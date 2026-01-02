@@ -37,6 +37,7 @@ This project consists of hardware modules that monitor wild bee activity and a w
   - Image retrieval and processing status
   - Quantified data queries
 - Educated improvements to data schema are welcome based on real-world requirements
+- See [ML_ARCHITECTURE.md](ML_ARCHITECTURE.md) for neural network integration details
 
 ### Hardware Development
 
@@ -44,7 +45,7 @@ This project consists of hardware modules that monitor wild bee activity and a w
 - **Battery Integration**: Add rechargeable battery to ESP32 module
   - Select appropriate battery capacity for 24/7 operation
   - Implement battery management circuit
-  - Add low-power sleep modes for efficiency
+  - Add low-power sleep modes for efficiency on ESP
   
 - **Solar Panel Addition**: Enable year-round self-sufficient deployment
   - Size solar panel for continuous operation in outdoor conditions
@@ -56,6 +57,7 @@ This project consists of hardware modules that monitor wild bee activity and a w
 - South-facing installation for optimal solar charging
 - Mounting hardware for secure outdoor placement (optional)
 - Temperature-resistant components (-20°C to +50°C operation)
+- All-year (Winter and Summer deployment)
 
 ## Current Status
 

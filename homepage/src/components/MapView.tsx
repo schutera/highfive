@@ -48,21 +48,7 @@ const AmberIcon = L.divIcon({
   popupAnchor: [1, -34],
 });
 
-// Gray marker for offline modules
-const GrayIcon = L.divIcon({
-  className: 'custom-marker',
-  html: `
-    <svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12.5 0C5.6 0 0 5.6 0 12.5c0 8.4 12.5 28.5 12.5 28.5S25 20.9 25 12.5C25 5.6 19.4 0 12.5 0z" 
-            fill="#9ca3af" stroke="#6b7280" stroke-width="1"/>
-      <circle cx="12.5" cy="12.5" r="6" fill="white"/>
-      <circle cx="12.5" cy="12.5" r="3" fill="#6b7280"/>
-    </svg>
-  `,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-});
+
 
 // Function to add random offset within ~1km radius for data protection
 function fuzzLocation(location: { lat: number; lng: number }, moduleId: string): [number, number] {

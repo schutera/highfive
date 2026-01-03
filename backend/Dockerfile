@@ -5,8 +5,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install all dependencies (including dev dependencies for build)
+RUN npm install
 
 # Create images directory
 RUN mkdir -p /app/images
@@ -18,8 +18,8 @@ COPY tsconfig.json ./
 # Build TypeScript
 RUN npm run build
 
-# Remove source files to reduce image size
-RUN rm -rf src tsconfig.json
+# Remove dev dependencies and source files to reduce image size
+RUN npm prune --production && rm -rf src tsconfig.json
 
 # Expose port
 EXPOSE 3008

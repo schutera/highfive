@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api, ModuleDetail, NestData } from '../services/api';
+import { api, ModuleDetail } from '../services/api';
 import { BEE_TYPES } from '../types';
+
 
 interface ModulePanelProps {
   module: { id: string; name: string; status: 'online' | 'offline' };
@@ -118,7 +119,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           
           <div className="text-amber-100/90 text-xs space-y-0.5">
             <div>Last update: {formattedTime}</div>
-            <div>First online: {new Date(moduleDetail.firstOnline).getFullYear()}</div>
+            {/* <div>First online: {new Date(moduleDetail.firstOnline).getFullYear()}</div> */}
           </div>
         </div>
       </div>

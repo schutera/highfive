@@ -76,8 +76,6 @@ This project consists of hardware modules that monitor wild bee activity and a w
 cd backend
 npm install
 npm run dev        # Development server
-npm test           # Run tests
-npm run test:coverage  # Coverage report
 ```
 
 ### Frontend
@@ -86,7 +84,3 @@ cd homepage
 npm install
 npm run dev        # Development server on port 5173
 ```
-
-## API Documentation
-
-When the backend is running, visit `http://localhost:3001/api-docs` for the full Swagger documentation.

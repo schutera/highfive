@@ -117,7 +117,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           
           <div className="text-amber-100/90 text-xs space-y-0.5">
             <div>Last update: {formattedTime}</div>
-            <div>First online: {new Date(moduleDetail.firstOnline).getFullYear()}</div>
+            {/* <div>First online: {new Date(moduleDetail.firstOnline).getFullYear()}</div> */}
           </div>
         </div>
       </div>

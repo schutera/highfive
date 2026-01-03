@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, ModuleDetail, NestData } from '../services/api';
+import { api, ModuleDetail } from '../services/api';
 import { BEE_TYPES } from '../types';
-
 interface ModulePanelProps {
   module: { id: string; name: string; status: 'online' | 'offline' };
   onClose: () => void;

@@ -4,8 +4,16 @@ import { db } from './database';
 
 export const app = express();
 
-// Middleware
-app.use(cors());
+// Middleware - Configure CORS for production
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? 'https://highfive.schutera.com'
+    : '*',
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // API Routes

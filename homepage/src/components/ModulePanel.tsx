@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ModuleDetail } from '../services/api';
 import { BEE_TYPES } from '../types';
-<<<<<<< HEAD
 
-
-=======
->>>>>>> main
 interface ModulePanelProps {
   module: { id: string; name: string; status: 'online' | 'offline' };
   onClose: () => void;
@@ -123,10 +119,6 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           
           <div className="text-amber-100/90 text-xs">
             <div>Last update: {formattedTime}</div>
-<<<<<<< HEAD
-            {/* <div>First online: {new Date(moduleDetail.firstOnline).getFullYear()}</div> */}
-=======
->>>>>>> main
           </div>
         </div>
       </div>

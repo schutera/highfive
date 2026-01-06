@@ -287,12 +287,12 @@ export default function DashboardPage() {
                 {/* Module list */}
                 <div className="overflow-y-auto overscroll-contain flex-1 p-4 pb-safe-bottom">
                   <div className="space-y-2">
-                    {visibleModules.map((module) => (
+                    {visibleModules.map((module: Module) => (
                       <button
                         key={module.id}
                         onClick={() => handleModuleSelect(module)}
                         className={`w-full text-left p-3 rounded-xl transition-all border min-h-[56px] flex items-center ${
-                          selectedModule?.id === module.id
+                          selectedModule && selectedModule.id === module.id
                             ? 'bg-amber-50 border-amber-400'
                             : 'bg-gray-50 active:bg-amber-50 border-gray-200'
                         }`}

@@ -15,7 +15,9 @@ COPY postcss.config.js ./
 COPY tailwind.config.js ./
 
 ARG VITE_API_URL=https://api.highfive.schutera.com
+ARG VITE_API_KEY=hf_prod_key_please_override
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_API_KEY=$VITE_API_KEY
 
 RUN npm run build
 

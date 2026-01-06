@@ -9,6 +9,7 @@ export interface Module {
   lastApiCall: string; // ISO date string
   batteryLevel: number;
   firstOnline: string; // ISO date string
+  totalHatches: number; // Sum of all hatches across all nests
 }
 
 export interface NestData {

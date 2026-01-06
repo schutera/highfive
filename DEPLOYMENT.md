@@ -46,7 +46,15 @@ cd ..
 cat > .env << EOF
 NODE_ENV=production
 PORT=3001
+HIGHFIVE_API_KEY=your_secure_production_key_here_change_this
 EOF
+
+# ⚠️ IMPORTANT: Generate a secure API key!
+# Example using openssl:
+# openssl rand -base64 32
+
+# Then update .env with the generated key:
+# HIGHFIVE_API_KEY=<generated-key-here>
 ```
 
 ### 4. Get SSL Certificate
@@ -295,6 +303,55 @@ git revert HEAD
 git push origin production
 
 # Redeploy as shown in Updates section above
+```
+
+## API Key Management
+
+### Generating a Secure API Key
+```bash
+# Use OpenSSL to generate a 32-byte random key
+openssl rand -base64 32
+
+# Example output: 
+# a7K9mL2pQ8wX5yZ1nB3vC6dE8fG0hI2jK4lM6nO8pQ0rS
+```
+
+### Setting API Key in Production
+
+#### Option 1: Using docker-compose (recommended)
+```bash
+# Create or edit .env file in project root
+HIGHFIVE_API_KEY=your_generated_key_here
+VITE_API_KEY=your_generated_key_here
+
+# Deploy with docker-compose
+docker-compose up -d
+```
+
+#### Option 2: Using PM2
+```bash
+# In /var/www/highfive/.env
+HIGHFIVE_API_KEY=your_generated_key_here
+
+# Backend will read from .env automatically
+pm2 start backend/dist/server.js --name "highfive-backend"
+```
+
+#### Option 3: Environment variables (systemd)
+```bash
+# Edit /etc/systemd/system/highfive.service
+[Service]
+Environment="HIGHFIVE_API_KEY=your_generated_key_here"
+```
+
+### Frontend Configuration
+The frontend API key is built into the image during Docker build:
+```bash
+docker build \
+  --build-arg VITE_API_KEY=your_key \
+  --build-arg VITE_API_URL=https://api.highfive.schutera.com \
+  -t highfive-frontend \
+  ./homepage
 ```
 
 ## Security Notes

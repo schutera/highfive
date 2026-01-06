@@ -131,15 +131,25 @@ export class MockDatabase {
 
   // API Methods
   getAllModules(): Module[] {
-    return Array.from(this.modules.values()).map(m => ({
-      id: m.id,
-      name: m.name,
-      location: m.location,
-      status: m.status,
-      lastApiCall: m.lastApiCall,
-      batteryLevel: m.batteryLevel,
-      firstOnline: m.firstOnline
-    }));
+    return Array.from(this.modules.values()).map(m => {
+      // Calculate total hatches from all nests' latest daily progress
+      const totalHatches = m.nests.reduce((sum, nest) => {
+        // Get the most recent day's hatched count
+        const latestProgress = nest.dailyProgress[nest.dailyProgress.length - 1];
+        return sum + (latestProgress?.hatched || 0);
+      }, 0);
+      
+      return {
+        id: m.id,
+        name: m.name,
+        location: m.location,
+        status: m.status,
+        lastApiCall: m.lastApiCall,
+        batteryLevel: m.batteryLevel,
+        firstOnline: m.firstOnline,
+        totalHatches
+      };
+    });
   }
 
   getModuleById(id: string): ModuleDetail | null {

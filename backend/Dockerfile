@@ -22,7 +22,10 @@ RUN npm run build
 RUN npm prune --production && rm -rf src tsconfig.json
 
 # Expose port
-EXPOSE 3008
+EXPOSE 3001
+
+# Note: Set HIGHFIVE_API_KEY environment variable when running
+# docker run -e HIGHFIVE_API_KEY=your_secure_key backend-image
 
 # Start server
 CMD ["node", "dist/server.js"]

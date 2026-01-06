@@ -65,6 +65,40 @@ function fuzzLocation(location: { lat: number; lng: number }, moduleId: string):
   return [location.lat + offsetLat, location.lng + offsetLng];
 }
 
+// Interpolate between colors based on hatches
+// Using amber palette to match homepage: light amber → amber-500 → deep amber/orange
+function getColorFromHatches(totalHatches: number, maxHatches: number = 1000): string {
+  const normalized = Math.min(totalHatches / maxHatches, 1);
+  
+  // Color stops matching homepage amber palette
+  const colors = [
+    { r: 0xfe, g: 0xf3, b: 0xc7 }, // #fef3c7 - amber-100 (low)
+    { r: 0xf5, g: 0x9e, b: 0x0b }, // #f59e0b - amber-500 (mid) - main brand color
+    { r: 0xb4, g: 0x53, b: 0x09 }, // #b45309 - amber-700 (high)
+  ];
+  
+  // Determine which two colors to interpolate between
+  let t: number;
+  let c1: typeof colors[0];
+  let c2: typeof colors[0];
+  
+  if (normalized < 0.5) {
+    t = normalized * 2; // 0-1 for first half
+    c1 = colors[0];
+    c2 = colors[1];
+  } else {
+    t = (normalized - 0.5) * 2; // 0-1 for second half
+    c1 = colors[1];
+    c2 = colors[2];
+  }
+  
+  const r = Math.round(c1.r + (c2.r - c1.r) * t);
+  const g = Math.round(c1.g + (c2.g - c1.g) * t);
+  const b = Math.round(c1.b + (c2.b - c1.b) * t);
+  
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
 // Calculate distance between two points in km
 function getDistance(loc1: [number, number], loc2: [number, number]): number {
   const R = 6371; // Earth's radius in km
@@ -171,16 +205,21 @@ function ClusterMarker({
   cluster, 
   clusterCenter, 
   onModuleSelect,
-  clusterZoomThreshold 
+  clusterZoomThreshold,
+  maxHatches
 }: { 
   cluster: Array<Module & { fuzzedLocation: [number, number] }>;
   clusterCenter: [number, number];
   onModuleSelect: (module: Module) => void;
   clusterZoomThreshold: number;
+  maxHatches: number;
 }) {
   const map = useMap();
   const onlineCount = cluster.filter(m => m.status === 'online').length;
   const hasOnline = onlineCount > 0;
+  // Sum total hatches for the cluster
+  const clusterTotalHatches = cluster.reduce((sum, m) => sum + (m.totalHatches || 0), 0);
+  const clusterColor = hasOnline ? getColorFromHatches(clusterTotalHatches, maxHatches * cluster.length) : '#9ca3af';
 
   const handleClick = () => {
     map.flyTo(clusterCenter, clusterZoomThreshold + 1, {
@@ -195,9 +234,9 @@ function ClusterMarker({
           center={clusterCenter}
           radius={7000}
           pathOptions={{
-            color: hasOnline ? '#f59e0b' : '#9ca3af',
-            fillColor: hasOnline ? '#f59e0b' : '#9ca3af',
-            fillOpacity: 0.25,
+            color: clusterColor,
+            fillColor: clusterColor,
+            fillOpacity: 0.35,
             weight: 3,
             opacity: 0.8,
           }}
@@ -215,6 +254,7 @@ function ClusterMarker({
   // Single module - show circle with badge count of 1 if online, 0 if offline
   const singleOnlineCount = cluster[0].status === 'online' ? 1 : 0;
   const singleHasOnline = cluster[0].status === 'online';
+  const singleColor = singleHasOnline ? getColorFromHatches(cluster[0].totalHatches || 0, maxHatches) : '#9ca3af';
   
   return (
     <>
@@ -222,9 +262,9 @@ function ClusterMarker({
         center={cluster[0].fuzzedLocation}
         radius={1000}
         pathOptions={{
-          color: cluster[0].status === 'online' ? '#f59e0b' : '#9ca3af',
-          fillColor: cluster[0].status === 'online' ? '#f59e0b' : '#9ca3af',
-          fillOpacity: 0.25,
+          color: singleColor,
+          fillColor: singleColor,
+          fillOpacity: 0.35,
           weight: 2,
           opacity: 0.7,
         }}
@@ -281,6 +321,12 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
     [fuzzedModules]
   );
 
+  // Calculate max hatches for normalization
+  const maxHatches = useMemo(() => 
+    Math.max(...modules.map(m => m.totalHatches || 0), 1),
+    [modules]
+  );
+
   const showClusters = zoom < CLUSTER_ZOOM_THRESHOLD;
 
   return (
@@ -289,6 +335,7 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
       zoom={13}
       className="h-full w-full"
       style={{ height: '100%', width: '100%' }}
+      zoomControl={false}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -311,27 +358,33 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
             clusterCenter={getClusterCenter(cluster)}
             onModuleSelect={onModuleSelect}
             clusterZoomThreshold={CLUSTER_ZOOM_THRESHOLD}
+            maxHatches={maxHatches}
           />
         ))
       ) : (
         // Show individual circles when zoomed in
-        fuzzedModules.map((module) => (
-          <Circle
-            key={module.id}
-            center={module.fuzzedLocation}
-            radius={1000}
-            pathOptions={{
-              color: module.status === 'online' ? '#f59e0b' : '#9ca3af',
-              fillColor: module.status === 'online' ? '#f59e0b' : '#9ca3af',
-              fillOpacity: 0.25,
-              weight: 2,
-              opacity: 0.7,
-            }}
-            eventHandlers={{
-              click: () => onModuleSelect(module),
-            }}
-          />
-        ))
+        fuzzedModules.map((module) => {
+          const circleColor = module.status === 'online' 
+            ? getColorFromHatches(module.totalHatches || 0, maxHatches) 
+            : '#9ca3af';
+          return (
+            <Circle
+              key={module.id}
+              center={module.fuzzedLocation}
+              radius={1000}
+              pathOptions={{
+                color: circleColor,
+                fillColor: circleColor,
+                fillOpacity: 0.35,
+                weight: 2,
+                opacity: 0.7,
+              }}
+              eventHandlers={{
+                click: () => onModuleSelect(module),
+              }}
+            />
+          );
+        })
       )}
     </MapContainer>
   );

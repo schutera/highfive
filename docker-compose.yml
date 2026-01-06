@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: highfive-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:-hf_dev_key_2026}
+      - PORT=3001
+    restart: unless-stopped
+    networks:
+      - highfive-network
+
+  frontend:
+    build:
+      context: ./homepage
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=https://api.highfive.schutera.com
+        - VITE_API_KEY=${VITE_API_KEY:-hf_dev_key_2026}
+    container_name: highfive-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    networks:
+      - highfive-network
+    depends_on:
+      - backend
+
+networks:
+  highfive-network:
+    driver: bridge

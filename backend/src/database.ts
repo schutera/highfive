@@ -21,6 +21,14 @@ export class MockDatabase {
 
     moduleConfigs.forEach(config => {
       const isOnline = config.status === 'online';
+      const nests = this.generateNestData(config.id);
+      
+      // Calculate total hatches from all nests' latest daily progress
+      const totalHatches = nests.reduce((sum, nest) => {
+        const latestProgress = nest.dailyProgress[nest.dailyProgress.length - 1];
+        return sum + (latestProgress?.hatched || 0);
+      }, 0);
+      
       const module: ModuleDetail = {
         id: config.id,
         name: config.name,
@@ -36,7 +44,8 @@ export class MockDatabase {
           ? 60 + Math.random() * 40 // 60-100%
           : 10 + Math.random() * 30, // 10-40%
         firstOnline: new Date(config.firstOnline).toISOString(),
-        nests: this.generateNestData(config.id)
+        nests,
+        totalHatches
       };
       this.modules.set(config.id, module);
     });

@@ -10,6 +10,7 @@ export interface Module {
   status: 'online' | 'offline';
   lastApiCall: string;
   batteryLevel: number;
+  totalHatches: number;
 }
 
 export interface NestData {

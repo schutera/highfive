@@ -288,7 +288,8 @@ export default function DashboardPage() {
                 <div className="overflow-y-auto overscroll-contain flex-1 p-4 pb-safe-bottom">
                   <div className="space-y-2">
                     {visibleModules.map((module: Module) => {
-                      const isSelected = selectedModule !== null && selectedModule.id === module.id;
+                      const selectedId = selectedModule ? selectedModule.id : null;
+                      const isSelected = selectedId === module.id;
                       return (
                       <button
                         key={module.id}

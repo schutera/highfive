@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import { db } from './database';
+import { setupSwagger } from './swagger';
+import { apiKeyAuth } from './auth';
 
 export const app = express();
 
@@ -8,7 +10,18 @@ export const app = express();
 app.use(cors());
 app.use(express.json());
 
-// API Routes
+// Setup Swagger documentation (public, no auth required)
+setupSwagger(app);
+
+// Health check (public, no auth required)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Apply API key authentication to all other /api routes
+app.use('/api', apiKeyAuth);
+
+// API Routes (protected)
 
 app.get('/api/modules', (req, res) => {
   try {
@@ -49,8 +62,4 @@ app.patch('/api/modules/:id/status', (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to update module status' });
   }
-});
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });

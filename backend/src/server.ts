@@ -1,7 +1,7 @@
 import { app } from './app';
 import { db } from './database';
 
-const PORT = 3001;
+const PORT = 3002;
 
 // Start server
 app.listen(PORT, () => {

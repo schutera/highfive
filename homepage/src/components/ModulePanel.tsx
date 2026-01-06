@@ -86,28 +86,29 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-5 text-white shadow-lg relative">
+      <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-4 md:p-5 text-white shadow-lg relative">
+        {/* Desktop close button - hidden on mobile since parent handles it */}
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 text-white/80 hover:text-white hover:bg-white/20 rounded-full p-1.5 transition-colors"
+          className="absolute top-3 right-3 text-white/80 hover:text-white hover:bg-white/20 rounded-full p-1.5 transition-colors hidden md:flex items-center justify-center"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
         
-        <div className="pr-8">
-          <h2 className="text-2xl font-bold mb-3">{moduleDetail.name}</h2>
+        <div className="pr-0 md:pr-8">
+          <h2 className="text-xl md:text-2xl font-bold mb-2 md:mb-3">{moduleDetail.name}</h2>
           
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
             {/* Status Badge */}
-            <div className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold ${isOnline ? 'bg-green-500/90' : 'bg-gray-500/90'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-white' : 'bg-white/70'}`} />
+            <div className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${isOnline ? 'bg-green-500/90' : 'bg-gray-500/90'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-white animate-pulse' : 'bg-white/70'}`} />
               {isOnline ? 'Online' : 'Offline'}
             </div>
             
             {/* Battery Badge */}
-            <div className="inline-flex items-center gap-1.5 bg-white/20 rounded-md px-2.5 py-1 text-xs font-semibold">
+            <div className="inline-flex items-center gap-1.5 bg-white/20 rounded-full px-3 py-1 text-xs font-semibold">
               <svg className={`w-3.5 h-3.5 ${batteryColor}`} fill="currentColor" viewBox="0 0 24 24">
                 <path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/>
               </svg>
@@ -115,45 +116,50 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
             </div>
           </div>
           
-          <div className="text-amber-100/90 text-xs space-y-0.5">
+          <div className="text-amber-100/90 text-xs">
             <div>Last update: {formattedTime}</div>
-            {/* <div>First online: {new Date(moduleDetail.firstOnline).getFullYear()}</div> */}
           </div>
         </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {/* Species Cards - Vertical Stack */}
-        <div className="space-y-4">
+        {/* Species Cards - Responsive grid on larger mobile, stack on small */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-1 gap-3 md:gap-4">
           {beeTypeSummaries.map((summary) => (
             <div key={summary.key}>
               {/* Summary Card */}
               <div 
-                className="rounded-lg p-3 shadow-sm border-2"
+                className="rounded-xl p-3 md:p-4 shadow-sm border-2 transition-transform active:scale-[0.98] md:active:scale-100"
                 style={{ 
                   backgroundColor: summary.lightColor,
                   borderColor: summary.color 
                 }}
               >
-                <div className="text-xs font-semibold mb-1 text-gray-700">{summary.size}</div>
-                <div className="text-base font-bold mb-2" style={{ color: summary.color }}>{summary.name}</div>
-                <div className="text-3xl font-bold mb-1" style={{ color: summary.color }}>
-                  {summary.totalHatched}
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{summary.size}</div>
+                    <div className="text-base md:text-lg font-bold" style={{ color: summary.color }}>{summary.name}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl md:text-3xl font-bold" style={{ color: summary.color }}>
+                      {summary.totalHatched}
+                    </div>
+                    <div className="text-xs text-gray-500">hatches</div>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-600 mb-2">Total Hatches</div>
                 
                 {/* Individual nest progress bars */}
-                <div className="space-y-1">
+                <div className="space-y-2 mt-3">
                   {summary.nests.map((nest, index) => (
                     <div key={nest.nestId}>
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-gray-600">Nest {index + 1}</span>
-                        <span className="text-xs font-semibold" style={{ color: summary.color }}>
+                        <span className="text-xs text-gray-600 font-medium">Nest {index + 1}</span>
+                        <span className="text-xs font-bold" style={{ color: summary.color }}>
                           {nest.sealed}%
                         </span>
                       </div>
-                      <div className="h-1.5 bg-white/50 rounded-full overflow-hidden">
+                      <div className="h-2 bg-white/60 rounded-full overflow-hidden shadow-inner">
                         <div 
                           className="h-full transition-all duration-500 rounded-full"
                           style={{ 

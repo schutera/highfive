@@ -303,6 +303,7 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
       zoom={13}
       className="h-full w-full"
       style={{ height: '100%', width: '100%' }}
+      zoomControl={false}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

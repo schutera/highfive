@@ -195,3 +195,13 @@ cython_debug/
 
 # Secrets
 secrets.h
+
+# Configuration files - server-specific
+.env
+.env.local
+ecosystem.config.js
+
+# Build outputs
+backend/dist/
+homepage/dist/
+backend/coverage/

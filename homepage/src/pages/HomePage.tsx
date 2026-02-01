@@ -131,7 +131,7 @@ export default function HomePage() {
                   Simple browser-based installer - works on all platforms, no downloads or drivers needed
                 </p>
                 <a 
-                  href="#web-installer" 
+                  href="/web-installer" 
                   className="flex items-center justify-center w-full bg-blue-500 hover:bg-blue-600 text-white px-3 md:px-4 py-2 rounded-lg font-semibold text-sm md:text-base transition-colors"
                 >
                   Launch Web Installer →

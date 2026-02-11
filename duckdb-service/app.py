@@ -5,7 +5,9 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-DB_PATH = os.getenv("DUCKDB_PATH", "/data/app.duckdb")
+DB_PATH = os.getenv("DUCKDB_PATH", "./data/app.duckdb")
+if not os.path.exists(os.path.dirname(DB_PATH)):
+    os.makedirs(os.path.dirname(DB_PATH))
 lock = threading.Lock()
 
 
@@ -17,13 +19,57 @@ def get_conn():
 def init_db():
     with lock:
         con = get_conn()
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS items (
-                id UUID PRIMARY KEY,
-                name TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT now()
-            );
-        """)
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS module_configs (
+            id VARCHAR(20) PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            lat DECIMAL(9,6) NOT NULL,
+            lng DECIMAL(9,6) NOT NULL,
+            status VARCHAR(10) NOT NULL CHECK (status IN ('online', 'offline')),
+            first_online DATE NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS nest_data(
+        nest_id VARCHAR(20) NOT NULL PRIMARY KEY,
+        module_id VARCHAR(20) NOT NULL REFERENCES module_configs(id),
+        beeType VARCHAR(20) CHECK (beeType IN ('blackmasked', 'resin', 'leafcutter', 'orchard'))
+        );
+
+        CREATE TABLE IF NOT EXISTS daily_progress (
+        progress_id VARCHAR(20) PRIMARY KEY,
+        nest_id VARCHAR(20) NOT NULL REFERENCES nest_data(nest_id),
+        date DATE NOT NULL,
+        empty INTEGER NOT NULL,
+        sealed INTEGER NOT NULL,
+        hatched INTEGER NOT NULL
+        );
+
+        INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
+        ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15'),
+        ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20'),
+        ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10'),
+        ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01'),
+        ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14');
+
+        INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
+        ('nest-001', 'hive-001', 'blackmasked'),
+        ('nest-002', 'hive-001', 'resin'),
+        ('nest-003', 'hive-002', 'leafcutter'),
+        ('nest-004', 'hive-003', 'orchard'),
+        ('nest-005', 'hive-004', 'blackmasked'),
+        ('nest-006', 'hive-001', 'blackmasked');
+
+        INSERT INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) VALUES
+        ('prog-001', 'nest-001', '2024-06-01', 5, 10, 15),
+        ('prog-002', 'nest-002', '2024-06-01', 3, 7, 12),
+        ('prog-003', 'nest-003', '2024-06-01', 8, 5, 20),
+        ('prog-004', 'nest-004', '2024-06-01', 2, 12, 18),
+        ('prog-005', 'nest-005', '2024-06-01', 6, 9, 14),
+        ('prog-006', 'nest-001', '2024-06-02', 4, 11, 16),
+        ('prog-007', 'nest-006', '2024-06-02', 2, 8, 13),
+        """
+        )
         con.close()
 
 
@@ -35,7 +81,8 @@ init_db()
 def health():
     return jsonify(ok=True, db=DB_PATH), 200
 
-# Hier noch Logik 
+
+# Hier noch Logik
 # @app.post("/query")
 # def query():
 #     payload = request.get_json(silent=True) or {}
@@ -54,8 +101,47 @@ def health():
 
 #         return jsonify(columns=cols, rows=rows), 200
 
-    # except Exception as e:
-    #     return jsonify(error=str(e)), 400
+# except Exception as e:
+#     return jsonify(error=str(e)), 400
+
+
+@app.get("/modules")
+def get_modules():
+    with lock:
+        con = get_conn()
+        cur = con.execute("SELECT * FROM module_configs")
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        con.close()
+
+    modules = [dict(zip(cols, row)) for row in rows]
+    return jsonify(modules=modules), 200
+
+
+@app.get("/nests")
+def get_nests():
+    with lock:
+        con = get_conn()
+        cur = con.execute("SELECT * FROM nest_data")
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        con.close()
+
+    nests = [dict(zip(cols, row)) for row in rows]
+    return jsonify(nests=nests), 200
+
+
+@app.get("/progress")
+def get_progress():
+    with lock:
+        con = get_conn()
+        cur = con.execute("SELECT * FROM daily_progress")
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        con.close()
+
+    progress = [dict(zip(cols, row)) for row in rows]
+    return jsonify(progress=progress), 200
 
 
 if __name__ == "__main__":

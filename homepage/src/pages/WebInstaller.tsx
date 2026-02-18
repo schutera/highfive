@@ -7,10 +7,15 @@ export default function WebInstaller() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Firmware States
+  const [firmwareUrl, setFirmwareUrl] = useState<string>('/firmware.bin');
+  const [firmwareVersion, setFirmwareVersion] = useState<string>('Loading...');
+  const [firmwareLoading, setFirmwareLoading] = useState(true);
+
 
   useEffect(() => {
     loadModules();
-
+    loadLatestFirmware();
     // ESP Web Tools Script laden
     const script = document.createElement("script");
     script.type = "module";
@@ -31,6 +36,46 @@ export default function WebInstaller() {
       setLoading(false);
     }
   };
+
+  const loadLatestFirmware = async () => {
+  try {
+    setFirmwareLoading(true);
+    
+    // GitHub API: Latest Release abrufen
+    const response = await fetch(
+      'https://api.github.com/repos/schutera/highfive/releases/latest'
+    );
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch latest release');
+    }
+    
+    const releaseData = await response.json();
+    
+    // Finde firmware.bin Asset
+    const firmwareAsset = releaseData.assets.find(
+      (asset: any) => asset.name === 'firmware.bin'
+    );
+    
+    if (firmwareAsset) {
+      setFirmwareUrl(firmwareAsset.browser_download_url);
+      setFirmwareVersion(releaseData.tag_name || releaseData.name);
+      console.log('✅ Firmware loaded from GitHub:', releaseData.tag_name);
+    } else {
+      console.log('⚠️ No firmware.bin in release, using local');
+      setFirmwareUrl('/firmware.bin');
+      setFirmwareVersion('Local');
+    }
+  } catch (err) {
+    console.error('❌ Error loading firmware:', err);
+    // Fallback auf lokale Datei
+    setFirmwareUrl('/firmware.bin');
+    setFirmwareVersion('Local (Fallback)');
+  } finally {
+    setFirmwareLoading(false);
+  }
+};
+
 
   return (
     <div className="h-[100dvh] flex flex-col bg-gray-100 overflow-hidden">
@@ -60,12 +105,44 @@ export default function WebInstaller() {
           (Chrome oder Edge erforderlich)
         </p>
 
+      {/* Firmware Info Box */}
+      <div className="mb-6 bg-blue-50 border-2 border-blue-200 rounded-lg p-4 max-w-md mx-auto">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-gray-700 font-medium">Firmware Version:</span>
+          {firmwareLoading ? (
+            <span className="text-gray-500">Laden...</span>
+          ) : (
+            <span className="text-blue-600 font-bold">{firmwareVersion}</span>
+          )}
+        </div>
+        <div className="text-xs text-gray-500">
+          {firmwareUrl.startsWith('http') 
+            ? '✅ Von GitHub Release geladen' 
+            : '⚠️ Lokale Datei (Fallback)'}
+        </div>
+      </div>
+
+
         {/* ESP WEB INSTALLER BUTTON */}
         <esp-web-install-button manifest="/manifest.json">
           <button className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors">
             Firmware installieren
           </button>
         </esp-web-install-button>
+
+        {/* Link zur Anleitung */}
+        <div className="mt-8 text-center">
+          <p className="text-gray-600 mb-3">
+            Firmware erfolgreich installiert? 
+          </p>
+          <Link
+            to="/setup-guide"
+            className="inline-block bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors shadow-lg"
+          >
+            → Weiter zur Setup-Anleitung
+          </Link>
+        </div>
+
 
         {error && (
           <p className="mt-4 text-red-600">{error}</p>

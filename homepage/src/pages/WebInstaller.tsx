@@ -38,43 +38,43 @@ export default function WebInstaller() {
   };
 
   const loadLatestFirmware = async () => {
-  try {
-    setFirmwareLoading(true);
-    
-    // GitHub API: Latest Release abrufen
-    const response = await fetch(
-      'https://api.github.com/repos/schutera/highfive/releases/latest'
-    );
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch latest release');
-    }
-    
-    const releaseData = await response.json();
-    
-    // Finde firmware.bin Asset
-    const firmwareAsset = releaseData.assets.find(
-      (asset: any) => asset.name === 'firmware.bin'
-    );
-    
-    if (firmwareAsset) {
-      setFirmwareUrl(firmwareAsset.browser_download_url);
-      setFirmwareVersion(releaseData.tag_name || releaseData.name);
-      console.log('✅ Firmware loaded from GitHub:', releaseData.tag_name);
-    } else {
-      console.log('⚠️ No firmware.bin in release, using local');
+    try {
+      setFirmwareLoading(true);
+      
+      // GitHub API: Latest Release abrufen
+      const response = await fetch(
+        'https://api.github.com/repos/schutera/highfive/releases/latest'
+      );
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch latest release');
+      }
+      
+      const releaseData = await response.json();
+      
+      // Finde firmware.bin Asset
+      const firmwareAsset = releaseData.assets.find(
+        (asset: any) => asset.name === 'firmware.bin'
+      );
+      
+      if (firmwareAsset) {
+        setFirmwareUrl(firmwareAsset.browser_download_url);
+        setFirmwareVersion(releaseData.tag_name || releaseData.name);
+        console.log('Firmware loaded from GitHub:', releaseData.tag_name);
+      } else {
+        console.log('No firmware.bin in release, using local');
+        setFirmwareUrl('/firmware.bin');
+        setFirmwareVersion('Local');
+      }
+    } catch (err) {
+      console.error('Error loading firmware:', err);
+      // Fallback auf lokale Datei
       setFirmwareUrl('/firmware.bin');
-      setFirmwareVersion('Local');
+      setFirmwareVersion('Local (Fallback)');
+    } finally {
+      setFirmwareLoading(false);
     }
-  } catch (err) {
-    console.error('❌ Error loading firmware:', err);
-    // Fallback auf lokale Datei
-    setFirmwareUrl('/firmware.bin');
-    setFirmwareVersion('Local (Fallback)');
-  } finally {
-    setFirmwareLoading(false);
-  }
-};
+  };
 
 
   return (
@@ -101,8 +101,8 @@ export default function WebInstaller() {
         <h2 className="text-2xl font-bold mb-4">ESP32 Firmware Installer</h2>
 
         <p className="mb-6 text-center max-w-md text-gray-700">
-          Verbinde deinen ESP32 per USB und klicke auf den Button.
-          (Chrome oder Edge erforderlich)
+          Connect your ESP32 via USB and click the button
+          (Chrome or Edge required)
         </p>
 
       {/* Firmware Info Box */}
@@ -117,8 +117,8 @@ export default function WebInstaller() {
         </div>
         <div className="text-xs text-gray-500">
           {firmwareUrl.startsWith('http') 
-            ? '✅ Von GitHub Release geladen' 
-            : '⚠️ Lokale Datei (Fallback)'}
+            ? 'Von GitHub Release geladen' 
+            : 'Lokale Datei (Fallback)'}
         </div>
       </div>
 
@@ -133,13 +133,13 @@ export default function WebInstaller() {
         {/* Link zur Anleitung */}
         <div className="mt-8 text-center">
           <p className="text-gray-600 mb-3">
-            Firmware erfolgreich installiert? 
+            Firmware installed successfully? 
           </p>
           <Link
             to="/setup-guide"
             className="inline-block bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors shadow-lg"
           >
-            → Weiter zur Setup-Anleitung
+            → Go to Setup Guide
           </Link>
         </div>
 

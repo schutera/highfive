@@ -25,6 +25,7 @@ app.use('/api', apiKeyAuth);
 
 app.get('/api/modules', (req, res) => {
   try {
+    db.refresh()
     const modules = db.getAllModules();
     res.json(modules);
   } catch (error) {
@@ -34,8 +35,10 @@ app.get('/api/modules', (req, res) => {
 
 app.get('/api/modules/:id', (req, res) => {
   try {
+    db.refresh()
     const module = db.getModuleById(req.params.id);
     if (module) {
+      db.refresh();
       res.json(module);
     } else {
       res.status(404).json({ error: 'Module not found' });
@@ -47,13 +50,14 @@ app.get('/api/modules/:id', (req, res) => {
 
 app.patch('/api/modules/:id/status', (req, res) => {
   try {
+    db.refresh();
     const { status } = req.body;
     if (status !== 'online' && status !== 'offline') {
       res.status(400).json({ error: 'Invalid status. Must be "online" or "offline"' });
       return;
     }
-    
     const success = db.updateModuleStatus(req.params.id, status);
+    db.refresh();
     if (success) {
       res.json({ message: 'Status updated successfully' });
     } else {

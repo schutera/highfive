@@ -105,6 +105,39 @@ def health():
 #     return jsonify(error=str(e)), 400
 
 
+@app.post("/test_insert")
+def test_insert():
+    try:
+        with lock:
+            con = get_conn()
+            con.execute(
+                """
+                INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
+                ('hive-091', 'Hirrlingen', 47.8086, 9.6433, 'online',  '2023-04-15');
+                """
+            )
+            con.close()
+        return jsonify(success=True), 200
+    except Exception as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.post("/remove_test")
+def remove_test_insert():
+    try:
+        with lock:
+            con = get_conn()
+            con.execute(
+                """
+                DELETE FROM module_configs WHERE id = 'hive-091';
+                """
+            )
+            con.close()
+        return jsonify(success=True), 200
+    except Exception as e:
+        return jsonify(error=str(e)), 400
+
+
 @app.get("/modules")
 def get_modules():
     with lock:

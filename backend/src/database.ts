@@ -42,6 +42,8 @@ async initializeData(): Promise<void> {
   const nestsData = await nestsRes.json() as ApiNestResponse;
   const progressData = await progressRes.json() as ApiDailyProgressResponse;
 
+  this.modules.clear();
+
   // ---- 1️⃣ Progress normalisieren ----
   const progressByNest = new Map<string, DailyProgress[]>();
 
@@ -100,6 +102,11 @@ async initializeData(): Promise<void> {
     this.modules.set(module.id, module);
   });
 }
+
+  async refresh() {
+  await this.initializeData();
+  }
+
 
   // API Methods
   getAllModules(): Module[] {

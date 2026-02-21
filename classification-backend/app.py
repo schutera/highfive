@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 from flask import Flask, jsonify, request
+import sys
+import duckdb
+from datetime import datetime
 
 from routes.preview import preview_route, push_frame
 from routes.dashboard import dashboard_route
@@ -26,7 +29,7 @@ app.config["UPLOAD_FOLDER"] = os.path.abspath(
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
 s3 = AWSClient()
-duckdb = DuckDBService()
+duckdb_service = DuckDBService()
 
 import time
 
@@ -34,7 +37,7 @@ def test_duckdb(retries: int = 20, delay: float = 0.5):
     for i in range(retries):
         try:
             print("Testing DuckDB service…")
-            print("DuckDB health:", duckdb.health())
+            print("DuckDB health:", duckdb_service.health())
             return True
         except Exception as e:
             if i == retries - 1:
@@ -42,8 +45,30 @@ def test_duckdb(retries: int = 20, delay: float = 0.5):
                 return False
             time.sleep(delay)
 
+def updateModule(id, battery):
+    DB_PATH = os.getenv("DUCKDB_PATH", "./data/app.duckdb")
+    conn = duckdb.connect(DB_PATH)
+    cur = conn.cursor()
+
+    now = datetime.now()
+    formatted_date = now.strftime("%Y-%m-%d")
+
+    cur.execute(
+        """
+        UPDATE module_configs
+        SET battery_level = ?,
+        first_online = ?
+        WHERE id = ?
+        """,
+        (battery, formatted_date, id)
+    )
+
+    conn.commit()
+    conn.close()
+
 @app.post("/upload")
 def upload_image():
+
     # --- metadata (optional/required as you want) ---
     mac = request.form.get("mac") or request.args.get("mac")
     battery = request.form.get("battery") or request.args.get("battery")
@@ -84,6 +109,8 @@ def upload_image():
 
     # S3 upload of image
     s3.upload("validation", file_path, delete=True)
+
+    updateModule(mac, battery * 100) # * 100 becaudse db has battery level as INTEGER
 
     return (
         jsonify(

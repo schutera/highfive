@@ -35,6 +35,10 @@ services:
       - .env
     ports:
       - "8000:4444"
+    environment:
+      DUCKDB_PATH: /data/app.duckdb
+    volumes:
+      - duckdb_data:/data
     networks:
       - net
 

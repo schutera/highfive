@@ -7,7 +7,7 @@ interface ApiModule {
   lng: string;
   status: 'online' | 'offline';
   first_online: string;
-  battery_level: string;
+  battery_level: number;
 }
 
 interface ApiNestResponse {

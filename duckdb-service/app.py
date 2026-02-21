@@ -4,6 +4,8 @@ import duckdb
 from flask import Flask, jsonify, request
 from flask import request, jsonify
 from pydantic import BaseModel, ValidationError
+from datetime import datetime
+
 
 app = Flask(__name__)
 
@@ -144,6 +146,7 @@ def remove_test_insert():
 
 class ModuleData(BaseModel):
     esp_id: str
+    module_name: str
     latitude: float
     longitude: float
     battery_level: int
@@ -160,18 +163,21 @@ def add_module():
 
     with lock:
         try:
+            now = datetime.now()
+            formatted_date = now.strftime("%Y-%m-%d")
+
             con = get_conn()
             cur = con.cursor()
             cur.execute("""
                 INSERT OR IGNORE INTO module_configs (id, name, lat, lng, status, first_online, battery_level)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
-                str(data.esp_id),           # ensure string
-                "PlaceholderName",
+                str(data.esp_id),
+                str(data.module_name),
                 data.latitude,
                 data.longitude,
-                "offline",
-                "2025-01-01",
+                "online",
+                formatted_date,
                 data.battery_level
             ))
             con.commit()

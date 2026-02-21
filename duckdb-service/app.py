@@ -2,6 +2,8 @@ import os
 import threading
 import duckdb
 from flask import Flask, jsonify, request
+from flask import request, jsonify
+from pydantic import BaseModel, ValidationError
 
 app = Flask(__name__)
 
@@ -45,14 +47,14 @@ def init_db():
         hatched INTEGER NOT NULL
         );
 
-        INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
+        INSERT or IGNORE INTO module_configs (id, name, lat, lng, status, first_online) VALUES
         ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15'),
         ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20'),
         ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10'),
         ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01'),
         ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14');
 
-        INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
+        INSERT or IGNORE INTO nest_data (nest_id, module_id, beeType) VALUES
         ('nest-001', 'hive-001', 'blackmasked'),
         ('nest-002', 'hive-001', 'resin'),
         ('nest-003', 'hive-002', 'leafcutter'),
@@ -60,7 +62,7 @@ def init_db():
         ('nest-005', 'hive-004', 'blackmasked'),
         ('nest-006', 'hive-001', 'blackmasked');
 
-        INSERT INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) VALUES
+        INSERT or IGNORE INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) VALUES
         ('prog-001', 'nest-001', '2024-06-01', 5, 10, 15),
         ('prog-002', 'nest-002', '2024-06-01', 3, 7, 12),
         ('prog-003', 'nest-003', '2024-06-01', 8, 5, 20),
@@ -112,7 +114,7 @@ def test_insert():
             con = get_conn()
             con.execute(
                 """
-                INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
+                INSERT or IGNORE INTO module_configs (id, name, lat, lng, status, first_online) VALUES
                 ('hive-091', 'Hirrlingen', 47.8086, 9.6433, 'online',  '2023-04-15');
                 """
             )
@@ -137,6 +139,51 @@ def remove_test_insert():
     except Exception as e:
         return jsonify(error=str(e)), 400
 
+
+
+class ModuleData(BaseModel):
+    esp_id: str
+    latitude: float
+    longitude: float
+
+
+
+class ModuleData(BaseModel):
+    esp_id: str
+    latitude: float
+    longitude: float
+
+@app.post("/new_module")
+def add_module():
+    try:
+        json_data = request.get_json()
+        data = ModuleData(**json_data)  # parse/validate JSON
+    except ValidationError as e:
+        return jsonify({"error": e.errors()}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+    with lock:
+        try:
+            con = get_conn()
+            cur = con.cursor()
+            cur.execute("""
+                INSERT OR IGNORE INTO module_configs (id, name, lat, lng, status, first_online)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                str(data.esp_id),           # ensure string
+                "PlaceholderName",
+                data.latitude,
+                data.longitude,
+                "offline",
+                "2025-01-01"
+            ))
+            con.commit()
+            return jsonify({"message": "Module added successfully", "id": data.esp_id})
+        except sqlite3.Error as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            con.close()
 
 @app.get("/modules")
 def get_modules():

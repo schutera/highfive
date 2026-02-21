@@ -33,9 +33,9 @@ export class MockDatabase {
 
 async initializeData(): Promise<void> {
   const [modulesRes, nestsRes, progressRes] = await Promise.all([
-    fetch('http://127.0.0.1:8000/modules'),
-    fetch('http://127.0.0.1:8000/nests'),
-    fetch('http://127.0.0.1:8000/progress'),
+    fetch('http://duckdb-service:8000/modules'),
+    fetch('http://duckdb-service:8000/nests'),
+    fetch('http://duckdb-service:8000/progress'),
   ]);
 
   const modulesData = await modulesRes.json() as ApiModuleResponse;

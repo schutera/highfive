@@ -29,7 +29,8 @@ def init_db():
             lat DECIMAL(9,6) NOT NULL,
             lng DECIMAL(9,6) NOT NULL,
             status VARCHAR(10) NOT NULL CHECK (status IN ('online', 'offline')),
-            first_online DATE NOT NULL
+            first_online DATE NOT NULL,
+            battery_level INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS nest_data(
@@ -47,12 +48,12 @@ def init_db():
         hatched INTEGER NOT NULL
         );
 
-        INSERT or IGNORE INTO module_configs (id, name, lat, lng, status, first_online) VALUES
-        ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15'),
-        ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20'),
-        ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10'),
-        ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01'),
-        ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14');
+        INSERT or IGNORE INTO module_configs (id, name, lat, lng, status, first_online, battery_level) VALUES
+        ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15', 10),
+        ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20', 20),
+        ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10', 30),
+        ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01', 25),
+        ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14', 33);
 
         INSERT or IGNORE INTO nest_data (nest_id, module_id, beeType) VALUES
         ('nest-001', 'hive-001', 'blackmasked'),
@@ -145,13 +146,7 @@ class ModuleData(BaseModel):
     esp_id: str
     latitude: float
     longitude: float
-
-
-
-class ModuleData(BaseModel):
-    esp_id: str
-    latitude: float
-    longitude: float
+    battery_level: int
 
 @app.post("/new_module")
 def add_module():
@@ -168,15 +163,16 @@ def add_module():
             con = get_conn()
             cur = con.cursor()
             cur.execute("""
-                INSERT OR IGNORE INTO module_configs (id, name, lat, lng, status, first_online)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO module_configs (id, name, lat, lng, status, first_online, battery_level)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 str(data.esp_id),           # ensure string
                 "PlaceholderName",
                 data.latitude,
                 data.longitude,
                 "offline",
-                "2025-01-01"
+                "2025-01-01",
+                data.battery_level
             ))
             con.commit()
             return jsonify({"message": "Module added successfully", "id": data.esp_id})

@@ -7,6 +7,7 @@ interface ApiModule {
   lng: string;
   status: 'online' | 'offline';
   first_online: string;
+  battery_level: string;
 }
 
 interface ApiNestResponse {
@@ -94,7 +95,7 @@ async initializeData(): Promise<void> {
       status: m.status,
       firstOnline: new Date(m.first_online).toISOString(),
       lastApiCall: new Date().toISOString(),
-      batteryLevel: 0,
+      batteryLevel: m.battery_level,
       totalHatches: 0,
       nests: nestsByModule.get(m.id) || [],
     };

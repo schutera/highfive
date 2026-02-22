@@ -151,41 +151,64 @@ class ModuleData(BaseModel):
     longitude: float
     battery_level: int
 
+from flask import request, jsonify
+from datetime import datetime
+from pydantic import ValidationError
+from threading import Lock
+
+lock = Lock()
+
 @app.post("/new_module")
 def add_module():
     try:
         json_data = request.get_json()
-        data = ModuleData(**json_data)  # parse/validate JSON
+        data = ModuleData(**json_data)
     except ValidationError as e:
         return jsonify({"error": e.errors()}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
     with lock:
+        con = None
         try:
-            now = datetime.now()
-            formatted_date = now.strftime("%Y-%m-%d")
-
             con = get_conn()
             cur = con.cursor()
+
+            now = datetime.now().isoformat()
+
+            # Delete any existing row with same id (upsert behavior)
+            cur.execute("DELETE FROM module_configs WHERE id = ?", (data.esp_id,))
+
+            # Insert new row
             cur.execute("""
-                INSERT OR IGNORE INTO module_configs (id, name, lat, lng, status, first_online, battery_level)
+                INSERT INTO module_configs (id, name, lat, lng, status, first_online, battery_level)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
-                str(data.esp_id),
-                str(data.module_name),
+                data.esp_id,
+                data.module_name,
                 data.latitude,
                 data.longitude,
                 "online",
-                formatted_date,
+                now,
                 data.battery_level
             ))
+
             con.commit()
-            return jsonify({"message": "Module added successfully", "id": data.esp_id})
-        except sqlite3.Error as e:
+            return jsonify({
+                "message": "Module added successfully",
+                "id": data.esp_id
+            })
+        except Exception as e:
+            if con:
+                con.rollback()
             return jsonify({"error": str(e)}), 500
+
+        except duckdb.Error as e:
+            return jsonify({"error": str(e)}), 500
+
         finally:
-            con.close()
+            if con:
+                con.close()
 
 @app.get("/modules")
 def get_modules():

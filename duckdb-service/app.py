@@ -2,6 +2,10 @@ import os
 import threading
 import duckdb
 from flask import Flask, jsonify, request
+from typing import Dict
+from pydantic import BaseModel
+from uuid import uuid4
+from datetime import date
 
 app = Flask(__name__)
 
@@ -175,6 +179,87 @@ def get_progress():
 
     progress = [dict(zip(cols, row)) for row in rows]
     return jsonify(progress=progress), 200
+
+
+class ClassificationOutput(BaseModel):
+    modul_id: str
+    classification: Dict[str, Dict[int, int]]
+
+
+# Mapping Payload -> DB BeeType
+beeType_map = {
+    "black_masked_bee": "blackmasked",
+    "leafcutter_bee": "leafcutter",
+    "orchard_bee": "orchard",
+    "resin_bee": "resin",
+}
+
+# Ziel: 3 Nester pro BeeType, 12 Nester pro Modul
+TARGET_NESTS_PER_TYPE = 3
+
+
+@app.post("/add_progress_for_module")
+def add_progress_for_module():
+    json_data = request.get_json()
+    payload = ClassificationOutput(**json_data)
+    modul_id = payload.modul_id
+
+    with lock:
+        con = get_conn()
+        today = date.today().isoformat()
+
+        try:
+            for bee_type_payload, sealed_values in payload.classification.items():
+                db_bee_type = beeType_map.get(bee_type_payload)
+                if db_bee_type is None:
+                    continue
+
+                # Vorhandene Nester für Modul + BeeType
+                existing_nests = con.execute(
+                    "SELECT nest_id FROM nest_data WHERE module_id = ? AND beeType = ? ORDER BY nest_id",
+                    (modul_id, db_bee_type),
+                ).fetchall()
+                existing_nest_ids = [row[0] for row in existing_nests]
+
+                # Fehlende Nester erstellen
+                while len(existing_nest_ids) < TARGET_NESTS_PER_TYPE:
+                    # Neue nest_id generieren (z.B. nest-007, nest-008...)
+                    max_id_row = con.execute(
+                        "SELECT MAX(CAST(SUBSTR(nest_id, 6) AS INTEGER)) FROM nest_data"
+                    ).fetchone()
+                    next_id = (max_id_row[0] or 0) + 1
+                    new_nest_id = f"nest-{str(next_id).zfill(3)}"
+
+                    con.execute(
+                        "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+                        (new_nest_id, modul_id, db_bee_type),
+                    )
+                    existing_nest_ids.append(new_nest_id)
+
+                # Progress eintragen
+                # Payload gibt sealed-Werte für die Nester an; falls weniger als TARGET_NESTS_PER_TYPE, wiederhole letzte
+                sealed_list = list(sealed_values.values())
+                while len(sealed_list) < TARGET_NESTS_PER_TYPE:
+                    sealed_list.append(sealed_list[-1])  # letzte wiederholen
+
+                for nest_id, sealed in zip(existing_nest_ids, sealed_list):
+                    empty = 0
+                    sealed_val = int(sealed * 100)
+                    hatched = 0
+                    con.execute(
+                        """
+                        INSERT INTO daily_progress
+                        (progress_id, nest_id, date, empty, sealed, hatched)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (str(uuid4()), nest_id, today, empty, sealed_val, hatched),
+                    )
+
+            con.commit()
+            return {"success": True}
+
+        finally:
+            con.close()
 
 
 if __name__ == "__main__":

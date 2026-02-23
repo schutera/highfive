@@ -8,9 +8,14 @@ from routes.result import result_route
 from services.aws import AWSClient
 from services.state import bee_json_state
 from services.circle_detection.detect_circle import detect_circles
-from services.circle_detection.new_bee_detection import crop_12_classify_and_montage, results_to_bee_json, encode_bee_json_binary
+from services.circle_detection.new_bee_detection import (
+    crop_12_classify_and_montage,
+    results_to_bee_json,
+    encode_bee_json_binary,
+)
 
 from services.duckdb import DuckDBService
+import requests
 
 # Load .env
 debug = os.getenv("DEBUG", "false").lower() == "true"
@@ -32,6 +37,7 @@ duckdb = DuckDBService()
 
 import time
 
+
 def test_duckdb(retries: int = 20, delay: float = 0.5):
     for i in range(retries):
         try:
@@ -43,6 +49,7 @@ def test_duckdb(retries: int = 20, delay: float = 0.5):
                 print("DuckDB connection failed:", e)
                 return False
             time.sleep(delay)
+
 
 @app.post("/upload")
 def upload_image():
@@ -77,7 +84,6 @@ def upload_image():
     # RUN CLASSIFICATION
     # ---------------------------
     results, montage = crop_12_classify_and_montage(file_path)
-
     bee_json = results_to_bee_json(results)
     # Elias -> hier mit 1 (filled) und 0 (unfilled)
     # Das ist der Output
@@ -105,11 +111,14 @@ def upload_image():
     #         }
     #     }
     # }
+
     bee_binary = encode_bee_json_binary(bee_json)
+    payload = {"modul_id": "hive-001", "classification": bee_binary["classification"]}
+    url = "http://127.0.0.1:8000/add_progress_for_module"
+    requests.post(url, json=payload)
 
     bee_json_state.clear()
     bee_json_state.update(bee_json)
-
 
     # debug preview
     if debug:
@@ -118,12 +127,41 @@ def upload_image():
     # upload original image
     s3.upload("validation", file_path, delete=True)
 
-    return jsonify({
-        "message": f"Image {image.filename} uploaded successfully",
-        "mac": mac,
-        "battery": battery,
-        "classification": bee_json
-    }), 200
+    return (
+        jsonify(
+            {
+                "message": f"Image {image.filename} uploaded successfully",
+                "mac": mac,
+                "battery": battery,
+                "classification": bee_json,
+            }
+        ),
+        200,
+    )
+
+
+@app.post("/sample_classification")
+def sample_classification():
+    file_path = (
+        "/Users/eliaspfeiffer/Developer/highfive/mock-hive/mock_fully_filled.jpg"
+    )
+
+    results, montage = crop_12_classify_and_montage(file_path)
+    bee_json = results_to_bee_json(results)
+    bee_binary = encode_bee_json_binary(bee_json)
+
+    if not isinstance(bee_json, dict):
+        return {"error": "bee_json is not a dict"}
+
+    payload = {
+        "modul_id": "hive-001",
+        "classification": bee_binary.get("classification", bee_binary),
+    }
+
+    url = "http://127.0.0.1:8000/add_progress_for_module"
+    response = requests.post(url, json=payload)
+
+    return {"sent_payload": payload, "backend_status": response.status_code}
 
 
 if __name__ == "__main__":

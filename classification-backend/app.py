@@ -6,8 +6,10 @@ from routes.preview import preview_route, push_frame
 from routes.dashboard import dashboard_route
 from routes.result import result_route
 from services.aws import AWSClient
-from services.state import circles_array
+from services.state import bee_json_state
 from services.circle_detection.detect_circle import detect_circles
+from services.circle_detection.new_bee_detection import crop_12_classify_and_montage, results_to_bee_json, encode_bee_json_binary
+
 from services.duckdb import DuckDBService
 
 # Load .env
@@ -44,26 +46,23 @@ def test_duckdb(retries: int = 20, delay: float = 0.5):
 
 @app.post("/upload")
 def upload_image():
-    # --- metadata (optional/required as you want) ---
     mac = request.form.get("mac") or request.args.get("mac")
     battery = request.form.get("battery") or request.args.get("battery")
 
-    # Optional: validation
-    if mac is None or mac.strip() == "":
+    if not mac:
         return jsonify({"error": "Missing parameter: mac"}), 400
 
-    if battery is None or battery.strip() == "":
+    if not battery:
         return jsonify({"error": "Missing parameter: battery"}), 400
 
     try:
         battery = float(battery)
     except ValueError:
-        return jsonify({"error": "battery must be an float"}), 400
+        return jsonify({"error": "battery must be a float"}), 400
 
     if not (0 <= battery <= 1):
         return jsonify({"error": "battery must be between 0 and 1"}), 400
 
-    # --- file upload ---
     if "image" not in request.files:
         return jsonify({"error": "No image file provided"}), 400
 
@@ -74,28 +73,57 @@ def upload_image():
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], image.filename)
     image.save(file_path)
 
-    circles, result_img = detect_circles(file_path)
+    # ---------------------------
+    # RUN CLASSIFICATION
+    # ---------------------------
+    results, montage = crop_12_classify_and_montage(file_path)
 
+    bee_json = results_to_bee_json(results)
+    # Elias -> hier mit 1 (filled) und 0 (unfilled)
+    # Das ist der Output
+    #     {
+    #     "classification": {
+    #         "black_masked_bee": {
+    #             "1": 1,
+    #             "2": 1,
+    #             "3": 1
+    #         },
+    #         "leafcutter_bee": {
+    #             "1": 0,
+    #             "2": 0,
+    #             "3": 1
+    #         },
+    #         "orchard_bee": {
+    #             "1": 0,
+    #             "2": 0,
+    #             "3": 0
+    #         },
+    #         "resin_bee": {
+    #             "1": 1,
+    #             "2": 0,
+    #             "3": 1
+    #         }
+    #     }
+    # }
+    bee_binary = encode_bee_json_binary(bee_json)
+
+    bee_json_state.clear()
+    bee_json_state.update(bee_json)
+
+
+    # debug preview
     if debug:
-        circles_array.clear()
-        circles_array.append(circles)
+        push_frame(montage)
 
-        push_frame(result_img)
-
-    # S3 upload of image
+    # upload original image
     s3.upload("validation", file_path, delete=True)
 
-    return (
-        jsonify(
-            {
-                "message": f"Image {image.filename} uploaded successfully",
-                "mac": mac,
-                "battery": battery,
-                "circles": circles,
-            }
-        ),
-        200,
-    )
+    return jsonify({
+        "message": f"Image {image.filename} uploaded successfully",
+        "mac": mac,
+        "battery": battery,
+        "classification": bee_json
+    }), 200
 
 
 if __name__ == "__main__":

@@ -1,1 +1,1 @@
-circles_array = []
+bee_json_state = {}

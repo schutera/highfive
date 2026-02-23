@@ -1,0 +1,16 @@
+{
+  "NETWORK": {
+    "MODULE_NAME": "New Module",
+    "SSID": "ssid",
+    "PASSWORD": "password",
+    "UPLOAD_URL": "url",
+    "INIT_URL": "url"
+  },
+  "CAMERA": {
+    "CAPTURE_INTERVAL_IN_MS": 300,
+    "RESOLUTION": "VGA",
+    "VERTICAL_FLIP": 1,
+    "BRIGHTNESS": 1,
+    "SATURATION": -1
+  }
+}

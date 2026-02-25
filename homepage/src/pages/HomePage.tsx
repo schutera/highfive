@@ -106,12 +106,13 @@ export default function HomePage() {
                     Wood structure for mounting
                   </li>
                 </ul>
-                <a 
-                  href="#diy-guide" 
-                  className="flex items-center justify-center w-full bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 md:px-4 py-2 rounded-lg font-semibold text-sm md:text-base transition-colors"
-                >
-                  View Parts List →
-                </a>
+                <Link
+  to="/parts-list"
+  className="flex items-center justify-center w-full bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 md:px-4 py-2 rounded-lg font-semibold text-sm md:text-base transition-colors"
+>
+  View Parts List →
+</Link>
+
               </div>
             </div>
 
@@ -131,7 +132,7 @@ export default function HomePage() {
                   Simple browser-based installer - works on all platforms, no downloads or drivers needed
                 </p>
                 <a 
-                  href="#web-installer" 
+                  href="/web-installer" 
                   className="flex items-center justify-center w-full bg-blue-500 hover:bg-blue-600 text-white px-3 md:px-4 py-2 rounded-lg font-semibold text-sm md:text-base transition-colors"
                 >
                   Launch Web Installer →

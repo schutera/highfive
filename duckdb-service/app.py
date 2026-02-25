@@ -4,8 +4,11 @@ import duckdb
 from flask import Flask, jsonify, request
 from flask import request, jsonify
 from pydantic import BaseModel, ValidationError
-from datetime import datetime
+from datetime import datetime, date
 
+from typing import Dict
+from pydantic import BaseModel
+from uuid import uuid4
 
 app = Flask(__name__)
 
@@ -49,30 +52,6 @@ def init_db():
         sealed INTEGER NOT NULL,
         hatched INTEGER NOT NULL
         );
-
-        INSERT or IGNORE INTO module_configs (id, name, lat, lng, status, first_online, battery_level) VALUES
-        ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15', 10),
-        ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20', 20),
-        ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10', 30),
-        ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01', 25),
-        ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14', 33);
-
-        INSERT or IGNORE INTO nest_data (nest_id, module_id, beeType) VALUES
-        ('nest-001', 'hive-001', 'blackmasked'),
-        ('nest-002', 'hive-001', 'resin'),
-        ('nest-003', 'hive-002', 'leafcutter'),
-        ('nest-004', 'hive-003', 'orchard'),
-        ('nest-005', 'hive-004', 'blackmasked'),
-        ('nest-006', 'hive-001', 'blackmasked');
-
-        INSERT or IGNORE INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) VALUES
-        ('prog-001', 'nest-001', '2024-06-01', 5, 10, 15),
-        ('prog-002', 'nest-002', '2024-06-01', 3, 7, 12),
-        ('prog-003', 'nest-003', '2024-06-01', 8, 5, 20),
-        ('prog-004', 'nest-004', '2024-06-01', 2, 12, 18),
-        ('prog-005', 'nest-005', '2024-06-01', 6, 9, 14),
-        ('prog-006', 'nest-001', '2024-06-02', 4, 11, 16),
-        ('prog-007', 'nest-006', '2024-06-02', 2, 8, 13),
         """
         )
         con.close()
@@ -108,6 +87,52 @@ def health():
 
 # except Exception as e:
 #     return jsonify(error=str(e)), 400
+
+# INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
+# ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15'),
+# ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20'),
+# ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10'),
+# ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01'),
+# ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14');
+
+
+@app.get("/initial_insert")
+def initial_insert():
+    try:
+        with lock:
+            con = get_conn()
+            con.execute(
+                """
+                INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
+                ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15'),
+                ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20'),
+                ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10'),
+                ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01'),
+                ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14');
+
+                INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
+                ('nest-001', 'hive-001', 'blackmasked'),
+                ('nest-002', 'hive-001', 'resin'),
+                ('nest-003', 'hive-002', 'leafcutter'),
+                ('nest-004', 'hive-003', 'orchard'),
+                ('nest-005', 'hive-004', 'blackmasked'),
+                ('nest-006', 'hive-001', 'blackmasked');
+
+                INSERT INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) VALUES
+                ('prog-001', 'nest-001', '2024-06-01', 5, 10, 15),
+                ('prog-002', 'nest-002', '2024-06-01', 3, 7, 12),
+                ('prog-003', 'nest-003', '2024-06-01', 8, 5, 20),
+                ('prog-004', 'nest-004', '2024-06-01', 2, 12, 18),
+                ('prog-005', 'nest-005', '2024-06-01', 6, 9, 14),
+                ('prog-006', 'nest-001', '2024-06-02', 4, 11, 16),
+                ('prog-007', 'nest-006', '2024-06-02', 2, 8, 13),
+
+                """
+            )
+            con.close()
+        return jsonify(success=True), 200
+    except Exception as e:
+        return jsonify(error=str(e)), 400
 
 
 @app.post("/test_insert")
@@ -247,6 +272,87 @@ def get_progress():
 
     progress = [dict(zip(cols, row)) for row in rows]
     return jsonify(progress=progress), 200
+
+
+class ClassificationOutput(BaseModel):
+    modul_id: str
+    classification: Dict[str, Dict[int, int]]
+
+
+# Mapping Payload -> DB BeeType
+beeType_map = {
+    "black_masked_bee": "blackmasked",
+    "leafcutter_bee": "leafcutter",
+    "orchard_bee": "orchard",
+    "resin_bee": "resin",
+}
+
+# Ziel: 3 Nester pro BeeType, 12 Nester pro Modul
+TARGET_NESTS_PER_TYPE = 3
+
+
+@app.post("/add_progress_for_module")
+def add_progress_for_module():
+    json_data = request.get_json()
+    payload = ClassificationOutput(**json_data)
+    modul_id = payload.modul_id
+
+    with lock:
+        con = get_conn()
+        today = date.today().isoformat()
+
+        try:
+            for bee_type_payload, sealed_values in payload.classification.items():
+                db_bee_type = beeType_map.get(bee_type_payload)
+                if db_bee_type is None:
+                    continue
+
+                # Vorhandene Nester für Modul + BeeType
+                existing_nests = con.execute(
+                    "SELECT nest_id FROM nest_data WHERE module_id = ? AND beeType = ? ORDER BY nest_id",
+                    (modul_id, db_bee_type),
+                ).fetchall()
+                existing_nest_ids = [row[0] for row in existing_nests]
+
+                # Fehlende Nester erstellen
+                while len(existing_nest_ids) < TARGET_NESTS_PER_TYPE:
+                    # Neue nest_id generieren (z.B. nest-007, nest-008...)
+                    max_id_row = con.execute(
+                        "SELECT MAX(CAST(SUBSTR(nest_id, 6) AS INTEGER)) FROM nest_data"
+                    ).fetchone()
+                    next_id = (max_id_row[0] or 0) + 1
+                    new_nest_id = f"nest-{str(next_id).zfill(3)}"
+
+                    con.execute(
+                        "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+                        (new_nest_id, modul_id, db_bee_type),
+                    )
+                    existing_nest_ids.append(new_nest_id)
+
+                # Progress eintragen
+                # Payload gibt sealed-Werte für die Nester an; falls weniger als TARGET_NESTS_PER_TYPE, wiederhole letzte
+                sealed_list = list(sealed_values.values())
+                while len(sealed_list) < TARGET_NESTS_PER_TYPE:
+                    sealed_list.append(sealed_list[-1])  # letzte wiederholen
+
+                for nest_id, sealed in zip(existing_nest_ids, sealed_list):
+                    empty = 0
+                    sealed_val = int(sealed * 100)
+                    hatched = 0
+                    con.execute(
+                        """
+                        INSERT INTO daily_progress
+                        (progress_id, nest_id, date, empty, sealed, hatched)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (str(uuid4()), nest_id, today, empty, sealed_val, hatched),
+                    )
+
+            con.commit()
+            return {"success": True}
+
+        finally:
+            con.close()
 
 
 if __name__ == "__main__":

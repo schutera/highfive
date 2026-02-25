@@ -206,6 +206,7 @@ ecosystem.config.js
 backend/dist/
 homepage/dist/
 backend/coverage/
-backend/.DS_Store
 backend/node_modules/
-.vscode/settings.json
+backend/package_lock.json
+
+.DS_Store

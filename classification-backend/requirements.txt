@@ -6,3 +6,4 @@ boto3==1.40.59
 dotenv==0.9.9
 requests==2.32.5
 python-dotenv==1.2.1
+duckdb

@@ -2,10 +2,13 @@ import os
 import threading
 import duckdb
 from flask import Flask, jsonify, request
+from flask import request, jsonify
+from pydantic import BaseModel, ValidationError
+from datetime import datetime, date
+
 from typing import Dict
 from pydantic import BaseModel
 from uuid import uuid4
-from datetime import date
 
 app = Flask(__name__)
 
@@ -31,7 +34,8 @@ def init_db():
             lat DECIMAL(9,6) NOT NULL,
             lng DECIMAL(9,6) NOT NULL,
             status VARCHAR(10) NOT NULL CHECK (status IN ('online', 'offline')),
-            first_online DATE NOT NULL
+            first_online DATE NOT NULL,
+            battery_level INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS nest_data(
@@ -48,7 +52,6 @@ def init_db():
         sealed INTEGER NOT NULL,
         hatched INTEGER NOT NULL
         );
-
         """
         )
         con.close()
@@ -139,7 +142,7 @@ def test_insert():
             con = get_conn()
             con.execute(
                 """
-                INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
+                INSERT or IGNORE INTO module_configs (id, name, lat, lng, status, first_online) VALUES
                 ('hive-091', 'Hirrlingen', 47.8086, 9.6433, 'online',  '2023-04-15');
                 """
             )
@@ -164,6 +167,73 @@ def remove_test_insert():
     except Exception as e:
         return jsonify(error=str(e)), 400
 
+
+
+class ModuleData(BaseModel):
+    esp_id: str
+    module_name: str
+    latitude: float
+    longitude: float
+    battery_level: int
+
+from flask import request, jsonify
+from datetime import datetime
+from pydantic import ValidationError
+from threading import Lock
+
+lock = Lock()
+
+@app.post("/new_module")
+def add_module():
+    try:
+        json_data = request.get_json()
+        data = ModuleData(**json_data)
+    except ValidationError as e:
+        return jsonify({"error": e.errors()}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+    with lock:
+        con = None
+        try:
+            con = get_conn()
+            cur = con.cursor()
+
+            now = datetime.now().isoformat()
+
+            # Delete any existing row with same id (upsert behavior)
+            cur.execute("DELETE FROM module_configs WHERE id = ?", (data.esp_id,))
+
+            # Insert new row
+            cur.execute("""
+                INSERT INTO module_configs (id, name, lat, lng, status, first_online, battery_level)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data.esp_id,
+                data.module_name,
+                data.latitude,
+                data.longitude,
+                "online",
+                now,
+                data.battery_level
+            ))
+
+            con.commit()
+            return jsonify({
+                "message": "Module added successfully",
+                "id": data.esp_id
+            })
+        except Exception as e:
+            if con:
+                con.rollback()
+            return jsonify({"error": str(e)}), 500
+
+        except duckdb.Error as e:
+            return jsonify({"error": str(e)}), 500
+
+        finally:
+            if con:
+                con.close()
 
 @app.get("/modules")
 def get_modules():

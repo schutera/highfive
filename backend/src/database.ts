@@ -7,6 +7,7 @@ interface ApiModule {
   lng: string;
   status: 'online' | 'offline';
   first_online: string;
+  battery_level: number;
 }
 
 interface ApiNestResponse {
@@ -103,14 +104,71 @@ async initializeData(): Promise<void> {
   });
 }
 
-  async refresh() {
-  await this.initializeData();
+      if (!progressByNest.has(p.nest_id)) {
+        progressByNest.set(p.nest_id, []);
+      }
+
+      progressByNest.get(p.nest_id)!.push(normalized);
+    });
+
+    // ---- 2️⃣ Nests bauen ----
+    const nestsByModule = new Map<string, NestData[]>();
+
+    nestsData.nests.forEach((n: any) => {
+      const nest: NestData = {
+        nest_id: n.nest_id,
+        module_id: n.module_id,
+        beeType: n.beeType,
+        dailyProgress: progressByNest.get(n.nest_id) || [],
+      };
+
+      if (!nestsByModule.has(n.module_id)) {
+        nestsByModule.set(n.module_id, []);
+      }
+
+      nestsByModule.get(n.module_id)!.push(nest);
+    });
+
+    // ---- 3️⃣ Module bauen ----
+    modulesData.modules.forEach((m: any) => {
+      const firstOnlineDate = new Date(m.first_online);
+      const now = new Date();
+
+      //console.log(`Module ID: ${m.id}`);
+      //console.log(`Raw first_online value: ${m.first_online}`);
+      //console.log(`Parsed firstOnlineDate: ${firstOnlineDate.toISOString()}`);
+      //console.log(`Current time: ${now.toISOString()}`);
+      //console.log(`Time difference (ms): ${now.getTime() - firstOnlineDate.getTime()}`);
+
+      const isOnline = (now.getTime() - firstOnlineDate.getTime()) <= 24 * 60 * 60 * 1000; // currently 24h
+      //console.log(`Calculated status: ${isOnline ? 'online' : 'offline'}`);
+
+      const module: ModuleDetail = {
+        id: m.id,
+        name: m.name,
+        location: {
+          lat: Number(m.lat),
+          lng: Number(m.lng),
+        },
+        status: isOnline ? 'online' : 'offline',
+        firstOnline: firstOnlineDate.toISOString(),
+        lastApiCall: now.toISOString(),
+        batteryLevel: m.battery_level,
+        totalHatches: 0,
+        nests: nestsByModule.get(m.id) || [],
+      };
+
+      this.modules.set(module.id, module);
+    });
   }
 
+  async refresh() {
+    await this.initializeData();
+  }
 
-  // API Methods
+  // ---- API Methods ----
   getAllModules(): Module[] {
-    return Array.from(this.modules.values()).map(m => {
+    return Array.from(this.modules.values()).map((m) => {
       const totalHatches = m.nests.reduce((sum, nest) => {
         const latestProgress = nest.dailyProgress[nest.dailyProgress.length - 1];
         return sum + (latestProgress?.hatched || 0);

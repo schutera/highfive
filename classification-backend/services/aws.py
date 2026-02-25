@@ -8,19 +8,20 @@ from PIL import Image
 # Load .env file
 load_dotenv()
 
-endpoint = os.getenv("AWS_ENDPOINT")
-access_key = os.getenv("AWS_ACCESS_KEY_ID")
-secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+REGION = "eu-north-1"  # Stockholm
+BUCKET_NAME = "hive-hive-test-bucket-2026"
 
 
 class AWSClient:
     def __init__(self):
-        if endpoint and access_key and secret_key:
+        if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
             self.s3 = boto3.client(
                 "s3",
-                endpoint_url=endpoint,
-                aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key,
+                aws_access_key_id=AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                region_name=REGION
             )
             print("[S3] Bucket upload initialized...")
 
@@ -42,7 +43,7 @@ class AWSClient:
         return output_path
 
     def upload(self, bucket, filename, delete=False):
-        if endpoint and access_key and secret_key:
+        if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
             # Convert to JPG if needed
@@ -51,7 +52,7 @@ class AWSClient:
             key = f"{timestamp}.jpg"
 
             # Upload to S3
-            self.s3.upload_file(Filename=jpg_file, Bucket=bucket, Key=key)
+            self.s3.upload_file(Filename=jpg_file, Bucket=BUCKET_NAME, Key=key)
 
             if delete:
                 # Delete original if different

@@ -85,48 +85,21 @@ def upload_image():
     # ---------------------------
     results, montage = crop_12_classify_and_montage(file_path)
     bee_json = results_to_bee_json(results)
-    # Elias -> hier mit 1 (filled) und 0 (unfilled)
-    # Das ist der Output
-    #     {
-    #     "classification": {
-    #         "black_masked_bee": {
-    #             "1": 1,
-    #             "2": 1,
-    #             "3": 1
-    #         },
-    #         "leafcutter_bee": {
-    #             "1": 0,
-    #             "2": 0,
-    #             "3": 1
-    #         },
-    #         "orchard_bee": {
-    #             "1": 0,
-    #             "2": 0,
-    #             "3": 0
-    #         },
-    #         "resin_bee": {
-    #             "1": 1,
-    #             "2": 0,
-    #             "3": 1
-    #         }
-    #     }
-    # }
-
     bee_binary = encode_bee_json_binary(bee_json)
-    payload = {"modul_id": "hive-001", "classification": bee_binary["classification"]}
-    url = "http://duckdb-service:8000/add_progress_for_module"
-    requests.post(url, json=payload)
 
-    bee_json_state.clear()
-    bee_json_state.update(bee_json)
+    if not isinstance(bee_json, dict):
+        return {"error": "bee_json is not a dict"}
 
     payload = {
-        "modul_id": "hive-001",
+        "modul_id": mac,
         "classification": bee_binary.get("classification", bee_binary),
     }
 
     url = "http://duckdb-service:8000/add_progress_for_module"
     response = requests.post(url, json=payload)
+
+    bee_json_state.clear()
+    bee_json_state.update(bee_json)
 
     # debug preview
     if debug:
@@ -146,31 +119,6 @@ def upload_image():
         ),
         200,
     )
-
-
-@app.post("/sample_classification")
-def sample_classification():
-    file_path = (
-        "/Users/eliaspfeiffer/Developer/highfive/mock-hive/mock_fully_filled.jpg"
-    )
-
-    results, montage = crop_12_classify_and_montage(file_path)
-    bee_json = results_to_bee_json(results)
-    bee_binary = encode_bee_json_binary(bee_json)
-
-    if not isinstance(bee_json, dict):
-        return {"error": "bee_json is not a dict"}
-
-    payload = {
-        "modul_id": "hive-001",
-        "classification": bee_binary.get("classification", bee_binary),
-    }
-
-    url = "http://duckdb-service:8000/add_progress_for_module"
-    response = requests.post(url, json=payload)
-
-    return {"sent_payload": payload, "backend_status": response.status_code}
-
 
 if __name__ == "__main__":
     test_duckdb()

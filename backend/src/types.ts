@@ -13,12 +13,15 @@ export interface Module {
 }
 
 export interface NestData {
-  nestId: number;
+  nest_id: string;
+  module_id: string;
   beeType: 'blackmasked' | 'resin' | 'leafcutter' | 'orchard';
   dailyProgress: DailyProgress[];
 }
 
 export interface DailyProgress {
+  progress_id: string;
+  nest_id: string;
   date: string; // ISO date string
   empty: number;
   sealed: number;

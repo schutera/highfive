@@ -25,6 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+node_modules/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -206,3 +207,4 @@ backend/dist/
 homepage/dist/
 backend/coverage/
 backend/.DS_Store
+.vscode/settings.json

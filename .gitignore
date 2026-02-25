@@ -205,3 +205,4 @@ ecosystem.config.js
 backend/dist/
 homepage/dist/
 backend/coverage/
+backend/.DS_Store

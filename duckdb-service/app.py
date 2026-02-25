@@ -49,29 +49,6 @@ def init_db():
         hatched INTEGER NOT NULL
         );
 
-        INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
-        ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15'),
-        ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20'),
-        ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10'),
-        ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01'),
-        ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14');
-
-        INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
-        ('nest-001', 'hive-001', 'blackmasked'),
-        ('nest-002', 'hive-001', 'resin'),
-        ('nest-003', 'hive-002', 'leafcutter'),
-        ('nest-004', 'hive-003', 'orchard'),
-        ('nest-005', 'hive-004', 'blackmasked'),
-        ('nest-006', 'hive-001', 'blackmasked');
-
-        INSERT INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) VALUES
-        ('prog-001', 'nest-001', '2024-06-01', 5, 10, 15),
-        ('prog-002', 'nest-002', '2024-06-01', 3, 7, 12),
-        ('prog-003', 'nest-003', '2024-06-01', 8, 5, 20),
-        ('prog-004', 'nest-004', '2024-06-01', 2, 12, 18),
-        ('prog-005', 'nest-005', '2024-06-01', 6, 9, 14),
-        ('prog-006', 'nest-001', '2024-06-02', 4, 11, 16),
-        ('prog-007', 'nest-006', '2024-06-02', 2, 8, 13),
         """
         )
         con.close()
@@ -107,6 +84,30 @@ def health():
 
 # except Exception as e:
 #     return jsonify(error=str(e)), 400
+
+# INSERT INTO module_configs (id, name, lat, lng, status, first_online) VALUES
+# ('hive-001', 'Elias123', 47.8086, 9.6433, 'online',  '2023-04-15'),
+# ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20'),
+# ('hive-003', 'Waldrand',      47.7819, 9.6107, 'online',  '2024-03-10'),
+# ('hive-004', 'Schussental',   47.7850, 9.6200, 'online',  '2024-06-01'),
+# ('hive-005', 'Bergblick',     47.8050, 9.6350, 'online',  '2025-02-14');
+
+# INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
+# ('nest-001', 'hive-001', 'blackmasked'),
+# ('nest-002', 'hive-001', 'resin'),
+# ('nest-003', 'hive-002', 'leafcutter'),
+# ('nest-004', 'hive-003', 'orchard'),
+# ('nest-005', 'hive-004', 'blackmasked'),
+# ('nest-006', 'hive-001', 'blackmasked');
+
+# INSERT INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) VALUES
+# ('prog-001', 'nest-001', '2024-06-01', 5, 10, 15),
+# ('prog-002', 'nest-002', '2024-06-01', 3, 7, 12),
+# ('prog-003', 'nest-003', '2024-06-01', 8, 5, 20),
+# ('prog-004', 'nest-004', '2024-06-01', 2, 12, 18),
+# ('prog-005', 'nest-005', '2024-06-01', 6, 9, 14),
+# ('prog-006', 'nest-001', '2024-06-02', 4, 11, 16),
+# ('prog-007', 'nest-006', '2024-06-02', 2, 8, 13),
 
 
 @app.post("/test_insert")

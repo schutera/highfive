@@ -206,5 +206,5 @@ ecosystem.config.js
 backend/dist/
 homepage/dist/
 backend/coverage/
-.vscode/settings.json
+backend/.DS_Store
 .vscode/settings.json

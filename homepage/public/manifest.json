@@ -1,0 +1,12 @@
+{
+  "name": "HighFive ESP32",
+  "version": "1.0",
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "firmware.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

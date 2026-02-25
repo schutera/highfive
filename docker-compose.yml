@@ -1,0 +1,59 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3002:3002"
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    networks:
+      - net
+
+  homepage:
+    build:
+      context: ./homepage
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./homepage:/app
+      - /app/node_modules
+    networks:
+      - net
+
+  classification-backend:
+    build:
+      context: ./classification-backend
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
+    ports:
+      - "8000:4444"
+    networks:
+      - net
+
+  duckdb-service:
+    build:
+      context: ./duckdb-service
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8002:8000"
+    volumes:
+      - duckdb_data:/data
+    env_file:
+      - .env
+    networks:
+      - net
+
+volumes:
+  duckdb_data:
+
+networks:
+  net:
+    driver: bridge

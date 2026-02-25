@@ -1,144 +1,121 @@
 import { Module, ModuleDetail, NestData, DailyProgress } from './types';
 
-// Mock database
+interface ApiModule {
+  id: string;
+  name: string;
+  lat: string;
+  lng: string;
+  status: 'online' | 'offline';
+  first_online: string;
+}
+
+interface ApiNestResponse {
+  nests: NestData[];
+}
+
+interface ApiDailyProgressResponse {
+  progress: DailyProgress[];
+}
+
+interface ApiModuleResponse {
+  modules: ApiModule[];
+}
+
 export class MockDatabase {
   private modules: Map<string, ModuleDetail>;
 
   constructor() {
     this.modules = new Map();
-    this.initializeData();
-  }
-
-  private initializeData() {
-    // Create 5 mock modules around Weingarten (88250) and Ravensburg
-    const moduleConfigs = [
-      { id: 'hive-001', name: 'Klostergarten', lat: 47.8086, lng: 9.6433, status: 'online' as const, firstOnline: '2023-04-15' },
-      { id: 'hive-002', name: 'Wiesengrund', lat: 47.8100, lng: 9.6450, status: 'offline' as const, firstOnline: '2023-05-20' },
-      { id: 'hive-003', name: 'Waldrand', lat: 47.7819, lng: 9.6107, status: 'online' as const, firstOnline: '2024-03-10' },
-      { id: 'hive-004', name: 'Schussental', lat: 47.7850, lng: 9.6200, status: 'online' as const, firstOnline: '2024-06-01' },
-      { id: 'hive-005', name: 'Bergblick', lat: 47.8050, lng: 9.6350, status: 'online' as const, firstOnline: '2025-02-14' }
-    ];
-
-    moduleConfigs.forEach(config => {
-      const isOnline = config.status === 'online';
-      const module: ModuleDetail = {
-        id: config.id,
-        name: config.name,
-        location: {
-          lat: config.lat,
-          lng: config.lng
-        },
-        status: config.status,
-        lastApiCall: isOnline 
-          ? new Date(Date.now() - Math.random() * 300000).toISOString() // Last 5 min
-          : new Date(Date.now() - (10 * 24 * 60 * 60 * 1000)).toISOString(), // 10 days ago
-        batteryLevel: isOnline 
-          ? 60 + Math.random() * 40 // 60-100%
-          : 10 + Math.random() * 30, // 10-40%
-        firstOnline: new Date(config.firstOnline).toISOString(),
-        nests: this.generateNestData(config.id)
-      };
-      this.modules.set(config.id, module);
+    this.initializeData().catch((err) => {
+      console.error('Failed to initialize database:', err);
     });
   }
 
-  private generateNestData(moduleId: string): NestData[] {
-    const beeTypes: ('blackmasked' | 'resin' | 'leafcutter' | 'orchard')[] = 
-      ['blackmasked', 'resin', 'leafcutter', 'orchard'];
-    
-    const nests: NestData[] = [];
-    let nestId = 1;
+async initializeData(): Promise<void> {
+  const [modulesRes, nestsRes, progressRes] = await Promise.all([
+    fetch('http://duckdb-service:8000/modules'),
+    fetch('http://duckdb-service:8000/nests'),
+    fetch('http://duckdb-service:8000/progress'),
+  ]);
 
-    // 3 nests per bee type (12 total)
-    beeTypes.forEach(beeType => {
-      for (let i = 0; i < 3; i++) {
-        nests.push({
-          nestId: nestId++,
-          beeType,
-          dailyProgress: this.generateYearData(moduleId, nestId)
-        });
-      }
-    });
+  const modulesData = await modulesRes.json() as ApiModuleResponse;
+  const nestsData = await nestsRes.json() as ApiNestResponse;
+  const progressData = await progressRes.json() as ApiDailyProgressResponse;
 
-    return nests;
-  }
+  this.modules.clear();
 
-  private generateYearData(moduleId: string, nestId: number): DailyProgress[] {
-    const progress: DailyProgress[] = [];
-    const startDate = new Date('2025-01-01');
-    const endDate = new Date('2026-01-02');
-    
-    // Seeded random based on moduleId and nestId
-    const seed = this.hashCode(moduleId + nestId);
-    let random = this.seededRandom(seed);
+  // ---- 1️⃣ Progress normalisieren ----
+  const progressByNest = new Map<string, DailyProgress[]>();
 
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0];
-      const month = d.getMonth();
-      
-      // Simulate annual cycle: activity peaks in spring/summer (Mar-Aug)
-      const isActiveSeason = month >= 2 && month <= 7;
-      
-      if (isActiveSeason) {
-        // Active season: gradual progression
-        const dayOfSeason = Math.floor((d.getTime() - new Date(d.getFullYear(), 2, 1).getTime()) / (1000 * 60 * 60 * 24));
-        const maxDays = 180; // ~6 months
-        
-        const baseProgress = Math.min(100, (dayOfSeason / maxDays) * 100);
-        const sealed = Math.min(100, baseProgress + (random() * 10 - 5));
-        const hatched = Math.min(sealed, baseProgress * 0.8 + (random() * 10 - 5));
-        const empty = Math.max(0, 100 - sealed);
-        
-        progress.push({
-          date: dateStr,
-          empty: Math.round(Math.max(0, empty)),
-          sealed: Math.round(Math.max(0, Math.min(100, sealed))),
-          hatched: Math.round(Math.max(0, Math.min(sealed, hatched)))
-        });
-      } else {
-        // Dormant season: minimal activity
-        progress.push({
-          date: dateStr,
-          empty: 95 + Math.floor(random() * 5),
-          sealed: Math.floor(random() * 5),
-          hatched: 0
-        });
-      }
-    }
-
-    return progress;
-  }
-
-  // Simple hash function for seeding
-  private hashCode(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash);
-  }
-
-  // Seeded random number generator
-  private seededRandom(seed: number) {
-    let value = seed;
-    return function() {
-      value = (value * 9301 + 49297) % 233280;
-      return value / 233280;
+  progressData.progress.forEach((p: any) => {
+    const normalized: DailyProgress = {
+      progress_id: p.progess_id,     // Backend name!
+      nest_id: p.nest_id,
+      date: new Date(p.date).toISOString(),
+      empty: p.empty,
+      sealed: p.sealed,
+      hatched: p.hateched,           // Backend name!
     };
+
+    if (!progressByNest.has(p.nest_id)) {
+      progressByNest.set(p.nest_id, []);
+    }
+
+    progressByNest.get(p.nest_id)!.push(normalized);
+  });
+
+  // ---- 2️⃣ Nests bauen ----
+  const nestsByModule = new Map<string, NestData[]>();
+
+  nestsData.nests.forEach((n: any) => {
+    const nest: NestData = {
+      nest_id: n.nest_id,
+      module_id: n.module_id,
+      beeType: n.beeType,
+      dailyProgress: progressByNest.get(n.nest_id) || [],
+    };
+
+    if (!nestsByModule.has(n.module_id)) {
+      nestsByModule.set(n.module_id, []);
+    }
+
+    nestsByModule.get(n.module_id)!.push(nest);
+  });
+
+  // ---- 3️⃣ Module bauen ----
+  modulesData.modules.forEach((m: any) => {
+    const module: ModuleDetail = {
+      id: m.id,
+      name: m.name,
+      location: {
+        lat: Number(m.lat),
+        lng: Number(m.lng),
+      },
+      status: m.status,
+      firstOnline: new Date(m.first_online).toISOString(),
+      lastApiCall: new Date().toISOString(),
+      batteryLevel: 0,
+      totalHatches: 0,
+      nests: nestsByModule.get(m.id) || [],
+    };
+
+    this.modules.set(module.id, module);
+  });
+}
+
+  async refresh() {
+  await this.initializeData();
   }
+
 
   // API Methods
   getAllModules(): Module[] {
     return Array.from(this.modules.values()).map(m => {
-      // Calculate total hatches from all nests' latest daily progress
       const totalHatches = m.nests.reduce((sum, nest) => {
-        // Get the most recent day's hatched count
         const latestProgress = nest.dailyProgress[nest.dailyProgress.length - 1];
         return sum + (latestProgress?.hatched || 0);
       }, 0);
-      
+
       return {
         id: m.id,
         name: m.name,
@@ -147,7 +124,7 @@ export class MockDatabase {
         lastApiCall: m.lastApiCall,
         batteryLevel: m.batteryLevel,
         firstOnline: m.firstOnline,
-        totalHatches
+        totalHatches,
       };
     });
   }
@@ -158,12 +135,11 @@ export class MockDatabase {
 
   updateModuleStatus(id: string, status: 'online' | 'offline'): boolean {
     const module = this.modules.get(id);
-    if (module) {
-      module.status = status;
-      module.lastApiCall = new Date().toISOString();
-      return true;
-    }
-    return false;
+    if (!module) return false;
+
+    module.status = status;
+    module.lastApiCall = new Date().toISOString();
+    return true;
   }
 }
 

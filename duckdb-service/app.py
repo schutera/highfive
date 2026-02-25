@@ -211,11 +211,11 @@ def add_module():
             """, (
                 data.esp_id,
                 data.module_name,
-                data.latitude,
-                data.longitude,
+                float(data.latitude) if data.latitude is not None else None,
+                float(data.longitude) if data.longitude is not None else None,
                 "online",
                 now,
-                data.battery_level
+                int(data.battery_level) if data.battery_level is not None else None
             ))
 
             con.commit()

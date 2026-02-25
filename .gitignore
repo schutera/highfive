@@ -207,3 +207,6 @@ backend/dist/
 homepage/dist/
 backend/coverage/
 backend/node_modules/
+backend/package_lock.json
+
+.DS_Store

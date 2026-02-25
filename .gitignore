@@ -205,3 +205,5 @@ ecosystem.config.js
 backend/dist/
 homepage/dist/
 backend/coverage/
+backend/node_modules/.bin/
+backend/node_modules/.package-lock.json

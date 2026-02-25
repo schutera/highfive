@@ -206,3 +206,4 @@ ecosystem.config.js
 backend/dist/
 homepage/dist/
 backend/coverage/
+backend/node_modules/

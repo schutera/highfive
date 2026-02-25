@@ -114,11 +114,19 @@ def upload_image():
 
     bee_binary = encode_bee_json_binary(bee_json)
     payload = {"modul_id": "hive-001", "classification": bee_binary["classification"]}
-    url = "http://127.0.0.1:8000/add_progress_for_module"
+    url = "http://duckdb-service:8000/add_progress_for_module"
     requests.post(url, json=payload)
 
     bee_json_state.clear()
     bee_json_state.update(bee_json)
+
+    payload = {
+        "modul_id": "hive-001",
+        "classification": bee_binary.get("classification", bee_binary),
+    }
+
+    url = "http://duckdb-service:8000/add_progress_for_module"
+    response = requests.post(url, json=payload)
 
     # debug preview
     if debug:
@@ -158,7 +166,7 @@ def sample_classification():
         "classification": bee_binary.get("classification", bee_binary),
     }
 
-    url = "http://127.0.0.1:8000/add_progress_for_module"
+    url = "http://duckdb-service:8000/add_progress_for_module"
     response = requests.post(url, json=payload)
 
     return {"sent_payload": payload, "backend_status": response.status_code}

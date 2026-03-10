@@ -35,7 +35,7 @@ def init_db():
             lng DECIMAL(9,6) NOT NULL,
             status VARCHAR(10) NOT NULL CHECK (status IN ('online', 'offline')),
             first_online DATE NOT NULL,
-            battery_level INTEGER NOT NULL
+            battery_level INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS nest_data(
@@ -168,7 +168,6 @@ def remove_test_insert():
         return jsonify(error=str(e)), 400
 
 
-
 class ModuleData(BaseModel):
     esp_id: str
     module_name: str
@@ -176,12 +175,14 @@ class ModuleData(BaseModel):
     longitude: float
     battery_level: int
 
+
 from flask import request, jsonify
 from datetime import datetime
 from pydantic import ValidationError
 from threading import Lock
 
 lock = Lock()
+
 
 @app.post("/new_module")
 def add_module():
@@ -205,24 +206,24 @@ def add_module():
             cur.execute("DELETE FROM module_configs WHERE id = ?", (data.esp_id,))
 
             # Insert new row
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO module_configs (id, name, lat, lng, status, first_online, battery_level)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                data.esp_id,
-                data.module_name,
-                float(data.latitude) if data.latitude is not None else None,
-                float(data.longitude) if data.longitude is not None else None,
-                "online",
-                now,
-                int(data.battery_level) if data.battery_level is not None else None
-            ))
+            """,
+                (
+                    data.esp_id,
+                    data.module_name,
+                    float(data.latitude) if data.latitude is not None else None,
+                    float(data.longitude) if data.longitude is not None else None,
+                    "online",
+                    now,
+                    int(data.battery_level) if data.battery_level is not None else None,
+                ),
+            )
 
             con.commit()
-            return jsonify({
-                "message": "Module added successfully",
-                "id": data.esp_id
-            })
+            return jsonify({"message": "Module added successfully", "id": data.esp_id})
         except Exception as e:
             if con:
                 con.rollback()
@@ -234,6 +235,7 @@ def add_module():
         finally:
             if con:
                 con.close()
+
 
 @app.get("/modules")
 def get_modules():

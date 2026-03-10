@@ -32,86 +32,41 @@ export class MockDatabase {
     });
   }
 
-async initializeData(): Promise<void> {
-  const [modulesRes, nestsRes, progressRes] = await Promise.all([
-    fetch('http://duckdb-service:8000/modules'),
-    fetch('http://duckdb-service:8000/nests'),
-    fetch('http://duckdb-service:8000/progress'),
-  ]);
+  async initializeData(): Promise<void> {
+    const [modulesRes, nestsRes, progressRes] = await Promise.all([
+      fetch('http://duckdb-service:8000/modules'),
+      fetch('http://duckdb-service:8000/nests'),
+      fetch('http://duckdb-service:8000/progress'),
+    ]);
 
-  const modulesData = await modulesRes.json() as ApiModuleResponse;
-  const nestsData = await nestsRes.json() as ApiNestResponse;
-  const progressData = await progressRes.json() as ApiDailyProgressResponse;
+    const modulesData = (await modulesRes.json()) as ApiModuleResponse;
+    const nestsData = (await nestsRes.json()) as ApiNestResponse;
+    const progressData = (await progressRes.json()) as ApiDailyProgressResponse;
 
-  this.modules.clear();
+    this.modules.clear();
 
-  // ---- 1️⃣ Progress normalisieren ----
-  const progressByNest = new Map<string, DailyProgress[]>();
+    // ---- 1) Progress normalisieren ----
+    const progressByNest = new Map<string, DailyProgress[]>();
 
-  progressData.progress.forEach((p: any) => {
-    const normalized: DailyProgress = {
-      progress_id: p.progess_id,     // Backend name!
-      nest_id: p.nest_id,
-      date: new Date(p.date).toISOString(),
-      empty: p.empty,
-      sealed: p.sealed,
-      hatched: p.hateched,           // Backend name!
-    };
+    progressData.progress.forEach((p: any) => {
+      const normalized: DailyProgress = {
+        progress_id: p.progess_id, // Backend name!
+        nest_id: p.nest_id,
+        date: new Date(p.date).toISOString(),
+        empty: p.empty,
+        sealed: p.sealed,
+        hatched: p.hateched, // Backend name!
+      };
 
-    if (!progressByNest.has(p.nest_id)) {
-      progressByNest.set(p.nest_id, []);
-    }
-
-    progressByNest.get(p.nest_id)!.push(normalized);
-  });
-
-  // ---- 2️⃣ Nests bauen ----
-  const nestsByModule = new Map<string, NestData[]>();
-
-  nestsData.nests.forEach((n: any) => {
-    const nest: NestData = {
-      nest_id: n.nest_id,
-      module_id: n.module_id,
-      beeType: n.beeType,
-      dailyProgress: progressByNest.get(n.nest_id) || [],
-    };
-
-    if (!nestsByModule.has(n.module_id)) {
-      nestsByModule.set(n.module_id, []);
-    }
-
-    nestsByModule.get(n.module_id)!.push(nest);
-  });
-
-  // ---- 3️⃣ Module bauen ----
-  modulesData.modules.forEach((m: any) => {
-    const module: ModuleDetail = {
-      id: m.id,
-      name: m.name,
-      location: {
-        lat: Number(m.lat),
-        lng: Number(m.lng),
-      },
-      status: m.status,
-      firstOnline: new Date(m.first_online).toISOString(),
-      lastApiCall: new Date().toISOString(),
-      batteryLevel: 0,
-      totalHatches: 0,
-      nests: nestsByModule.get(m.id) || [],
-    };
-
-    this.modules.set(module.id, module);
-  });
-}
-
-      if (!progressByNest.has(p.nest_id)) {
-        progressByNest.set(p.nest_id, []);
+      let arr = progressByNest.get(p.nest_id);
+      if (!arr) {
+        arr = [];
+        progressByNest.set(p.nest_id, arr);
       }
-
-      progressByNest.get(p.nest_id)!.push(normalized);
+      arr.push(normalized);
     });
 
-    // ---- 2️⃣ Nests bauen ----
+    // ---- 2) Nests bauen ----
     const nestsByModule = new Map<string, NestData[]>();
 
     nestsData.nests.forEach((n: any) => {
@@ -122,26 +77,20 @@ async initializeData(): Promise<void> {
         dailyProgress: progressByNest.get(n.nest_id) || [],
       };
 
-      if (!nestsByModule.has(n.module_id)) {
-        nestsByModule.set(n.module_id, []);
+      let arr = nestsByModule.get(n.module_id);
+      if (!arr) {
+        arr = [];
+        nestsByModule.set(n.module_id, arr);
       }
-
-      nestsByModule.get(n.module_id)!.push(nest);
+      arr.push(nest);
     });
 
-    // ---- 3️⃣ Module bauen ----
+    // ---- 3) Module bauen ----
     modulesData.modules.forEach((m: any) => {
       const firstOnlineDate = new Date(m.first_online);
       const now = new Date();
-
-      //console.log(`Module ID: ${m.id}`);
-      //console.log(`Raw first_online value: ${m.first_online}`);
-      //console.log(`Parsed firstOnlineDate: ${firstOnlineDate.toISOString()}`);
-      //console.log(`Current time: ${now.toISOString()}`);
-      //console.log(`Time difference (ms): ${now.getTime() - firstOnlineDate.getTime()}`);
-
-      const isOnline = (now.getTime() - firstOnlineDate.getTime()) <= 24 * 60 * 60 * 1000; // currently 24h
-      //console.log(`Calculated status: ${isOnline ? 'online' : 'offline'}`);
+      const isOnline =
+        now.getTime() - firstOnlineDate.getTime() <= 24 * 60 * 60 * 1000;
 
       const module: ModuleDetail = {
         id: m.id,
@@ -153,7 +102,7 @@ async initializeData(): Promise<void> {
         status: isOnline ? 'online' : 'offline',
         firstOnline: firstOnlineDate.toISOString(),
         lastApiCall: now.toISOString(),
-        batteryLevel: m.battery_level,
+        batteryLevel: m.battery_level ?? 0,
         totalHatches: 0,
         nests: nestsByModule.get(m.id) || [],
       };
@@ -170,7 +119,8 @@ async initializeData(): Promise<void> {
   getAllModules(): Module[] {
     return Array.from(this.modules.values()).map((m) => {
       const totalHatches = m.nests.reduce((sum, nest) => {
-        const latestProgress = nest.dailyProgress[nest.dailyProgress.length - 1];
+        const latestProgress =
+          nest.dailyProgress[nest.dailyProgress.length - 1];
         return sum + (latestProgress?.hatched || 0);
       }, 0);
 

@@ -118,7 +118,7 @@ Request Body
 
 ---
 
-## 1.4 Get All Modules
+## 1.4 Get All Modules _[used internally]_
 
 ### Endpoint
 
@@ -152,7 +152,7 @@ Returns all registered Hive modules.
 
 ---
 
-## 1.5 Get All Nests
+## 1.5 Get All Nests _[used internally]_
 
 ### Endpoint
 
@@ -193,7 +193,7 @@ Returns all nests stored in the system.
 
 ---
 
-## 1.6 Get Progress Data
+## 1.6 Get Progress Data _[used internally]_
 
 ### Endpoint
 
@@ -235,7 +235,7 @@ Returns stored brood progress entries.
 
 ---
 
-## 1.7 Store Classification Result
+## 1.7 Store Classification Result _[used internally]_
 
 ### Endpoint
 
@@ -380,7 +380,7 @@ HTML dashboard page displaying:
 
 ---
 
-## 2.3 Preview Stream
+## 2.3 Preview Stream _[used internally]_
 
 ### Endpoint
 

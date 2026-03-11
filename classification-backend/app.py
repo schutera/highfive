@@ -87,12 +87,12 @@ def upload_image():
         return jsonify({"error": "Missing parameter: battery"}), 400
 
     try:
-        battery = float(battery)
+        battery = int(battery)
     except ValueError:
-        return jsonify({"error": "battery must be a float"}), 400
+        return jsonify({"error": "battery must be a integer"}), 400
 
-    if not (0 <= battery <= 1):
-        return jsonify({"error": "battery must be between 0 and 1"}), 400
+    if not (0 <= battery <= 100):
+        return jsonify({"error": "battery must be between 0 and 100"}), 400
 
     if "image" not in request.files:
         return jsonify({"error": "No image file provided"}), 400
@@ -132,7 +132,7 @@ def upload_image():
     # upload original image
     s3.upload("validation", file_path, delete=True)
 
-    updateModule(mac, battery * 100) # * 100 becaudse db has battery level as INTEGER
+    updateModule(mac, battery)
 
     return (
         jsonify(

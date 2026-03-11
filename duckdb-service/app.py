@@ -169,11 +169,11 @@ def remove_test_insert():
 
 
 class ModuleData(BaseModel):
-    esp_id: str
+    mac: str
     module_name: str
     latitude: float
     longitude: float
-    battery_level: int
+    battery: int
 
 
 from flask import request, jsonify
@@ -203,7 +203,7 @@ def add_module():
             now = datetime.now().isoformat()
 
             # Delete any existing row with same id (upsert behavior)
-            cur.execute("DELETE FROM module_configs WHERE id = ?", (data.esp_id,))
+            cur.execute("DELETE FROM module_configs WHERE id = ?", (data.mac,))
 
             # Insert new row
             cur.execute(
@@ -212,18 +212,18 @@ def add_module():
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 (
-                    data.esp_id,
+                    data.mac,
                     data.module_name,
                     float(data.latitude) if data.latitude is not None else None,
                     float(data.longitude) if data.longitude is not None else None,
                     "online",
                     now,
-                    int(data.battery_level) if data.battery_level is not None else None,
+                    int(data.battery) if data.battery is not None else None,
                 ),
             )
 
             con.commit()
-            return jsonify({"message": "Module added successfully", "id": data.esp_id})
+            return jsonify({"message": "Module added successfully", "id": data.mac})
         except Exception as e:
             if con:
                 con.rollback()

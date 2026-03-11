@@ -10,6 +10,12 @@ This project consists of hardware modules that monitor wild bee activity and a w
 
 ## Next Steps
 
+[Deployment Guide](documentation/service-deployment.md)
+
+[API Usage Guide](documentation/api-usage.md)
+
+[classification-backend Details](classification-backend/classification-backend.md)
+
 ### Frontend Development
 
 #### Parts List & Assembly Guide Page

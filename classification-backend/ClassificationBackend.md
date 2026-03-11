@@ -28,7 +28,9 @@ In this project, the hive modules are equipped with camera systems that capture 
 A Hive module contains multiple nesting areas and **three nesting tubes per bee species**.
 All Hive modules are standardized in geometric arrangement of the cells which is also part of the HiveHive project.
 
-![Hive module with ESP32 camera](documentation/hivemodule.jpeg)
+<div align="center">
+  <img src="documentation/hivemodule.jpeg" height="50%">
+</div>
 
 _Figure 1: Example of a Hive module equipped with ESP32-camera. (Mark Schutera, 2026)_
 
@@ -44,7 +46,9 @@ The modules are photographed using an **ESP32 camera module**.
 Because the geometry of the nesting aid is fixed, the captured image can
 later be deterministically divided into individual tiles. As the physical Hive module is not fully developed yet, there was not training data available. Thus, sample images were generated using AI for developing the image classification functionality.
 
-![View of the Hive module from ESP-perspective](documentation/mock_fully_filled.jpg)
+<div align="center">
+  <img src="documentation/mock_fully_filled.jpg" width="50%">
+</div>
 
 _Figure 2: View of the Hive module from ESP-Cam perspective used for development - all nests are occupied. (AI-Generated)_
 
@@ -178,7 +182,9 @@ These correspond to:
 
 The split is based on fixed pixel coordinates which can be easily adjusted in `new_bee_detection.py`: `REGIONS` to fit real training images later on.
 
-![Tile layout](documentation/mock_cutouts.png)
+<div align="center">
+  <img src="documentation/mock_cutouts.png" width="50%">
+</div>
 
 _Figure 3: View of the Hive module from ESP-Cam perspective with the cutout image tiles - all nests are empty. (AI-Generated)_
 
@@ -305,7 +311,9 @@ The following endpoints are used:
 
 The dashboard is intended only for development and debugging purposes. It will always display the latest uploaded image to the `/upload` route.
 
-![Dashboard](documentation/dashboard.png)
+<div align="center">
+  <img src="documentation/dashboard.png" width="80%">
+</div>
 
 _Figure 4: Debug Dashboard showing the latest classification result from the upload route_
 

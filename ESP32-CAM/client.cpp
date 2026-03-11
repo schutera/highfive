@@ -112,13 +112,10 @@ int postImage(esp_config_t *esp_config) {
   String filename = createFileName();
   String boundary = "------------------------esp32" + String(millis());
 
-  // Convert battery level to 0-1 float string
-  float batteryFloat = esp_config->battery_level / 100.0f;
-  //String batteryStr = String(batteryFloat, 2);
-  
-  float battery = random(1, 101) / 100.0; // randomizes battery percentage - later, here comes the actual battery %
-  String batteryStr = String(battery);
-  
+  // for now the battery percentage is randomized!
+  esp_config->battery_level = random(1, 100);
+  int battery_level = esp_config->battery_level;
+    
   String macStr = String(esp_config->esp_ID);
 
   // --- build multipart/form-data ---
@@ -129,7 +126,7 @@ int postImage(esp_config_t *esp_config) {
 
       "--" + boundary + "\r\n"
       "Content-Disposition: form-data; name=\"battery\"\r\n\r\n" +
-      batteryStr + "\r\n" +
+      String(battery_level) + "\r\n" +
 
       "--" + boundary + "\r\n"
       "Content-Disposition: form-data; name=\"image\"; filename=\"" + filename + "\"\r\n"

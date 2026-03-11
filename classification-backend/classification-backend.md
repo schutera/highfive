@@ -142,7 +142,7 @@ Each request sent by a Hive module must contain the following information:
 | --------- | ----------------------------------------- |
 | `image`   | Captured image of the hive module         |
 | `mac`     | Unique identifier of the Hive module      |
-| `battery` | Current battery level of the device (0–1) |
+| `battery` | Current battery level of the device as int (0–100) |
 
 These parameters allow the system to associate the captured image with the correct hardware module and to monitor the operational state of the device.
 

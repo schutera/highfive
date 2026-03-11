@@ -15,6 +15,8 @@ The service is implemented as a **REST API** and forms a central
 component of the data pipeline between the edge devices and the database
 system.
 
+<br>
+
 # 1. Hive Modules as Data Source
 
 The images used for classification originates from the **Hive modules**.
@@ -45,6 +47,8 @@ later be deterministically divided into individual tiles. As the physical Hive m
 ![View of the Hive module from ESP-perspective](documentation/mock_fully_filled.jpg)
 
 _Figure 2: View of the Hive module from ESP-Cam perspective used for development - all nests are occupied. (AI-Generated)_
+
+<br>
 
 # 2. Technologies Used
 
@@ -89,7 +93,9 @@ Within this project OpenCV is used for:
 - circle detection
 - color and brightness analysis
 
-# 3 Architecture of the Classification Backend
+<br>
+
+# 3. Architecture of the Classification Backend
 
 The service follows a modular design and a simple microservice
 structure.
@@ -126,6 +132,15 @@ The central entry point of the service is the endpoint:
 
 This endpoint is called by the Hive modules whenever a new image is
 captured.
+Each request sent by a Hive module must contain the following information:
+
+| Parameter | Description                               |
+| --------- | ----------------------------------------- |
+| `image`   | Captured image of the hive module         |
+| `mac`     | Unique identifier of the Hive module      |
+| `battery` | Current battery level of the device (0–1) |
+
+These parameters allow the system to associate the captured image with the correct hardware module and to monitor the operational state of the device.
 
 The data flow within the system can be summarized as follows:
 
@@ -136,6 +151,8 @@ The data flow within the system can be summarized as follows:
 5.  A structured JSON result is created.
 6.  Optionally the image is stored in an object storage system.
 7.  The classification results are forwarded to the DuckDB service from where on the frontend is taking over.
+
+<br>
 
 # 4. Image Processing Pipeline
 
@@ -159,7 +176,7 @@ These correspond to:
 - 4 bee species
 - 3 nesting tubes each
 
-The split is based on fixed pixel coordinates which can be easily adjusted to real training images later on.
+The split is based on fixed pixel coordinates which can be easily adjusted in `new_bee_detection.py`: `REGIONS` to fit real training images later on.
 
 ![Tile layout](documentation/mock_cutouts.png)
 
@@ -167,48 +184,84 @@ _Figure 3: View of the Hive module from ESP-Cam perspective with the cutout imag
 
 ## 4.2 Circle Detection
 
-Within each tile, a circle detection algorithm is applied.
-
-The **Hough Circle Transform** is used for this task.
+Within each tile, a circle detection algorithm is applied to identify the
+opening of the nesting tube. For this purpose the **Hough Circle Transform**
+is used.
 
 The algorithm works in several steps:
 
-1.  Convert image to grayscale
-2.  Apply median filtering to reduce noise
-3.  Analyze edge structures
-4.  Detect potential circle parameters
+1. Convert the image to grayscale
+2. Apply a median filter to reduce image noise
+3. Detect edge structures within the image
+4. Identify circle candidates based on the detected edges
 
-The Hough transform is well suited for detecting circular structures
-such as nesting tubes.
+The Hough transform is particularly suitable for detecting circular
+structures and therefore works well for identifying the round openings
+of the nesting tubes in the hive modules.
 
----
+Another reason for choosing this approach is that the geometry of the
+hive modules is highly standardized. Since the nesting tubes always
+appear as circular shapes in approximately known positions, a classical
+computer vision approach such as the Hough transform provides a simple
+and efficient solution.
 
-# 4.3 Nest Cell Classification
+At the current stage of development this component should be considered
+**prototypical**.
+
+## 4.3 Nest Cell Classification
 
 After circle detection, the nesting cells are classified.
 
-The goal is a **binary classification**.
+The goal of this step is a **binary classification**:
 
 ```
 1 = Cell is filled
 0 = Cell is empty
 ```
 
-The classification is based on analyzing color and brightness values
-within the detected circular region.
+The classification is currently performed using a rule-based approach
+based on simple color and brightness features within the detected circle
+region.
 
-The following features are considered:
+The following image properties are analyzed:
 
 - brightness (Value channel in HSV color space)
 - color saturation (Saturation channel)
 - dominance of the green channel
 
-Filled cells usually contain plant material and therefore show higher
-color saturation and stronger green components.
+Filled cells usually contain plant material such as leaves or pollen
+mixtures. These materials often introduce stronger color saturation and
+green components into the image region.
 
-Empty cells typically appear darker and less saturated.
+Empty cells, in contrast, typically appear darker and less saturated
+because the interior of the tube is visible.
 
-## 4.4 Structure of Classification Results
+Similar to the circle detection stage, this classification approach is
+currently **heuristic and prototype-based**. The parameters of both components were tuned mainly using
+synthetic and AI-generated training images, as no large dataset of real
+images from deployed hive modules was available during development.
+Because of this limitation the detection logic is likely **overfitted to the available test images**.
+
+For this reason the classification modules where intentionally designed
+to be easily replaceable so that improved detection methods can be
+integrated in future versions.
+
+## 4.4 Future Development: Neural Network Based Classification
+
+In future versions of the system the rule-based classification could be
+replaced by a **neural network based image classification model**.
+
+This would allow the model to better handle variations in lighting,
+camera angle, and environmental conditions.
+
+Such an approach would likely provide more robust and accurate
+classification results compared to the current heuristic solution.
+
+Because the image processing pipeline was implemented as a modular
+component, the current prototype can be replaced by a machine learning
+model without major changes to the overall system architecture.
+
+## 4.5 Structure of Classification Results
 
 The classification results are stored as a JSON object.
 
@@ -222,6 +275,17 @@ The classification results are stored as a JSON object.
 ```
 
 This structure allows simple downstream processing by other services.
+
+At this stage the classification result is only returned as a binary value (`0` or `1`).  
+A value of `1` indicates that a nesting cell is **filled**, while `0` indicates that the cell is **empty**.
+
+In future revisions the system is intended to output a value between **0–100%** representing the **estimated brood development progress** inside a nesting tube.
+
+Once a bee seals a tube after laying an egg and providing pollen, the larva develops over several weeks. By tracking the time since a tube was first detected as sealed, the system could estimate the development progress.
+
+The classification backend would therefore mainly detect **state changes (open/sealed)**, while downstream systems could calculate the estimated development progress over time.
+
+<br>
 
 # 5. Debug Dashboard
 
@@ -245,6 +309,8 @@ The dashboard is intended only for development and debugging purposes. It will a
 
 _Figure 4: Debug Dashboard showing the latest classification result from the upload route_
 
+<br>
+
 # 6. Image Storage
 
 Image storage is optional.
@@ -260,35 +326,58 @@ This could potentially be used for:
 - analysis of misclassifications
 - visualization of original images in frontend applications
 
+<br>
+
 # 7. Integration with the Database System
 
-The classification results are forwarded to the DuckDB service.
+The classification results are forwarded to the DuckDB service for
+persistent storage.
 
-The outputs of the classification backend therefore form the basis for
-analyzing brood development over time.
+For each uploaded image the following information is stored:
 
----
+- module identifier (`mac`)
+- timestamp of the observation
+- bee species and nesting tube index
+- classification result (`0` = empty, `1` = filled)
 
-# Future Improvements
+These records allow the system to track nest occupancy and brood
+development over time.
 
-Possible future improvements include:
+The registration of new hive modules is handled directly in the DuckDB docker service. Requests for registrations should be sent to it directly. Incoming images from modules are then matched using the module identifier.
 
-- improved circle detection
-- creation of a validation dataset
-- automated quality checks
-- integration of deep learning models
-- computation of brood development progress between **0% and 100%**
+<br>
 
-Using neural networks could significantly improve robustness under
-varying lighting conditions and image quality.
+# 8. Future Improvements
 
----
+Several improvements are planned for future versions of the classification backend.
 
-# References
+**1. Real training data**
 
-- Bradski, G., & Kaehler, A. (2008). _Learning OpenCV_. O'Reilly
-  Media.
-- OpenCV Documentation
-- Python Documentation
-- DuckDB Documentation
-- https://insektenhotels.net/insektenhotel-loecher-verschlossen/
+The current image processing pipeline was mainly developed using AI-generated images, since no real images from deployed hive modules were available during development. In future deployments, real image data can be collected and used to improve and validate the detection algorithms.
+
+**2. Neural network based classification**
+
+The current rule-based classification could be replaced by a neural network model. Such models could learn relevant visual features directly from data and improve robustness under different lighting conditions and camera perspectives.
+
+**3. Improved circle detection**
+
+The Hough transform works well under controlled conditions but may become less reliable when image quality varies. Future versions could use more advanced detection methods or object detection models.
+
+**4. Brood development estimation**
+
+Currently the system only detects whether a nesting tube is empty or filled. In future versions this could be extended to estimate a **0–100% brood development progress** based on the time since a tube was first detected as sealed.
+
+<br>
+
+# 9. References
+
+Bradski, G., & Kaehler, A. (2008). _Learning OpenCV_. O’Reilly Media.
+
+OpenCV Documentation. https://docs.opencv.org
+
+Python Software Foundation. _Python Documentation_. https://docs.python.org
+
+DuckDB Documentation. https://duckdb.org/docs
+
+Insektenhotels.net. _Warum sind in einem Insektenhotel Löcher verschlossen?_.  
+https://insektenhotels.net/insektenhotel-loecher-verschlossen/

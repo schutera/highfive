@@ -1,17 +1,19 @@
 <h1 align="center">HiveHive</h1>
 
-<div align="center">
+<p align="center">
   <img src="documentation/doc_images/HiveHive_Logo.png" alt="HiveHive Logo" width="180"/>
+</p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB?logo=react&logoColor=white" alt="React + Vite" />
+  <img src="https://img.shields.io/badge/language-TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/backend-Node.js%20%2B%20Express-339933?logo=node.js&logoColor=white" alt="Node.js + Express" />
+  <img src="https://img.shields.io/badge/classification-Python%20%2B%20Flask-3776AB?logo=python&logoColor=white" alt="Python + Flask" />
+  <img src="https://img.shields.io/badge/database-DuckDB-FFC107?logoColor=white" alt="DuckDB" />
+  <img src="https://img.shields.io/badge/hardware-ESP32--CAM-E7352C?logoColor=white" alt="ESP32-CAM" />
+  <img src="https://img.shields.io/badge/deploy-Docker%20Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose" />
+</p>
 
-  ![frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB?style=flat&logo=react)
-  ![language](https://img.shields.io/badge/language-TypeScript-3178C6?style=flat&logo=typescript)
-  ![backend](https://img.shields.io/badge/backend-Node.js%20%2B%20Express-339933?style=flat&logo=node.js)
-  ![classification](https://img.shields.io/badge/classification-Python%20%2B%20Flask-3776AB?style=flat&logo=python)
-  ![database](https://img.shields.io/badge/database-DuckDB-FFC107?style=flat)
-  ![hardware](https://img.shields.io/badge/hardware-ESP32--CAM-E7352C?style=flat)
-  ![deploy](https://img.shields.io/badge/deploy-Docker%20Compose-2496ED?style=flat&logo=docker)
-</div>
 
 <br>
 

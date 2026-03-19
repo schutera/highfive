@@ -100,10 +100,21 @@ export default function WebInstaller() {
       <main className="flex-1 flex flex-col items-center justify-center px-4">
         <h2 className="text-2xl font-bold mb-4">ESP32 Firmware Installer</h2>
 
-        <p className="mb-6 text-center max-w-md text-gray-700">
-          Connect your ESP32 via USB and click the button
-          (Chrome or Edge required)
-        </p>
+         {/* Connection steps before flashing */}
+        <div className="mb-6 bg-white rounded-lg shadow p-5 max-w-md w-full">
+          <h3 className="font-bold text-gray-900 mb-3">Before you start</h3>
+          <ol className="list-decimal list-inside space-y-2 text-sm text-gray-700">
+            <li>Connect the ESP32-CAM to your computer via USB</li>
+            <li>Use <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> — other browsers are not supported</li>
+            <li>Wait until your computer recognizes the device</li>
+            <li>Click <strong>Install firmware</strong> below</li>
+            <li>Do not disconnect the USB cable during the process</li>
+          </ol>
+          <div className="bg-amber-50 border border-amber-200 rounded p-3 mt-4 text-xs text-amber-900">
+            <strong>Note:</strong> If the device is not detected, try a different USB cable — some cables are charge-only and do not transfer data.
+          </div>
+        </div>
+
 
       {/* Firmware Info Box */}
       <div className="mb-6 bg-blue-50 border-2 border-blue-200 rounded-lg p-4 max-w-md mx-auto">

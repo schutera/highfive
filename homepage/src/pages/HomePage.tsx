@@ -79,7 +79,7 @@ export default function HomePage() {
                   Get everything pre-assembled and ready to use
                 </p>
                 <a 
-                  href="#buy-kit" 
+                  href="mailto:info@highfive-bees.com?subject=HighFive%20Kit%20Inquiry" 
                   className="flex items-center justify-center w-full bg-amber-500 hover:bg-amber-600 text-white px-3 md:px-4 py-2 rounded-lg font-semibold text-sm md:text-base transition-colors"
                 >
                   Buy Complete Kit →

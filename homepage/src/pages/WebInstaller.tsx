@@ -37,6 +37,25 @@ export default function WebInstaller() {
     }
   };
 
+  const manifest = {
+  name: "HighFive ESP32",
+  version: firmwareVersion,
+  builds: [
+    {
+      chipFamily: "ESP32",
+      parts: [
+        {
+          path: firmwareUrl, // ← GitHub URL!
+          offset: 0
+        }
+      ]
+    }
+  ]
+};
+
+  const blob = new Blob([JSON.stringify(manifest)], { type: "application/json" });
+  const manifestUrl = URL.createObjectURL(blob);
+
   const loadLatestFirmware = async () => {
     try {
       setFirmwareLoading(true);
@@ -135,7 +154,7 @@ export default function WebInstaller() {
 
 
         {/* ESP WEB INSTALLER BUTTON */}
-        <esp-web-install-button manifest="/manifest.json">
+        <esp-web-install-button manifest={manifestUrl}>
           <button className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors">
             Firmware installieren
           </button>

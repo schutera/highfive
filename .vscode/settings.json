@@ -1,5 +1,0 @@
-{
-  "cmake.sourceDirectory": "D:/Projects/highfive/sentinel/esp32-cam-idf",
-  "python-envs.defaultEnvManager": "ms-python.python:pyenv",
-  "python-envs.pythonProjects": []
-}

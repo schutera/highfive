@@ -2,9 +2,12 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import MapView from '../components/MapView';
 import ModulePanel from '../components/ModulePanel';
+import LanguageToggle from '../components/LanguageToggle';
+import { useTranslation } from '../i18n/LanguageContext';
 import { api, Module } from '../services/api';
 
 export default function DashboardPage() {
+  const { t } = useTranslation();
   const [modules, setModules] = useState<Module[]>([]);
   const [visibleModules, setVisibleModules] = useState<Module[]>([]);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
@@ -23,7 +26,7 @@ export default function DashboardPage() {
       const data = await api.getAllModules();
       setModules(data);
     } catch (err) {
-      setError('Failed to load modules. Make sure the backend is running.');
+      setError(t('dashboard.errorDetail'));
       console.error('Error loading modules:', err);
     } finally {
       setLoading(false);
@@ -46,25 +49,26 @@ export default function DashboardPage() {
             <span className="inline">HighFive</span>
           </Link>
           <span className="text-gray-300 hidden md:inline">|</span>
-          <h1 className="hidden md:block text-xl font-semibold text-gray-800">Dashboard</h1>
+          <h1 className="hidden md:block text-xl font-semibold text-gray-800">{t('dashboard.title')}</h1>
         </div>
-        
+
         <div className="flex items-center gap-2 md:gap-4">
+          <LanguageToggle />
           {loading ? (
             <div className="text-xs md:text-sm text-gray-600 flex items-center gap-2">
               <div className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-              <span className="hidden sm:inline">Loading...</span>
+              <span className="hidden sm:inline">{t('common.loading')}</span>
             </div>
           ) : error ? (
             <div className="text-xs md:text-sm text-red-600 flex items-center gap-1">
               <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-              <span className="hidden sm:inline">Error</span>
+              <span className="hidden sm:inline">{t('common.error')}</span>
             </div>
           ) : (
             <div className="text-xs md:text-sm text-gray-600 flex items-center gap-1.5">
               <span className="w-2 h-2 bg-green-500 rounded-full"></span>
               <span>{modules.filter(m => m.status === 'online').length}/{modules.length}</span>
-              <span className="hidden sm:inline">Online</span>
+              <span className="hidden sm:inline">{t('common.online')}</span>
             </div>
           )}
         </div>
@@ -80,15 +84,15 @@ export default function DashboardPage() {
               <div className="mb-4 md:mb-8 animate-bounce">
                 <div className="text-5xl md:text-8xl">🐝</div>
               </div>
-              
+
               {/* Error Message */}
               <h2 className="text-xl md:text-3xl font-bold text-gray-800 mb-2 md:mb-4">
-                It's not you, it's us!
+                {t('dashboard.errorTitle')}
               </h2>
               <p className="text-xs md:text-sm text-gray-500 mb-4 md:mb-8">
-                Our worker bees are already on it.
+                {t('dashboard.errorSubtitle')}
               </p>
-              
+
               {/* Retry Button */}
               <button
                 onClick={loadModules}
@@ -97,9 +101,9 @@ export default function DashboardPage() {
                 <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Try Again
+                {t('common.tryAgain')}
               </button>
-              
+
               {/* Technical Details */}
               <div className="mt-4 md:mt-8 p-3 md:p-4 bg-white/60 rounded-lg border border-amber-200">
                 <p className="text-xs text-gray-500 font-mono break-words">{error}</p>
@@ -112,20 +116,20 @@ export default function DashboardPage() {
         {!error && (
           <div className="flex-1 relative">
             {!loading && (
-              <MapView 
-                modules={modules} 
+              <MapView
+                modules={modules}
                 selectedModule={selectedModule}
                 onModuleSelect={handleModuleSelect}
                 onVisibleModulesChange={setVisibleModules}
               />
             )}
-            
+
             {/* Loading overlay */}
             {loading && (
               <div className="absolute inset-0 bg-gray-100 flex items-center justify-center">
                 <div className="text-center">
                   <div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                  <p className="text-gray-600 text-sm">Loading map...</p>
+                  <p className="text-gray-600 text-sm">{t('dashboard.loadingMap')}</p>
                 </div>
               </div>
             )}
@@ -134,9 +138,9 @@ export default function DashboardPage() {
 
         {/* Desktop: Right Panel - Module Details */}
         {!error && selectedModule && (
-          <div className="hidden md:flex w-80 lg:w-96 bg-white shadow-xl overflow-hidden flex-col border-l border-gray-200">
-            <ModulePanel 
-              module={selectedModule} 
+          <div className="hidden md:flex w-80 lg:w-96 shadow-xl overflow-hidden flex-col border-l border-gray-200">
+            <ModulePanel
+              module={selectedModule}
               onClose={() => setSelectedModule(null)}
               onError={(errorMsg) => {
                 setError(errorMsg);
@@ -149,15 +153,15 @@ export default function DashboardPage() {
 
       {/* Mobile: Module Detail Panel - Full screen slide-up */}
       {!error && selectedModule && (
-        <div 
+        <div
           className="fixed inset-0 z-[1000] md:hidden"
           onClick={() => setSelectedModule(null)}
         >
           {/* Backdrop */}
           <div className="absolute inset-0 bg-black/40" />
-          
+
           {/* Panel - Full screen on mobile */}
-          <div 
+          <div
             className="absolute inset-0 bg-white flex flex-col animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
@@ -171,13 +175,13 @@ export default function DashboardPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <span className="font-semibold text-gray-900">Module Details</span>
+              <span className="font-semibold text-gray-900">{t('dashboard.moduleDetails')}</span>
             </div>
-            
+
             {/* Panel content - full height scrollable */}
             <div className="flex-1 overflow-y-auto overscroll-contain">
-              <ModulePanel 
-                module={selectedModule} 
+              <ModulePanel
+                module={selectedModule}
                 onClose={() => setSelectedModule(null)}
                 onError={(errorMsg) => {
                   setError(errorMsg);
@@ -193,8 +197,8 @@ export default function DashboardPage() {
       {!loading && !error && visibleModules.length > 0 && (
         <div className="hidden md:flex absolute bottom-8 left-8 w-80 bg-white rounded-xl shadow-2xl z-[999] max-h-[400px] flex-col">
           <div className="p-4 border-b shrink-0">
-            <h2 className="text-lg font-bold text-amber-600">Hive Modules</h2>
-            <p className="text-xs text-gray-500 mt-0.5">{visibleModules.length} modules in view</p>
+            <h2 className="text-lg font-bold text-amber-600">{t('common.hiveModules')}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{t('dashboard.modulesInView', { count: visibleModules.length })}</p>
           </div>
           <div className="overflow-y-auto flex-1 p-4">
             <div className="space-y-2">
@@ -238,8 +242,8 @@ export default function DashboardPage() {
                     <span className="text-lg">🐝</span>
                   </div>
                   <div className="text-left">
-                    <div className="font-semibold text-gray-900 text-sm">Hive Modules</div>
-                    <div className="text-xs text-gray-500">{visibleModules.length} in view • Tap to expand</div>
+                    <div className="font-semibold text-gray-900 text-sm">{t('common.hiveModules')}</div>
+                    <div className="text-xs text-gray-500">{t('dashboard.inViewTap', { count: visibleModules.length })}</div>
                   </div>
                 </div>
                 <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -251,15 +255,15 @@ export default function DashboardPage() {
 
           {/* Expanded state - full list */}
           {mobileListExpanded && (
-            <div 
+            <div
               className="fixed inset-0 z-50"
               onClick={() => setMobileListExpanded(false)}
             >
               {/* Backdrop */}
               <div className="absolute inset-0 bg-black/30" />
-              
+
               {/* Bottom sheet */}
-              <div 
+              <div
                 className="absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-2xl max-h-[70vh] flex flex-col animate-slide-up"
                 onClick={(e) => e.stopPropagation()}
               >
@@ -267,12 +271,12 @@ export default function DashboardPage() {
                 <div className="flex justify-center py-2 shrink-0">
                   <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
                 </div>
-                
+
                 {/* Header */}
                 <div className="flex justify-between items-center px-4 pb-3 border-b shrink-0">
                   <div>
-                    <h2 className="font-bold text-gray-900">Hive Modules</h2>
-                    <p className="text-xs text-gray-500">{visibleModules.length} modules in view</p>
+                    <h2 className="font-bold text-gray-900">{t('common.hiveModules')}</h2>
+                    <p className="text-xs text-gray-500">{t('dashboard.modulesInView', { count: visibleModules.length })}</p>
                   </div>
                   <button
                     onClick={() => setMobileListExpanded(false)}
@@ -283,7 +287,7 @@ export default function DashboardPage() {
                     </svg>
                   </button>
                 </div>
-                
+
                 {/* Module list */}
                 <div className="overflow-y-auto overscroll-contain flex-1 p-4 pb-safe-bottom">
                   <div className="space-y-2">
@@ -306,7 +310,7 @@ export default function DashboardPage() {
                           <div className="flex-1 min-w-0">
                             <h3 className="font-semibold text-gray-900 truncate">{module.name}</h3>
                             <p className={`text-xs ${module.status === 'online' ? 'text-green-600' : 'text-gray-500'}`}>
-                              {module.status === 'online' ? '● Online' : '○ Offline'}
+                              {module.status === 'online' ? t('dashboard.statusOnline') : t('dashboard.statusOffline')}
                             </p>
                           </div>
                           <svg className="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

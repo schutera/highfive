@@ -25,6 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+node_modules/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -195,3 +196,16 @@ cython_debug/
 
 # Secrets
 secrets.h
+
+# Configuration files - server-specific
+.env
+.env.local
+ecosystem.config.js
+
+# Build outputs
+backend/dist/
+homepage/dist/
+backend/coverage/
+backend/node_modules/
+
+.DS_Store

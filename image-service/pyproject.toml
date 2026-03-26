@@ -1,0 +1,29 @@
+[tool.ruff]
+# Match Black’s defaults for line length
+line-length = 88
+target-version = "py312"
+exclude = ["venv", ".venv", "build", "dist", ".git"]
+
+# Enable common rule sets
+lint.select = [
+  "E", "F",   # pycodestyle + pyflakes
+  "I",        # isort (imports)
+  "B",        # bugbear (sensible warnings)
+  "UP"        # pyupgrade (modernize)
+]
+
+# Ignore noisy rules (adjust if needed)
+lint.ignore = [
+  "E203",     # whitespace before ':', Black-compatible
+  "E501"      # line length handled by formatter if you enable it
+]
+
+# Per-file ignores example (tests can be a bit looser)
+[tool.ruff.lint.per-file-ignores]
+"tests/**.py" = ["S101"] # example: allow assert if you enable flake8-bandit later
+
+# If you want Ruff to format too (replaces Black), keep this on:
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

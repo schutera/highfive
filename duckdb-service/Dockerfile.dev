@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DUCKDB_PATH=/data/app.duckdb
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# DB-Verzeichnis vorbereiten
+RUN mkdir -p /data
+
+EXPOSE 8000
+
+CMD ["python", "app.py"]

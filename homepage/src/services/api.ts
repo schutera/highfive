@@ -11,6 +11,7 @@ export interface Module {
   lastApiCall: string;
   batteryLevel: number;
   totalHatches: number;
+  imageCount: number;
 }
 
 export interface NestData {
@@ -51,6 +52,7 @@ class ApiService {
 
   async getAllModules(): Promise<Module[]> {
     const response = await fetch(`${this.baseUrl}/modules`, {
+    //const response = await fetch(`localhost:8002/modules`, {
       headers: this.getHeaders(),
     });
     if (!response.ok) {

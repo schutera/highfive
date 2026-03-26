@@ -5,7 +5,7 @@ import { Module } from '../services/api';
 
 // Create a badge icon for clusters
 function createBadgeIcon(count: number, hasOnline: boolean) {
-  const color = hasOnline ? '#f59e0b' : '#9ca3af';
+  const color = hasOnline ? '#f59e0b' : '#94a3b8';
   return L.divIcon({
     className: 'cluster-badge',
     html: `
@@ -66,15 +66,14 @@ function fuzzLocation(location: { lat: number; lng: number }, moduleId: string):
 }
 
 // Interpolate between colors based on hatches
-// Using amber palette to match homepage: light amber → amber-500 → deep amber/orange
+// emerald → amber → rose gradient for nature/activity visualization
 function getColorFromHatches(totalHatches: number, maxHatches: number = 1000): string {
   const normalized = Math.min(totalHatches / maxHatches, 1);
-  
-  // Color stops matching homepage amber palette
+
   const colors = [
-    { r: 0xfe, g: 0xf3, b: 0xc7 }, // #fef3c7 - amber-100 (low)
-    { r: 0xf5, g: 0x9e, b: 0x0b }, // #f59e0b - amber-500 (mid) - main brand color
-    { r: 0xb4, g: 0x53, b: 0x09 }, // #b45309 - amber-700 (high)
+    { r: 0x34, g: 0xd3, b: 0x99 }, // #34d399 - emerald-400 (low activity)
+    { r: 0xf5, g: 0x9e, b: 0x0b }, // #f59e0b - amber-500 (mid activity)
+    { r: 0xf4, g: 0x3f, b: 0x5e }, // #f43f5e - rose-500 (high activity)
   ];
   
   // Determine which two colors to interpolate between
@@ -219,7 +218,7 @@ function ClusterMarker({
   const hasOnline = onlineCount > 0;
   // Sum total hatches for the cluster
   const clusterTotalHatches = cluster.reduce((sum, m) => sum + (m.totalHatches || 0), 0);
-  const clusterColor = hasOnline ? getColorFromHatches(clusterTotalHatches, maxHatches * cluster.length) : '#9ca3af';
+  const clusterColor = hasOnline ? getColorFromHatches(clusterTotalHatches, maxHatches * cluster.length) : '#94a3b8';
 
   const handleClick = () => {
     map.flyTo(clusterCenter, clusterZoomThreshold + 1, {
@@ -236,9 +235,9 @@ function ClusterMarker({
           pathOptions={{
             color: clusterColor,
             fillColor: clusterColor,
-            fillOpacity: 0.35,
+            fillOpacity: 0.2,
             weight: 3,
-            opacity: 0.8,
+            opacity: 1,
           }}
           eventHandlers={{ click: handleClick }}
         />
@@ -254,7 +253,7 @@ function ClusterMarker({
   // Single module - show circle with badge count of 1 if online, 0 if offline
   const singleOnlineCount = cluster[0].status === 'online' ? 1 : 0;
   const singleHasOnline = cluster[0].status === 'online';
-  const singleColor = singleHasOnline ? getColorFromHatches(cluster[0].totalHatches || 0, maxHatches) : '#9ca3af';
+  const singleColor = singleHasOnline ? getColorFromHatches(cluster[0].totalHatches || 0, maxHatches) : '#94a3b8';
   
   return (
     <>
@@ -264,9 +263,9 @@ function ClusterMarker({
         pathOptions={{
           color: singleColor,
           fillColor: singleColor,
-          fillOpacity: 0.35,
+          fillOpacity: 0.2,
           weight: 2,
-          opacity: 0.7,
+          opacity: 1,
         }}
         eventHandlers={{
           click: () => onModuleSelect(cluster[0]),
@@ -289,7 +288,7 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
   const CLUSTER_ZOOM_THRESHOLD = 13; // Show clusters below this zoom level
   
   // Center map on first module or default location
-  const center: [number, number] = modules[0]?.location ? [modules[0].location.lat, modules[0].location.lng] : [51.505, -0.09];
+  const center: [number, number] = modules[0]?.location ? [modules[0].location.lat, modules[0].location.lng] : [47.78, 9.61];
 
   // Memoize fuzzed locations to keep them consistent
   const fuzzedModules = useMemo(() => 
@@ -366,7 +365,7 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
         fuzzedModules.map((module) => {
           const circleColor = module.status === 'online' 
             ? getColorFromHatches(module.totalHatches || 0, maxHatches) 
-            : '#9ca3af';
+            : '#94a3b8';
           return (
             <Circle
               key={module.id}
@@ -375,9 +374,9 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
               pathOptions={{
                 color: circleColor,
                 fillColor: circleColor,
-                fillOpacity: 0.35,
+                fillOpacity: 0.2,
                 weight: 2,
-                opacity: 0.7,
+                opacity: 1,
               }}
               eventHandlers={{
                 click: () => onModuleSelect(module),

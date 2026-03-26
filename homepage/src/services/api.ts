@@ -11,6 +11,7 @@ export interface Module {
   lastApiCall: string;
   batteryLevel: number;
   totalHatches: number;
+  imageCount: number;
 }
 
 export interface NestData {

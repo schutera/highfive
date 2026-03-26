@@ -1,4 +1,5 @@
 import { Module, ModuleDetail, NestData, DailyProgress } from './types';
+import { DUCKDB_URL } from './duckdbClient';
 
 interface ApiModule {
   id: string;
@@ -8,6 +9,7 @@ interface ApiModule {
   status: 'online' | 'offline';
   first_online: string;
   battery_level: number;
+  image_count: number;
 }
 
 interface ApiNestResponse {
@@ -22,26 +24,52 @@ interface ApiModuleResponse {
   modules: ApiModule[];
 }
 
-export class MockDatabase {
+export class ModuleCache {
   private modules: Map<string, ModuleDetail>;
 
   constructor() {
     this.modules = new Map();
-    this.initializeData().catch((err) => {
-      console.error('Failed to initialize database:', err);
-    });
+    this.initWithRetry();
+  }
+
+  private async initWithRetry(retries = 10, delayMs = 3000): Promise<void> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        await this.initializeData();
+        console.log('📊 Data loaded from DuckDB service');
+        return;
+      } catch (err) {
+        const remaining = retries - i - 1;
+        if (remaining > 0) {
+          console.warn(`⏳ DuckDB not ready, retrying in ${delayMs / 1000}s (${remaining} left)...`);
+          await new Promise(r => setTimeout(r, delayMs));
+        } else {
+          console.error('❌ Could not reach DuckDB service after all retries. Starting with empty data.');
+        }
+      }
+    }
   }
 
   async initializeData(): Promise<void> {
-    const [modulesRes, nestsRes, progressRes] = await Promise.all([
-      fetch('http://duckdb-service:8000/modules'),
-      fetch('http://duckdb-service:8000/nests'),
-      fetch('http://duckdb-service:8000/progress'),
+    const [modulesResult, nestsResult, progressResult] = await Promise.allSettled([
+      fetch(`${DUCKDB_URL}/modules`).then(r => r.json()),
+      fetch(`${DUCKDB_URL}/nests`).then(r => r.json()),
+      fetch(`${DUCKDB_URL}/progress`).then(r => r.json()),
     ]);
 
-    const modulesData = (await modulesRes.json()) as ApiModuleResponse;
-    const nestsData = (await nestsRes.json()) as ApiNestResponse;
-    const progressData = (await progressRes.json()) as ApiDailyProgressResponse;
+    if (modulesResult.status === 'rejected') {
+      console.warn('⚠️ Failed to fetch modules:', modulesResult.reason);
+    }
+    if (nestsResult.status === 'rejected') {
+      console.warn('⚠️ Failed to fetch nests:', nestsResult.reason);
+    }
+    if (progressResult.status === 'rejected') {
+      console.warn('⚠️ Failed to fetch progress:', progressResult.reason);
+    }
+
+    const modulesData = (modulesResult.status === 'fulfilled' ? modulesResult.value : { modules: [] }) as ApiModuleResponse;
+    const nestsData = (nestsResult.status === 'fulfilled' ? nestsResult.value : { nests: [] }) as ApiNestResponse;
+    const progressData = (progressResult.status === 'fulfilled' ? progressResult.value : { progress: [] }) as ApiDailyProgressResponse;
 
     this.modules.clear();
 
@@ -104,6 +132,7 @@ export class MockDatabase {
         lastApiCall: now.toISOString(),
         batteryLevel: m.battery_level ?? 0,
         totalHatches: 0,
+        imageCount: m.image_count ?? 0,
         nests: nestsByModule.get(m.id) || [],
       };
 
@@ -133,6 +162,7 @@ export class MockDatabase {
         batteryLevel: m.batteryLevel,
         firstOnline: m.firstOnline,
         totalHatches,
+        imageCount: m.imageCount,
       };
     });
   }
@@ -151,4 +181,4 @@ export class MockDatabase {
   }
 }
 
-export const db = new MockDatabase();
+export const db = new ModuleCache();

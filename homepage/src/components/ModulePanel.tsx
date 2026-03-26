@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, ModuleDetail } from '../services/api';
 import { BEE_TYPES } from '../types';
+import { useTranslation } from '../i18n/LanguageContext';
+
 interface ModulePanelProps {
   module: { id: string; name: string; status: 'online' | 'offline' };
   onClose: () => void;
@@ -8,6 +10,7 @@ interface ModulePanelProps {
 }
 
 export default function ModulePanel({ module, onClose, onError }: ModulePanelProps) {
+  const { t, lang } = useTranslation();
   const [moduleDetail, setModuleDetail] = useState<ModuleDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +26,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       const data = await api.getModuleById(module.id);
       setModuleDetail(data);
     } catch (err) {
-      const errorMsg = 'Failed to load module details';
+      const errorMsg = t('modulePanel.failedToLoad');
       setError(errorMsg);
       console.error('Error loading module details:', err);
       onError(errorMsg);
@@ -35,7 +38,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-gray-600">Loading...</div>
+        <div className="text-gray-600">{t('common.loading')}</div>
       </div>
     );
   }
@@ -43,24 +46,25 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   if (error || !moduleDetail) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-red-600">{error || 'Module not found'}</div>
+        <div className="text-red-600">{error || t('modulePanel.moduleNotFound')}</div>
       </div>
     );
   }
 
   const isOnline = moduleDetail.status === 'online';
   const lastApiCall = new Date(moduleDetail.lastApiCall);
-  const batteryLevel = Math.round(moduleDetail.batteryLevel);
-  const batteryColor = batteryLevel > 50 ? 'text-green-500' : batteryLevel > 20 ? 'text-amber-500' : 'text-red-500';
+  // const batteryLevel = Math.round(moduleDetail.batteryLevel);
+  // const batteryColor = batteryLevel > 50 ? 'text-green-500' : batteryLevel > 20 ? 'text-amber-500' : 'text-red-500';
 
-  const formattedTime = lastApiCall.toLocaleString('en-US', {
+  const locale = lang === 'de' ? 'de-DE' : 'en-US';
+  const formattedTime = lastApiCall.toLocaleString(locale, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
   });
-  
+
   // Calculate totals per bee type and get latest progress
   const beeTypeSummaries = BEE_TYPES.map(beeType => {
     const nestsForType = moduleDetail.nests.filter(n => n.beeType === beeType.key);
@@ -68,7 +72,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       const latestData = nest.dailyProgress[nest.dailyProgress.length - 1];
       return sum + (latestData?.hatched || 0);
     }, 0);
-    
+
     return {
       ...beeType,
       nests: nestsForType.map(nest => {
@@ -84,9 +88,9 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   });
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="h-full flex flex-col bg-gradient-to-b from-amber-50/50 to-gray-50">
       {/* Header */}
-      <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-4 md:p-5 text-white shadow-lg relative">
+      <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-4 md:p-5 text-white relative">
         {/* Desktop close button - hidden on mobile since parent handles it */}
         <button
           onClick={onClose}
@@ -96,28 +100,29 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
-        
+
         <div className="pr-0 md:pr-8">
           <h2 className="text-xl md:text-2xl font-bold mb-2 md:mb-3">{moduleDetail.name}</h2>
-          
+
           <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
             {/* Status Badge */}
             <div className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${isOnline ? 'bg-green-500/90' : 'bg-gray-500/90'}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-white animate-pulse' : 'bg-white/70'}`} />
-              {isOnline ? 'Online' : 'Offline'}
+              {isOnline ? t('common.online') : t('common.offline')}
             </div>
-            
-            {/* Battery Badge */}
+
+            {/* Image Count Badge */}
             <div className="inline-flex items-center gap-1.5 bg-white/20 rounded-full px-3 py-1 text-xs font-semibold">
-              <svg className={`w-3.5 h-3.5 ${batteryColor}`} fill="currentColor" viewBox="0 0 24 24">
-                <path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              {batteryLevel}%
+              {moduleDetail.imageCount} {t('modulePanel.images')}
             </div>
           </div>
-          
+
           <div className="text-amber-100/90 text-xs">
-            <div>Last update: {formattedTime}</div>
+            <div>{t('modulePanel.lastUpdate', { time: formattedTime })}</div>
           </div>
         </div>
       </div>
@@ -129,40 +134,39 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           {beeTypeSummaries.map((summary) => (
             <div key={summary.key}>
               {/* Summary Card */}
-              <div 
+              <div
                 className="rounded-xl p-3 md:p-4 shadow-sm border-2 transition-transform active:scale-[0.98] md:active:scale-100"
-                style={{ 
+                style={{
                   backgroundColor: summary.lightColor,
-                  borderColor: summary.color 
+                  borderColor: summary.color
                 }}
               >
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{summary.size}</div>
-                    <div className="text-base md:text-lg font-bold" style={{ color: summary.color }}>{summary.name}</div>
+                    <div className="text-base md:text-lg font-bold" style={{ color: summary.color }}>{summary.size}</div>
                   </div>
                   <div className="text-right">
                     <div className="text-2xl md:text-3xl font-bold" style={{ color: summary.color }}>
                       {summary.totalHatched}
                     </div>
-                    <div className="text-xs text-gray-500">hatches</div>
+                    <div className="text-xs text-gray-500">{t('modulePanel.hatches')}</div>
                   </div>
                 </div>
-                
+
                 {/* Individual nest progress bars */}
                 <div className="space-y-2 mt-3">
                   {summary.nests.map((nest, index) => (
                     <div key={nest.nestId}>
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-gray-600 font-medium">Nest {index + 1}</span>
+                        <span className="text-xs text-gray-600 font-medium">{t('modulePanel.nest', { index: index + 1 })}</span>
                         <span className="text-xs font-bold" style={{ color: summary.color }}>
                           {nest.sealed}%
                         </span>
                       </div>
                       <div className="h-2 bg-white/60 rounded-full overflow-hidden shadow-inner">
-                        <div 
+                        <div
                           className="h-full transition-all duration-500 rounded-full"
-                          style={{ 
+                          style={{
                             width: `${nest.sealed}%`,
                             backgroundColor: summary.color
                           }}

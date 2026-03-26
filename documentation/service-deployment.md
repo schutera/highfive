@@ -7,7 +7,7 @@ The system consists of four services:
 
 - **backend** - Next.js API backend
 - **homepage** - Next.js frontend application
-- **classification-backend** - image classification service
+- **image-service** - image classification service
 - **duckdb-service** - database service
 
 All services are orchestrated using **Docker Compose**.
@@ -51,16 +51,10 @@ DEBUG=<boolean>
 ## Keep as is then running with docker-compose
 DUCKDB_SERVICE_URL="http://duckdb-service:8000"
 
-## Optional: Environment variables for AWS S3 configuration
-## See classification-backend/services/aws.py
-AWS_ENDPOINT="<URL:PORT>"
-
-AWS_ACCESS_KEY_ID="<USERNAME>"
-AWS_SECRET_ACCESS_KEY="<PASSWORD>"
-## Currently used for uploading unclassified images for validation and training purposes
+## Optional: Additional environment variables can be added here as needed
 ```
 
-The `.env` file is used by the **classification backend** and the
+The `.env` file is used by the **image service** and the
 **DuckDB service**.
 
 ## 4. Start the Services
@@ -82,7 +76,7 @@ After startup the services are available on the following ports:
 | ---------------------- | ------ | ---------------------------- |
 | Homepage               | `5173` | Web frontend                 |
 | Backend API            | `3002` | Next.js backend              |
-| Classification Backend | `8000` | Image classification service |
+| Image Service          | `8000` | Image ingestion and analysis |
 | DuckDB Service         | `8002` | Database API                 |
 
 The web-interface itself is reachable under: http://localhost:5173
@@ -93,8 +87,8 @@ The DuckDB database is stored in the Docker volume:
 
     duckdb_data
 
-This volume is shared between the **classification backend** and the
-**DuckDB service** to persist the database across container restarts.
+This volume is shared between the **image service** and the
+**DuckDB service** to persist the database and images across container restarts.
 
 During development it may be necessary to reset the database, for example
 when **primary key conflicts** occur due to previously inserted test data.

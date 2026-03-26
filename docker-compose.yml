@@ -7,9 +7,11 @@ services:
       - "3002:3002"
     environment:
       NODE_ENV: development
+      DUCKDB_SERVICE_URL: http://duckdb-service:8000
     volumes:
       - ./backend:/app
       - /app/node_modules
+    restart: unless-stopped
     networks:
       - net
 
@@ -24,12 +26,13 @@ services:
     volumes:
       - ./homepage:/app
       - /app/node_modules
+    restart: unless-stopped
     networks:
       - net
 
-  classification-backend:
+  image-service:
     build:
-      context: ./classification-backend
+      context: ./image-service
       dockerfile: Dockerfile.dev
     env_file:
       - .env
@@ -39,6 +42,10 @@ services:
       DUCKDB_PATH: /data/app.duckdb
     volumes:
       - duckdb_data:/data
+    restart: unless-stopped
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
     networks:
       - net
 
@@ -47,11 +54,20 @@ services:
       context: ./duckdb-service
       dockerfile: Dockerfile.dev
     ports:
-      - "8002:8000"
+      - "0.0.0.0:8002:8000"
     volumes:
       - duckdb_data:/data
     env_file:
       - .env
+    environment:
+      SEED_DATA: "true"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - net
 

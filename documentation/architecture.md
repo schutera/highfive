@@ -12,7 +12,7 @@ The platform follows a microservice architecture with clear responsibility bound
 | ------------------------ | ------------------------------ | --------------------------- | -------------------------------------------------------------------------- |
 | `homepage`               | React + Vite + TypeScript      | `5173 -> 5173`              | Dashboard UI, map view, module detail UI, setup pages                      |
 | `backend`                | Node.js + Express + TypeScript | `3002 -> 3002`              | Authenticated API for frontend, aggregation of module/nest/progress data   |
-| `classification-backend` | Python + Flask + OpenCV        | `8000 -> 4444`              | Image upload endpoint, circle detection/classification, progress writeback |
+| `image-service`            | Python + Flask               | `8000 -> 4444`              | Image upload endpoint, storage, classification stub, progress writeback    |
 | `duckdb-service`         | Python + Flask + DuckDB        | `8002 -> 8000`              | Persistent storage API (`modules`, `nests`, `progress`)                    |
 | `ESP32-CAM`              | C++/Arduino firmware           | n/a (edge device)           | Captures images and uploads to classification endpoint                     |
 
@@ -21,11 +21,11 @@ The platform follows a microservice architecture with clear responsibility bound
 - All services run in one shared Docker bridge network: `net`.
 - Persistent DB file is stored in Docker volume `duckdb_data`.
 - Shared volume mount for stateful services:
-  - `classification-backend` mounts `duckdb_data:/data`
+  - `image-service` mounts `duckdb_data:/data`
   - `duckdb-service` mounts `duckdb_data:/data`
 - Inter-service communication inside Docker uses service DNS names, not `localhost`:
   - `backend` -> `http://duckdb-service:8000`
-  - `classification-backend` -> `http://duckdb-service:8000`
+  - `image-service` -> `http://duckdb-service:8000`
 
 ## 4. Architecture Diagram
 
@@ -47,7 +47,7 @@ The platform follows a microservice architecture with clear responsibility bound
 ### 5.2 Edge Ingestion + Classification Flow
 
 0. ESP32-CAM captures image on interval.
-1. Device uploads form data (`image`, `mac`, `battery`) to `classification-backend /upload`.
+1. Device uploads form data (`image`, `mac`, `battery`) to `image-service /upload`.
 2. Classification service runs detection pipeline and sends json Object `duckdb-service /add_progress_for_module`. At the same time it updates the module's battery and last-online Date in the database.
 3. The `duckdb-service` endpoint:
    - Validates the module exists
@@ -73,7 +73,7 @@ The platform follows a microservice architecture with clear responsibility bound
 ## 10. Known Trade-offs
 
 - Current backend read path refreshes full module/nest/progress snapshots on demand, which is simple but not optimized for high scale.
-- Classification currently combines heuristic image processing with fixed geometry assumptions.
+- Classification currently returns stub/dummy values; MaskRCNN integration is planned.
 - Some write paths currently update DuckDB directly from classification service (fast, but tighter coupling than API-only writes).
 
 ## 11. Recommended Next Architecture Steps

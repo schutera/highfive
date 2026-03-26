@@ -164,6 +164,7 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
+  client.println("Access-Control-Allow-Origin: *");
   client.println("Connection: close");
   client.println();
   client.println("<!DOCTYPE html><html><head>");

@@ -1,5 +1,5 @@
-const DUCKDB_URL =
-  process.env.DUCKDB_SERVICE_URL ?? "http://duckdb-service:8000";
+export const DUCKDB_URL =
+  process.env.DUCKDB_SERVICE_URL ?? "http://127.0.0.1:8002";
 
 export async function duckdbHealth(): Promise<{ ok: boolean; db?: string }> {
   const res = await fetch(`${DUCKDB_URL}/health`);

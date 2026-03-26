@@ -7,7 +7,7 @@ export default function WebInstaller() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Firmware States
+  // Firmware state
   const [firmwareUrl, setFirmwareUrl] = useState<string>('/firmware.bin');
   const [firmwareVersion, setFirmwareVersion] = useState<string>('Loading...');
   const [firmwareLoading, setFirmwareLoading] = useState(true);
@@ -16,7 +16,7 @@ export default function WebInstaller() {
   useEffect(() => {
     loadModules();
     loadLatestFirmware();
-    // ESP Web Tools Script laden
+    // Load ESP Web Tools script
     const script = document.createElement("script");
     script.type = "module";
     script.src = "https://unpkg.com/esp-web-tools@9/dist/web/install-button.js";
@@ -42,7 +42,7 @@ export default function WebInstaller() {
     try {
       setFirmwareLoading(true);
       
-      // GitHub API: Latest Release abrufen
+      // Fetch latest release from GitHub API
       const response = await fetch(
         'https://api.github.com/repos/schutera/highfive/releases/latest'
       );
@@ -53,7 +53,7 @@ export default function WebInstaller() {
       
       const releaseData = await response.json();
       
-      // Finde firmware.bin Asset
+      // Find firmware.bin asset
       const firmwareAsset = releaseData.assets.find(
         (asset: any) => asset.name === 'firmware.bin'
       );
@@ -69,7 +69,7 @@ export default function WebInstaller() {
       }
     } catch (err) {
       console.error('Error loading firmware:', err);
-      // Fallback auf lokale Datei
+      // Fallback to local file
       setFirmwareUrl('/firmware.bin');
       setFirmwareVersion('Local (Fallback)');
     } finally {
@@ -122,15 +122,15 @@ export default function WebInstaller() {
         <div className="flex items-center justify-between mb-2">
           <span className="text-gray-700 font-medium">Firmware Version:</span>
           {firmwareLoading ? (
-            <span className="text-gray-500">Laden...</span>
+            <span className="text-gray-500">Loading...</span>
           ) : (
             <span className="text-blue-600 font-bold">{firmwareVersion}</span>
           )}
         </div>
         <div className="text-xs text-gray-500">
-          {firmwareUrl.startsWith('http') 
-            ? 'Von GitHub Release geladen' 
-            : 'Lokale Datei (Fallback)'}
+          {firmwareUrl.startsWith('http')
+            ? 'Loaded from GitHub Release'
+            : 'Local file (Fallback)'}
         </div>
       </div>
 
@@ -138,11 +138,10 @@ export default function WebInstaller() {
         {/* ESP WEB INSTALLER BUTTON */}
         <esp-web-install-button manifest="/manifest.json">
           <button className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors">
-            Firmware installieren
+            Install Firmware
           </button>
         </esp-web-install-button>
 
-        {/* Link zur Anleitung */}
         <div className="mt-8 text-center">
           <p className="text-gray-600 mb-3">
             Firmware installed successfully? 

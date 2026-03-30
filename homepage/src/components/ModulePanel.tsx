@@ -52,18 +52,17 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   }
 
   const isOnline = moduleDetail.status === 'online';
-  const lastApiCall = new Date(moduleDetail.lastApiCall);
-  // const batteryLevel = Math.round(moduleDetail.batteryLevel);
-  // const batteryColor = batteryLevel > 50 ? 'text-green-500' : batteryLevel > 20 ? 'text-amber-500' : 'text-red-500';
 
   const locale = lang === 'de' ? 'de-DE' : 'en-US';
-  const formattedTime = lastApiCall.toLocaleString(locale, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  const formattedTime = moduleDetail.lastApiCall
+    ? new Date(moduleDetail.lastApiCall).toLocaleString(locale, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    : null;
 
   // Calculate totals per bee type and get latest progress
   const beeTypeSummaries = BEE_TYPES.map(beeType => {
@@ -121,9 +120,11 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
             </div>
           </div>
 
-          <div className="text-amber-100/90 text-xs">
-            <div>{t('modulePanel.lastUpdate', { time: formattedTime })}</div>
-          </div>
+          {formattedTime && (
+            <div className="text-amber-100/90 text-xs">
+              <div>{t('modulePanel.lastUpdate', { time: formattedTime })}</div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -209,3 +209,10 @@ backend/coverage/
 backend/node_modules/
 
 .DS_Store
+
+# Claude Code
+.claude/settings.local.json
+
+# DuckDB
+*.duckdb
+*.duckdb.wal

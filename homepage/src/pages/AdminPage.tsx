@@ -168,7 +168,55 @@ export default function AdminPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Filters & Stats */}
+        {/* Module Overview */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-8 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-800">Modules ({modules.length})</h2>
+          </div>
+          {modules.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">ID</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Email</th>
+                    <th className="px-4 py-3">Location</th>
+                    <th className="px-4 py-3">Images</th>
+                    <th className="px-4 py-3">First Online</th>
+                    <th className="px-4 py-3">Last Image</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {modules.map((m) => (
+                    <tr
+                      key={m.id}
+                      className={`hover:bg-amber-50/50 cursor-pointer transition-colors ${selectedModule === m.id ? 'bg-amber-50' : ''}`}
+                      onClick={() => setSelectedModule(selectedModule === m.id ? '' : m.id)}
+                    >
+                      <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
+                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">{m.id}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${m.status === 'online' ? 'text-green-700' : 'text-gray-500'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${m.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}`} />
+                          {m.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{m.email || <span className="text-gray-300">&mdash;</span>}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs font-mono">{m.location.lat.toFixed(4)}, {m.location.lng.toFixed(4)}</td>
+                      <td className="px-4 py-3 text-gray-600">{m.imageCount}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{m.firstOnline || <span className="text-gray-300">&mdash;</span>}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{m.lastApiCall ? formatDate(m.lastApiCall) : <span className="text-gray-300">&mdash;</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Image Filter & Stats */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">

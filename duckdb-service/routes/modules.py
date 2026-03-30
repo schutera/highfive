@@ -222,7 +222,17 @@ def list_image_uploads():
 def get_modules():
     with lock:
         con = get_conn()
-        cur = con.execute("SELECT * FROM module_configs")
+        cur = con.execute(
+            """
+            SELECT m.*,
+                   COUNT(i.id) AS real_image_count,
+                   MAX(i.uploaded_at) AS last_image_at
+            FROM module_configs m
+            LEFT JOIN image_uploads i ON m.id = i.module_id
+            GROUP BY m.id, m.name, m.lat, m.lng, m.status, m.first_online,
+                     m.battery_level, m.image_count, m.email
+            """
+        )
         cols = [d[0] for d in cur.description]
         rows = cur.fetchall()
         con.close()

@@ -10,6 +10,9 @@ interface ApiModule {
   first_online: string;
   battery_level: number;
   image_count: number;
+  real_image_count: number;
+  last_image_at: string | null;
+  email: string | null;
 }
 
 interface ApiNestResponse {
@@ -78,12 +81,12 @@ export class ModuleCache {
 
     progressData.progress.forEach((p: any) => {
       const normalized: DailyProgress = {
-        progress_id: p.progess_id, // Backend name!
+        progress_id: p.progress_id,
         nest_id: p.nest_id,
         date: new Date(p.date).toISOString(),
         empty: p.empty,
         sealed: p.sealed,
-        hatched: p.hateched, // Backend name!
+        hatched: p.hatched,
       };
 
       let arr = progressByNest.get(p.nest_id);
@@ -120,6 +123,11 @@ export class ModuleCache {
       const isOnline =
         now.getTime() - firstOnlineDate.getTime() <= 24 * 60 * 60 * 1000;
 
+      // first_online is a DATE column (no time), pass the date portion only
+      const firstOnlineStr = m.first_online
+        ? firstOnlineDate.toISOString().split('T')[0]
+        : null;
+
       const module: ModuleDetail = {
         id: m.id,
         name: m.name,
@@ -128,11 +136,12 @@ export class ModuleCache {
           lng: Number(m.lng),
         },
         status: isOnline ? 'online' : 'offline',
-        firstOnline: firstOnlineDate.toISOString(),
-        lastApiCall: now.toISOString(),
+        firstOnline: firstOnlineStr ?? '',
+        lastApiCall: m.last_image_at ? new Date(m.last_image_at).toISOString() : '',
         batteryLevel: m.battery_level ?? 0,
         totalHatches: 0,
-        imageCount: m.image_count ?? 0,
+        imageCount: m.real_image_count ?? m.image_count ?? 0,
+        email: m.email ?? null,
         nests: nestsByModule.get(m.id) || [],
       };
 
@@ -163,6 +172,7 @@ export class ModuleCache {
         firstOnline: m.firstOnline,
         totalHatches,
         imageCount: m.imageCount,
+        email: m.email,
       };
     });
   }

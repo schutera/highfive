@@ -101,12 +101,10 @@ def upload_image():
     except Exception as e:
         print(f"Warning: failed to record image upload: {e}")
 
-    # Run classification stub (replace with MaskRCNN later)
-    classification = stub_classify()
-
-    # Post results to DuckDB service
-    payload = {"modul_id": mac, "classification": classification}
-    http_requests.post(f"{DUCKDB_SERVICE_URL}/add_progress_for_module", json=payload)
+    # Classification disabled until real model is integrated
+    # classification = stub_classify()
+    # payload = {"modul_id": mac, "classification": classification}
+    # http_requests.post(f"{DUCKDB_SERVICE_URL}/add_progress_for_module", json=payload)
 
     # Update module battery and online status
     if battery is not None:

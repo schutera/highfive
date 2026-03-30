@@ -11,7 +11,6 @@ export interface WizardState {
   firmwareLoading: boolean;
   flashComplete: boolean;
   // Step 4
-  moduleName: string;
   wifiSsid: string;
   wifiPassword: string;
   configSending: boolean;
@@ -56,7 +55,6 @@ export function useSetupWizard() {
     firmwareVersion: '',
     firmwareLoading: true,
     flashComplete: false,
-    moduleName: '',
     wifiSsid: '',
     wifiPassword: '',
     configSending: false,
@@ -69,16 +67,14 @@ export function useSetupWizard() {
   });
 
   const lanIpRef = useRef<string | null>(null);
-  const baselineModuleIdsRef = useRef<Set<string>>(new Set());
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
+  const knownModuleIdsRef = useRef<Set<string>>(new Set());
 
-  // Load firmware info, detect LAN IP, and capture baseline modules on mount
-  // (while still on home WiFi, before ESP is configured)
+  // Load firmware info and detect LAN IP on mount
   useEffect(() => {
     loadFirmware();
     detectLanIp();
-    captureBaseline();
   }, []);
 
   // Cleanup polling on unmount
@@ -87,17 +83,6 @@ export function useSetupWizard() {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     };
   }, []);
-
-  const captureBaseline = async () => {
-    try {
-      const currentModules = await api.getAllModules();
-      baselineModuleIdsRef.current = new Set(currentModules.map(m => m.id));
-      console.log('[SetupWizard] Baseline captured on mount:', baselineModuleIdsRef.current.size, 'modules');
-    } catch {
-      console.warn('[SetupWizard] Could not capture baseline on mount — will be empty');
-      baselineModuleIdsRef.current = new Set();
-    }
-  };
 
   const detectLanIp = async () => {
     try {
@@ -178,10 +163,6 @@ export function useSetupWizard() {
     setState(s => ({ ...s, flashComplete: true }));
   }, []);
 
-  const setModuleName = useCallback((v: string) => {
-    setState(s => ({ ...s, moduleName: v }));
-  }, []);
-
   const setWifiSsid = useCallback((v: string) => {
     setState(s => ({ ...s, wifiSsid: v }));
   }, []);
@@ -204,7 +185,6 @@ export function useSetupWizard() {
 
     try {
       await sendConfigToEsp({
-        moduleName: state.moduleName,
         ssid: state.wifiSsid,
         password: state.wifiPassword,
         initBase,
@@ -217,7 +197,7 @@ export function useSetupWizard() {
       const message = err instanceof Error ? err.message : String(err);
       setState(s => ({ ...s, configSending: false, configError: message }));
     }
-  }, [state.moduleName, state.wifiSsid, state.wifiPassword]);
+  }, [state.wifiSsid, state.wifiPassword]);
 
   const stopVerification = useCallback(() => {
     if (pollingIntervalRef.current) {
@@ -228,9 +208,16 @@ export function useSetupWizard() {
   }, []);
 
   const startVerification = useCallback(async () => {
-    // Baseline was already captured on wizard mount (before ESP was configured).
-    // This ensures the new module isn't included in the baseline.
-    console.log('[Step5] Starting verification, baseline has', baselineModuleIdsRef.current.size, 'modules');
+    console.log('[Step5] Starting verification, looking for any new module');
+
+    // Snapshot existing module IDs so we can detect new ones
+    try {
+      const existing = await api.getAllModules();
+      knownModuleIdsRef.current = new Set(existing.map((m: Module) => m.id));
+      console.log('[Step5] Known module IDs:', [...knownModuleIdsRef.current]);
+    } catch {
+      knownModuleIdsRef.current = new Set();
+    }
 
     setState(s => ({
       ...s,
@@ -255,8 +242,9 @@ export function useSetupWizard() {
 
       try {
         const modules = await api.getAllModules();
-        console.log(`[Step5] Got ${modules.length} modules, baseline has ${baselineModuleIdsRef.current.size}`);
-        const newModule = modules.find(m => !baselineModuleIdsRef.current.has(m.id));
+        const newModule = modules.find(
+          (m: Module) => !knownModuleIdsRef.current.has(m.id)
+        );
         if (newModule) {
           console.log('[Step5] New module detected:', newModule);
           stopVerification();
@@ -275,7 +263,6 @@ export function useSetupWizard() {
     goToStep,
     markConfigDone,
     markFlashComplete,
-    setModuleName,
     setWifiSsid,
     setWifiPassword,
     sendConfig,

@@ -115,8 +115,9 @@ void initEspCamera(framesize_t resolution) {
   Serial.println("-- initializing ESP camera");
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("---- camera init failed: 0x%x\n", err);
-    while (true) delay(1000);
+    Serial.printf("---- camera init failed: 0x%x. Restarting in 5s...\n", err);
+    delay(5000);
+    ESP.restart();
   } else {
     initialized = 1;
     Serial.println("---- camera initialized");
@@ -193,14 +194,44 @@ void setupWifiConnection(wifi_configuration_t *wifi_config) {
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
   //WiFi.begin("Vodafone-CAKE", "tYsjat-gakke8-kephaw");
-  Serial.printf("---- connecting to %s with pw %s\n", wifi_config->SSID, wifi_config->PASSWORD);
+  Serial.printf("---- connecting to %s\n", wifi_config->SSID);
+  unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - wifiStart > 30000) {
+      Serial.println("\n------ WiFi connection timed out after 30s. Restarting...");
+      ESP.restart();
+    }
     delay(500);
     Serial.print(".");
   }
   Serial.printf("\n---- Connected. IP: %s\n", WiFi.localIP().toString().c_str());
 
   setupTime();
+}
+
+/* ---------------------------------------- */
+/* ---------- MODULE NAME GENERATOR ---------- */
+/* ---------------------------------------- */
+static const char* ADJECTIVES[] = {
+  "swift", "bold", "calm", "bright", "gentle", "keen", "noble", "proud",
+  "quiet", "warm", "wild", "wise", "brave", "eager", "lively", "merry"
+};
+static const char* FRUITS[] = {
+  "mango", "peach", "apple", "berry", "cherry", "lemon", "melon", "olive",
+  "plum", "grape", "fig", "lime", "pear", "kiwi", "guava", "date"
+};
+static const char* ANIMALS[] = {
+  "fox", "owl", "bear", "deer", "hawk", "lynx", "wolf", "hare",
+  "wren", "dove", "otter", "finch", "crane", "robin", "badger", "raven"
+};
+
+String generateModuleName() {
+  uint64_t mac = ESP.getEfuseMac();
+  uint8_t* bytes = (uint8_t*)&mac;
+  const char* adj = ADJECTIVES[bytes[0] % 16];
+  const char* fruit = FRUITS[bytes[1] % 16];
+  const char* animal = ANIMALS[bytes[2] % 16];
+  return String(adj) + "-" + String(fruit) + "-" + String(animal);
 }
 
 /* -------------------------------- */
@@ -236,6 +267,10 @@ bool loadConfig(esp_config_t *esp_config) {
   esp_config->brightness = 1;
   esp_config->saturation = -1;
 
+  esp_config->geolocation.latitude  = 0.0f;
+  esp_config->geolocation.longitude = 0.0f;
+  esp_config->geolocation.accuracy  = 0.0f;
+
   if (!SPIFFS.begin(true)) {
     Serial.println("-- SPIFFS mount failed");
     return false;
@@ -256,11 +291,10 @@ bool loadConfig(esp_config_t *esp_config) {
     return false;
   }
 
-  strlcpy(
-    esp_config->module_name,
-    esp_config_doc["NETWORK"]["MODULE_NAME"] | "New Module",
-    sizeof(esp_config->module_name)
-  );
+  String autoName = generateModuleName();
+  strlcpy(esp_config->module_name, autoName.c_str(), sizeof(esp_config->module_name));
+  Serial.printf("------ Auto-generated module name: %s\n", esp_config->module_name);
+
   strlcpy(
     esp_config->wifi_config.SSID,
     esp_config_doc["NETWORK"]["SSID"] | "",
@@ -296,16 +330,16 @@ bool loadConfig(esp_config_t *esp_config) {
   esp_config->brightness = esp_config_doc["CAMERA"]["BRIGHTNESS"];
   esp_config->saturation = esp_config_doc["CAMERA"]["SATURATION"];
   
-  if (!esp_config->wifi_config.SSID) {
+  if (strlen(esp_config->wifi_config.SSID) == 0) {
     Serial.println("------ Could not read SSID from config file.");
     return false;
-  } else if (!esp_config->wifi_config.PASSWORD) {
+  } else if (strlen(esp_config->wifi_config.PASSWORD) == 0) {
     Serial.println("------ Could not read PASSWORD from config file.");
     return false;
-  } else if (!esp_config->UPLOAD_URL) {
+  } else if (strlen(esp_config->UPLOAD_URL) == 0) {
     Serial.println("------ Could not read UPLOAD_URL from config file.");
     return false;
-  } else if (!esp_config->INIT_URL) {
+  } else if (strlen(esp_config->INIT_URL) == 0) {
     Serial.println("------ Could not read INIT_URL from config file.");
     return false;
   }

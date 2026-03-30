@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import MapView from '../components/MapView';
 import ModulePanel from '../components/ModulePanel';
 import LanguageToggle from '../components/LanguageToggle';
@@ -8,6 +8,7 @@ import { api, Module } from '../services/api';
 
 export default function DashboardPage() {
   const { t } = useTranslation();
+  const location = useLocation();
   const [modules, setModules] = useState<Module[]>([]);
   const [visibleModules, setVisibleModules] = useState<Module[]>([]);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
@@ -25,6 +26,15 @@ export default function DashboardPage() {
       setError(null);
       const data = await api.getAllModules();
       setModules(data);
+
+      // Auto-select module passed from setup wizard
+      const navState = location.state as { selectModuleId?: string } | null;
+      if (navState?.selectModuleId) {
+        const match = data.find((m: Module) => m.id === navState.selectModuleId);
+        if (match) setSelectedModule(match);
+        // Clear the navigation state so refresh doesn't re-select
+        window.history.replaceState({}, '');
+      }
     } catch (err) {
       setError(t('dashboard.errorDetail'));
       console.error('Error loading modules:', err);

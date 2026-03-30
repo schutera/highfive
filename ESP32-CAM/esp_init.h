@@ -1,6 +1,7 @@
 #ifndef ESP_INIT_H
 #define ESP_INIT_H
 
+#include <Arduino.h>
 #include "esp_camera.h"
 
 
@@ -42,6 +43,7 @@ typedef struct {
 
 bool isESPConfigured();
 void setESPConfigured(bool value);
+String generateModuleName();
 bool loadConfig(esp_config_t *esp_config);
 void initEspPinout();
 void initEspCamera(framesize_t resolution);

@@ -95,9 +95,16 @@ def add_module():
             now = datetime.now().strftime("%Y-%m-%d")
             con.execute(
                 """
-                INSERT OR REPLACE INTO module_configs
+                INSERT INTO module_configs
                     (id, name, lat, lng, status, first_online, battery_level, email)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    lat = EXCLUDED.lat,
+                    lng = EXCLUDED.lng,
+                    status = EXCLUDED.status,
+                    battery_level = EXCLUDED.battery_level,
+                    email = EXCLUDED.email
                 """,
                 (
                     data.mac,
@@ -162,11 +169,10 @@ def update_module_upload():
                 """
                 UPDATE module_configs
                 SET battery_level = ?,
-                    first_online = ?,
                     image_count = image_count + 1
                 WHERE id = ?
                 """,
-                (int(battery), datetime.now().strftime("%Y-%m-%d"), module_id),
+                (int(battery), module_id),
             )
             con.commit()
             return jsonify({"message": "Module updated"}), 200

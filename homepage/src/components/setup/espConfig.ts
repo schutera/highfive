@@ -8,7 +8,6 @@ const TIMEOUT_MS = 10000;
 const BYPASS_SESSION = 'hivehive-setup';
 
 export interface EspConfig {
-  moduleName: string;
   ssid: string;
   password: string;
   initBase: string;
@@ -54,7 +53,6 @@ export async function sendConfigToEsp(config: EspConfig): Promise<void> {
 
   const params = new URLSearchParams({
     session: sessionToken,
-    module_name: config.moduleName,
     ssid: config.ssid,
     password: config.password,
     init_base: config.initBase,
@@ -97,7 +95,6 @@ export async function sendConfigToEsp(config: EspConfig): Promise<void> {
 function submitConfigViaForm(config: EspConfig): void {
   const fields: Record<string, string> = {
     session: BYPASS_SESSION,
-    module_name: config.moduleName,
     ssid: config.ssid,
     password: config.password,
     init_base: config.initBase,

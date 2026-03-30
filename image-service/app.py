@@ -122,7 +122,6 @@ def upload_image():
         "message": f"Image {image.filename} uploaded successfully",
         "mac": mac,
         "battery": battery,
-        "classification": classification,
     }), 200
 
 

@@ -144,7 +144,7 @@ export default function PartsList() {
             <li>Power on the module — it creates the Wi-Fi network <code className="bg-gray-100 px-2 py-1 rounded">HiveHive-Access-Point</code></li>
             <li>Connect your phone or laptop to that network</li>
             <li>Open a browser and go to <code className="bg-gray-100 px-2 py-1 rounded">192.168.4.1</code></li>
-            <li>Enter a <strong>Module Name</strong>, your <strong>Wi-Fi SSID and password</strong></li>
+            <li>Enter your <strong>Wi-Fi SSID and password</strong> (the module name is auto-generated)</li>
             <li>Enter the <strong>Initialization Base URL</strong> (your server IP, port <code className="bg-gray-100 px-2 py-1 rounded">8002</code>) and endpoint <code className="bg-gray-100 px-2 py-1 rounded">/new_module</code></li>
             <li>Enter the <strong>Upload Base URL</strong> (your server IP, port <code className="bg-gray-100 px-2 py-1 rounded">8000</code>) and endpoint <code className="bg-gray-100 px-2 py-1 rounded">/upload</code></li>
             <li>Save — the module restarts, registers itself, and begins uploading images automatically</li>

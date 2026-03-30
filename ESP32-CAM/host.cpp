@@ -13,7 +13,6 @@ String sessionToken;
 
 String header;
 
-String cfg_module_name = "";
 String cfg_ssid           = "";
 String cfg_password       = "";
 String cfg_email          = "";
@@ -91,7 +90,6 @@ void loadConfig() {
     return;
   }
 
-  cfg_module_name = doc["NETWORK"]["MODULE_NAME"] | "";
   cfg_ssid        = doc["NETWORK"]["SSID"]           | "";
   cfg_password    = doc["NETWORK"]["PASSWORD"]       | "";
   cfg_email       = doc["NETWORK"]["EMAIL"]          | "";
@@ -116,7 +114,6 @@ void saveConfig() {
   JsonObject net  = doc.createNestedObject("NETWORK");
   JsonObject cam  = doc.createNestedObject("CAMERA");
 
-  net["MODULE_NAME"] = cfg_module_name;
   net["SSID"]        = cfg_ssid;
   net["PASSWORD"]    = cfg_password;
   net["EMAIL"]       = cfg_email;
@@ -233,14 +230,13 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
     client.println("<div class=\"message\">Configuration saved! The module will now restart and connect to your WiFi.</div>");
   }
 
+  String moduleName = generateModuleName();
+  client.println("<div class=\"message\" style=\"background:#f0f9ff;color:#1e3a5f;\">");
+  client.println("Your module name: <strong>" + moduleName + "</strong>");
+  client.println("</div>");
+
   client.println("<form action=\"/save\" method=\"POST\" autocomplete=\"off\" onsubmit=\"validateForm(event)\">");
   client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
-
-  client.println("<div class=\"field\">");
-  client.println("<label>Module Name</label>");
-  client.println("<input type=\"text\" name=\"module_name\" placeholder=\"e.g. Garden Cam\" value=\"" + cfg_module_name + "\">");
-  client.println("<div class=\"description\">Give your module a name to identify it.</div>");
-  client.println("</div>");
 
   client.println("<div class=\"field\">");
   client.println("<label>WiFi Network</label>");
@@ -315,10 +311,17 @@ void runAccessPoint() {
               // Read body if POST
               String body = "";
               if (isPost && contentLength > 0) {
+                unsigned long bodyStart = millis();
                 while ((int)body.length() < contentLength) {
+                  if (!client.connected()) break;
+                  if (millis() - bodyStart > 10000) {
+                    Serial.println("------ POST body read timed out");
+                    break;
+                  }
                   if (client.available()) {
                     char ch = client.read();
                     body += ch;
+                    bodyStart = millis();
                   }
                 }
               }
@@ -341,7 +344,6 @@ void runAccessPoint() {
                   // Only treat as valid if session token matches
                   String sessionParam = getParam(query, "session");
                   if (sessionParam == sessionToken || sessionParam == "hivehive-setup") {
-                    cfg_module_name = getParam(query, "module_name");
                     cfg_ssid        = getParam(query, "ssid");
                     cfg_password    = getParam(query, "password");
                     cfg_email       = getParam(query, "email");
@@ -418,7 +420,9 @@ void runAccessPoint() {
     }
   }
 
-  Serial.println("Exiting runAccessPoint()");
+  Serial.println("Exiting runAccessPoint() — restarting...");
+  delay(2000);
+  ESP.restart();
 }
 
 void setupAccessPoint() {
@@ -430,13 +434,11 @@ void setupAccessPoint() {
 
   sessionToken = String((uint32_t)esp_random(), HEX);
 
-  WiFi.mode(WIFI_AP_STA);
+  WiFi.mode(WIFI_AP);
   bool ok = WiFi.softAP(HOST_SSID);  // open network, no password
   if (!ok) {
     Serial.println("!!! WiFi.softAP FAILED");
   }
-
-  WiFi.begin();
 
   IPAddress IP = WiFi.softAPIP();
   Serial.print("---- AccessPoint IP: ");

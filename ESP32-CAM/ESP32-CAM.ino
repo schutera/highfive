@@ -14,9 +14,6 @@ int counter = 0;
 bool firstCaptureDone = false;
 int lastCaptureDay = -1;
 
-// CONFIG button params
-unsigned long pressStart = 0;
-bool pressed = false;
 
 
 
@@ -43,12 +40,28 @@ void setup() {
 
   strlcpy(esp_config.CONFIG_FILE, CONFIG_FILE_PATH, sizeof(esp_config.CONFIG_FILE));
 
+  // Check for config reset: hold GPIO0 LOW for 5 seconds at boot
+  // Must happen before camera init claims GPIO0 for XCLK
+  if (digitalRead(CONFIG_BUTTON) == LOW) {
+    Serial.println("CONFIG button held at boot - hold for 5s to reset...");
+    unsigned long start = millis();
+    while (digitalRead(CONFIG_BUTTON) == LOW) {
+      if (millis() - start > 5000) {
+        Serial.println("Long press detected - resetting config");
+        setESPConfigured(false);
+        delay(500);
+        ESP.restart();
+      }
+      delay(50);
+    }
+    Serial.println("Button released, continuing normal boot");
+  }
 
   /*
     ESP opens WiFi access point to receive the configuration from user input
 
     Once connected go to:
-    
+
           ==============================
           ===== http://192.168.4.1 ===== -> ESP softAP() endpoint
           ==============================
@@ -62,7 +75,7 @@ void setup() {
     Serial.println("-- ESP not yet configured. Opening ESP access point...");
     setupAccessPoint();
   } else {
-    Serial.println("-- ESP already configured. Press and hold CONFIG button (GPIO0) on ESP for 10-15 seconds to restart and reconfigure through the ESP access point. Do not press RESET button during this period as this will enter flash mode.");
+    Serial.println("-- ESP already configured. To reconfigure, hold CONFIG button (GPIO0) while pressing RESET. Keep holding for 5 seconds until you see the reset message.");
   }
 
   Serial.println("[ESP] INITIALIZING ESP");
@@ -98,6 +111,12 @@ void setup() {
   initNewModuleOnServer(&esp_config);
 
   Serial.println("[ESP] SETUP COMPLETE");
+
+  // Flush stale frame buffer accumulated during WiFi/geolocation operations
+  camera_fb_t *stale = esp_camera_fb_get();
+  if (stale) esp_camera_fb_return(stale);
+  delay(1000); // Let camera sensor stabilize after RF operations
+
   Serial.println("");
   Serial.println("---------------------");
   Serial.println("");
@@ -109,9 +128,18 @@ void captureAndUpload() {
   Serial.println("");
   Serial.printf("-- Trying to capture and post image number %d\n", counter++);
 
-  int httpCode = postImage(&esp_config);
+  int httpCode = -1;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      Serial.printf("---- Retry attempt %d/3\n", attempt + 1);
+      delay(2000);
+    }
+    httpCode = postImage(&esp_config);
+    if (httpCode != -1) break;
+  }
+
   if (httpCode == -1) {
-    Serial.println("---- Camera error. Could not capture image");
+    Serial.println("---- Camera error. Could not capture image after 3 attempts");
     return;
   } else if (httpCode == -2) {
     Serial.println("---- Network error. Could not start the host connection");
@@ -160,22 +188,8 @@ void captureAndUpload() {
 }
 
 void loop() {
-
-  if (digitalRead(CONFIG_BUTTON) == LOW) {
-    if (!pressed) {
-      pressStart = millis();
-      pressed = true;
-    }
-
-    if (millis() - pressStart > 7000) {  // 7 seconds
-      Serial.println("Long press detected - resetting config");
-      setESPConfigured(false);
-      delay(500);
-      ESP.restart();
-    }
-  } else {
-      pressed = false;
-  }
+  // NOTE: GPIO0 config button check moved to setup() — it cannot be read
+  // reliably here because the camera XCLK drives GPIO0 after init.
 
   // First capture immediately after boot
   if (!firstCaptureDone) {
@@ -184,11 +198,11 @@ void loop() {
     firstCaptureDone = true;
   }
 
-  // Daily capture at 11:59 AM local time
+  // Daily capture at noon (local time via NTP)
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo, 100)) {
-    if (timeinfo.tm_hour == 11 && timeinfo.tm_min == 59 && timeinfo.tm_yday != lastCaptureDay) {
-      Serial.printf("-- Daily capture at %02d:%02d (day %d)\n", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_yday);
+  if (getLocalTime(&timeinfo, 200)) {
+    if (timeinfo.tm_hour == 12 && timeinfo.tm_yday != lastCaptureDay) {
+      Serial.println("-- Noon capture");
       captureAndUpload();
       lastCaptureDay = timeinfo.tm_yday;
     }

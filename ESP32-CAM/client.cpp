@@ -13,7 +13,7 @@ static WiFiClient client;
 */
 static url_t splitUrl(const char* urlChars) {
   url_t url;
-  url.port = 443;
+  url.port = 80;
   url.path = "/";
 
   String urlString(urlChars);
@@ -99,15 +99,11 @@ int postImage(esp_config_t *esp_config) {
 
   char *UPLOAD_URL = esp_config->UPLOAD_URL;
   
-  // Capture image
-  digitalWrite(4, HIGH);
+  // Capture image (flash off)
   camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) { 
-    digitalWrite(4, LOW);
-    return -1; 
+  if (!fb) {
+    return -1;
   }
-  delay(100);
-  digitalWrite(4, LOW);
 
   String filename = createFileName();
   String boundary = "------------------------esp32" + String(millis());
@@ -152,7 +148,7 @@ int postImage(esp_config_t *esp_config) {
     clientInitialized = true;
   }
 
-  Serial.printf("---- trying to send image to: %s:%u\n", url.host, url.port);
+  Serial.printf("---- trying to send image to: %s:%u\n", url.host.c_str(), url.port);
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
     if (!client.connect(url.host.c_str(), url.port)) {
@@ -181,8 +177,12 @@ int postImage(esp_config_t *esp_config) {
     }
     sent += chunk;
   }
-  client.write((uint8_t*)tail.c_str(), tail.length());
-  //client.print(tail);
+  size_t tailSent = client.write((uint8_t*)tail.c_str(), tail.length());
+  if (tailSent != tail.length()) {
+    client.stop();
+    esp_camera_fb_return(fb);
+    return -3;
+  }
 
   // Read HTTP response
   String status = client.readStringUntil('\n');

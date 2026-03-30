@@ -25,10 +25,12 @@ export default function Step5Verify({
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
   const [checkingBackend, setCheckingBackend] = useState(false);
 
-  // Auto-redirect to dashboard after module is detected
+  // Auto-redirect to dashboard with module selected after detection
   useEffect(() => {
     if (!detectedModule) return;
-    const timer = setTimeout(() => navigate('/dashboard'), 3000);
+    const timer = setTimeout(() => {
+      navigate('/dashboard', { state: { selectModuleId: detectedModule.id } });
+    }, 3000);
     return () => clearTimeout(timer);
   }, [detectedModule, navigate]);
 
@@ -86,6 +88,7 @@ export default function Step5Verify({
 
         <Link
           to="/dashboard"
+          state={{ selectModuleId: detectedModule.id }}
           className="w-full md:w-auto bg-amber-500 hover:bg-amber-600 text-white px-8 py-3 rounded-lg font-semibold transition-colors text-center block"
         >
           {t('step5.viewDashboard')}

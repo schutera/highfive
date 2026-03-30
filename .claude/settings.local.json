@@ -103,7 +103,11 @@
       "Bash(git push:*)",
       "Bash(git reset:*)",
       "Bash(find /var/www/highfive/image-service -type f \\\\\\(-name *.py -o -name *.ts \\\\\\) ! -path */node_modules/* ! -path */__pycache__/*)",
-      "Bash(source /var/www/highfive/.env)"
+      "Bash(source /var/www/highfive/.env)",
+      "Bash(git -C /var/www/highfive log --all --oneline)",
+      "Bash(git:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)"
     ]
   }
 }

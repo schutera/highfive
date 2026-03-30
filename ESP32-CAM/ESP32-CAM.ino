@@ -11,6 +11,8 @@
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
 int counter = 0;
+bool firstCaptureDone = false;
+int lastCaptureDay = -1;
 
 // CONFIG button params
 unsigned long pressStart = 0;
@@ -103,24 +105,7 @@ void setup() {
 }
 
 
-void loop() {
-
-  if (digitalRead(CONFIG_BUTTON) == LOW) {
-    if (!pressed) {
-      pressStart = millis();
-      pressed = true;
-    }
-
-    if (millis() - pressStart > 7000) {  // 7 seconds
-      Serial.println("Long press detected - resetting config");
-      setESPConfigured(false);
-      delay(500);
-      ESP.restart();
-    }
-  } else {
-      pressed = false;
-  }
-
+void captureAndUpload() {
   Serial.println("");
   Serial.printf("-- Trying to capture and post image number %d\n", counter++);
 
@@ -172,6 +157,42 @@ void loop() {
   }
 
   Serial.printf("-- Finished capturing and posting image %d\n", counter);
+}
 
-  delay(esp_config.CAPTURE_INTERVAL);
+void loop() {
+
+  if (digitalRead(CONFIG_BUTTON) == LOW) {
+    if (!pressed) {
+      pressStart = millis();
+      pressed = true;
+    }
+
+    if (millis() - pressStart > 7000) {  // 7 seconds
+      Serial.println("Long press detected - resetting config");
+      setESPConfigured(false);
+      delay(500);
+      ESP.restart();
+    }
+  } else {
+      pressed = false;
+  }
+
+  // First capture immediately after boot
+  if (!firstCaptureDone) {
+    Serial.println("-- First capture after boot");
+    captureAndUpload();
+    firstCaptureDone = true;
+  }
+
+  // Daily capture at 11:59 AM local time
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo, 100)) {
+    if (timeinfo.tm_hour == 11 && timeinfo.tm_min == 59 && timeinfo.tm_yday != lastCaptureDay) {
+      Serial.printf("-- Daily capture at %02d:%02d (day %d)\n", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_yday);
+      captureAndUpload();
+      lastCaptureDay = timeinfo.tm_yday;
+    }
+  }
+
+  delay(30000);  // check every 30 seconds
 }

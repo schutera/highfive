@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { api, Module } from '../services/api';
 
 export default function WebInstaller() {
-  const [modules, setModules] = useState<Module[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [_modules, setModules] = useState<Module[]>([]);
+  const [_loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Firmware state

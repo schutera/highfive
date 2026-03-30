@@ -16,7 +16,8 @@ def init_db():
                 status VARCHAR(10) NOT NULL CHECK (status IN ('online', 'offline')),
                 first_online DATE NOT NULL,
                 battery_level INTEGER,
-                image_count INTEGER NOT NULL DEFAULT 0
+                image_count INTEGER NOT NULL DEFAULT 0,
+                email VARCHAR(255)
             );
 
             CREATE TABLE IF NOT EXISTS nest_data (
@@ -34,11 +35,26 @@ def init_db():
                 hatched INTEGER NOT NULL
             );
 
+            CREATE SEQUENCE IF NOT EXISTS image_uploads_seq START 1;
+            CREATE TABLE IF NOT EXISTS image_uploads (
+                id INTEGER PRIMARY KEY DEFAULT nextval('image_uploads_seq'),
+                module_id VARCHAR(20) NOT NULL,
+                filename VARCHAR(255) NOT NULL,
+                uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_nest_module ON nest_data(module_id);
             CREATE INDEX IF NOT EXISTS idx_progress_nest ON daily_progress(nest_id);
             CREATE INDEX IF NOT EXISTS idx_progress_date ON daily_progress(date);
+            CREATE INDEX IF NOT EXISTS idx_image_module ON image_uploads(module_id);
             """
         )
+
+        # Add email column to existing databases
+        try:
+            con.execute("ALTER TABLE module_configs ADD COLUMN email VARCHAR(255)")
+        except Exception:
+            pass  # column already exists
 
         if os.getenv("SEED_DATA", "").lower() == "true":
             row_count = con.execute("SELECT COUNT(*) FROM module_configs").fetchone()[0]

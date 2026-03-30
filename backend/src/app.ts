@@ -4,6 +4,8 @@ import { db } from './database';
 import { setupSwagger } from './swagger';
 import { apiKeyAuth } from './auth';
 
+const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://127.0.0.1:4444';
+
 export const app = express();
 
 // Middleware - Configure CORS for production
@@ -52,6 +54,51 @@ app.get('/api/modules/:id', async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch module details' });
+  }
+});
+
+// Image routes (proxied to image-service)
+
+app.get('/api/images', async (req, res) => {
+  try {
+    const moduleId = req.query.module_id;
+    const url = moduleId
+      ? `${IMAGE_SERVICE_URL}/images?module_id=${encodeURIComponent(String(moduleId))}`
+      : `${IMAGE_SERVICE_URL}/images`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Image service error: ${response.status}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(502).json({ error: 'Failed to fetch images from image service' });
+  }
+});
+
+app.delete('/api/images/:filename', async (req, res) => {
+  try {
+    const response = await fetch(`${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`, {
+      method: 'DELETE',
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    res.status(502).json({ error: 'Failed to delete image' });
+  }
+});
+
+app.get('/api/images/:filename', async (req, res) => {
+  try {
+    const response = await fetch(`${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`);
+    if (!response.ok) {
+      res.status(response.status).json({ error: 'Image not found' });
+      return;
+    }
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.send(buffer);
+  } catch (error) {
+    res.status(502).json({ error: 'Failed to fetch image from image service' });
   }
 });
 

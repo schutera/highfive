@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, Module } from '../../services/api';
 import { useTranslation } from '../../i18n/LanguageContext';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
+const BACKEND_URL = import.meta.env.VITE_API_URL || '/api';
 
 interface Step5VerifyProps {
   pollingActive: boolean;
@@ -21,8 +21,16 @@ export default function Step5Verify({
   onBack,
 }: Step5VerifyProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
   const [checkingBackend, setCheckingBackend] = useState(false);
+
+  // Auto-redirect to dashboard after module is detected
+  useEffect(() => {
+    if (!detectedModule) return;
+    const timer = setTimeout(() => navigate('/dashboard'), 3000);
+    return () => clearTimeout(timer);
+  }, [detectedModule, navigate]);
 
   const checkBackendAndStart = async () => {
     setCheckingBackend(true);

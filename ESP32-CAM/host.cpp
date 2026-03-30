@@ -2,9 +2,10 @@
 #include <SPIFFS.h>
 #include <FS.h>
 #include <ArduinoJson.h>
+#include "esp_init.h"
 
-const char *HOST_SSID = "ESP32-Access-Point";
-const char *HOST_PASSWORD = "esp-12345";
+const char *HOST_SSID = "HiveHive-Access-Point";
+const char *HOST_PASSWORD = NULL;  // open network (no password)
 
 WiFiServer server(80); // port 80
 int server_running = 0;
@@ -15,13 +16,14 @@ String header;
 String cfg_module_name = "";
 String cfg_ssid           = "";
 String cfg_password       = "";
-String cfg_upload_url     = "";
-String cfg_init_url       = "";
+String cfg_email          = "";
+String cfg_upload_url     = "http://highfive.schutera.com/upload";
+String cfg_init_url       = "http://highfive.schutera.com/new_module";
 String cfg_resolution     = "VGA";
-int    cfg_interval_ms    = 300;
-int    cfg_vflip          = 0;
-int    cfg_brightness     = 0;
-int    cfg_saturation     = 0;
+int    cfg_interval_ms    = 86400000; // 24 hours
+int    cfg_vflip          = 1;
+int    cfg_brightness     = 1;
+int    cfg_saturation     = -1;
 
 
 /*
@@ -80,7 +82,7 @@ void loadConfig() {
     return;
   }
 
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
   DeserializationError err = deserializeJson(doc, f);
   f.close();
   if (err) {
@@ -92,8 +94,9 @@ void loadConfig() {
   cfg_module_name = doc["NETWORK"]["MODULE_NAME"] | "";
   cfg_ssid        = doc["NETWORK"]["SSID"]           | "";
   cfg_password    = doc["NETWORK"]["PASSWORD"]       | "";
+  cfg_email       = doc["NETWORK"]["EMAIL"]          | "";
   cfg_upload_url  = doc["NETWORK"]["UPLOAD_URL"]     | "";
-  cfg_init_url  = doc["NETWORK"]["INIT_URL"]     | "";
+  cfg_init_url    = doc["NETWORK"]["INIT_URL"]       | "";
 
   cfg_interval_ms = doc["CAMERA"]["CAPTURE_INTERVAL_IN_MS"] | 0;
   cfg_resolution  = doc["CAMERA"]["RESOLUTION"]              | "VGA";
@@ -108,7 +111,7 @@ void loadConfig() {
   ----------------------------------
 */
 void saveConfig() {
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
 
   JsonObject net  = doc.createNestedObject("NETWORK");
   JsonObject cam  = doc.createNestedObject("CAMERA");
@@ -116,6 +119,7 @@ void saveConfig() {
   net["MODULE_NAME"] = cfg_module_name;
   net["SSID"]        = cfg_ssid;
   net["PASSWORD"]    = cfg_password;
+  net["EMAIL"]       = cfg_email;
   net["UPLOAD_URL"]  = cfg_upload_url;
   net["INIT_URL"]    = cfg_init_url;
 
@@ -144,24 +148,6 @@ void saveConfig() {
   ----------------------------------
 */
 void sendConfigForm(WiFiClient &client, bool saved = false) {
-  // Optional: split cfg_upload_url into base + endpoint for pre-filling
-  String uploadBase = cfg_upload_url;
-  String uploadEndpoint = "";
-  int lastSlash = uploadBase.lastIndexOf('/');
-  if (lastSlash > 7) { // after "http://", "https://"
-    uploadEndpoint = uploadBase.substring(lastSlash + 1);
-    uploadBase = uploadBase.substring(0, lastSlash);
-  }
-
-  String initBase = cfg_init_url;
-  String initEndpoint = "";
-  int lastSlashInit = initBase.lastIndexOf('/');
-  if (lastSlashInit > 7) { // after "http://", "https://"
-    initEndpoint = initBase.substring(lastSlashInit + 1);
-    initBase = initBase.substring(0, lastSlashInit);
-  }
-
-
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
   client.println("Access-Control-Allow-Origin: *");
@@ -169,14 +155,14 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println();
   client.println("<!DOCTYPE html><html><head>");
   client.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-  client.println("<title>ESP32 Configuration</title>");
+  client.println("<title>HiveHive Module Setup</title>");
 
   client.println(
   "<style>"
   ":root{"
-  "  --primary:#2563eb;"
-  "  --primary-dark:#1e40af;"
-  "  --bg:#f3f6fb;"
+  "  --primary:#f59e0b;"
+  "  --primary-dark:#d97706;"
+  "  --bg:#fffbeb;"
   "  --card:#ffffff;"
   "  --text:#1f2937;"
   "  --muted:#6b7280;"
@@ -186,54 +172,47 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 
   "*{box-sizing:border-box;}"
   "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}"
-  ".container{max-width:760px;margin:40px auto;padding:0 20px;}"
+  ".container{max-width:480px;margin:40px auto;padding:0 20px;}"
   ".card{background:var(--card);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);padding:32px;}"
-  "h1{text-align:center;margin-top:0;font-size:26px;}"
-
-  ".section{margin-top:28px;padding-top:18px;border-top:1px solid var(--border);}"
-  ".section h2{margin:0 0 10px 0;font-size:18px;}"
-  ".section-desc{font-size:13px;color:var(--muted);margin-bottom:16px;}"
+  "h1{text-align:center;margin-top:0;font-size:24px;}"
+  ".subtitle{text-align:center;color:var(--muted);font-size:14px;margin-top:-8px;margin-bottom:24px;}"
 
   ".field{margin-bottom:18px;}"
   "label{display:block;font-weight:600;font-size:14px;margin-bottom:6px;}"
 
-  "input,select{"
+  "input{"
   "  width:100%;padding:10px 12px;border-radius:8px;"
   "  border:1px solid var(--border);font-size:14px;background:#fafafa;"
   "}"
-
-  "input:focus,select:focus{outline:none;border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,0.15);}"
-
-  ".row{display:flex;gap:14px;}"
-  ".row .field{flex:1;}"
+  "input:focus{outline:none;border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px rgba(245,158,11,0.2);}"
 
   ".description{font-size:12px;color:var(--muted);margin-top:6px;}"
 
   ".error-field{border-color:var(--error) !important;background:#fff5f5 !important;}"
   ".error-message{color:var(--error);font-size:13px;margin-top:12px;text-align:center;display:none;}"
 
-  "button{margin-top:20px;width:100%;padding:12px;border:none;border-radius:999px;font-size:15px;font-weight:600;background:var(--primary);color:#fff;cursor:pointer;transition:0.2s;}"
+  "button{margin-top:20px;width:100%;padding:14px;border:none;border-radius:999px;font-size:16px;font-weight:600;background:var(--primary);color:#fff;cursor:pointer;transition:0.2s;}"
   "button:hover{background:var(--primary-dark);}"
 
-  ".message{background:#e6f4ea;color:#14532d;padding:12px;border-radius:8px;margin-bottom:16px;font-size:14px;}"
+  ".message{background:#e6f4ea;color:#14532d;padding:14px;border-radius:8px;margin-bottom:16px;font-size:14px;text-align:center;}"
   "</style>"
   );
 
-  /* ===== VALIDATION SCRIPT ===== */
   client.println(
   "<script>"
   "function validateForm(event){"
   "  event.preventDefault();"
   "  let valid=true;"
-  "  const fields=document.querySelectorAll('input, select');"
+  "  const fields=document.querySelectorAll('input[type=text],input[type=password]');"
   "  fields.forEach(f=>{"
-  "    if(f.type!=='hidden' && f.value.trim()===''){"
+  "    if(f.value.trim()===''){"
   "      f.classList.add('error-field');"
   "      valid=false;"
   "    }else{"
   "      f.classList.remove('error-field');"
   "    }"
   "  });"
+  "  document.querySelectorAll('input[type=email]').forEach(f=>f.classList.remove('error-field'));"
   "  const errorMsg=document.getElementById('errorText');"
   "  if(!valid){"
   "    errorMsg.style.display='block';"
@@ -247,105 +226,40 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 
   client.println("</head><body>");
   client.println("<div class=\"container\"><div class=\"card\">");
-  client.println("<h1>ESP32 Module Configuration</h1>");
+  client.println("<h1>HiveHive Module Setup</h1>");
+  client.println("<p class=\"subtitle\">Configure your module to get started.</p>");
 
   if (saved) {
-    client.println("<div class=\"message\"><strong>Configuration saved successfully.</strong></div>");
+    client.println("<div class=\"message\">Configuration saved! The module will now restart and connect to your WiFi.</div>");
   }
 
   client.println("<form action=\"/save\" method=\"POST\" autocomplete=\"off\" onsubmit=\"validateForm(event)\">");
   client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
 
-  /* ===== GENERAL ===== */
-  client.println("<div class=\"section\">");
-  client.println("<h2>General</h2>");
-  client.println("<div class=\"section-desc\">Basic identification settings for this device.</div>");
-
   client.println("<div class=\"field\">");
   client.println("<label>Module Name</label>");
-  client.println("<input type=\"text\" name=\"module_name\" value=\"" + cfg_module_name + "\">");
-  client.println("<div class=\"description\">You can name the module however you want.</div>");
+  client.println("<input type=\"text\" name=\"module_name\" placeholder=\"e.g. Garden Cam\" value=\"" + cfg_module_name + "\">");
+  client.println("<div class=\"description\">Give your module a name to identify it.</div>");
   client.println("</div>");
-  client.println("</div>");
-
-  /* ===== NETWORK ===== */
-  client.println("<div class=\"section\">");
-  client.println("<h2>Network</h2>");
-  client.println("<div class=\"section-desc\">WiFi credentials and communication endpoints.</div>");
 
   client.println("<div class=\"field\">");
-  client.println("<label>WiFi SSID</label>");
-  client.println("<input type=\"text\" name=\"ssid\" value=\"" + cfg_ssid + "\">");
+  client.println("<label>WiFi Network</label>");
+  client.println("<input type=\"text\" name=\"ssid\" placeholder=\"Your WiFi name\" value=\"" + cfg_ssid + "\">");
   client.println("</div>");
 
   client.println("<div class=\"field\">");
   client.println("<label>WiFi Password</label>");
-  client.println("<input type=\"password\" name=\"password\" value=\"" + cfg_password + "\">");
-  client.println("</div>");
-
-  client.println("<div class=\"row\">");
-  client.println("<div class=\"field\">");
-  client.println("<label>Initialization Base URL</label>");
-  client.println("<input type=\"text\" name=\"init_base\" value=\"" + initBase + "\">");
-  client.println("</div>");
-  client.println("<div class=\"field\">");
-  client.println("<label>Initialization Endpoint</label>");
-  client.println("<input type=\"text\" name=\"init_endpoint\" value=\"" + initEndpoint + "\">");
-  client.println("</div>");
-  client.println("</div>");
-
-  client.println("<div class=\"row\">");
-  client.println("<div class=\"field\">");
-  client.println("<label>Upload Base URL</label>");
-  client.println("<input type=\"text\" name=\"upload_base\" value=\"" + uploadBase + "\">");
-  client.println("</div>");
-  client.println("<div class=\"field\">");
-  client.println("<label>Upload Endpoint</label>");
-  client.println("<input type=\"text\" name=\"upload_endpoint\" value=\"" + uploadEndpoint + "\">");
-  client.println("</div>");
-  client.println("</div>");
-  client.println("</div>");
-
-  /* ===== CAMERA ===== */
-  client.println("<div class=\"section\">");
-  client.println("<h2>Camera</h2>");
-  client.println("<div class=\"section-desc\">Image capture and quality settings.</div>");
-
-  client.println("<div class=\"field\">");
-  client.println("<label>Capture Interval (ms)</label>");
-  client.println("<input type=\"number\" name=\"interval\" min=\"10\" value=\"" + String(cfg_interval_ms) + "\">");
+  client.println("<input type=\"password\" name=\"password\" placeholder=\"Your WiFi password\" value=\"" + cfg_password + "\">");
   client.println("</div>");
 
   client.println("<div class=\"field\">");
-  client.println("<label>Resolution</label>");
-  client.println("<select name=\"res\">");
-  client.println("<option value=\"qvga\""  + String(cfg_resolution.equalsIgnoreCase("qvga")  ? " selected" : "") + ">QVGA - 320x240</option>");
-  client.println("<option value=\"vga\""   + String(cfg_resolution.equalsIgnoreCase("vga")   ? " selected" : "") + ">VGA - 640x480</option>");
-  client.println("<option value=\"qxga\""  + String(cfg_resolution.equalsIgnoreCase("qxga")  ? " selected" : "") + ">QXGA - 800x600</option>");
-  client.println("<option value=\"sxga\""  + String(cfg_resolution.equalsIgnoreCase("sxga")  ? " selected" : "") + ">SXGA - 1280x1024</option>");
-  client.println("<option value=\"uxga\""  + String(cfg_resolution.equalsIgnoreCase("uxga")  ? " selected" : "") + ">UXGA - 1600x1200</option>");
-  client.println("</select>");
+  client.println("<label>Email <span style=\"font-weight:400;color:var(--muted)\">(optional)</span></label>");
+  client.println("<input type=\"email\" name=\"email\" placeholder=\"you@example.com\" value=\"" + cfg_email + "\">");
+  client.println("<div class=\"description\">Share your email so we can reach you with updates.</div>");
   client.println("</div>");
 
-  client.println("<div class=\"field\">");
-  client.println("<label>Vertical Flip (0 or 1)</label>");
-  client.println("<input type=\"number\" name=\"vflip\" min=\"0\" max=\"1\" value=\"" + String(cfg_vflip) + "\">");
-  client.println("</div>");
-
-  client.println("<div class=\"field\">");
-  client.println("<label>Brightness</label>");
-  client.println("<input type=\"number\" name=\"bright\" value=\"" + String(cfg_brightness) + "\">");
-  client.println("</div>");
-
-  client.println("<div class=\"field\">");
-  client.println("<label>Saturation</label>");
-  client.println("<input type=\"number\" name=\"sat\" value=\"" + String(cfg_saturation) + "\">");
-  client.println("</div>");
-
-  client.println("</div>");
-
-  client.println("<button type=\"submit\">Save Configuration</button>");
-  client.println("<div id=\"errorText\" class=\"error-message\">Enter missing details before saving configuration.</div>");
+  client.println("<button type=\"submit\">Save &amp; Connect</button>");
+  client.println("<div id=\"errorText\" class=\"error-message\">Please fill in all fields.</div>");
 
   client.println("</form></div></div></body></html>");
   client.println();
@@ -426,62 +340,50 @@ void runAccessPoint() {
                 if (query.length() > 0) {
                   // Only treat as valid if session token matches
                   String sessionParam = getParam(query, "session");
-                  if (sessionParam == sessionToken) {
+                  if (sessionParam == sessionToken || sessionParam == "hivehive-setup") {
                     cfg_module_name = getParam(query, "module_name");
-
                     cfg_ssid        = getParam(query, "ssid");
                     cfg_password    = getParam(query, "password");
+                    cfg_email       = getParam(query, "email");
 
-                    // NEW: split URL fields
-                    String uploadBase     = getParam(query, "upload_base");
-                    String uploadEndpoint = getParam(query, "upload_endpoint");
+                    // Server URLs: web app sends base + endpoint separately
+                    String init_base     = getParam(query, "init_base");
+                    String init_endpoint = getParam(query, "init_endpoint");
+                    String upload_base     = getParam(query, "upload_base");
+                    String upload_endpoint = getParam(query, "upload_endpoint");
 
-
-                    // initURL
-                    String initBase     = getParam(query, "init_base");
-                    String initEndpoint = getParam(query, "init_endpoint");
-
-                    // Normalise and combine into cfg_upload_url
-                    uploadBase.trim();
-                    uploadEndpoint.trim();
-                    initBase.trim();
-                    initEndpoint.trim();
-
-                    // upload
-                    if (uploadBase.endsWith("/")) {
-                      uploadBase.remove(uploadBase.length() - 1);
+                    if (init_base.length() > 0 && init_endpoint.length() > 0) {
+                      cfg_init_url = init_base + init_endpoint;
                     }
-                    if (uploadEndpoint.startsWith("/")) {
-                      uploadEndpoint = uploadEndpoint.substring(1);
+                    if (upload_base.length() > 0 && upload_endpoint.length() > 0) {
+                      cfg_upload_url = upload_base + upload_endpoint;
                     }
 
-                    if (uploadBase.length() > 0 && uploadEndpoint.length() > 0) {
-                      cfg_upload_url = uploadBase + "/" + uploadEndpoint;
-                    } else {
-                      // if no endpoint, just store base
-                      cfg_upload_url = uploadBase;
+                    // Camera settings (only overwrite when present)
+                    String res = getParam(query, "res");
+                    if (res.length() > 0) {
+                      cfg_resolution = res;
                     }
 
-                    // init
-                    if (initBase.endsWith("/")) {
-                      initBase.remove(initBase.length() - 1);
-                    }
-                    if (initEndpoint.startsWith("/")) {
-                      initEndpoint = initEndpoint.substring(1);
+                    String interval = getParam(query, "interval");
+                    if (interval.length() > 0) {
+                      cfg_interval_ms = interval.toInt();
                     }
 
-                    if (initBase.length() > 0 && initEndpoint.length() > 0) {
-                      cfg_init_url = initBase + "/" + initEndpoint;
-                    } else {
-                      // if no endpoint, just store base
-                      cfg_init_url = initBase;
+                    String vflip = getParam(query, "vflip");
+                    if (vflip.length() > 0) {
+                      cfg_vflip = vflip.toInt();
                     }
 
-                    cfg_interval_ms = getParam(query, "interval").toInt();
-                    cfg_resolution  = getParam(query, "res");
-                    cfg_vflip       = getParam(query, "vflip").toInt();
-                    cfg_brightness  = getParam(query, "bright").toInt();
-                    cfg_saturation  = getParam(query, "sat").toInt();
+                    String bright = getParam(query, "bright");
+                    if (bright.length() > 0) {
+                      cfg_brightness = bright.toInt();
+                    }
+
+                    String sat = getParam(query, "sat");
+                    if (sat.length() > 0) {
+                      cfg_saturation = sat.toInt();
+                    }
 
                     saveConfig();
                     sendConfigForm(client, true);
@@ -529,7 +431,7 @@ void setupAccessPoint() {
   sessionToken = String((uint32_t)esp_random(), HEX);
 
   WiFi.mode(WIFI_AP_STA);
-  bool ok = WiFi.softAP(HOST_SSID, HOST_PASSWORD, 1, 0);
+  bool ok = WiFi.softAP(HOST_SSID);  // open network, no password
   if (!ok) {
     Serial.println("!!! WiFi.softAP FAILED");
   }

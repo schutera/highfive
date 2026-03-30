@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage';
 import SetupWizard from './pages/SetupWizard';
 import HiveModule from './pages/HiveModule';
 import AssemblyGuide from './pages/AssemblyGuide';
+import AdminPage from './pages/AdminPage';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/setup" element={<SetupWizard />} />
           <Route path="/hive-module" element={<HiveModule />} />
           <Route path="/assembly" element={<AssemblyGuide />} />
+          <Route path="/admin" element={<AdminPage />} />
           {/* Redirect old routes */}
           <Route path="/web-installer" element={<Navigate to="/setup" replace />} />
           <Route path="/setup-guide" element={<Navigate to="/setup" replace />} />

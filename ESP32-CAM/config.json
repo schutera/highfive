@@ -1,13 +1,13 @@
 {
   "NETWORK": {
-    "MODULE_NAME": "New Module",
-    "SSID": "ssid",
-    "PASSWORD": "password",
-    "UPLOAD_URL": "url",
-    "INIT_URL": "url"
+    "MODULE_NAME": "",
+    "SSID": "",
+    "PASSWORD": "",
+    "UPLOAD_URL": "http://highfive.schutera.com/upload",
+    "INIT_URL": "http://highfive.schutera.com/new_module"
   },
   "CAMERA": {
-    "CAPTURE_INTERVAL_IN_MS": 300,
+    "CAPTURE_INTERVAL_IN_MS": 86400000,
     "RESOLUTION": "VGA",
     "VERTICAL_FLIP": 1,
     "BRIGHTNESS": 1,

@@ -1,8 +1,4 @@
-<h1 align="center">HiveHive</h1>
-
-<p align="center">
-  <img src="documentation/doc_images/HiveHive_Logo.png" alt="HiveHive Logo" width="180"/>
-</p>
+<h1 align="center">🙌 HighFive</h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB?logo=react&logoColor=white" alt="React + Vite" />

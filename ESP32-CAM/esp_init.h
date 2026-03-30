@@ -21,6 +21,7 @@ typedef struct {
   /* esp module information */
   uint64_t esp_ID;
   char module_name[64];
+  char email[128];
   uint8_t battery_level;
   bool is_configured;
 

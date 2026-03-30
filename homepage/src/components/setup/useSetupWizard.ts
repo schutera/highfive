@@ -24,7 +24,7 @@ export interface WizardState {
   verificationTimedOut: boolean;
 }
 
-const INIT_BASE_URL = import.meta.env.VITE_INIT_BASE_URL || 'http://localhost:8002';
+const INIT_BASE_URL = import.meta.env.VITE_INIT_BASE_URL || 'http://localhost:8000';
 const UPLOAD_BASE_URL = import.meta.env.VITE_UPLOAD_BASE_URL || 'http://localhost:8000';
 
 export const SERVER_CONFIG = {
@@ -73,10 +73,12 @@ export function useSetupWizard() {
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
 
-  // Load firmware info + detect LAN IP on mount (while still on home WiFi)
+  // Load firmware info, detect LAN IP, and capture baseline modules on mount
+  // (while still on home WiFi, before ESP is configured)
   useEffect(() => {
     loadFirmware();
     detectLanIp();
+    captureBaseline();
   }, []);
 
   // Cleanup polling on unmount
@@ -85,6 +87,17 @@ export function useSetupWizard() {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     };
   }, []);
+
+  const captureBaseline = async () => {
+    try {
+      const currentModules = await api.getAllModules();
+      baselineModuleIdsRef.current = new Set(currentModules.map(m => m.id));
+      console.log('[SetupWizard] Baseline captured on mount:', baselineModuleIdsRef.current.size, 'modules');
+    } catch {
+      console.warn('[SetupWizard] Could not capture baseline on mount — will be empty');
+      baselineModuleIdsRef.current = new Set();
+    }
+  };
 
   const detectLanIp = async () => {
     try {
@@ -149,6 +162,18 @@ export function useSetupWizard() {
     }));
   }, []);
 
+  const goToStep = useCallback((step: number) => {
+    setState(s => ({
+      ...s,
+      currentStep: step,
+      direction: step > s.currentStep ? 'forward' : 'back',
+    }));
+  }, []);
+
+  const markConfigDone = useCallback(() => {
+    setState(s => ({ ...s, configSent: true }));
+  }, []);
+
   const markFlashComplete = useCallback(() => {
     setState(s => ({ ...s, flashComplete: true }));
   }, []);
@@ -203,15 +228,9 @@ export function useSetupWizard() {
   }, []);
 
   const startVerification = useCallback(async () => {
-    // Capture baseline module list
-    try {
-      const currentModules = await api.getAllModules();
-      baselineModuleIdsRef.current = new Set(currentModules.map(m => m.id));
-      console.log('[Step5] Baseline captured:', baselineModuleIdsRef.current.size, 'modules');
-    } catch {
-      console.warn('[Step5] Could not capture baseline — will retry during polling');
-      baselineModuleIdsRef.current = new Set();
-    }
+    // Baseline was already captured on wizard mount (before ESP was configured).
+    // This ensures the new module isn't included in the baseline.
+    console.log('[Step5] Starting verification, baseline has', baselineModuleIdsRef.current.size, 'modules');
 
     setState(s => ({
       ...s,
@@ -221,7 +240,6 @@ export function useSetupWizard() {
       detectedModule: null,
     }));
     pollCountRef.current = 0;
-    let baselineCaptured = baselineModuleIdsRef.current.size > 0;
 
     pollingIntervalRef.current = setInterval(async () => {
       pollCountRef.current++;
@@ -237,15 +255,6 @@ export function useSetupWizard() {
 
       try {
         const modules = await api.getAllModules();
-
-        // If baseline was empty (backend wasn't reachable), capture it now
-        if (!baselineCaptured && modules.length > 0) {
-          baselineModuleIdsRef.current = new Set(modules.map(m => m.id));
-          baselineCaptured = true;
-          console.log('[Step5] Baseline captured late:', baselineModuleIdsRef.current.size, 'modules');
-          return; // skip this poll — baseline just set
-        }
-
         console.log(`[Step5] Got ${modules.length} modules, baseline has ${baselineModuleIdsRef.current.size}`);
         const newModule = modules.find(m => !baselineModuleIdsRef.current.has(m.id));
         if (newModule) {
@@ -263,6 +272,8 @@ export function useSetupWizard() {
     state,
     goNext,
     goBack,
+    goToStep,
+    markConfigDone,
     markFlashComplete,
     setModuleName,
     setWifiSsid,

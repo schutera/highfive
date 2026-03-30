@@ -227,10 +227,11 @@ bool loadConfig(esp_config_t *esp_config) {
 
   // ---- set initial battery level ---- //
   esp_config->battery_level = 90;
+  esp_config->email[0] = '\0';
 
   /* DEFAULTS */
   esp_config->RESOLUTION = FRAMESIZE_VGA;
-  esp_config->CAPTURE_INTERVAL = 300;
+  esp_config->CAPTURE_INTERVAL = 86400000; // 24 hours (used as fallback)
   esp_config->vertical_flip = 1;
   esp_config->brightness = 1;
   esp_config->saturation = -1;
@@ -247,7 +248,7 @@ bool loadConfig(esp_config_t *esp_config) {
     return false;
   }
 
-  StaticJsonDocument<512> esp_config_doc;
+  StaticJsonDocument<1024> esp_config_doc;
   DeserializationError err = deserializeJson(esp_config_doc, file);
   file.close();
   if (err) {
@@ -280,7 +281,12 @@ bool loadConfig(esp_config_t *esp_config) {
     esp_config_doc["NETWORK"]["INIT_URL"] | "",
     sizeof(esp_config->INIT_URL)
   );
-  
+  strlcpy(
+    esp_config->email,
+    esp_config_doc["NETWORK"]["EMAIL"] | "",
+    sizeof(esp_config->email)
+  );
+
   //Serial.printf("SSID: %s\n", esp_config->wifi_config.SSID);
   //Serial.printf("PASSWORD: %s\n", esp_config->wifi_config.PASSWORD);
 
@@ -379,12 +385,15 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
     //http.begin("http://192.168.0.36:8002/new_module");
     http.addHeader("Content-Type", "application/json");
 
-    StaticJsonDocument<200> doc;
+    StaticJsonDocument<256> doc;
     doc["esp_id"] = String(esp_config->esp_ID);
     doc["module_name"] = esp_config->module_name;
     doc["latitude"] = String(esp_config->geolocation.latitude);
     doc["longitude"] = String(esp_config->geolocation.longitude);
     doc["battery_level"] = String(esp_config->battery_level);
+    if (strlen(esp_config->email) > 0) {
+      doc["email"] = esp_config->email;
+    }
 
 
     String jsonData;

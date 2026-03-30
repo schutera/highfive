@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 export interface Module {
   id: string;
@@ -10,8 +10,10 @@ export interface Module {
   status: 'online' | 'offline';
   lastApiCall: string;
   batteryLevel: number;
+  firstOnline: string;
   totalHatches: number;
   imageCount: number;
+  email: string | null;
 }
 
 export interface NestData {
@@ -29,6 +31,12 @@ export interface DailyProgress {
 
 export interface ModuleDetail extends Module {
   nests: NestData[];
+}
+
+export interface ImageUpload {
+  module_id: string;
+  filename: string;
+  uploaded_at: string;
 }
 
 // API key for authentication - in production, this should come from environment variables
@@ -80,6 +88,30 @@ class ApiService {
     if (!response.ok) {
       throw new Error(`Failed to update module ${id} status`);
     }
+  }
+
+  async getImages(moduleId?: string): Promise<ImageUpload[]> {
+    const url = moduleId
+      ? `${this.baseUrl}/images?module_id=${encodeURIComponent(moduleId)}`
+      : `${this.baseUrl}/images`;
+    const response = await fetch(url, {
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch images');
+    const data = await response.json();
+    return data.images;
+  }
+
+  async deleteImage(filename: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/images/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to delete image');
+  }
+
+  getImageUrl(filename: string): string {
+    return `${this.baseUrl}/images/${encodeURIComponent(filename)}`;
   }
 
   async healthCheck(): Promise<{ status: string; timestamp: string }> {

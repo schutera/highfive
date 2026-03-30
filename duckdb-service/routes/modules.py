@@ -96,8 +96,8 @@ def add_module():
             con.execute(
                 """
                 INSERT OR REPLACE INTO module_configs
-                    (id, name, lat, lng, status, first_online, battery_level)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (id, name, lat, lng, status, first_online, battery_level, email)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data.mac,
@@ -107,6 +107,7 @@ def add_module():
                     "online",
                     now,
                     data.battery,
+                    data.email,
                 ),
             )
             con.commit()
@@ -125,11 +126,113 @@ def add_module():
             con.close()
 
 
+@modules_bp.post("/record_image")
+def record_image():
+    data = request.get_json()
+    module_id = data.get("module_id")
+    filename = data.get("filename")
+    if not module_id or not filename:
+        return jsonify({"error": "module_id and filename required"}), 400
+    with lock:
+        con = get_conn()
+        try:
+            con.execute(
+                "INSERT INTO image_uploads (module_id, filename, uploaded_at) VALUES (?, ?, ?)",
+                (module_id, filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            con.commit()
+            return jsonify({"message": "Image recorded"}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            con.close()
+
+
+@modules_bp.post("/update_module_status")
+def update_module_upload():
+    data = request.get_json()
+    module_id = data.get("module_id")
+    battery = data.get("battery")
+    if not module_id or battery is None:
+        return jsonify({"error": "module_id and battery required"}), 400
+    with lock:
+        con = get_conn()
+        try:
+            con.execute(
+                """
+                UPDATE module_configs
+                SET battery_level = ?,
+                    first_online = ?,
+                    image_count = image_count + 1
+                WHERE id = ?
+                """,
+                (int(battery), datetime.now().strftime("%Y-%m-%d"), module_id),
+            )
+            con.commit()
+            return jsonify({"message": "Module updated"}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            con.close()
+
+
+@modules_bp.delete("/image_uploads/<filename>")
+def delete_image_upload(filename):
+    with lock:
+        con = get_conn()
+        try:
+            existing = con.execute(
+                "SELECT filename FROM image_uploads WHERE filename = ?", (filename,)
+            ).fetchone()
+            if not existing:
+                return jsonify({"error": "Image not found"}), 404
+            con.execute("DELETE FROM image_uploads WHERE filename = ?", (filename,))
+            con.commit()
+            return jsonify({"message": "Image record deleted"}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            con.close()
+
+
+@modules_bp.get("/image_uploads")
+def list_image_uploads():
+    module_id = request.args.get("module_id")
+    with lock:
+        con = get_conn()
+        try:
+            if module_id:
+                rows = con.execute(
+                    "SELECT module_id, filename, uploaded_at FROM image_uploads WHERE module_id = ? ORDER BY uploaded_at DESC",
+                    (module_id,),
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    "SELECT module_id, filename, uploaded_at FROM image_uploads ORDER BY uploaded_at DESC"
+                ).fetchall()
+            images = [{"module_id": r[0], "filename": r[1], "uploaded_at": str(r[2])} for r in rows]
+            return jsonify(images=images), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            con.close()
+
+
 @modules_bp.get("/modules")
 def get_modules():
     with lock:
         con = get_conn()
-        cur = con.execute("SELECT * FROM module_configs")
+        cur = con.execute(
+            """
+            SELECT m.*,
+                   COUNT(i.id) AS real_image_count,
+                   MAX(i.uploaded_at) AS last_image_at
+            FROM module_configs m
+            LEFT JOIN image_uploads i ON m.id = i.module_id
+            GROUP BY m.id, m.name, m.lat, m.lng, m.status, m.first_online,
+                     m.battery_level, m.image_count, m.email
+            """
+        )
         cols = [d[0] for d in cur.description]
         rows = cur.fetchall()
         con.close()

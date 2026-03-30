@@ -1,79 +1,38 @@
+version: '3.8'
+
 services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
+    container_name: highfive-backend
     ports:
-      - "3002:3002"
+      - "3001:3001"
     environment:
-      NODE_ENV: development
-      DUCKDB_SERVICE_URL: http://duckdb-service:8000
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
+      - NODE_ENV=production
+      - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:-hf_dev_key_2026}
+      - PORT=3001
     restart: unless-stopped
     networks:
-      - net
+      - highfive-network
 
-  homepage:
+  frontend:
     build:
       context: ./homepage
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=https://api.highfive.schutera.com
+        - VITE_API_KEY=${VITE_API_KEY:-hf_dev_key_2026}
+    container_name: highfive-frontend
     ports:
-      - "5173:5173"
-    environment:
-      NODE_ENV: development
-    volumes:
-      - ./homepage:/app
-      - /app/node_modules
+      - "80:80"
+      - "443:443"
     restart: unless-stopped
     networks:
-      - net
-
-  image-service:
-    build:
-      context: ./image-service
-      dockerfile: Dockerfile.dev
-    env_file:
-      - .env
-    ports:
-      - "8000:4444"
-    environment:
-      DUCKDB_PATH: /data/app.duckdb
-    volumes:
-      - duckdb_data:/data
-    restart: unless-stopped
+      - highfive-network
     depends_on:
-      duckdb-service:
-        condition: service_healthy
-    networks:
-      - net
-
-  duckdb-service:
-    build:
-      context: ./duckdb-service
-      dockerfile: Dockerfile.dev
-    ports:
-      - "0.0.0.0:8002:8000"
-    volumes:
-      - duckdb_data:/data
-    env_file:
-      - .env
-    environment:
-      SEED_DATA: "true"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    networks:
-      - net
-
-volumes:
-  duckdb_data:
+      - backend
 
 networks:
-  net:
+  highfive-network:
     driver: bridge

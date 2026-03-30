@@ -33,11 +33,9 @@ export default function SetupWizard() {
     state,
     goNext,
     goBack,
+    goToStep,
     markFlashComplete,
-    setModuleName,
-    setWifiSsid,
-    setWifiPassword,
-    sendConfig,
+    markConfigDone,
     startVerification,
   } = useSetupWizard();
 
@@ -90,20 +88,12 @@ export default function SetupWizard() {
             />
           )}
           {state.currentStep === 3 && (
-            <Step3WiFi onNext={goNext} onBack={goBack} />
+            <Step3WiFi onNext={goNext} onBack={goBack} onSkip={() => goToStep(5)} />
           )}
           {state.currentStep === 4 && (
             <Step4Configure
-              moduleName={state.moduleName}
-              wifiSsid={state.wifiSsid}
-              wifiPassword={state.wifiPassword}
-              setModuleName={setModuleName}
-              setWifiSsid={setWifiSsid}
-              setWifiPassword={setWifiPassword}
-              configSending={state.configSending}
               configSent={state.configSent}
-              configError={state.configError}
-              sendConfig={sendConfig}
+              markConfigDone={markConfigDone}
               onNext={goNext}
               onBack={goBack}
             />

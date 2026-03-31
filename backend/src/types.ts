@@ -12,6 +12,7 @@ export interface Module {
   totalHatches: number; // Sum of all hatches across all nests
   imageCount: number; // Total images uploaded by this module
   email: string | null;
+  updatedAt?: string; // ISO timestamp — set on every registration/UPSERT
 }
 
 export interface NestData {

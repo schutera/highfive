@@ -96,15 +96,16 @@ def add_module():
             con.execute(
                 """
                 INSERT INTO module_configs
-                    (id, name, lat, lng, status, first_online, battery_level, email)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, name, lat, lng, status, first_online, battery_level, email, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     lat = EXCLUDED.lat,
                     lng = EXCLUDED.lng,
                     status = EXCLUDED.status,
                     battery_level = EXCLUDED.battery_level,
-                    email = EXCLUDED.email
+                    email = EXCLUDED.email,
+                    updated_at = NOW()
                 """,
                 (
                     data.mac,
@@ -126,6 +127,36 @@ def add_module():
                 f"**Battery:** {data.battery}%"
             )
             return jsonify({"message": "Module added successfully", "id": data.mac})
+        except Exception as e:
+            con.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            con.close()
+
+
+@modules_bp.delete("/modules/<module_id>")
+def delete_module(module_id):
+    """Delete a module and all its related data (nests, progress, images)."""
+    with lock:
+        con = get_conn()
+        try:
+            # Check module exists
+            existing = con.execute(
+                "SELECT id FROM module_configs WHERE id = ?", (module_id,)
+            ).fetchone()
+            if not existing:
+                return jsonify({"error": "Module not found"}), 404
+
+            # Delete in order: progress -> nests -> images -> module
+            con.execute(
+                "DELETE FROM daily_progress WHERE nest_id IN (SELECT nest_id FROM nest_data WHERE module_id = ?)",
+                (module_id,),
+            )
+            con.execute("DELETE FROM nest_data WHERE module_id = ?", (module_id,))
+            con.execute("DELETE FROM image_uploads WHERE module_id = ?", (module_id,))
+            con.execute("DELETE FROM module_configs WHERE id = ?", (module_id,))
+            con.commit()
+            return jsonify({"message": f"Module {module_id} deleted"}), 200
         except Exception as e:
             con.rollback()
             return jsonify({"error": str(e)}), 500
@@ -236,7 +267,7 @@ def get_modules():
             FROM module_configs m
             LEFT JOIN image_uploads i ON m.id = i.module_id
             GROUP BY m.id, m.name, m.lat, m.lng, m.status, m.first_online,
-                     m.battery_level, m.image_count, m.email
+                     m.battery_level, m.image_count, m.email, m.updated_at
             """
         )
         cols = [d[0] for d in cur.description]

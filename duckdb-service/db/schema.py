@@ -17,7 +17,8 @@ def init_db():
                 first_online DATE NOT NULL,
                 battery_level INTEGER,
                 image_count INTEGER NOT NULL DEFAULT 0,
-                email VARCHAR(255)
+                email VARCHAR(255),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS nest_data (
@@ -53,6 +54,12 @@ def init_db():
         # Add email column to existing databases
         try:
             con.execute("ALTER TABLE module_configs ADD COLUMN email VARCHAR(255)")
+        except Exception:
+            pass  # column already exists
+
+        # Add updated_at column to existing databases
+        try:
+            con.execute("ALTER TABLE module_configs ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         except Exception:
             pass  # column already exists
 

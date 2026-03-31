@@ -69,12 +69,16 @@ export function useSetupWizard() {
   const lanIpRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
-  const knownModuleIdsRef = useRef<Set<string>>(new Set());
+  const knownModuleSnapshotRef = useRef<Map<string, string | undefined>>(new Map());
 
-  // Load firmware info and detect LAN IP on mount
+  // Load firmware info, detect LAN IP, and snapshot modules on mount.
+  // The module snapshot must be taken NOW (before the user configures the ESP)
+  // so that when the ESP later calls /new_module, we can detect the changed
+  // updated_at in the verification poll.
   useEffect(() => {
     loadFirmware();
     detectLanIp();
+    snapshotModules();
   }, []);
 
   // Cleanup polling on unmount
@@ -83,6 +87,20 @@ export function useSetupWizard() {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     };
   }, []);
+
+  const snapshotModules = async () => {
+    try {
+      const existing = await api.getAllModules();
+      knownModuleSnapshotRef.current = new Map(
+        existing.map((m: Module) => [m.id, m.updatedAt])
+      );
+      console.log('[SetupWizard] Module snapshot taken on mount:', [...knownModuleSnapshotRef.current.keys()]);
+    } catch {
+      // Backend might not be reachable yet (user on ESP AP) — that's fine,
+      // startVerification will take a fallback snapshot.
+      console.log('[SetupWizard] Could not snapshot modules on mount (backend unreachable)');
+    }
+  };
 
   const detectLanIp = async () => {
     try {
@@ -210,13 +228,22 @@ export function useSetupWizard() {
   const startVerification = useCallback(async () => {
     console.log('[Step5] Starting verification, looking for any new module');
 
-    // Snapshot existing module IDs so we can detect new ones
-    try {
-      const existing = await api.getAllModules();
-      knownModuleIdsRef.current = new Set(existing.map((m: Module) => m.id));
-      console.log('[Step5] Known module IDs:', [...knownModuleIdsRef.current]);
-    } catch {
-      knownModuleIdsRef.current = new Set();
+    // Use the snapshot taken on wizard mount so we detect any module that
+    // registered/re-registered since the user opened the setup wizard.
+    // Only take a fresh snapshot as fallback if the mount snapshot failed
+    // (e.g., backend was unreachable when the wizard first opened).
+    if (knownModuleSnapshotRef.current.size === 0) {
+      try {
+        const existing = await api.getAllModules();
+        knownModuleSnapshotRef.current = new Map(
+          existing.map((m: Module) => [m.id, m.updatedAt])
+        );
+        console.log('[Step5] Fallback snapshot:', [...knownModuleSnapshotRef.current.keys()]);
+      } catch {
+        knownModuleSnapshotRef.current = new Map();
+      }
+    } else {
+      console.log('[Step5] Using mount snapshot:', [...knownModuleSnapshotRef.current.keys()]);
     }
 
     setState(s => ({
@@ -242,13 +269,15 @@ export function useSetupWizard() {
 
       try {
         const modules = await api.getAllModules();
-        const newModule = modules.find(
-          (m: Module) => !knownModuleIdsRef.current.has(m.id)
-        );
-        if (newModule) {
-          console.log('[Step5] New module detected:', newModule);
+        const detectedModule = modules.find((m: Module) => {
+          const prevTimestamp = knownModuleSnapshotRef.current.get(m.id);
+          // New module (ID not in snapshot) OR re-registered (updatedAt changed)
+          return prevTimestamp === undefined || m.updatedAt !== prevTimestamp;
+        });
+        if (detectedModule) {
+          console.log('[Step5] New or updated module detected:', detectedModule);
           stopVerification();
-          setState(s => ({ ...s, detectedModule: newModule }));
+          setState(s => ({ ...s, detectedModule }));
         }
       } catch (err) {
         console.error('[Step5] Poll error:', err);

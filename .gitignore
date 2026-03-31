@@ -200,6 +200,8 @@ secrets.h
 # Configuration files - server-specific
 .env
 .env.local
+.env.production
+*.env.production
 ecosystem.config.js
 
 # Build outputs
@@ -207,6 +209,13 @@ backend/dist/
 homepage/dist/
 backend/coverage/
 backend/node_modules/
+
+# Firmware binaries
+*.bin
+
+# Runtime data — NEVER push to remote
+image-service/data/
+duckdb-service/data/
 
 .DS_Store
 

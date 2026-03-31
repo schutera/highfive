@@ -14,6 +14,7 @@ export interface Module {
   totalHatches: number;
   imageCount: number;
   email: string | null;
+  updatedAt?: string;
 }
 
 export interface NestData {
@@ -77,6 +78,16 @@ class ApiService {
       throw new Error(`Failed to fetch module ${id}`);
     }
     return response.json();
+  }
+
+  async deleteModule(id: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/modules/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to delete module ${id}`);
+    }
   }
 
   async updateModuleStatus(id: string, status: 'online' | 'offline'): Promise<void> {

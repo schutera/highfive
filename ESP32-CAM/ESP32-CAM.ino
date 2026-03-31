@@ -85,17 +85,16 @@ void setup() {
   }
 
   /*
-    initialization of ESP + cam
+    WiFi + network operations BEFORE camera init.
+    Camera and WiFi share DMA channels / PSRAM on ESP32 —
+    initializing the camera first and then doing heavy RF work
+    corrupts the camera's DMA buffers, causing esp_camera_fb_get() to return NULL.
   */
   initEspPinout();
-  initEspCamera(esp_config.RESOLUTION);
-  configure_camera_sensor(&esp_config);
 
   Serial.printf("[ESP] CONFIGURING WIFI CONNECTION TO %s\n", esp_config.wifi_config.SSID);
   setupWifiConnection(&esp_config.wifi_config);
 
-
-  // GEOLOCATION [TEST]
   getGeolocation(&esp_config);
 
   Serial.print("Latitude: ");
@@ -110,12 +109,27 @@ void setup() {
   // ---- Initialize new module on server ---- //
   initNewModuleOnServer(&esp_config);
 
-  Serial.println("[ESP] SETUP COMPLETE");
+  /*
+    Camera init AFTER all WiFi/network operations to avoid DMA conflicts
+  */
+  Serial.println("[ESP] INITIALIZING CAMERA");
+  initEspCamera(esp_config.RESOLUTION);
+  configure_camera_sensor(&esp_config);
 
-  // Flush stale frame buffer accumulated during WiFi/geolocation operations
-  camera_fb_t *stale = esp_camera_fb_get();
-  if (stale) esp_camera_fb_return(stale);
-  delay(1000); // Let camera sensor stabilize after RF operations
+  // Warm up: sensor needs a few frames to auto-expose before producing valid JPEGs
+  Serial.println("-- warming up camera sensor");
+  for (int i = 0; i < 3; i++) {
+    delay(500);
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (fb) {
+      esp_camera_fb_return(fb);
+      Serial.printf("---- warm-up frame %d OK (%u bytes)\n", i + 1, fb->len);
+    } else {
+      Serial.printf("---- warm-up frame %d skipped (NULL)\n", i + 1);
+    }
+  }
+
+  Serial.println("[ESP] SETUP COMPLETE");
 
   Serial.println("");
   Serial.println("---------------------");

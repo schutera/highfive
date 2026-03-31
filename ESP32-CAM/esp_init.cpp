@@ -101,8 +101,11 @@ void initEspCamera(framesize_t resolution) {
 
   if (psramFound()) {
     config.jpeg_quality = 10;
-    config.fb_count = 2;
-    config.grab_mode = CAMERA_GRAB_LATEST;
+    // Single buffer + GRAB_WHEN_EMPTY: camera captures one frame then waits.
+    // GRAB_LATEST + fb_count=2 is for streaming — with infrequent captures
+    // (boot + daily) the unused buffers overflow (FB-OVF) and the driver stalls.
+    config.fb_count = 1;
+    config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   } else {
     // this is just a fallback... don't know if the psram will ever not be found
     Serial.println("---- PSRAM not found. Image quality will be reduced.");
@@ -261,7 +264,7 @@ bool loadConfig(esp_config_t *esp_config) {
   esp_config->email[0] = '\0';
 
   /* DEFAULTS */
-  esp_config->RESOLUTION = FRAMESIZE_VGA;
+  esp_config->RESOLUTION = FRAMESIZE_UXGA;
   esp_config->CAPTURE_INTERVAL = 86400000; // 24 hours (used as fallback)
   esp_config->vertical_flip = 1;
   esp_config->brightness = 1;

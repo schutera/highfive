@@ -226,38 +226,45 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<h1>HiveHive Module Setup</h1>");
   client.println("<p class=\"subtitle\">Configure your module to get started.</p>");
 
-  if (saved) {
-    client.println("<div class=\"message\">Configuration saved! The module will now restart and connect to your WiFi.</div>");
-  }
-
   String moduleName = generateModuleName();
-  client.println("<div class=\"message\" style=\"background:#f0f9ff;color:#1e3a5f;\">");
-  client.println("Your module name: <strong>" + moduleName + "</strong>");
-  client.println("</div>");
 
-  client.println("<form action=\"/save\" method=\"POST\" autocomplete=\"off\" onsubmit=\"validateForm(event)\">");
-  client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
+  if (saved) {
+    client.println("<div style=\"text-align:center;\">");
+    client.println("<div style=\"width:64px;height:64px;border-radius:50%;background:#dcfce7;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;\">&#10003;</div>");
+    client.println("<h2 style=\"margin:0 0 8px;\">Configuration saved!</h2>");
+    client.println("<p style=\"color:var(--muted);margin:0 0 20px;\">Module <strong>" + moduleName + "</strong> is restarting and connecting to your WiFi.</p>");
+    client.println("<div class=\"message\">You can close this tab now and go back to the setup page to continue.</div>");
+    client.println("</div>");
+    client.println("</div></div></body></html>");
+  } else {
+    client.println("<div class=\"message\" style=\"background:#f0f9ff;color:#1e3a5f;\">");
+    client.println("Your module name: <strong>" + moduleName + "</strong>");
+    client.println("</div>");
 
-  client.println("<div class=\"field\">");
-  client.println("<label>WiFi Network</label>");
-  client.println("<input type=\"text\" name=\"ssid\" placeholder=\"Your WiFi name\" value=\"" + cfg_ssid + "\">");
-  client.println("</div>");
+    client.println("<form action=\"/save\" method=\"POST\" autocomplete=\"off\" onsubmit=\"validateForm(event)\">");
+    client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
 
-  client.println("<div class=\"field\">");
-  client.println("<label>WiFi Password</label>");
-  client.println("<input type=\"password\" name=\"password\" placeholder=\"Your WiFi password\" value=\"" + cfg_password + "\">");
-  client.println("</div>");
+    client.println("<div class=\"field\">");
+    client.println("<label>WiFi Network</label>");
+    client.println("<input type=\"text\" name=\"ssid\" placeholder=\"Your WiFi name\" value=\"" + cfg_ssid + "\">");
+    client.println("</div>");
 
-  client.println("<div class=\"field\">");
-  client.println("<label>Email <span style=\"font-weight:400;color:var(--muted)\">(optional)</span></label>");
-  client.println("<input type=\"email\" name=\"email\" placeholder=\"you@example.com\" value=\"" + cfg_email + "\">");
-  client.println("<div class=\"description\">Share your email so we can reach you with updates.</div>");
-  client.println("</div>");
+    client.println("<div class=\"field\">");
+    client.println("<label>WiFi Password</label>");
+    client.println("<input type=\"password\" name=\"password\" placeholder=\"Your WiFi password\" value=\"" + cfg_password + "\">");
+    client.println("</div>");
 
-  client.println("<button type=\"submit\">Save &amp; Connect</button>");
-  client.println("<div id=\"errorText\" class=\"error-message\">Please fill in all fields.</div>");
+    client.println("<div class=\"field\">");
+    client.println("<label>Email <span style=\"font-weight:400;color:var(--muted)\">(optional)</span></label>");
+    client.println("<input type=\"email\" name=\"email\" placeholder=\"you@example.com\" value=\"" + cfg_email + "\">");
+    client.println("<div class=\"description\">Share your email so we can reach you with updates.</div>");
+    client.println("</div>");
 
-  client.println("</form></div></div></body></html>");
+    client.println("<button type=\"submit\">Save &amp; Connect</button>");
+    client.println("<div id=\"errorText\" class=\"error-message\">Please fill in all fields.</div>");
+
+    client.println("</form></div></div></body></html>");
+  }
   client.println();
 }
 

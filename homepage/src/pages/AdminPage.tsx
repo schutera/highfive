@@ -118,6 +118,17 @@ export default function AdminPage() {
     return mod ? mod.name : moduleId;
   };
 
+  const handleDeleteModule = async (mod: Module) => {
+    if (!confirm(`Delete module "${mod.name}" (${mod.id}) and all its data?`)) return;
+    try {
+      await api.deleteModule(mod.id);
+      setModules(prev => prev.filter(m => m.id !== mod.id));
+      if (selectedModule === mod.id) setSelectedModule('');
+    } catch (err) {
+      console.error('Failed to delete module:', err);
+    }
+  };
+
   const handleDelete = async (img: ImageUpload) => {
     if (!confirm(`Delete ${img.filename}?`)) return;
     try {
@@ -186,6 +197,7 @@ export default function AdminPage() {
                     <th className="px-4 py-3">Images</th>
                     <th className="px-4 py-3">First Online</th>
                     <th className="px-4 py-3">Last Image</th>
+                    <th className="px-4 py-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -208,6 +220,17 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-gray-600">{m.imageCount}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{m.firstOnline || <span className="text-gray-300">&mdash;</span>}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{m.lastApiCall ? formatDate(m.lastApiCall) : <span className="text-gray-300">&mdash;</span>}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteModule(m); }}
+                          className="text-red-400 hover:text-red-600 transition-colors"
+                          title="Delete module"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

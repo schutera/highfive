@@ -3,6 +3,7 @@ import cors from 'cors';
 import { db } from './database';
 import { setupSwagger } from './swagger';
 import { apiKeyAuth } from './auth';
+import { DUCKDB_URL } from './duckdbClient';
 
 const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://127.0.0.1:4444';
 
@@ -26,6 +27,23 @@ setupSwagger(app);
 // Health check (public, no auth required)
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Serve images without auth — <img> tags cannot send custom headers
+app.get('/api/images/:filename', async (req, res) => {
+  try {
+    const response = await fetch(`${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`);
+    if (!response.ok) {
+      res.status(response.status).json({ error: 'Image not found' });
+      return;
+    }
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.send(buffer);
+  } catch (error) {
+    res.status(502).json({ error: 'Failed to fetch image from image service' });
+  }
 });
 
 // Apply API key authentication to all other /api routes
@@ -86,19 +104,16 @@ app.delete('/api/images/:filename', async (req, res) => {
   }
 });
 
-app.get('/api/images/:filename', async (req, res) => {
+app.delete('/api/modules/:id', async (req, res) => {
   try {
-    const response = await fetch(`${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`);
-    if (!response.ok) {
-      res.status(response.status).json({ error: 'Image not found' });
-      return;
-    }
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    res.setHeader('Content-Type', contentType);
-    const buffer = Buffer.from(await response.arrayBuffer());
-    res.send(buffer);
+    const response = await fetch(`${DUCKDB_URL}/modules/${encodeURIComponent(req.params.id)}`, {
+      method: 'DELETE',
+    });
+    const data = await response.json();
+    if (response.ok) await db.refresh();
+    res.status(response.status).json(data);
   } catch (error) {
-    res.status(502).json({ error: 'Failed to fetch image from image service' });
+    res.status(502).json({ error: 'Failed to delete module' });
   }
 });
 

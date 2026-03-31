@@ -13,6 +13,7 @@ interface ApiModule {
   real_image_count: number;
   last_image_at: string | null;
   email: string | null;
+  updated_at: string | null;
 }
 
 interface ApiNestResponse {
@@ -118,14 +119,15 @@ export class ModuleCache {
 
     // ---- 3) Module bauen ----
     modulesData.modules.forEach((m: any) => {
-      const firstOnlineDate = new Date(m.first_online);
       const now = new Date();
-      const isOnline =
-        now.getTime() - firstOnlineDate.getTime() <= 24 * 60 * 60 * 1000;
+      // A module is online if it uploaded an image in the last 24 hours
+      const isOnline = m.last_image_at
+        ? now.getTime() - new Date(m.last_image_at).getTime() <= 24 * 60 * 60 * 1000
+        : false;
 
       // first_online is a DATE column (no time), pass the date portion only
       const firstOnlineStr = m.first_online
-        ? firstOnlineDate.toISOString().split('T')[0]
+        ? new Date(m.first_online).toISOString().split('T')[0]
         : null;
 
       const module: ModuleDetail = {
@@ -142,6 +144,7 @@ export class ModuleCache {
         totalHatches: 0,
         imageCount: m.real_image_count ?? m.image_count ?? 0,
         email: m.email ?? null,
+        updatedAt: m.updated_at ?? undefined,
         nests: nestsByModule.get(m.id) || [],
       };
 
@@ -173,6 +176,7 @@ export class ModuleCache {
         totalHatches,
         imageCount: m.imageCount,
         email: m.email,
+        updatedAt: m.updatedAt,
       };
     });
   }

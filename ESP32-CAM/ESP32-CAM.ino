@@ -2,11 +2,19 @@
 #include "esp_init.h"
 #include "host.h"
 #include "client.h"
+#include "logbuf.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
+#include <esp_task_wdt.h>
+#include <esp_system.h>
 
 
 #define CONFIG_BUTTON 0
+
+// Reliability knobs
+#define TASK_WDT_TIMEOUT_S      30
+#define DAILY_REBOOT_MS         (24UL * 60UL * 60UL * 1000UL)
+#define WIFI_FAIL_REBOOT_THRESH 5
 
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
@@ -15,6 +23,9 @@ int counter = 0;
 // CONFIG button params
 unsigned long pressStart = 0;
 bool pressed = false;
+
+// Reliability state
+uint8_t wifi_fail_streak = 0;
 
 
 
@@ -36,6 +47,16 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println();
   delay(200);
+
+  // Telemetry: ring buffer + boot marker with reset reason
+  logbufInit();
+  uint32_t boot_count = incrementBootCount();
+  logf("[BOOT] fw=%s reset_reason=%d boot_count=%u free_heap=%u",
+       FIRMWARE_VERSION, (int)esp_reset_reason(), boot_count, ESP.getFreeHeap());
+
+  // Task watchdog — if loop() hangs for >TASK_WDT_TIMEOUT_S, reboot
+  esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
+  esp_task_wdt_add(NULL);
 
   Serial.println("------ ESP STARTED ------");
 
@@ -104,6 +125,14 @@ void setup() {
 
 
 void loop() {
+  esp_task_wdt_reset();
+
+  // Belt-and-braces daily reboot keeps the device healthy long-term
+  if (millis() > DAILY_REBOOT_MS) {
+    logf("[REBOOT] daily refresh after %lu ms", (unsigned long)millis());
+    delay(500);
+    ESP.restart();
+  }
 
   if (digitalRead(CONFIG_BUTTON) == LOW) {
     if (!pressed) {
@@ -120,6 +149,19 @@ void loop() {
   } else {
       pressed = false;
   }
+
+  // WiFi watchdog — recover from router reboots, DHCP lease expiry, etc.
+  if (!reconnectWifi(&esp_config.wifi_config)) {
+    wifi_fail_streak++;
+    if (wifi_fail_streak >= WIFI_FAIL_REBOOT_THRESH) {
+      logf("[WIFI] %u consecutive reconnect failures — restarting", wifi_fail_streak);
+      delay(500);
+      ESP.restart();
+    }
+    delay(5000);
+    return;
+  }
+  wifi_fail_streak = 0;
 
   Serial.println("");
   Serial.printf("-- Trying to capture and post image number %d\n", counter++);

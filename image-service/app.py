@@ -1,6 +1,8 @@
 import os
 import time
 import random
+import json
+import glob
 from datetime import datetime
 from flask import Flask, jsonify, request
 import duckdb
@@ -104,6 +106,23 @@ def upload_image():
     file_path = os.path.join(UPLOAD_FOLDER, image.filename)
     image.save(file_path)
 
+    # Persist optional ESP telemetry beside the image
+    logs_raw = request.form.get("logs")
+    if logs_raw:
+        try:
+            # Parse so the sidecar is valid JSON even if ESP sends garbage
+            logs_obj = json.loads(logs_raw)
+        except ValueError:
+            logs_obj = {"raw": logs_raw, "parse_error": True}
+        logs_obj["_mac"] = mac
+        logs_obj["_received_at"] = datetime.now().isoformat(timespec="seconds")
+        logs_obj["_image"] = image.filename
+        try:
+            with open(file_path + ".log.json", "w", encoding="utf-8") as f:
+                json.dump(logs_obj, f, ensure_ascii=False)
+        except OSError as exc:
+            print(f"[logs] failed to write sidecar for {image.filename}: {exc}")
+
     # Run classification stub (replace with MaskRCNN later)
     classification = stub_classify()
 
@@ -129,6 +148,38 @@ def upload_image():
         "battery": battery,
         "classification": classification,
     }), 200
+
+
+@app.get("/modules/<mac>/logs")
+def get_module_logs(mac: str):
+    """
+    Returns the most recent ESP telemetry entries for a module, newest-first.
+    Reads the .log.json sidecar files written by /upload.
+    """
+    try:
+        limit = int(request.args.get("limit", 10))
+    except ValueError:
+        limit = 10
+    limit = max(1, min(limit, 100))
+
+    pattern = os.path.join(UPLOAD_FOLDER, "*.log.json")
+    entries = []
+    for path in glob.glob(pattern):
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if str(data.get("_mac")) != str(mac):
+            continue
+        entries.append((st.st_mtime, data))
+
+    entries.sort(key=lambda t: t[0], reverse=True)
+    return jsonify([e[1] for e in entries[:limit]]), 200
 
 
 if __name__ == "__main__":

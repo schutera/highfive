@@ -1,6 +1,7 @@
 #include "esp_camera.h"
 #include "esp_wifi.h"
 #include "esp_init.h"
+#include "logbuf.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <FS.h>
@@ -72,6 +73,14 @@ void setESPConfigured(bool value) {
     preferences.end();
 }
 
+uint32_t incrementBootCount() {
+    preferences.begin("telemetry", false);
+    uint32_t count = preferences.getUInt("boot_count", 0) + 1;
+    preferences.putUInt("boot_count", count);
+    preferences.end();
+    return count;
+}
+
 
 /* -------------------------------- */
 /* ---------- CAMERA SETUP ---------- */
@@ -115,8 +124,9 @@ void initEspCamera(framesize_t resolution) {
   Serial.println("-- initializing ESP camera");
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("---- camera init failed: 0x%x\n", err);
-    while (true) delay(1000);
+    logf("[CAM] init failed: 0x%x — restarting in 3s", err);
+    delay(3000);
+    ESP.restart();
   } else {
     initialized = 1;
     Serial.println("---- camera initialized");
@@ -181,26 +191,60 @@ void tuneWifiForLatency() {
 }
 
 void setupWifiConnection(wifi_configuration_t *wifi_config) {
-  
+
   Serial.printf("connect to SSID: %s with pw: %s\n", wifi_config->SSID, wifi_config->PASSWORD);
   Serial.printf("SSID length: %d\n", strlen(wifi_config->SSID));
   Serial.printf("PW length: %d\n", strlen(wifi_config->PASSWORD));
-  
-  //tuneWifiForLatency();
 
   WiFi.disconnect();
   delay(100);
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
-  //WiFi.begin("Vodafone-CAKE", "tYsjat-gakke8-kephaw");
-  Serial.printf("---- connecting to %s with pw %s\n", wifi_config->SSID, wifi_config->PASSWORD);
+
+  const uint32_t WIFI_INITIAL_TIMEOUT_MS = 30000;
+  uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - start > WIFI_INITIAL_TIMEOUT_MS) {
+      logf("[WIFI] initial connect timed out — restarting");
+      delay(1000);
+      ESP.restart();
+    }
     delay(500);
     Serial.print(".");
   }
   Serial.printf("\n---- Connected. IP: %s\n", WiFi.localIP().toString().c_str());
 
   setupTime();
+}
+
+/*
+  Non-blocking reconnect attempt used from loop(). Returns true if
+  WiFi is connected after the call. If disconnected, kicks off a
+  reconnect and waits up to RECONNECT_WAIT_MS for it to come up.
+  Caller is expected to restart the device if this keeps failing.
+*/
+bool reconnectWifi(wifi_configuration_t *wifi_config) {
+  if (WiFi.status() == WL_CONNECTED) return true;
+
+  logf("[WIFI] disconnected — attempting reconnect");
+  logbufNoteWifiReconnect();
+
+  WiFi.disconnect();
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
+
+  const uint32_t RECONNECT_WAIT_MS = 15000;
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - start > RECONNECT_WAIT_MS) {
+      logf("[WIFI] reconnect failed after %u ms", RECONNECT_WAIT_MS);
+      return false;
+    }
+    delay(500);
+  }
+  logf("[WIFI] reconnected. IP: %s", WiFi.localIP().toString().c_str());
+  return true;
 }
 
 /* -------------------------------- */

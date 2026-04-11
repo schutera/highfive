@@ -31,6 +31,20 @@ export interface ModuleDetail extends Module {
   nests: NestData[];
 }
 
+export interface TelemetryEntry {
+  fw?: string;
+  uptime_s?: number;
+  last_reset_reason?: string;
+  free_heap?: number;
+  min_free_heap?: number;
+  rssi?: number;
+  wifi_reconnects?: number;
+  last_http_codes?: number[];
+  log?: string;
+  _received_at?: string;
+  _image?: string;
+}
+
 // API key for authentication - in production, this should come from environment variables
 const API_KEY = import.meta.env.VITE_API_KEY || 'hf_dev_key_2026';
 
@@ -67,6 +81,16 @@ class ApiService {
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch module ${id}`);
+    }
+    return response.json();
+  }
+
+  async getModuleLogs(id: string, limit: number = 10): Promise<TelemetryEntry[]> {
+    const response = await fetch(`${this.baseUrl}/modules/${id}/logs?limit=${limit}`, {
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch logs for module ${id}`);
     }
     return response.json();
   }

@@ -1,5 +1,6 @@
 #include "esp_camera.h"
 #include "client.h"
+#include "logbuf.h"
 #include <time.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -115,8 +116,11 @@ int postImage(esp_config_t *esp_config) {
   // for now the battery percentage is randomized!
   esp_config->battery_level = random(1, 100);
   int battery_level = esp_config->battery_level;
-    
+
   String macStr = String(esp_config->esp_ID);
+
+  // Telemetry payload piggybacked on the upload
+  String telemetry = buildTelemetryJson();
 
   // --- build multipart/form-data ---
   String head =
@@ -127,6 +131,11 @@ int postImage(esp_config_t *esp_config) {
       "--" + boundary + "\r\n"
       "Content-Disposition: form-data; name=\"battery\"\r\n\r\n" +
       String(battery_level) + "\r\n" +
+
+      "--" + boundary + "\r\n"
+      "Content-Disposition: form-data; name=\"logs\"\r\n"
+      "Content-Type: application/json\r\n\r\n" +
+      telemetry + "\r\n" +
 
       "--" + boundary + "\r\n"
       "Content-Disposition: form-data; name=\"image\"; filename=\"" + filename + "\"\r\n"
@@ -156,8 +165,10 @@ int postImage(esp_config_t *esp_config) {
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
     if (!client.connect(url.host.c_str(), url.port)) {
-      Serial.println("[!client.connect(xxx)]");
+      logf("[HTTP] connect failed to %s:%u", url.host.c_str(), url.port);
+      client.stop();
       esp_camera_fb_return(fb);
+      logbufNoteHttpCode(-2);
       return -2;
     }
   }
@@ -175,14 +186,15 @@ int postImage(esp_config_t *esp_config) {
   while (sent < fb->len) {
     size_t chunk = client.write(fb->buf + sent, min((size_t)16384, fb->len - sent));
     if (chunk == 0) {
+      logf("[HTTP] body write failed at %u/%u bytes", (unsigned)sent, (unsigned)fb->len);
       client.stop();
       esp_camera_fb_return(fb);
+      logbufNoteHttpCode(-3);
       return -3;
     }
     sent += chunk;
   }
   client.write((uint8_t*)tail.c_str(), tail.length());
-  //client.print(tail);
 
   // Read HTTP response
   String status = client.readStringUntil('\n');
@@ -210,7 +222,11 @@ int postImage(esp_config_t *esp_config) {
   if (status.startsWith("HTTP/1.1 ")) {
     code = status.substring(9, 12).toInt();
   }
-  if (code < 200 || code >= 300) client.stop();
+  logbufNoteHttpCode(code);
+  if (code < 200 || code >= 300) {
+    logf("[HTTP] non-2xx %d — dropping socket", code);
+    client.stop();
+  }
 
   esp_camera_fb_return(fb);
   unsigned long __t_all_end = millis();

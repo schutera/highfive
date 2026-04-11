@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, ModuleDetail } from '../services/api';
+import { api, ModuleDetail, TelemetryEntry } from '../services/api';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 
@@ -15,8 +15,16 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [logs, setLogs] = useState<TelemetryEntry[] | null>(null);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+
   useEffect(() => {
     loadModuleDetail();
+    setLogs(null);
+    setLogsOpen(false);
+    setLogsError(null);
   }, [module.id]);
 
   const loadModuleDetail = async () => {
@@ -32,6 +40,28 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       onError(errorMsg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadLogs = async () => {
+    try {
+      setLogsLoading(true);
+      setLogsError(null);
+      const data = await api.getModuleLogs(module.id, 10);
+      setLogs(data);
+    } catch (err) {
+      console.error('Error loading telemetry:', err);
+      setLogsError('Failed to load telemetry');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const toggleLogs = () => {
+    const next = !logsOpen;
+    setLogsOpen(next);
+    if (next && logs === null && !logsLoading) {
+      loadLogs();
     }
   };
 
@@ -129,6 +159,57 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
+        {/* Telemetry / Logs — admin view */}
+        <div className="mb-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <button
+            onClick={toggleLogs}
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 active:bg-gray-100 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2a4 4 0 014-4h4m0 0l-3-3m3 3l-3 3M3 7h6a2 2 0 012 2v10a2 2 0 01-2 2H3" />
+              </svg>
+              <span className="font-semibold text-sm text-gray-800">Telemetry</span>
+              {logs && logs.length > 0 && (
+                <span className="text-xs text-gray-500">({logs.length})</span>
+              )}
+            </div>
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform ${logsOpen ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {logsOpen && (
+            <div className="border-t border-gray-100 p-3 space-y-3 bg-gray-50">
+              {logsLoading && (
+                <div className="text-xs text-gray-500">Loading telemetry…</div>
+              )}
+              {logsError && (
+                <div className="text-xs text-red-600">{logsError}</div>
+              )}
+              {!logsLoading && !logsError && logs && logs.length === 0 && (
+                <div className="text-xs text-gray-500">No telemetry yet. Logs arrive with each uploaded image.</div>
+              )}
+              {!logsLoading && logs && logs.map((entry, i) => (
+                <TelemetryRow key={i} entry={entry} />
+              ))}
+              {logs && logs.length > 0 && (
+                <button
+                  onClick={loadLogs}
+                  className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                >
+                  Refresh
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Species Cards - Responsive grid on larger mobile, stack on small */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-1 gap-3 md:gap-4">
           {beeTypeSummaries.map((summary) => (
@@ -182,4 +263,55 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       </div>
     </div>
   );
+}
+
+function TelemetryRow({ entry }: { entry: TelemetryEntry }) {
+  const uptime = typeof entry.uptime_s === 'number' ? formatUptime(entry.uptime_s) : '—';
+  const heap = typeof entry.free_heap === 'number' ? `${Math.round(entry.free_heap / 1024)} KB` : '—';
+  const rssi = typeof entry.rssi === 'number' ? `${entry.rssi} dBm` : '—';
+  const received = entry._received_at || '';
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-2.5 text-xs">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-mono text-gray-700">{received}</span>
+        {entry.fw && <span className="text-gray-400">fw {entry.fw}</span>}
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-gray-600">
+        <div><span className="text-gray-400">uptime</span> {uptime}</div>
+        <div><span className="text-gray-400">heap</span> {heap}</div>
+        <div><span className="text-gray-400">rssi</span> {rssi}</div>
+        <div><span className="text-gray-400">reset</span> {entry.last_reset_reason || '—'}</div>
+        {typeof entry.wifi_reconnects === 'number' && (
+          <div><span className="text-gray-400">reconnects</span> {entry.wifi_reconnects}</div>
+        )}
+        {entry.last_http_codes && entry.last_http_codes.length > 0 && (
+          <div className="col-span-2">
+            <span className="text-gray-400">http</span> {entry.last_http_codes.join(', ')}
+          </div>
+        )}
+      </div>
+      {entry.log && (
+        <details className="mt-1.5">
+          <summary className="text-gray-400 cursor-pointer hover:text-gray-600">log</summary>
+          <pre className="mt-1 text-[10px] font-mono whitespace-pre-wrap text-gray-600 bg-gray-50 p-2 rounded max-h-40 overflow-y-auto">
+            {entry.log}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  if (seconds < 86400) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return `${h}h ${m}m`;
+  }
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  return `${d}d ${h}h`;
 }

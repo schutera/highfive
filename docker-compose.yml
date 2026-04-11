@@ -8,6 +8,7 @@ services:
     environment:
       NODE_ENV: development
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
+      IMAGE_SERVICE_URL: http://image-service:4444
     volumes:
       - ./backend:/app
       - /app/node_modules

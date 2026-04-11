@@ -47,6 +47,24 @@ app.get('/api/modules/:id', async (req, res) => {
   }
 });
 
+const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL || 'http://image-service:4444';
+
+app.get('/api/modules/:id/logs', async (req, res) => {
+  try {
+    const limit = req.query.limit ? `?limit=${encodeURIComponent(String(req.query.limit))}` : '';
+    const url = `${IMAGE_SERVICE_URL}/modules/${encodeURIComponent(req.params.id)}/logs${limit}`;
+    const upstream = await fetch(url);
+    if (!upstream.ok) {
+      res.status(upstream.status).json({ error: 'Failed to fetch module logs' });
+      return;
+    }
+    const payload = await upstream.json();
+    res.json(payload);
+  } catch (error) {
+    res.status(502).json({ error: 'image-service unreachable' });
+  }
+});
+
 app.patch('/api/modules/:id/status', async (req, res) => {
   try {
     const { status } = req.body;

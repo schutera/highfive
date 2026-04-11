@@ -3,6 +3,10 @@
 
 #include "esp_camera.h"
 
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "1.0.0"
+#endif
+
 
 typedef struct {
   char SSID[64];
@@ -48,5 +52,9 @@ void configure_camera_sensor(esp_config_t *esp_config);
 void setupWifiConnection(wifi_configuration_t *wifi_config);
 void getGeolocation(esp_config_t *esp_config);
 void initNewModuleOnServer(esp_config_t *esp_config);
+
+/* Telemetry: reset-reason + boot count persistence + WiFi recovery */
+uint32_t incrementBootCount();
+bool reconnectWifi(wifi_configuration_t *wifi_config);
 
 #endif

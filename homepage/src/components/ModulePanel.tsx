@@ -3,6 +3,19 @@ import { api, ModuleDetail, TelemetryEntry } from '../services/api';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 
+// Admin-only UI is unlocked by opening the dashboard with ?admin=1 in the URL.
+// The flag persists in sessionStorage so it survives navigation within the
+// session but is gone after the tab is closed.
+function isAdminMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('admin') === '1') {
+    sessionStorage.setItem('hf_admin', '1');
+    return true;
+  }
+  return sessionStorage.getItem('hf_admin') === '1';
+}
+
 interface ModulePanelProps {
   module: { id: string; name: string; status: 'online' | 'offline' };
   onClose: () => void;
@@ -19,6 +32,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   const [logsOpen, setLogsOpen] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
+  const adminMode = isAdminMode();
 
   useEffect(() => {
     loadModuleDetail();
@@ -159,7 +173,8 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {/* Telemetry / Logs — admin view */}
+        {/* Telemetry / Logs — admin view (unlock via ?admin=1) */}
+        {adminMode && (
         <div className="mb-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
           <button
             onClick={toggleLogs}
@@ -209,6 +224,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
             </div>
           )}
         </div>
+        )}
 
         {/* Species Cards - Responsive grid on larger mobile, stack on small */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-1 gap-3 md:gap-4">

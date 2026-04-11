@@ -28,6 +28,7 @@ First tagged release aimed at keeping deployed modules alive in the field and ma
 ### Admin view
 
 - **ModulePanel** (`homepage/src/components/ModulePanel.tsx`) has a new collapsible **Telemetry** section. Lazy-loads logs on expand, shows uptime, free heap, RSSI, reset reason, reconnect count, last HTTP codes, and an expandable raw log view per entry.
+- The Telemetry section is **hidden from the normal dashboard**. Unlock it by opening the dashboard with `?admin=1` in the URL — the flag is stored in `sessionStorage` (`hf_admin`) and clears when the tab closes.
 - `api.getModuleLogs(id, limit)` added to `homepage/src/services/api.ts`.
 - New `TelemetryEntry` TypeScript type.
 

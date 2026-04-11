@@ -127,12 +127,18 @@ If the ESP ever sends non-JSON, the sidecar still gets written as `{"raw": "..."
 
 ## Reading logs from the admin view
 
-1. Open the dashboard and click a module pin on the map.
-2. In the right-hand **Module Details** panel, expand the **Telemetry** section.
-3. The last ten uploads are shown newest-first, with uptime, free heap, WiFi RSSI, last reset reason, WiFi reconnect count, and the last eight HTTP response codes.
-4. Expand the **log** dropdown on any entry to see the raw circular-buffer contents from that boot session.
+The Telemetry section is **admin-only** and hidden from the normal dashboard. To unlock it:
+
+1. Open the dashboard with `?admin=1` in the URL, e.g. `https://highfive.example.com/dashboard?admin=1`.
+2. The admin flag is stored in `sessionStorage` under `hf_admin` and survives navigation within the tab; closing the tab clears it.
+3. Click a module pin on the map.
+4. In the right-hand **Module Details** panel, expand the **Telemetry** section.
+5. The last ten uploads are shown newest-first, with uptime, free heap, WiFi RSSI, last reset reason, WiFi reconnect count, and the last eight HTTP response codes.
+6. Expand the **log** dropdown on any entry to see the raw circular-buffer contents from that boot session.
 
 Reading the telemetry is a good first stop whenever a module looks unhealthy: a spike in `wifi_reconnects`, a low `min_free_heap`, or non-2xx `last_http_codes` will usually point at the problem immediately.
+
+> **Note:** The `?admin=1` flag is a soft UI gate, not a security boundary. Regular users won't stumble on the section, but anyone who knows the flag can still open it. The underlying `GET /api/modules/:id/logs` endpoint is protected by the existing `X-API-Key` middleware and returns the same data to anyone who can reach the backend. Tighten this to a dedicated admin key if you expose the dashboard publicly.
 
 ---
 

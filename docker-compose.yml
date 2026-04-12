@@ -5,10 +5,13 @@ services:
       dockerfile: Dockerfile.dev
     ports:
       - "3002:3002"
+    env_file:
+      - .env
     environment:
       NODE_ENV: development
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       IMAGE_SERVICE_URL: http://image-service:4444
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
     volumes:
       - ./backend:/app
       - /app/node_modules

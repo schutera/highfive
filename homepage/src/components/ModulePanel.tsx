@@ -57,7 +57,20 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
     }
   };
 
+  const ensureAdminKey = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    if (sessionStorage.getItem('hf_admin_key')) return true;
+    const entered = window.prompt('Enter admin key to view telemetry');
+    if (!entered) return false;
+    sessionStorage.setItem('hf_admin_key', entered);
+    return true;
+  };
+
   const loadLogs = async () => {
+    if (!ensureAdminKey()) {
+      setLogsError('Admin key required');
+      return;
+    }
     try {
       setLogsLoading(true);
       setLogsError(null);
@@ -65,7 +78,11 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       setLogs(data);
     } catch (err) {
       console.error('Error loading telemetry:', err);
-      setLogsError('Failed to load telemetry');
+      if (err instanceof Error && err.message === 'unauthorized') {
+        setLogsError('Invalid admin key — click Refresh to re-enter');
+      } else {
+        setLogsError('Failed to load telemetry');
+      }
     } finally {
       setLogsLoading(false);
     }

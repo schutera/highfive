@@ -32,6 +32,14 @@ First tagged release aimed at keeping deployed modules alive in the field and ma
 - `api.getModuleLogs(id, limit)` added to `homepage/src/services/api.ts`.
 - New `TelemetryEntry` TypeScript type.
 
+### Admin key (backend gate)
+
+- **`GET /api/modules/:id/logs`** now requires an `X-Admin-Key` header matching the `ADMIN_API_KEY` env var on top of the existing `X-API-Key` middleware. Fails closed with `503` if `ADMIN_API_KEY` is not configured.
+- **Frontend** prompts for the key via `window.prompt()` on first Telemetry open per tab, stores it in `sessionStorage['hf_admin_key']`, and sends it as `X-Admin-Key`. On 401/403 the key is cleared and re-requested. The key is never bundled into the public JS.
+- **docker-compose.yml** forwards `ADMIN_API_KEY` from the root `.env` to the backend service.
+- **Scope of the gate:** only the admin logs endpoint. ESPs post images to `image-service:/upload` directly — unaffected, zero changes to the data ingestion path.
+- **Deploy step:** set `ADMIN_API_KEY=<random-string>` in `.env` and recreate the backend container.
+
 ### Documentation
 
 - New `documentation/esp-reliability.md` — reliability strategy, telemetry schema, data-flow diagram, how to read logs from the admin view.

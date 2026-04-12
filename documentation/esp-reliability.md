@@ -138,7 +138,22 @@ The Telemetry section is **admin-only** and hidden from the normal dashboard. To
 
 Reading the telemetry is a good first stop whenever a module looks unhealthy: a spike in `wifi_reconnects`, a low `min_free_heap`, or non-2xx `last_http_codes` will usually point at the problem immediately.
 
-> **Note:** The `?admin=1` flag is a soft UI gate, not a security boundary. Regular users won't stumble on the section, but anyone who knows the flag can still open it. The underlying `GET /api/modules/:id/logs` endpoint is protected by the existing `X-API-Key` middleware and returns the same data to anyone who can reach the backend. Tighten this to a dedicated admin key if you expose the dashboard publicly.
+### Admin key (backend gate)
+
+On top of the `?admin=1` UI flag, the `GET /api/modules/:id/logs` endpoint is protected by a **separate admin key** layered over the existing `X-API-Key` middleware. The backend requires an `X-Admin-Key` header matching the `ADMIN_API_KEY` environment variable; if the env var is unset, the endpoint fails closed with `503 admin disabled`.
+
+**Deploy:**
+
+1. Generate a random key and put it in the repo root `.env`:
+   ```
+   ADMIN_API_KEY=replace-with-a-long-random-string
+   ```
+2. `docker compose up -d --force-recreate backend` — the `docker-compose.yml` forwards `ADMIN_API_KEY` to the backend service automatically.
+3. Only people you hand the key to can load telemetry. Everyone else gets a 403 even if they know the `?admin=1` flag.
+
+**Frontend UX:** the admin key is **never** bundled into the JS. The first time a user opens the Telemetry section in a tab, the page prompts for the key via `window.prompt()` and stores it in `sessionStorage['hf_admin_key']` (cleared on tab close). If the backend returns 401/403, the stored key is cleared and re-requested on the next Refresh.
+
+**Scope:** this gate only affects `GET /api/modules/:id/logs`. ESPs post images to `image-service:/upload` directly and are completely unaffected — the upload path has no admin requirement.
 
 ---
 

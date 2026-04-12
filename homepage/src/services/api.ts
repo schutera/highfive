@@ -86,9 +86,16 @@ class ApiService {
   }
 
   async getModuleLogs(id: string, limit: number = 10): Promise<TelemetryEntry[]> {
+    const adminKey = typeof window !== 'undefined' ? sessionStorage.getItem('hf_admin_key') : null;
+    const headers: Record<string, string> = { ...(this.getHeaders() as Record<string, string>) };
+    if (adminKey) headers['X-Admin-Key'] = adminKey;
     const response = await fetch(`${this.baseUrl}/modules/${id}/logs?limit=${limit}`, {
-      headers: this.getHeaders(),
+      headers,
     });
+    if (response.status === 401 || response.status === 403) {
+      if (typeof window !== 'undefined') sessionStorage.removeItem('hf_admin_key');
+      throw new Error('unauthorized');
+    }
     if (!response.ok) {
       throw new Error(`Failed to fetch logs for module ${id}`);
     }

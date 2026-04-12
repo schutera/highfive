@@ -140,18 +140,9 @@ Reading the telemetry is a good first stop whenever a module looks unhealthy: a 
 
 ### Admin key (backend gate)
 
-On top of the `?admin=1` UI flag, the `GET /api/modules/:id/logs` endpoint is protected by a **separate admin key** layered over the existing `X-API-Key` middleware. The backend requires an `X-Admin-Key` header matching the `ADMIN_API_KEY` environment variable; if the env var is unset, the endpoint fails closed with `503 admin disabled`.
+On top of the `?admin=1` UI flag, the `GET /api/modules/:id/logs` endpoint requires an `X-Admin-Key` header matching the existing `HIGHFIVE_API_KEY`. This is the same key used by all `/api` routes, but regular dashboard pages send it automatically (via the bundled `VITE_API_KEY`). The admin endpoint demands it be provided *explicitly* as `X-Admin-Key` — casual visitors who just open the dashboard will never trigger that header.
 
-**Deploy:**
-
-1. Generate a random key and put it in the repo root `.env`:
-   ```
-   ADMIN_API_KEY=replace-with-a-long-random-string
-   ```
-2. `docker compose up -d --force-recreate backend` — the `docker-compose.yml` forwards `ADMIN_API_KEY` to the backend service automatically.
-3. Only people you hand the key to can load telemetry. Everyone else gets a 403 even if they know the `?admin=1` flag.
-
-**Frontend UX:** the admin key is **never** bundled into the JS. The first time a user opens the Telemetry section in a tab, the page prompts for the key via `window.prompt()` and stores it in `sessionStorage['hf_admin_key']` (cleared on tab close). If the backend returns 401/403, the stored key is cleared and re-requested on the next Refresh.
+**Frontend UX:** the admin key is **not** sent automatically. The first time a user opens the Telemetry section in a tab, the page prompts for the key via `window.prompt()` and stores it in `sessionStorage['hf_admin_key']` (cleared on tab close). If the backend returns 403, the stored key is cleared and re-requested on the next Refresh. No extra env vars needed — you reuse the `HIGHFIVE_API_KEY` you already have.
 
 **Scope:** this gate only affects `GET /api/modules/:id/logs`. ESPs post images to `image-service:/upload` directly and are completely unaffected — the upload path has no admin requirement.
 

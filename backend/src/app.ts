@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { db } from './database';
 import { setupSwagger } from './swagger';
-import { apiKeyAuth } from './auth';
+import { apiKeyAuth, getApiKey } from './auth';
 
 export const app = express();
 
@@ -48,18 +48,12 @@ app.get('/api/modules/:id', async (req, res) => {
 });
 
 const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL || 'http://image-service:4444';
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 
 // Admin-only: telemetry sidecar logs. Layered on top of the existing X-API-Key
-// middleware. Requires an additional X-Admin-Key header matching ADMIN_API_KEY.
-// Fails closed if ADMIN_API_KEY is not set in the environment.
+// middleware. Requires an additional X-Admin-Key header matching HIGHFIVE_API_KEY.
 app.get('/api/modules/:id/logs', async (req, res) => {
-  if (!ADMIN_API_KEY) {
-    res.status(503).json({ error: 'Admin endpoint disabled: ADMIN_API_KEY not configured' });
-    return;
-  }
   const provided = req.header('X-Admin-Key');
-  if (!provided || provided !== ADMIN_API_KEY) {
+  if (!provided || provided !== getApiKey()) {
     res.status(403).json({ error: 'Forbidden: admin key required' });
     return;
   }

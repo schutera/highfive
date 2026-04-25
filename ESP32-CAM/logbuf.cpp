@@ -1,18 +1,26 @@
 #include "logbuf.h"
+
+#include "metrics.h"
+#include "ring_buffer.h"
+#include "telemetry.h"
+
 #include <stdarg.h>
+#include <string>
 #include <WiFi.h>
-#include <ArduinoJson.h>
 #include <esp_system.h>
 
-static char     s_buf[LOGBUF_SIZE];
-static size_t   s_head      = 0;
-static bool     s_wrapped   = false;
+// Backing storage for the log ring (was a static char[LOGBUF_SIZE]).
+// Kept as a separate static array so its address is stable across the
+// life of the firmware; hf::RingBuffer holds a pointer into it.
+static char s_log_storage[LOGBUF_SIZE];
+static hf::RingBuffer s_log(s_log_storage, LOGBUF_SIZE);
 
-static int      s_http_codes[HTTP_CODES_LEN];
-static uint8_t  s_http_head = 0;
-static uint8_t  s_http_count = 0;
+// Backing storage for the recent-HTTP-codes ring (was static int[]).
+static int s_http_codes_storage[HTTP_CODES_LEN];
+static hf::HttpCodeRing s_http_codes(s_http_codes_storage, HTTP_CODES_LEN);
 
-static uint32_t s_wifi_reconnects = 0;
+// Monotonic counter for WiFi reconnect attempts.
+static hf::ReconnectCounter s_reconnects;
 
 static const char *resetReasonStr(esp_reset_reason_t r) {
   switch (r) {
@@ -31,22 +39,12 @@ static const char *resetReasonStr(esp_reset_reason_t r) {
 }
 
 void logbufInit() {
-  s_head = 0;
-  s_wrapped = false;
-  s_buf[0] = '\0';
-  s_http_head = 0;
-  s_http_count = 0;
-  s_wifi_reconnects = 0;
-}
-
-static void appendRaw(const char *data, size_t len) {
-  for (size_t i = 0; i < len; i++) {
-    s_buf[s_head++] = data[i];
-    if (s_head >= LOGBUF_SIZE) {
-      s_head = 0;
-      s_wrapped = true;
-    }
-  }
+  // Reset all telemetry state. Defensive against soft resets where BSS
+  // is preserved — the lib classes are trivially assignable, so a fresh
+  // instance gives us a clean slate without dynamic allocation.
+  s_log = hf::RingBuffer(s_log_storage, LOGBUF_SIZE);
+  s_http_codes = hf::HttpCodeRing(s_http_codes_storage, HTTP_CODES_LEN);
+  s_reconnects = hf::ReconnectCounter();
 }
 
 void logf(const char *fmt, ...) {
@@ -63,56 +61,37 @@ void logf(const char *fmt, ...) {
     Serial.write('\n');
   }
 
-  appendRaw(line, n);
+  s_log.append(line, (size_t)n);
   if (n == 0 || line[n - 1] != '\n') {
     const char nl = '\n';
-    appendRaw(&nl, 1);
+    s_log.append(&nl, 1);
   }
 }
 
 void logbufNoteHttpCode(int code) {
-  s_http_codes[s_http_head] = code;
-  s_http_head = (s_http_head + 1) % HTTP_CODES_LEN;
-  if (s_http_count < HTTP_CODES_LEN) s_http_count++;
+  s_http_codes.note(code);
 }
 
 void logbufNoteWifiReconnect() {
-  s_wifi_reconnects++;
-}
-
-static String getLogAsString() {
-  if (!s_wrapped) {
-    return String(s_buf).substring(0, s_head);
-  }
-  String out;
-  out.reserve(LOGBUF_SIZE + 1);
-  for (size_t i = 0; i < LOGBUF_SIZE; i++) {
-    size_t idx = (s_head + i) % LOGBUF_SIZE;
-    out += s_buf[idx];
-  }
-  return out;
+  s_reconnects.increment();
 }
 
 String buildTelemetryJson() {
-  DynamicJsonDocument doc(LOGBUF_SIZE + 1024);
+  // Gather Arduino-specific inputs here; pass them to the pure host-
+  // testable serializer in lib/telemetry. The wire format is pinned by
+  // test_image_service_expected_schema_exact and consumed verbatim by
+  // image-service's .log.json sidecars.
+  hf::TelemetryInputs in;
+  in.fw                = FIRMWARE_VERSION;
+  in.uptime_seconds    = (uint32_t)(millis() / 1000);
+  in.last_reset_reason = resetReasonStr(esp_reset_reason());
+  in.free_heap         = (uint32_t)ESP.getFreeHeap();
+  in.min_free_heap     = (uint32_t)ESP.getMinFreeHeap();
+  in.rssi              = WiFi.isConnected() ? WiFi.RSSI() : 0;
+  in.wifi_reconnects   = s_reconnects.value();
+  in.last_http_codes   = s_http_codes.snapshot();
+  in.log               = s_log.snapshot();
 
-  doc["fw"]                = FIRMWARE_VERSION;
-  doc["uptime_s"]          = (uint32_t)(millis() / 1000);
-  doc["last_reset_reason"] = resetReasonStr(esp_reset_reason());
-  doc["free_heap"]         = (uint32_t)ESP.getFreeHeap();
-  doc["min_free_heap"]     = (uint32_t)ESP.getMinFreeHeap();
-  doc["rssi"]              = WiFi.isConnected() ? WiFi.RSSI() : 0;
-  doc["wifi_reconnects"]   = s_wifi_reconnects;
-
-  JsonArray codes = doc.createNestedArray("last_http_codes");
-  for (uint8_t i = 0; i < s_http_count; i++) {
-    uint8_t idx = (s_http_head + HTTP_CODES_LEN - s_http_count + i) % HTTP_CODES_LEN;
-    codes.add(s_http_codes[idx]);
-  }
-
-  doc["log"] = getLogAsString();
-
-  String out;
-  serializeJson(doc, out);
-  return out;
+  std::string json = hf::buildTelemetryJson(in);
+  return String(json.c_str());
 }

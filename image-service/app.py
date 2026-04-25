@@ -5,8 +5,7 @@ import json
 import glob
 from datetime import datetime
 from flask import Flask, jsonify, request
-import duckdb
-import requests
+from requests import RequestException
 
 from services.duckdb import DuckDBService
 from services.discord import send_discord_message
@@ -16,7 +15,6 @@ app = Flask(__name__)
 UPLOAD_FOLDER = os.getenv("IMAGE_STORE_PATH", "/data/images")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-DB_PATH = os.getenv("DUCKDB_PATH", "./data/app.duckdb")
 duckdb_service = DuckDBService()
 
 
@@ -31,23 +29,6 @@ def test_duckdb(retries: int = 20, delay: float = 0.5):
                 print("DuckDB connection failed:", e)
                 return False
             time.sleep(delay)
-
-
-def update_module(module_id: str, battery: int):
-    conn = duckdb.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(
-        """
-        UPDATE module_configs
-        SET battery_level = ?,
-            first_online = ?,
-            image_count = image_count + 1
-        WHERE id = ?
-        """,
-        (battery, datetime.now().strftime("%Y-%m-%d"), module_id),
-    )
-    conn.commit()
-    conn.close()
 
 
 def stub_classify() -> dict:
@@ -96,21 +77,14 @@ def upload_image():
     if image.filename == "":
         return jsonify({"error": "No selected file"}), 400
 
-    # Check if this is the module's first upload
+    # Check if this is the module's first upload via duckdb-service.
+    # Tolerate transient duckdb-service failures: if we can't determine the
+    # count, assume "not first" so we don't spam Discord on flaky network.
     is_first_upload = False
     try:
-        conn = duckdb.connect(DB_PATH)
-        count = conn.execute(
-            """
-            SELECT COUNT(*) FROM daily_progress dp
-            JOIN nest_data nd ON dp.nest_id = nd.nest_id
-            WHERE nd.module_id = ?
-            """,
-            (mac,),
-        ).fetchone()[0]
-        conn.close()
+        count = duckdb_service.get_progress_count(mac)
         is_first_upload = count == 0
-    except Exception:
+    except RequestException:
         pass
 
     # Save image to volume
@@ -139,11 +113,17 @@ def upload_image():
 
     # Post results to DuckDB service
     payload = {"modul_id": mac, "classification": classification}
-    url = "http://duckdb-service:8000/add_progress_for_module"
-    requests.post(url, json=payload)
+    try:
+        duckdb_service.add_progress_for_module(payload)
+    except RequestException:
+        pass
 
-    # Update module battery and online status
-    update_module(mac, battery)
+    # Update module battery and online status via duckdb-service heartbeat.
+    # Tolerate transient failures: a missed heartbeat shouldn't fail the upload.
+    try:
+        duckdb_service.heartbeat(mac, battery)
+    except RequestException:
+        pass
 
     if is_first_upload:
         send_discord_message(

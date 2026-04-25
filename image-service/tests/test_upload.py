@@ -69,12 +69,29 @@ def test_upload_happy_path_saves_image_and_returns_classification(
     # No logs field => no sidecar should be written.
     assert not (tmp_upload_dir / "bee01.jpg.log.json").exists()
 
-    # Outbound POST to duckdb-service was attempted.
-    assert len(upload_env["duckdb_posts"]) == 1
-    call = upload_env["duckdb_posts"][0]
-    assert call["url"].endswith("/add_progress_for_module")
-    assert call["json"]["modul_id"] == "AA:BB:CC:DD:EE:FF"
-    assert "classification" in call["json"]
+    # Outbound POSTs to duckdb-service: /add_progress_for_module and /heartbeat.
+    posts = upload_env["duckdb_posts"]
+    assert len(posts) == 2
+
+    progress_calls = [p for p in posts if p["url"].endswith("/add_progress_for_module")]
+    assert len(progress_calls) == 1
+    assert progress_calls[0]["json"]["modul_id"] == "AA:BB:CC:DD:EE:FF"
+    assert "classification" in progress_calls[0]["json"]
+
+    heartbeat_calls = [
+        p for p in posts
+        if p["url"].endswith("/modules/AA:BB:CC:DD:EE:FF/heartbeat")
+    ]
+    assert len(heartbeat_calls) == 1
+    assert heartbeat_calls[0]["json"] == {"battery": 80}
+
+    # progress_count is fetched once per upload via GET.
+    gets = upload_env["duckdb_gets"]
+    progress_count_calls = [
+        g for g in gets
+        if g["url"].endswith("/modules/AA:BB:CC:DD:EE:FF/progress_count")
+    ]
+    assert len(progress_count_calls) == 1
 
 
 def test_upload_with_logs_writes_sidecar(client, tmp_upload_dir: Path, upload_env):
@@ -208,3 +225,97 @@ def test_upload_malformed_logs_writes_sidecar_with_parse_error(
     assert data.get("raw") == "this is not json {{"
     assert data["_mac"] == "AA:BB:CC:DD:EE:FF"
     assert data["_image"] == "bad.jpg"
+
+
+# --------------------------- duckdb-service integration ---------------------------
+
+def test_upload_first_upload_triggers_discord(client, upload_env):
+    """When progress_count returns 0, this is the first upload — Discord fires."""
+    upload_env["duckdb_http"]["progress_count"] = 0
+
+    resp = client.post(
+        "/upload",
+        data=_make_form(filename="first.jpg"),
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    assert len(upload_env["discord"]) == 1
+    assert "First image received" in upload_env["discord"][0]
+
+
+def test_upload_non_first_upload_does_not_trigger_discord(client, upload_env):
+    """When progress_count > 0, Discord stays silent."""
+    upload_env["duckdb_http"]["progress_count"] = 7
+
+    resp = client.post(
+        "/upload",
+        data=_make_form(filename="not-first.jpg"),
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    assert upload_env["discord"] == []
+
+
+def test_upload_heartbeat_called_with_battery_value(client, upload_env):
+    """Heartbeat receives the exact integer battery value."""
+    resp = client.post(
+        "/upload",
+        data=_make_form(battery="42", filename="batt.jpg"),
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+
+    heartbeats = [
+        p for p in upload_env["duckdb_posts"] if p["url"].endswith("/heartbeat")
+    ]
+    assert len(heartbeats) == 1
+    assert heartbeats[0]["json"] == {"battery": 42}
+
+
+def test_upload_survives_progress_count_failure(client, upload_env, monkeypatch):
+    """A duckdb-service hiccup on /progress_count must not fail the upload."""
+    import services.duckdb as duckdb_svc_mod
+    from requests import ConnectionError as RequestsConnectionError
+
+    def boom_get(url, **kwargs):
+        raise RequestsConnectionError("duckdb-service down")
+
+    monkeypatch.setattr(duckdb_svc_mod.requests, "get", boom_get)
+
+    resp = client.post(
+        "/upload",
+        data=_make_form(filename="survives.jpg"),
+        content_type="multipart/form-data",
+    )
+    # Upload still succeeds even though progress_count blew up.
+    assert resp.status_code == 200
+    # And no Discord (we couldn't determine first-upload status).
+    assert upload_env["discord"] == []
+
+
+def test_upload_survives_heartbeat_failure(client, upload_env, monkeypatch):
+    """A duckdb-service hiccup on /heartbeat must not fail the upload."""
+    import services.duckdb as duckdb_svc_mod
+    from requests import ConnectionError as RequestsConnectionError
+
+    posts = upload_env["duckdb_posts"]
+
+    def selective_post(url, json=None, **kwargs):
+        posts.append({"url": url, "json": json, "kwargs": kwargs})
+        if url.endswith("/heartbeat"):
+            raise RequestsConnectionError("heartbeat boom")
+
+        class _R:
+            status_code = 200
+            def json(self_inner): return {"ok": True}
+            def raise_for_status(self_inner): return None
+        return _R()
+
+    monkeypatch.setattr(duckdb_svc_mod.requests, "post", selective_post)
+
+    resp = client.post(
+        "/upload",
+        data=_make_form(filename="hb-fail.jpg"),
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200

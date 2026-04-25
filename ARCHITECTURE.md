@@ -27,17 +27,22 @@ status and nest progress in a web dashboard.
             │   • writes <img>.log.json    │
             │   • runs stub classifier     │
             │   • POSTs progress to DB svc │
-            │   • UPDATEs module_configs   │
-            │     directly (known issue,   │
-            │     scheduled for Phase 4)   │
+            │   • POSTs heartbeat to DB svc│
+            │     (battery, image_count,   │
+            │     first_online)            │
             └────┬─────────────────────────┘
                  │  POST /add_progress_for_module
+                 │  POST /modules/<mac>/heartbeat
+                 │  GET  /modules/<mac>/progress_count
                  ▼
             ┌──────────────────────────────┐
             │   duckdb-service  (Flask)    │  port 8002  (container :8000)
             │   owns app.duckdb            │
-            │   /modules, /nests, /progress│
-            │   /new_module, /health       │
+            │   /modules, /nests,          │
+            │   /progress, /new_module,    │
+            │   /modules/<id>/heartbeat,   │
+            │   /modules/<id>/             │
+            │     progress_count, /health  │
             └────────────────┬─────────────┘
                              │  GET /modules /nests /progress
                              ▼
@@ -76,10 +81,12 @@ network and refer to each other by container name.
 **Ingestion** — ESP captures image, attaches a JSON `logs` part with firmware
 version, uptime, free heap, RSSI, last reset reason, last HTTP codes, and the
 last ~2 KB of the on-device circular log buffer. `image-service` saves the
-image, writes `{image_path}.log.json` next to it, runs the stub classifier,
-forwards the result to `duckdb-service`, and updates the module's battery
-level + image count directly in DuckDB (the direct-write is the one
-remaining persistence-layering wart and is on the Phase 4 roadmap).
+image and writes `{image_path}.log.json` next to it locally, runs the stub
+classifier, forwards the result to `duckdb-service` via
+`/add_progress_for_module`, and updates the module's battery level,
+`first_online`, and `image_count` via `POST /modules/<mac>/heartbeat` on
+`duckdb-service`. All DuckDB writes go through HTTP — `image-service` no
+longer opens its own DuckDB connection.
 
 **Read** — Browser loads `homepage`; the dashboard calls `backend` with
 `X-API-Key`. `backend` refreshes its in-memory cache by reading

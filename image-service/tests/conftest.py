@@ -1,9 +1,8 @@
 """Pytest fixtures for image-service tests.
 
-Sets IMAGE_STORE_PATH and DUCKDB_PATH env vars to per-test temp paths
-BEFORE importing app, then mocks the outbound HTTP call to duckdb-service,
-the direct duckdb.connect calls (update_module + first-upload count query),
-and the Discord webhook so tests run hermetically.
+Sets IMAGE_STORE_PATH env var to a per-test temp path BEFORE importing app,
+then mocks the outbound HTTP calls to duckdb-service (POST + GET) and the
+Discord webhook so tests run hermetically.
 """
 
 from __future__ import annotations
@@ -32,13 +31,7 @@ def tmp_upload_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def tmp_duckdb_path(tmp_path: Path) -> Path:
-    """Per-test DuckDB file path (file is never actually created — duckdb is mocked)."""
-    return tmp_path / "app.duckdb"
-
-
-@pytest.fixture
-def app(tmp_upload_dir: Path, tmp_duckdb_path: Path, monkeypatch: pytest.MonkeyPatch):
+def app(tmp_upload_dir: Path, monkeypatch: pytest.MonkeyPatch):
     """Import (or reload) the Flask app with env vars pointing at tmp dirs.
 
     app.py reads IMAGE_STORE_PATH at import time and calls os.makedirs on it,
@@ -46,7 +39,6 @@ def app(tmp_upload_dir: Path, tmp_duckdb_path: Path, monkeypatch: pytest.MonkeyP
     every test to guarantee UPLOAD_FOLDER points at this test's tmp dir.
     """
     monkeypatch.setenv("IMAGE_STORE_PATH", str(tmp_upload_dir))
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_duckdb_path))
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "")  # disable real webhook
 
     # Force a fresh import so module-level globals see the env vars.
@@ -65,64 +57,59 @@ def client(app):
 
 
 @pytest.fixture
-def mocked_duckdb_post(app, monkeypatch: pytest.MonkeyPatch):
-    """Capture POSTs to the duckdb-service /add_progress_for_module endpoint."""
-    calls: list[dict] = []
+def mocked_duckdb_http(app, monkeypatch: pytest.MonkeyPatch):
+    """Capture all outbound HTTP traffic to duckdb-service.
+
+    Patches `requests.post` (used by /add_progress_for_module and
+    /modules/<id>/heartbeat) and `requests.get` (used by
+    /modules/<id>/progress_count). All outbound calls now route through
+    `services.duckdb.DuckDBService`, so we patch the requests binding in
+    that module.
+
+    Returns a dict with:
+        - "posts": list of {"url", "json", "kwargs"}
+        - "gets":  list of {"url", "kwargs"}
+        - "progress_count": int returned by GET /progress_count (mutable)
+        - "heartbeat_status": int returned by POST /heartbeat (mutable)
+    """
+    state = {
+        "posts": [],
+        "gets": [],
+        "progress_count": 0,
+        "heartbeat_status": 200,
+    }
 
     class _Resp:
-        status_code = 200
+        def __init__(self, status_code: int = 200, payload: dict | None = None):
+            self.status_code = status_code
+            self._payload = payload or {"ok": True}
 
         def json(self):
-            return {"ok": True}
+            return self._payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
 
     def fake_post(url, json=None, **kwargs):
-        calls.append({"url": url, "json": json, "kwargs": kwargs})
-        return _Resp()
+        state["posts"].append({"url": url, "json": json, "kwargs": kwargs})
+        if url.endswith("/heartbeat"):
+            return _Resp(state["heartbeat_status"], {"ok": True} if state["heartbeat_status"] < 400 else {"error": "x"})
+        # /add_progress_for_module and any other POST
+        return _Resp(200, {"ok": True})
 
-    # app.py does `import requests; requests.post(...)` — patch the binding
-    # in the app module's namespace.
-    monkeypatch.setattr(app.requests, "post", fake_post)
-    return calls
+    def fake_get(url, **kwargs):
+        state["gets"].append({"url": url, "kwargs": kwargs})
+        if url.endswith("/progress_count"):
+            return _Resp(200, {"count": state["progress_count"]})
+        return _Resp(200, {"ok": True})
 
-
-@pytest.fixture
-def mocked_duckdb_connect(app, monkeypatch: pytest.MonkeyPatch):
-    """Mock duckdb.connect used by update_module + first-upload count query.
-
-    Returns a list of executed (sql, params) tuples for assertion if needed.
-    """
-    executed: list[tuple] = []
-
-    class _FakeCursor:
-        def execute(self, sql, params=None):
-            executed.append((sql, params))
-            return self
-
-        def fetchone(self):
-            # First-upload count query expects a tuple; default to "no prior rows".
-            return (0,)
-
-        def close(self):
-            pass
-
-    class _FakeConn:
-        def cursor(self):
-            return _FakeCursor()
-
-        def execute(self, sql, params=None):
-            return _FakeCursor().execute(sql, params)
-
-        def commit(self):
-            pass
-
-        def close(self):
-            pass
-
-    def fake_connect(path, *args, **kwargs):
-        return _FakeConn()
-
-    monkeypatch.setattr(app.duckdb, "connect", fake_connect)
-    return executed
+    # All outbound HTTP from image-service now routes through
+    # services.duckdb.DuckDBService, so we only need to patch its `requests`.
+    import services.duckdb as duckdb_svc_mod
+    monkeypatch.setattr(duckdb_svc_mod.requests, "post", fake_post)
+    monkeypatch.setattr(duckdb_svc_mod.requests, "get", fake_get)
+    return state
 
 
 @pytest.fixture
@@ -139,10 +126,11 @@ def no_op_discord(app, monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def upload_env(mocked_duckdb_post, mocked_duckdb_connect, no_op_discord):
+def upload_env(mocked_duckdb_http, no_op_discord):
     """Composite fixture wiring all upload-path mocks for convenience."""
     return {
-        "duckdb_posts": mocked_duckdb_post,
-        "duckdb_sql": mocked_duckdb_connect,
+        "duckdb_http": mocked_duckdb_http,
+        "duckdb_posts": mocked_duckdb_http["posts"],
+        "duckdb_gets": mocked_duckdb_http["gets"],
         "discord": no_op_discord,
     }

@@ -136,3 +136,59 @@ def get_modules():
 
     modules = [dict(zip(cols, row)) for row in rows]
     return jsonify(modules=modules), 200
+
+
+@modules_bp.get("/modules/<module_id>/progress_count")
+def progress_count(module_id):
+    with lock:
+        con = get_conn()
+        try:
+            row = con.execute(
+                """
+                SELECT COUNT(*) FROM daily_progress dp
+                JOIN nest_data nd ON dp.nest_id = nd.nest_id
+                WHERE nd.module_id = ?
+                """,
+                (module_id,),
+            ).fetchone()
+            count = int(row[0]) if row and row[0] is not None else 0
+        finally:
+            con.close()
+
+    return jsonify(count=count), 200
+
+
+@modules_bp.post("/modules/<module_id>/heartbeat")
+def heartbeat(module_id):
+    json_data = request.get_json(silent=True) or {}
+    battery = json_data.get("battery")
+
+    if (not isinstance(battery, int) or isinstance(battery, bool)
+            or not (0 <= battery <= 100)):
+        return jsonify({"error": "battery must be an int in [0, 100]"}), 400
+
+    with lock:
+        con = get_conn()
+        try:
+            existing = con.execute(
+                "SELECT 1 FROM module_configs WHERE id = ?",
+                (module_id,),
+            ).fetchone()
+            if existing is None:
+                return jsonify({"error": "Module not found"}), 404
+
+            now = datetime.now().strftime("%Y-%m-%d")
+            con.execute(
+                """
+                UPDATE module_configs
+                SET battery_level = ?,
+                    first_online = ?,
+                    image_count = image_count + 1
+                WHERE id = ?
+                """,
+                (battery, now, module_id),
+            )
+            con.commit()
+            return jsonify({"ok": True}), 200
+        finally:
+            con.close()

@@ -176,6 +176,21 @@ This endpoint is used by the AI model to save classification results.
 - Missing nests are automatically generated
 - Progress values are saved for the current date
 
+### POST /modules/<module_id>/heartbeat
+
+Called by `image-service` on every accepted upload. Body:
+`{"battery": <int>}` → returns `{"ok": true}`.
+
+- Updates `battery_level` on `module_configs`
+- Sets `first_online` to today if it has not been set yet
+- Increments `image_count`
+
+### GET /modules/<module_id>/progress_count
+
+Returns `{"count": <int>}` — the number of `daily_progress` rows
+associated with the given module. Used by `image-service` to detect
+first-upload events without opening a direct DuckDB connection.
+
 ## References:
 
 - Lecture Data Engineering + Folien

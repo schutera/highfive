@@ -56,17 +56,23 @@ and persistence.
                                 │  • writes <file>.jpg.log.json│
                                 │  • stub classifier           │
                                 │  • POST /add_progress…       │
-                                │  • UPDATE module_configs     │ ← direct DB write,
-                                │     (battery, image_count)   │   known issue, Phase 4
-                                └────┬───────────────────┬─────┘
-                                     │                   │
-                          POST /add_progress_for_module  │
-                                     ▼                   │
+                                │  • POST /modules/<mac>/      │
+                                │    heartbeat (battery,       │
+                                │    image_count, first_online)│
+                                └────┬─────────────────────────┘
+                                     │
+                          POST /add_progress_for_module
+                          POST /modules/<mac>/heartbeat
+                          GET  /modules/<mac>/progress_count
+                                     ▼
                                 ┌─────────────────────────────┐
                                 │  duckdb-service (Flask)     │  :8000
                                 │  owns app.duckdb            │
                                 │  /modules /nests /progress  │
                                 │  /new_module /add_progress… │
+                                │  /modules/<id>/heartbeat    │
+                                │  /modules/<id>/             │
+                                │     progress_count          │
                                 │  /health                    │
                                 └────────────────┬────────────┘
                                                  │ GET /modules /nests /progress
@@ -109,7 +115,10 @@ and persistence.
 2. `image-service` saves the image, writes a `.log.json` sidecar if `logs`
    is present, runs the stub classifier, and then:
    - `POST /add_progress_for_module` to the duckdb-service, **and**
-   - directly `UPDATE`s `module_configs` (battery + image count + last-seen).
+   - `POST /modules/<mac>/heartbeat` to the duckdb-service to update
+     battery, `image_count`, and `first_online` (on first sighting it
+     also uses `GET /modules/<mac>/progress_count` to detect first
+     upload).
 3. The duckdb-service either inserts a new progress row for the day or
    replaces an existing one. Missing nests are auto-created.
 4. The frontend reflects the new data on the next `/api/modules` poll.
@@ -128,13 +137,16 @@ and persistence.
 5. `image-service` globs `*.log.json`, filters by `_mac`, returns the
    newest N entries.
 
-### 5.4 Known Issue — Direct DB Write from image-service
+### 5.4 Persistence Invariant
 
-`image-service.update_module()` opens its own DuckDB connection and
-runs an `UPDATE module_configs` directly, bypassing the duckdb-service
-HTTP API. This works because both services share the `duckdb_data`
-volume, but it breaks the "duckdb-service owns the DB" invariant. It is
-scheduled to be moved behind a duckdb-service endpoint in **Phase 4**.
+All DuckDB writes flow through `duckdb-service`. `image-service` no
+longer opens its own DuckDB connection and has no `DUCKDB_PATH` env
+var — battery / `image_count` / `first_online` updates go through
+`POST /modules/<mac>/heartbeat`, and first-upload detection uses
+`GET /modules/<mac>/progress_count`. `image-service` still writes
+images and `.log.json` sidecars to the shared volume locally; only the
+DB writes are HTTP. This restores the "duckdb-service owns the DB"
+invariant (Phase 4).
 
 ## 6. Test Stack
 
@@ -201,18 +213,14 @@ diagram in §4 is the current source of truth.
 - The backend cache refreshes the full module/nest/progress snapshot on
   demand. Simple, not optimised for high scale.
 - Classification returns stub values; MaskRCNN integration is planned.
-- `image-service` writes some module fields directly into DuckDB
-  (battery, `image_count`, `first_online`). Tighter coupling than the
-  HTTP-only design intends — scheduled for Phase 4.
 - Dev API key (`hf_dev_key_2026`) ships as a fallback. Override via
   `HIGHFIVE_API_KEY` for any non-local deployment.
 
 ## 10. Recommended Next Architecture Steps
 
-1. Route every DB write through `duckdb-service` (Phase 4).
-2. Add an asynchronous queue between upload and classification for
+1. Add an asynchronous queue between upload and classification for
    burst handling.
-3. Add structured observability (central logs + trace IDs across
+2. Add structured observability (central logs + trace IDs across
    services).
-4. Harden secrets handling — drop dev fallback in production builds.
-5. Add a migration / versioning strategy for DuckDB schema evolution.
+3. Harden secrets handling — drop dev fallback in production builds.
+4. Add a migration / versioning strategy for DuckDB schema evolution.

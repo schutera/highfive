@@ -61,10 +61,15 @@ The central entry point. Called by Hive modules whenever a new image is captured
 ### Data Flow
 
 1. Hive module sends image to `/upload`
-2. Image is saved to the Docker volume (`/data/images/`)
+2. Image is saved to the Docker volume (`/data/images/`); a `.log.json`
+   sidecar is written next to it if `logs` is present
 3. Stub classification generates dummy results (4 bee types x 3 nests each)
 4. Results are forwarded to `duckdb-service /add_progress_for_module`
-5. Module battery level and online status are updated in DuckDB
+5. Module battery level, `image_count`, and `first_online` are updated
+   via `POST /modules/<mac>/heartbeat` on `duckdb-service`. First-upload
+   detection uses `GET /modules/<mac>/progress_count`. All DuckDB
+   persistence flows through HTTP — `image-service` does not open its
+   own DuckDB connection.
 
 ### Classification Result Format
 

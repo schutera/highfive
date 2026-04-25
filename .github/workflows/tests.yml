@@ -1,13 +1,18 @@
 # CI test workflow.
 #
-# Two parallel jobs:
+# Three parallel jobs:
 #
-#   esp-native    → host-side Unity tests for the pure C++ helpers
-#                   under ESP32-CAM/lib/. Fast (~1 min cold).
+#   esp-native     → host-side Unity tests for the pure C++ helpers
+#                    under ESP32-CAM/lib/. Fast (~1 min cold).
 #
-#   e2e-pipeline  → boots the four-service docker compose, drives it
-#                   with the Python mock ESP, asserts the upload chain
-#                   works end-to-end. Slower (~5 min cold).
+#   esp-firmware   → 'pio run -e esp32cam': cross-compiles the actual
+#                    firmware against the espressif32 platform. Catches
+#                    breakage that only shows up when the .ino + .cpp
+#                    sources are linked together for the target.
+#
+#   e2e-pipeline   → boots the four-service docker compose, drives it
+#                    with the Python mock ESP, asserts the upload chain
+#                    works end-to-end. Slower (~5 min cold).
 #
 # Triggers on PRs to main and on push to main (badge stays green there)
 # and on push to the chore/test-harness branch so the workflow validates
@@ -56,6 +61,35 @@ jobs:
       - name: Run native unit tests
         working-directory: ESP32-CAM
         run: pio test -e native
+
+  esp-firmware:
+    name: ESP32-CAM firmware build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-fw-${{ runner.os }}-${{ hashFiles('ESP32-CAM/platformio.ini') }}
+          restore-keys: |
+            pio-fw-${{ runner.os }}-
+
+      - name: Build esp32cam firmware
+        working-directory: ESP32-CAM
+        run: pio run -e esp32cam
 
   e2e-pipeline:
     name: End-to-end pipeline test

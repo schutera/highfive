@@ -87,3 +87,53 @@ Flashing the firmware can be done in the browser using the [ESPWebTool](https://
 After flashing, the ESP32-CAM will begin its capture-and-upload cycle whenever it receives power.
 
 ---
+
+## Project Layout
+
+```
+ESP32-CAM/
+├── ESP32-CAM.ino          Arduino sketch entrypoint (setup, loop)
+├── client.cpp / .h        Image upload + multipart construction
+├── esp_init.cpp / .h      WiFi / camera / config bootstrap
+├── host.cpp / .h          Setup-mode access point + config web UI
+├── logbuf.cpp / .h        On-device telemetry ring buffer
+├── lib/                   Pure C++ helpers, host-testable
+│   └── url/               URL parsing
+├── test/                  PlatformIO native unit tests (no hardware)
+│   └── test_native_url/
+└── platformio.ini         Build config: esp32cam (firmware) + native (tests)
+```
+
+The `lib/` directory holds pure C++ modules with no Arduino dependencies, so
+they can be unit-tested on the host. The Arduino-IDE workflow keeps working —
+PlatformIO is added alongside, not as a replacement.
+
+### Native unit tests (no hardware)
+
+Install PlatformIO once:
+
+```bash
+pip install platformio
+```
+
+Then from the repository root:
+
+```bash
+make test-esp-native       # or: cd ESP32-CAM && pio test -e native
+```
+
+Tests live under `ESP32-CAM/test/test_native_*/` and run in milliseconds. They
+exist so that parser, telemetry-builder, and log-buffer regressions can be
+caught in CI without flashing a physical device.
+
+### Building the firmware via PlatformIO (optional)
+
+```bash
+cd ESP32-CAM && pio run -e esp32cam
+```
+
+The `esp32cam` env in `platformio.ini` is the source of truth for library
+versions. If you add a library via Arduino IDE, please mirror it under
+`lib_deps` so that other contributors and CI get the same build.
+
+---

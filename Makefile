@@ -22,5 +22,5 @@ test: test-esp-native
 test-esp: test-esp-native
 
 test-esp-native:
-	@echo ">>> pio test -e native (ESP32-CAM/)"
-	cd ESP32-CAM && pio test -e native
+	@echo ">>> python -m platformio test -e native (ESP32-CAM/)"
+	cd ESP32-CAM && python -m platformio test -e native

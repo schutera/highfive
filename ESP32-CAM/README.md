@@ -119,17 +119,19 @@ pip install platformio
 Then from the repository root:
 
 ```bash
-make test-esp-native       # or: cd ESP32-CAM && pio test -e native
+make test-esp-native
+# Equivalent to: cd ESP32-CAM && python -m platformio test -e native
+# Or (if 'pio' is on PATH):  cd ESP32-CAM && pio test -e native
 ```
 
-Tests live under `ESP32-CAM/test/test_native_*/` and run in milliseconds. They
+Tests live under `ESP32-CAM/test/test_native_*/` and run in seconds. They
 exist so that parser, telemetry-builder, and log-buffer regressions can be
 caught in CI without flashing a physical device.
 
 ### Building the firmware via PlatformIO (optional)
 
 ```bash
-cd ESP32-CAM && pio run -e esp32cam
+cd ESP32-CAM && python -m platformio run -e esp32cam
 ```
 
 The `esp32cam` env in `platformio.ini` is the source of truth for library

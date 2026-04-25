@@ -1,0 +1,87 @@
+# CI test workflow.
+#
+# Two parallel jobs:
+#
+#   esp-native    → host-side Unity tests for the pure C++ helpers
+#                   under ESP32-CAM/lib/. Fast (~1 min cold).
+#
+#   e2e-pipeline  → boots the four-service docker compose, drives it
+#                   with the Python mock ESP, asserts the upload chain
+#                   works end-to-end. Slower (~5 min cold).
+#
+# Triggers on PRs to main and on push to main (badge stays green there)
+# and on push to the chore/test-harness branch so the workflow validates
+# itself before being merged.
+
+name: tests
+
+on:
+  push:
+    branches: [main, "chore/test-harness"]
+  pull_request:
+    branches: [main]
+
+# Cancel previous runs of this workflow on the same ref when a new push
+# arrives — avoids burning Actions minutes on superseded commits.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  esp-native:
+    name: ESP32-CAM native unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.1.19
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('ESP32-CAM/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Run native unit tests
+        working-directory: ESP32-CAM
+        run: pio test -e native
+
+  e2e-pipeline:
+    name: End-to-end pipeline test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install -r tests/e2e/requirements.txt
+
+      - name: Show Docker version
+        run: docker version && docker compose version
+
+      - name: Run e2e pipeline tests
+        run: python -m pytest tests/e2e/ -v --tb=short
+
+      - name: Capture compose logs on failure
+        if: failure()
+        run: |
+          docker compose -f tests/e2e/docker-compose.test.yml \
+                         -p highfive-e2e logs --no-color || true

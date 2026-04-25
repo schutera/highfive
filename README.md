@@ -5,6 +5,10 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/schutera/highfive/actions/workflows/tests.yml"><img src="https://github.com/schutera/highfive/actions/workflows/tests.yml/badge.svg" alt="tests" /></a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB?logo=react&logoColor=white" alt="React + Vite" />
   <img src="https://img.shields.io/badge/language-TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/backend-Node.js%20%2B%20Express-339933?logo=node.js&logoColor=white" alt="Node.js + Express" />

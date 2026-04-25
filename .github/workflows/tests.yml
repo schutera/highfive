@@ -1,18 +1,29 @@
 # CI test workflow.
 #
-# Three parallel jobs:
+# Seven parallel jobs:
 #
-#   esp-native     → host-side Unity tests for the pure C++ helpers
-#                    under ESP32-CAM/lib/. Fast (~1 min cold).
+#   esp-native      → host-side Unity tests for the pure C++ helpers
+#                     under ESP32-CAM/lib/. Fast (~1 min cold).
 #
-#   esp-firmware   → 'pio run -e esp32cam': cross-compiles the actual
-#                    firmware against the espressif32 platform. Catches
-#                    breakage that only shows up when the .ino + .cpp
-#                    sources are linked together for the target.
+#   esp-firmware    → 'pio run -e esp32cam': cross-compiles the actual
+#                     firmware against the espressif32 platform. Catches
+#                     breakage that only shows up when the .ino + .cpp
+#                     sources are linked together for the target.
 #
-#   e2e-pipeline   → boots the four-service docker compose, drives it
-#                    with the Python mock ESP, asserts the upload chain
-#                    works end-to-end. Slower (~5 min cold).
+#   backend-unit    → vitest + supertest unit tests for the Node/Express
+#                     backend API (mocks db layer).
+#
+#   duckdb-unit     → pytest unit tests for the DuckDB service (real
+#                     in-memory DuckDB, no outbound HTTP).
+#
+#   image-unit      → pytest unit tests for the image-service (all
+#                     outbound HTTP and duckdb.connect are mocked).
+#
+#   homepage-unit   → vitest + jsdom smoke tests for the React homepage.
+#
+#   e2e-pipeline    → boots the four-service docker compose, drives it
+#                     with the Python mock ESP, asserts the upload chain
+#                     works end-to-end. Slower (~5 min cold).
 #
 # Triggers on PRs to main and on push to main (badge stays green there)
 # and on push to the chore/test-harness branch so the workflow validates
@@ -90,6 +101,98 @@ jobs:
       - name: Build esp32cam firmware
         working-directory: ESP32-CAM
         run: pio run -e esp32cam
+
+  backend-unit:
+    name: Backend unit tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run tests
+        working-directory: backend
+        run: npm test
+
+  duckdb-unit:
+    name: DuckDB service unit tests (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: duckdb-service/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: duckdb-service
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        working-directory: duckdb-service
+        run: pytest tests/ -q
+
+  image-unit:
+    name: Image service unit tests (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: image-service/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: image-service
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        working-directory: image-service
+        run: pytest tests/ -q
+
+  homepage-unit:
+    name: Homepage unit tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: homepage/package-lock.json
+
+      - name: Install dependencies
+        working-directory: homepage
+        run: npm ci
+
+      - name: Run tests
+        working-directory: homepage
+        run: npm test
 
   e2e-pipeline:
     name: End-to-end pipeline test

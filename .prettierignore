@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build artifacts
+dist/
+**/dist/
+build/
+**/build/
+out/
+**/out/
+coverage/
+**/coverage/
+
+# PlatformIO (ESP32-CAM)
+.pio/
+.pioenvs/
+.piolibdeps/
+**/.pio/
+**/.pioenvs/
+**/.piolibdeps/
+
+# Python build / cache
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Lockfiles (let the package manager own formatting)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Minified / generated assets
+*.min.*
+*.bundle.*
+*.map
+
+# CAD / binary artifacts
+*.FCStd
+*.FCBak
+*.dxf
+*.stl
+*.step
+*.stp
+
+# Misc
+.next/
+.vite/
+.cache/

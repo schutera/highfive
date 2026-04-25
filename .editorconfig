@@ -1,0 +1,34 @@
+# EditorConfig: https://editorconfig.org
+# Top-level config for the HiveHive monorepo.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Web / config languages (explicit for clarity)
+[*.{ts,tsx,js,jsx,mjs,cjs,json,jsonc,yml,yaml,md,html,htm,css,scss}]
+indent_style = space
+indent_size = 2
+
+# Python
+[*.py]
+indent_style = space
+indent_size = 4
+
+# C / C++ / Arduino (ESP32-CAM firmware)
+[*.{c,h,cc,cpp,hpp,ino}]
+indent_style = space
+indent_size = 2
+
+# Makefiles MUST use tabs - recipe lines break otherwise.
+[{Makefile,makefile,GNUmakefile,*.mk}]
+indent_style = tab
+
+# Markdown: don't trim trailing whitespace (two trailing spaces = hard break).
+[*.md]
+trim_trailing_whitespace = false

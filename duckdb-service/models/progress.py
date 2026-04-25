@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 class ClassificationOutput(BaseModel):
     modul_id: str
-    classification: Dict[str, Dict[int, int]]
+    classification: Dict[str, Dict[int, float]]
 
 
 BEE_TYPE_MAP = {

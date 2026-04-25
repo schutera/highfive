@@ -60,6 +60,17 @@ def stub_classify() -> dict:
     }
 
 
+@app.get("/health")
+def health():
+    """Liveness probe. Returns 200 once the Flask app is ready to serve.
+
+    Does not verify downstream DuckDB connectivity — image-service can
+    still queue uploads even if the DB is briefly unavailable. Use
+    duckdb-service's /health for that check.
+    """
+    return jsonify({"ok": True, "service": "image-service"}), 200
+
+
 @app.post("/upload")
 def upload_image():
     mac = request.form.get("mac") or request.args.get("mac")

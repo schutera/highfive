@@ -78,12 +78,12 @@ export class ModuleCache {
 
     progressData.progress.forEach((p: any) => {
       const normalized: DailyProgress = {
-        progress_id: p.progess_id, // Backend name!
+        progress_id: p.progress_id,
         nest_id: p.nest_id,
         date: new Date(p.date).toISOString(),
         empty: p.empty,
         sealed: p.sealed,
-        hatched: p.hateched, // Backend name!
+        hatched: p.hatched,
       };
 
       let arr = progressByNest.get(p.nest_id);

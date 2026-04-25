@@ -1,6 +1,8 @@
 #include "esp_camera.h"
 #include "client.h"
 #include "logbuf.h"
+#include "url.h"
+#include <string>
 #include <time.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -9,34 +11,6 @@
 #include <ArduinoJson.h>
 
 static WiFiClient client;
-/*
-  Extracts host, port, and endpoint path from URL
-*/
-static url_t splitUrl(const char* urlChars) {
-  url_t url;
-  url.port = 443;
-  url.path = "/";
-
-  String urlString(urlChars);
-  int doubleslashPosition = urlString.indexOf("://");
-  int hostIndex = doubleslashPosition >= 0 ? doubleslashPosition + 3 : 0;
-
-  int slash = urlString.indexOf('/', hostIndex);
-  String host = slash >= 0 ? urlString.substring(hostIndex, slash) : urlString.substring(hostIndex);
-
-  if (slash >= 0) {
-    url.path = urlString.substring(slash);
-  }
-
-  int colon = host.indexOf(':');
-  if (colon >= 0) {
-    url.host = host.substring(0, colon);
-    url.port = host.substring(colon + 1).toInt();
-  } else {
-    url.host = host;
-  }
-  return url;
-}
 
 /*
   Creates unique filename of format: esp_capture_YYYYMMDDhhmmss.jpg
@@ -150,7 +124,7 @@ int postImage(esp_config_t *esp_config) {
   //Serial.println(tail.substring(0, 100)); // first 100 bytes of tail
 
 
-  url_t url = splitUrl(UPLOAD_URL);
+  hf::Url url = hf::parseUrl(std::string(UPLOAD_URL));
 
   // Initialize client
   static bool clientInitialized = false;
@@ -161,11 +135,13 @@ int postImage(esp_config_t *esp_config) {
     clientInitialized = true;
   }
 
-  Serial.printf("---- trying to send image to: %s:%u\n", url.host, url.port);
+  Serial.printf("---- trying to send image to: %s:%u\n",
+                url.host.c_str(), (unsigned)url.port);
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
     if (!client.connect(url.host.c_str(), url.port)) {
-      logf("[HTTP] connect failed to %s:%u", url.host.c_str(), url.port);
+      logf("[HTTP] connect failed to %s:%u",
+           url.host.c_str(), (unsigned)url.port);
       client.stop();
       esp_camera_fb_return(fb);
       logbufNoteHttpCode(-2);
@@ -174,8 +150,8 @@ int postImage(esp_config_t *esp_config) {
   }
 
   // POST headers
-  client.print(String("POST ") + url.path + " HTTP/1.1\r\n");
-  client.print(String("Host: ") + url.host + "\r\n");
+  client.print(String("POST ") + url.path.c_str() + " HTTP/1.1\r\n");
+  client.print(String("Host: ") + url.host.c_str() + "\r\n");
   client.print("Connection: keep-alive\r\n");
   client.print("Content-Type: multipart/form-data; boundary=" + boundary + "\r\n");
   client.print("Content-Length: " + String(contentLength) + "\r\n\r\n");

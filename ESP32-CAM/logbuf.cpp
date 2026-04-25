@@ -1,5 +1,6 @@
 #include "logbuf.h"
 
+#include "esp_init.h"   // FIRMWARE_VERSION
 #include "metrics.h"
 #include "ring_buffer.h"
 #include "telemetry.h"

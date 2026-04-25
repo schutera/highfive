@@ -6,7 +6,7 @@
 #include <time.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
-#include <WifiClient.h>
+#include <WiFiClient.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
 

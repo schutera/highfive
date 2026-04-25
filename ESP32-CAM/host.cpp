@@ -2,6 +2,7 @@
 #include <SPIFFS.h>
 #include <FS.h>
 #include <ArduinoJson.h>
+#include "esp_init.h"   // setESPConfigured
 
 const char *HOST_SSID = "ESP32-Access-Point";
 const char *HOST_PASSWORD = "esp-12345";

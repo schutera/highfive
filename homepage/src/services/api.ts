@@ -15,7 +15,7 @@ export interface Module {
 }
 
 export interface NestData {
-  nestId: number;
+  nest_id: string;
   beeType: 'blackmasked' | 'resin' | 'leafcutter' | 'orchard';
   dailyProgress: DailyProgress[];
 }
@@ -66,7 +66,7 @@ class ApiService {
 
   async getAllModules(): Promise<Module[]> {
     const response = await fetch(`${this.baseUrl}/modules`, {
-    //const response = await fetch(`localhost:8002/modules`, {
+      //const response = await fetch(`localhost:8002/modules`, {
       headers: this.getHeaders(),
     });
     if (!response.ok) {

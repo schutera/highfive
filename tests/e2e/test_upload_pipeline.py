@@ -93,12 +93,16 @@ def test_upload_lands_image_then_writes_sidecar_and_updates_db(stack, mock_esp):
     sidecars = r.json()
     assert len(sidecars) >= 1, "no telemetry sidecar found"
 
+    # Sidecar envelope schema (since commit 4b2024e): metadata at top level,
+    # ESP telemetry nested under `payload`. Legacy `_mac`/top-level keys are
+    # gone on new uploads; the consumer normalizes legacy on-disk files to
+    # the new shape, but the e2e stack only writes new ones.
     latest = sidecars[0]
-    assert latest["_mac"] == mock_esp.mac
-    assert latest["fw"] == mock_esp.telemetry.fw
-    assert latest["last_reset_reason"] == "POWERON"
-    assert latest["uptime_s"] == 12345
-    assert "log" in latest and "[BOOT] e2e test" in latest["log"]
+    assert latest["mac"] == mock_esp.mac
+    assert latest["payload"]["fw"] == mock_esp.telemetry.fw
+    assert latest["payload"]["last_reset_reason"] == "POWERON"
+    assert latest["payload"]["uptime_s"] == 12345
+    assert "[BOOT] e2e test" in latest["payload"].get("log", "")
 
 
 # --- admin proxy through backend ------------------------------------------
@@ -116,7 +120,9 @@ def test_backend_admin_logs_endpoint_proxies_correctly(stack, mock_esp):
     proxied = r.json()
     assert isinstance(proxied, list)
     assert len(proxied) >= 1
-    assert proxied[0]["_mac"] == mock_esp.mac
+    # Sidecar envelope schema (since commit 4b2024e): top-level `mac`
+    # replaced legacy `_mac`.
+    assert proxied[0]["mac"] == mock_esp.mac
 
 
 def test_backend_admin_logs_rejects_missing_admin_key(stack, mock_esp):

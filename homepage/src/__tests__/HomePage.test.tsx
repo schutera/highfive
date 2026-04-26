@@ -10,7 +10,6 @@ vi.mock('../services/api', () => ({
     getAllModules: vi.fn().mockResolvedValue([]),
     getModuleById: vi.fn(),
     getModuleLogs: vi.fn().mockResolvedValue([]),
-    updateModuleStatus: vi.fn(),
     healthCheck: vi.fn().mockResolvedValue({ status: 'ok', timestamp: '' }),
   },
 }));
@@ -38,7 +37,7 @@ describe('HomePage smoke', () => {
     renderHome();
     const dashboardLinks = screen
       .getAllByRole('link')
-      .filter(a => (a as HTMLAnchorElement).getAttribute('href') === '/dashboard');
+      .filter((a) => (a as HTMLAnchorElement).getAttribute('href') === '/dashboard');
     expect(dashboardLinks.length).toBeGreaterThan(0);
   });
 });

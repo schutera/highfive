@@ -9,7 +9,8 @@ const options: swaggerJsdoc.Options = {
     info: {
       title: 'HighFive API',
       version: '1.0.0',
-      description: 'API for the HighFive wild bee monitoring system. Most endpoints require API key authentication.',
+      description:
+        'API for the HighFive wild bee monitoring system. Most endpoints require API key authentication.',
       contact: {
         name: 'HighFive Team',
       },
@@ -51,7 +52,11 @@ const options: swaggerJsdoc.Options = {
             lastApiCall: { type: 'string', format: 'date-time' },
             batteryLevel: { type: 'number', example: 85 },
             firstOnline: { type: 'string', format: 'date-time' },
-            totalHatches: { type: 'number', example: 450, description: 'Sum of all hatches across all nests' },
+            totalHatches: {
+              type: 'number',
+              example: 450,
+              description: 'Sum of all hatches across all nests',
+            },
           },
         },
         ModuleDetail: {
@@ -72,10 +77,10 @@ const options: swaggerJsdoc.Options = {
           type: 'object',
           properties: {
             nestId: { type: 'number', example: 1 },
-            beeType: { 
-              type: 'string', 
+            beeType: {
+              type: 'string',
               enum: ['blackmasked', 'resin', 'leafcutter', 'orchard'],
-              example: 'blackmasked' 
+              example: 'blackmasked',
             },
             dailyProgress: {
               type: 'array',
@@ -115,15 +120,13 @@ const options: swaggerJsdoc.Options = {
         },
       },
     },
-    security: [
-      { ApiKeyHeader: [] },
-      { BearerAuth: [] },
-    ],
+    security: [{ ApiKeyHeader: [] }, { BearerAuth: [] }],
     paths: {
       '/api/modules': {
         get: {
           summary: 'Get all modules',
-          description: 'Returns a list of all bee monitoring modules with their basic information and total hatches',
+          description:
+            'Returns a list of all bee monitoring modules with their basic information and total hatches',
           tags: ['Modules'],
           security: [{ ApiKeyHeader: [] }, { BearerAuth: [] }],
           responses: {
@@ -168,7 +171,8 @@ const options: swaggerJsdoc.Options = {
       '/api/modules/{id}': {
         get: {
           summary: 'Get module details',
-          description: 'Returns detailed information about a specific module including all nest data and daily progress',
+          description:
+            'Returns detailed information about a specific module including all nest data and daily progress',
           tags: ['Modules'],
           security: [{ ApiKeyHeader: [] }, { BearerAuth: [] }],
           parameters: [
@@ -209,77 +213,11 @@ const options: swaggerJsdoc.Options = {
           },
         },
       },
-      '/api/modules/{id}/status': {
-        patch: {
-          summary: 'Update module status',
-          description: 'Updates the online/offline status of a module',
-          tags: ['Modules'],
-          security: [{ ApiKeyHeader: [] }, { BearerAuth: [] }],
-          parameters: [
-            {
-              name: 'id',
-              in: 'path',
-              required: true,
-              description: 'Module ID',
-              schema: { type: 'string' },
-              example: 'hive-001',
-            },
-          ],
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['status'],
-                  properties: {
-                    status: {
-                      type: 'string',
-                      enum: ['online', 'offline'],
-                      example: 'online',
-                    },
-                  },
-                },
-              },
-            },
-          },
-          responses: {
-            200: {
-              description: 'Status updated successfully',
-              content: {
-                'application/json': {
-                  schema: {
-                    type: 'object',
-                    properties: {
-                      message: { type: 'string', example: 'Status updated successfully' },
-                    },
-                  },
-                },
-              },
-            },
-            400: {
-              description: 'Invalid status value',
-              content: {
-                'application/json': {
-                  schema: { $ref: '#/components/schemas/Error' },
-                },
-              },
-            },
-            404: {
-              description: 'Module not found',
-              content: {
-                'application/json': {
-                  schema: { $ref: '#/components/schemas/Error' },
-                },
-              },
-            },
-          },
-        },
-      },
       '/api/health': {
         get: {
           summary: 'Health check',
-          description: 'Returns the health status of the API. This endpoint is public and does not require authentication.',
+          description:
+            'Returns the health status of the API. This endpoint is public and does not require authentication.',
           tags: ['Health'],
           security: [], // Public endpoint, no auth required
           responses: {
@@ -304,27 +242,32 @@ const swaggerSpec = swaggerJsdoc(options);
 export function setupSwagger(app: Express): void {
   // Get the dev API key for display
   const devApiKey = getApiKey();
-  
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'HighFive API Documentation',
-    swaggerOptions: {
-      persistAuthorization: true,
-    },
-  }));
-  
+
+  app.use(
+    '/api-docs',
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, {
+      customCss: '.swagger-ui .topbar { display: none }',
+      customSiteTitle: 'HighFive API Documentation',
+      swaggerOptions: {
+        persistAuthorization: true,
+      },
+    }),
+  );
+
   // Also serve the raw OpenAPI spec
   app.get('/api-docs.json', (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(swaggerSpec);
   });
-  
+
   // Dev endpoint to get the API key (remove in production!)
   app.get('/api-docs/dev-key', (req, res) => {
-    res.json({ 
+    res.json({
       message: 'Development API key (do not use in production)',
       apiKey: devApiKey,
-      usage: 'Add header "X-API-Key: ' + devApiKey + '" or "Authorization: Bearer ' + devApiKey + '"'
+      usage:
+        'Add header "X-API-Key: ' + devApiKey + '" or "Authorization: Bearer ' + devApiKey + '"',
     });
   });
 }

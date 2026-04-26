@@ -7,7 +7,6 @@ vi.mock('../src/database', () => ({
     refresh: vi.fn().mockResolvedValue(undefined),
     getAllModules: vi.fn().mockReturnValue([]),
     getModuleById: vi.fn().mockReturnValue(null),
-    updateModuleStatus: vi.fn().mockReturnValue(false),
   },
 }));
 
@@ -31,9 +30,7 @@ describe('GET /api/modules/:id/logs', () => {
   });
 
   it('returns 403 when X-Admin-Key header is missing', async () => {
-    const res = await request(app)
-      .get('/api/modules/m1/logs')
-      .set('X-API-Key', KEY);
+    const res = await request(app).get('/api/modules/m1/logs').set('X-API-Key', KEY);
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/admin key required/i);
   });
@@ -91,8 +88,8 @@ describe('GET /api/modules/:id/logs', () => {
       .set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(200);
-    const calledWith = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>)
-      .mock.calls[0][0] as string;
+    const calledWith = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0][0] as string;
     expect(calledWith).toContain('/modules/m1/logs');
     expect(calledWith).toContain('limit=42');
   });

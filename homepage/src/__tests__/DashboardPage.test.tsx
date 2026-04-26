@@ -9,7 +9,6 @@ vi.mock('../services/api', () => ({
     getAllModules: vi.fn().mockResolvedValue([]),
     getModuleById: vi.fn(),
     getModuleLogs: vi.fn().mockResolvedValue([]),
-    updateModuleStatus: vi.fn(),
     healthCheck: vi.fn().mockResolvedValue({ status: 'ok', timestamp: '' }),
   },
 }));
@@ -43,14 +42,19 @@ vi.mock('leaflet', () => {
       }
     },
     LatLng: class {
-      constructor(public lat: number, public lng: number) {}
+      constructor(
+        public lat: number,
+        public lng: number,
+      ) {}
     },
   };
   return { default: L, ...L };
 });
 
 vi.mock('react-leaflet', () => {
-  const Pass = ({ children }: { children?: React.ReactNode }) => <div data-testid="leaflet-stub">{children}</div>;
+  const Pass = ({ children }: { children?: React.ReactNode }) => (
+    <div data-testid="leaflet-stub">{children}</div>
+  );
   return {
     MapContainer: Pass,
     TileLayer: () => null,

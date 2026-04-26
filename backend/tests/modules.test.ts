@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn().mockResolvedValue(undefined),
   getAllModules: vi.fn(),
   getModuleById: vi.fn(),
-  updateModuleStatus: vi.fn(),
 }));
 
 vi.mock('../src/database', () => ({
@@ -15,7 +14,6 @@ vi.mock('../src/database', () => ({
     refresh: mocks.refresh,
     getAllModules: mocks.getAllModules,
     getModuleById: mocks.getModuleById,
-    updateModuleStatus: mocks.updateModuleStatus,
   },
 }));
 
@@ -27,7 +25,6 @@ beforeEach(() => {
   mocks.refresh.mockClear();
   mocks.getAllModules.mockReset();
   mocks.getModuleById.mockReset();
-  mocks.updateModuleStatus.mockReset();
 });
 
 describe('GET /api/modules', () => {
@@ -84,53 +81,7 @@ describe('GET /api/modules/:id', () => {
   it('returns 404 for an unknown id', async () => {
     mocks.getModuleById.mockReturnValue(null);
 
-    const res = await request(app)
-      .get('/api/modules/does-not-exist')
-      .set('X-API-Key', KEY);
-    expect(res.status).toBe(404);
-    expect(res.body.error).toBe('Module not found');
-  });
-});
-
-describe('PATCH /api/modules/:id/status', () => {
-  it('returns 400 on invalid status string', async () => {
-    const res = await request(app)
-      .patch('/api/modules/m1/status')
-      .set('X-API-Key', KEY)
-      .send({ status: 'banana' });
-    expect(res.status).toBe(400);
-    expect(mocks.updateModuleStatus).not.toHaveBeenCalled();
-  });
-
-  it('returns 200 and calls db.updateModuleStatus for "online"', async () => {
-    mocks.updateModuleStatus.mockReturnValue(true);
-
-    const res = await request(app)
-      .patch('/api/modules/m1/status')
-      .set('X-API-Key', KEY)
-      .send({ status: 'online' });
-    expect(res.status).toBe(200);
-    expect(mocks.updateModuleStatus).toHaveBeenCalledWith('m1', 'online');
-  });
-
-  it('returns 200 and calls db.updateModuleStatus for "offline"', async () => {
-    mocks.updateModuleStatus.mockReturnValue(true);
-
-    const res = await request(app)
-      .patch('/api/modules/m2/status')
-      .set('X-API-Key', KEY)
-      .send({ status: 'offline' });
-    expect(res.status).toBe(200);
-    expect(mocks.updateModuleStatus).toHaveBeenCalledWith('m2', 'offline');
-  });
-
-  it('returns 404 when db reports not found', async () => {
-    mocks.updateModuleStatus.mockReturnValue(false);
-
-    const res = await request(app)
-      .patch('/api/modules/missing/status')
-      .set('X-API-Key', KEY)
-      .send({ status: 'online' });
+    const res = await request(app).get('/api/modules/does-not-exist').set('X-API-Key', KEY);
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('Module not found');
   });

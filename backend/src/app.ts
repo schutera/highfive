@@ -71,22 +71,3 @@ app.get('/api/modules/:id/logs', async (req, res) => {
     res.status(502).json({ error: 'image-service unreachable' });
   }
 });
-
-app.patch('/api/modules/:id/status', async (req, res) => {
-  try {
-    const { status } = req.body;
-    if (status !== 'online' && status !== 'offline') {
-      res.status(400).json({ error: 'Invalid status. Must be "online" or "offline"' });
-      return;
-    }
-    const success = db.updateModuleStatus(req.params.id, status);
-    await db.refresh();
-    if (success) {
-      res.json({ message: 'Status updated successfully' });
-    } else {
-      res.status(404).json({ error: 'Module not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update module status' });
-  }
-});

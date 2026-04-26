@@ -100,19 +100,7 @@ Same shape as above, plus a `nests` array of `NestData`. Each nest
 carries `dailyProgress[]` with `progress_id`, `nest_id`, `date`,
 `empty`, `sealed`, `hatched`. 404 if the module is unknown.
 
-## 1.4 Update status
-
-```
-PATCH /api/modules/:id/status
-Headers: X-API-Key: <key>
-Content-Type: application/json
-Body: { "status": "online" | "offline" }
-```
-
-Returns `{ "message": "Status updated successfully" }` on success.
-400 for any other status string, 404 if the module is unknown.
-
-## 1.5 Module telemetry logs (admin)
+## 1.4 Module telemetry logs (admin)
 
 ```
 GET /api/modules/:id/logs?limit=10

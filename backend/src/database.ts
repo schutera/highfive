@@ -41,10 +41,14 @@ export class ModuleCache {
       } catch (err) {
         const remaining = retries - i - 1;
         if (remaining > 0) {
-          console.warn(`⏳ DuckDB not ready, retrying in ${delayMs / 1000}s (${remaining} left)...`);
-          await new Promise(r => setTimeout(r, delayMs));
+          console.warn(
+            `⏳ DuckDB not ready, retrying in ${delayMs / 1000}s (${remaining} left)...`,
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
         } else {
-          console.error('❌ Could not reach DuckDB service after all retries. Starting with empty data.');
+          console.error(
+            '❌ Could not reach DuckDB service after all retries. Starting with empty data.',
+          );
         }
       }
     }
@@ -52,9 +56,9 @@ export class ModuleCache {
 
   async initializeData(): Promise<void> {
     const [modulesResult, nestsResult, progressResult] = await Promise.allSettled([
-      fetch(`${DUCKDB_URL}/modules`).then(r => r.json()),
-      fetch(`${DUCKDB_URL}/nests`).then(r => r.json()),
-      fetch(`${DUCKDB_URL}/progress`).then(r => r.json()),
+      fetch(`${DUCKDB_URL}/modules`).then((r) => r.json()),
+      fetch(`${DUCKDB_URL}/nests`).then((r) => r.json()),
+      fetch(`${DUCKDB_URL}/progress`).then((r) => r.json()),
     ]);
 
     if (modulesResult.status === 'rejected') {
@@ -67,9 +71,15 @@ export class ModuleCache {
       console.warn('⚠️ Failed to fetch progress:', progressResult.reason);
     }
 
-    const modulesData = (modulesResult.status === 'fulfilled' ? modulesResult.value : { modules: [] }) as ApiModuleResponse;
-    const nestsData = (nestsResult.status === 'fulfilled' ? nestsResult.value : { nests: [] }) as ApiNestResponse;
-    const progressData = (progressResult.status === 'fulfilled' ? progressResult.value : { progress: [] }) as ApiDailyProgressResponse;
+    const modulesData = (
+      modulesResult.status === 'fulfilled' ? modulesResult.value : { modules: [] }
+    ) as ApiModuleResponse;
+    const nestsData = (
+      nestsResult.status === 'fulfilled' ? nestsResult.value : { nests: [] }
+    ) as ApiNestResponse;
+    const progressData = (
+      progressResult.status === 'fulfilled' ? progressResult.value : { progress: [] }
+    ) as ApiDailyProgressResponse;
 
     this.modules.clear();
 
@@ -117,8 +127,7 @@ export class ModuleCache {
     modulesData.modules.forEach((m: any) => {
       const firstOnlineDate = new Date(m.first_online);
       const now = new Date();
-      const isOnline =
-        now.getTime() - firstOnlineDate.getTime() <= 24 * 60 * 60 * 1000;
+      const isOnline = now.getTime() - firstOnlineDate.getTime() <= 24 * 60 * 60 * 1000;
 
       const module: ModuleDetail = {
         id: m.id,
@@ -148,8 +157,7 @@ export class ModuleCache {
   getAllModules(): Module[] {
     return Array.from(this.modules.values()).map((m) => {
       const totalHatches = m.nests.reduce((sum, nest) => {
-        const latestProgress =
-          nest.dailyProgress[nest.dailyProgress.length - 1];
+        const latestProgress = nest.dailyProgress[nest.dailyProgress.length - 1];
         return sum + (latestProgress?.hatched || 0);
       }, 0);
 
@@ -169,15 +177,6 @@ export class ModuleCache {
 
   getModuleById(id: string): ModuleDetail | null {
     return this.modules.get(id) || null;
-  }
-
-  updateModuleStatus(id: string, status: 'online' | 'offline'): boolean {
-    const module = this.modules.get(id);
-    if (!module) return false;
-
-    module.status = status;
-    module.lastApiCall = new Date().toISOString();
-    return true;
   }
 }
 

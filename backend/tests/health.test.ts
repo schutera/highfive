@@ -8,7 +8,6 @@ vi.mock('../src/database', () => ({
     refresh: vi.fn().mockResolvedValue(undefined),
     getAllModules: vi.fn().mockReturnValue([]),
     getModuleById: vi.fn().mockReturnValue(null),
-    updateModuleStatus: vi.fn().mockReturnValue(false),
   },
 }));
 

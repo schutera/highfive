@@ -102,17 +102,6 @@ class ApiService {
     return response.json();
   }
 
-  async updateModuleStatus(id: string, status: 'online' | 'offline'): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/modules/${id}/status`, {
-      method: 'PATCH',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ status }),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to update module ${id} status`);
-    }
-  }
-
   async healthCheck(): Promise<{ status: string; timestamp: string }> {
     // Health check doesn't require auth
     const response = await fetch(`${this.baseUrl}/health`);

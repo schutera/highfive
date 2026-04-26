@@ -9,7 +9,6 @@ vi.mock('../services/api', () => ({
     getAllModules: vi.fn().mockResolvedValue([]),
     getModuleById: vi.fn(),
     getModuleLogs: vi.fn().mockResolvedValue([]),
-    updateModuleStatus: vi.fn(),
     healthCheck: vi.fn().mockResolvedValue({ status: 'ok', timestamp: '' }),
   },
 }));

@@ -5,11 +5,11 @@ import random
 import time
 
 from flask import Flask, jsonify, request
-from requests import RequestException
 
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
 from services.sidecar import LogSidecarEnvelope
+from services.upload_pipeline import UploadPipeline, UploadRequest
 
 app = Flask(__name__)
 
@@ -42,6 +42,20 @@ def stub_classify() -> dict:
     }
 
 
+def _send_discord(content: str) -> None:
+    """Indirection so tests can monkeypatch `app.send_discord_message` and
+    have the pipeline pick up the replacement at call time."""
+    send_discord_message(content)
+
+
+upload_pipeline = UploadPipeline(
+    upload_folder=UPLOAD_FOLDER,
+    duckdb_service=duckdb_service,
+    send_discord=_send_discord,
+    classify=stub_classify,
+)
+
+
 @app.get("/health")
 def health():
     """Liveness probe. Returns 200 once the Flask app is ready to serve.
@@ -57,95 +71,36 @@ def health():
 def upload_image():
     mac = request.form.get("mac") or request.args.get("mac")
     battery = request.form.get("battery") or request.args.get("battery")
-
     if not mac:
         return jsonify({"error": "Missing parameter: mac"}), 400
     if not battery:
         return jsonify({"error": "Missing parameter: battery"}), 400
-
     try:
         battery = int(battery)
     except ValueError:
         return jsonify({"error": "battery must be an integer"}), 400
-
     if not (0 <= battery <= 100):
         return jsonify({"error": "battery must be between 0 and 100"}), 400
-
     if "image" not in request.files:
         return jsonify({"error": "No image file provided"}), 400
-
     image = request.files["image"]
     if image.filename == "":
         return jsonify({"error": "No selected file"}), 400
 
-    # Check if this is the module's first upload via duckdb-service.
-    # Tolerate transient duckdb-service failures: if we can't determine the
-    # count, assume "not first" so we don't spam Discord on flaky network.
-    is_first_upload = False
-    try:
-        count = duckdb_service.get_progress_count(mac)
-        is_first_upload = count == 0
-    except RequestException:
-        pass
-
-    # Save image to volume
-    file_path = os.path.join(UPLOAD_FOLDER, image.filename)
-    image.save(file_path)
-
-    # Persist optional ESP telemetry beside the image as a typed envelope.
-    # On-disk shape: {"mac", "received_at", "image", "payload": {...}}.
-    logs_raw = request.form.get("logs")
-    if logs_raw:
-        try:
-            # Parse so the sidecar is valid JSON even if ESP sends garbage
-            payload = json.loads(logs_raw)
-            if not isinstance(payload, dict):
-                payload = {"raw": logs_raw, "parse_error": True}
-        except ValueError:
-            payload = {"raw": logs_raw, "parse_error": True}
-        envelope = LogSidecarEnvelope(
+    result = upload_pipeline.run(
+        UploadRequest(
             mac=mac,
-            received_at=LogSidecarEnvelope.now_iso(),
-            image=image.filename,
-            payload=payload,
+            battery=battery,
+            image=image,
+            logs_raw=request.form.get("logs"),
         )
-        try:
-            with open(file_path + ".log.json", "w", encoding="utf-8") as f:
-                f.write(envelope.to_json_string())
-        except OSError as exc:
-            print(f"[logs] failed to write sidecar for {image.filename}: {exc}")
-
-    # Run classification stub (replace with MaskRCNN later)
-    classification = stub_classify()
-
-    # Post results to DuckDB service
-    payload = {"modul_id": mac, "classification": classification}
-    try:
-        duckdb_service.add_progress_for_module(payload)
-    except RequestException:
-        pass
-
-    # Update module battery and online status via duckdb-service heartbeat.
-    # Tolerate transient failures: a missed heartbeat shouldn't fail the upload.
-    try:
-        duckdb_service.heartbeat(mac, battery)
-    except RequestException:
-        pass
-
-    if is_first_upload:
-        send_discord_message(
-            f"📸 **First image received!**\n"
-            f"Module **{mac}** just sent its first photo.\n"
-            f"**Battery:** {battery}%\n"
-            f"**File:** {image.filename}"
-        )
-
+    )
     return jsonify(
         {
-            "message": f"Image {image.filename} uploaded successfully",
+            "message": f"Image {result.filename} uploaded successfully",
             "mac": mac,
             "battery": battery,
-            "classification": classification,
+            "classification": result.classification,
         }
     ), 200
 

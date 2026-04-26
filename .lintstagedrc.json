@@ -1,0 +1,4 @@
+{
+  "*.{ts,tsx,js,jsx,json,md,mdx,yml,yaml,css,scss,html}": "prettier --write",
+  "{duckdb-service,image-service}/**/*.py": ["ruff check --fix", "ruff format"]
+}

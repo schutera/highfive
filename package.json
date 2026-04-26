@@ -1,5 +1,15 @@
 {
+  "name": "highfive-monorepo",
+  "private": true,
+  "scripts": {
+    "prepare": "husky"
+  },
   "dependencies": {
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.3"
   }
 }

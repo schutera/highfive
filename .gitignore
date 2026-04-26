@@ -215,3 +215,20 @@ ESP32-CAM/.pioenvs/
 ESP32-CAM/.piolibdeps/
 
 .DS_Store
+
+# User-local Claude config — per-machine permission allowlist accumulates
+# here, do not share. settings.json (without the .local) stays committed.
+.claude/settings.local.json
+
+# FreeCAD autosave backups — the .FCStd is the source of truth, the
+# timestamped .FCBak files are noise that drift in every working tree.
+*.FCBak
+
+# TypeScript incremental build artifacts
+*.tsbuildinfo
+
+# Vite cache (created by `vite dev` and `vite build`)
+**/.vite/
+
+# Vitest coverage output (homepage; backend/coverage/ already listed above)
+homepage/coverage/

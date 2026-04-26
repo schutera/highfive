@@ -19,14 +19,20 @@ services:
       context: ../../duckdb-service
       dockerfile: Dockerfile.dev
     ports:
-      - "0.0.0.0:9002:8000"
+      - '0.0.0.0:9002:8000'
     environment:
-      DEBUG: "false"
-      SEED_DATA: "false"   # tests assert against state they explicitly create
+      DEBUG: 'false'
+      SEED_DATA: 'false' # tests assert against state they explicitly create
     volumes:
       - duckdb_test_data:/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
       interval: 2s
       timeout: 5s
       retries: 30
@@ -39,9 +45,9 @@ services:
       context: ../../image-service
       dockerfile: Dockerfile.dev
     ports:
-      - "9000:4444"
+      - '9000:4444'
     environment:
-      DEBUG: "false"
+      DEBUG: 'false'
       DUCKDB_PATH: /data/app.duckdb
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
     volumes:
@@ -54,10 +60,12 @@ services:
 
   backend:
     build:
-      context: ../../backend
-      dockerfile: Dockerfile.dev
+      # Context is repo root (npm workspaces — needs contracts/ + root
+      # lockfile). Dockerfile lives under backend/.
+      context: ../..
+      dockerfile: backend/Dockerfile.dev
     ports:
-      - "4002:3002"
+      - '4002:3002'
     environment:
       NODE_ENV: production
       DUCKDB_SERVICE_URL: http://duckdb-service:8000

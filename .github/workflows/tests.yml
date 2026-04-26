@@ -33,7 +33,7 @@ name: tests
 
 on:
   push:
-    branches: [main, "chore/test-harness"]
+    branches: [main, 'chore/test-harness']
   pull_request:
     branches: [main]
 
@@ -55,7 +55,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
 
       - name: Install PlatformIO Core
@@ -84,7 +84,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
 
       - name: Install PlatformIO Core
@@ -113,17 +113,18 @@ jobs:
       - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          # Single root lockfile since the npm workspaces refactor —
+          # `backend/`, `homepage/`, and `contracts/` all install via the
+          # root `package-lock.json`.
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: backend
         run: npm ci
 
       - name: Run tests
-        working-directory: backend
-        run: npm test
+        run: npm test --workspace backend
 
   duckdb-unit:
     name: DuckDB service unit tests (pytest)
@@ -136,7 +137,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
           cache-dependency-path: duckdb-service/requirements-dev.txt
 
@@ -159,7 +160,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
           cache-dependency-path: image-service/requirements-dev.txt
 
@@ -182,17 +183,16 @@ jobs:
       - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
           cache: npm
-          cache-dependency-path: homepage/package-lock.json
+          # Single root lockfile since the npm workspaces refactor.
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: homepage
         run: npm ci
 
       - name: Run tests
-        working-directory: homepage
-        run: npm test
+        run: npm test --workspace homepage
 
   e2e-pipeline:
     name: End-to-end pipeline test
@@ -205,7 +205,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
 
       - name: Install test dependencies

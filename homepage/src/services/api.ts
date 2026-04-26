@@ -1,35 +1,8 @@
+import type { Module, ModuleDetail, NestData, DailyProgress } from '@highfive/contracts';
+
+export type { Module, ModuleDetail, NestData, DailyProgress };
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
-
-export interface Module {
-  id: string;
-  name: string;
-  location: {
-    lat: number;
-    lng: number;
-  };
-  status: 'online' | 'offline';
-  lastApiCall: string;
-  batteryLevel: number;
-  totalHatches: number;
-  imageCount: number;
-}
-
-export interface NestData {
-  nest_id: string;
-  beeType: 'blackmasked' | 'resin' | 'leafcutter' | 'orchard';
-  dailyProgress: DailyProgress[];
-}
-
-export interface DailyProgress {
-  date: string;
-  empty: number;
-  sealed: number;
-  hatched: number;
-}
-
-export interface ModuleDetail extends Module {
-  nests: NestData[];
-}
 
 export interface TelemetryEntry {
   fw?: string;

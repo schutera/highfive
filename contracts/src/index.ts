@@ -1,3 +1,15 @@
+// Canonical wire-shape contracts shared between `backend` and `homepage`.
+//
+// Both consumers import from `@highfive/contracts` (npm workspace), so any
+// drift between the two TypeScript sources becomes a compile-time error
+// instead of a silent field mismatch on the wire.
+//
+// The shapes here mirror what `backend/src/database.ts` returns to the
+// homepage; that file remains the source of truth for the wire contract,
+// and these declarations are cut-and-pasted from the original
+// `backend/src/types.ts`. Field-name drift (e.g. `progess`/`hateched`)
+// is called out in `UBIQUITOUS_LANGUAGE.md`.
+
 export interface Module {
   id: string;
   name: string;

@@ -193,6 +193,15 @@ and flags the synonyms, typos, and overloads that have caused bugs.
 - **`modul_id`** — same shape of risk as above, currently _live_ on
   the wire between image-service and duckdb-service. Highest-priority
   drift hazard remaining.
+- **TS interface duplication between `backend` and `homepage`**
+  — _RESOLVED 2026-04-26_. Both sides used to declare their own
+  `Module`, `ModuleDetail`, `NestData`, `DailyProgress`. The homepage
+  copy had already drifted (e.g. `nestId: number` vs the wire's
+  `nest_id: string`, fixed in `ab0ef3d`) and was missing several
+  backend-only fields. Now both consumers import from the
+  `@highfive/contracts` npm workspace package
+  (`contracts/src/index.ts`); any field-shape drift becomes a
+  TypeScript compile error.
 - **General mitigation:** treat any field whose spelling differs by
   one letter from a real English word as a smell. Add a
   contract-level integration check (or a Pydantic alias with the

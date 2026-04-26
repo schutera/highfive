@@ -66,29 +66,30 @@ cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile fi
 
 ## Where things live
 
-| Area                               | Path                                                  |
-| ---------------------------------- | ----------------------------------------------------- |
-| Backend Express entry              | `backend/src/server.ts`                               |
-| Backend route handlers             | `backend/src/app.ts` (+ `auth.ts`, `duckdbClient.ts`) |
-| Backend tests                      | `backend/tests/*.test.ts`                             |
-| Homepage pages / components        | `homepage/src/pages/`, `homepage/src/components/`     |
-| Homepage tests                     | `homepage/src/__tests__/*.test.tsx`                   |
-| Homepage API client                | `homepage/src/services/`                              |
-| Image service Flask app            | `image-service/app.py`                                |
-| Image service routes / services    | `image-service/routes/`, `image-service/services/`    |
-| Image service tests                | `image-service/tests/test_*.py`                       |
-| DuckDB service Flask app           | `duckdb-service/app.py`                               |
-| DuckDB schema / models             | `duckdb-service/db/`, `duckdb-service/models/`        |
-| DuckDB service tests               | `duckdb-service/tests/test_*.py`                      |
-| ESP32-CAM firmware entry           | `ESP32-CAM/ESP32-CAM.ino`                             |
-| ESP32-CAM pure C++ (host-testable) | `ESP32-CAM/lib/{url,ring_buffer,telemetry}/`          |
-| ESP32-CAM Unity host tests         | `ESP32-CAM/test/test_native_*/`                       |
-| End-to-end pipeline test           | `tests/e2e/test_upload_pipeline.py`                   |
-| E2E isolated compose stack         | `tests/e2e/docker-compose.test.yml` (ports +1000)     |
-| Mock ESP driver                    | `tools/mock_esp.py`                                   |
-| Compose stack                      | `docker-compose.yml`                                  |
-| CAD / laser DXFs                   | `assets/`                                             |
-| Docs (deep dives)                  | `documentation/`                                      |
+| Area                               | Path                                                           |
+| ---------------------------------- | -------------------------------------------------------------- |
+| Shared TS contracts                | `contracts/src/index.ts` (npm workspace `@highfive/contracts`) |
+| Backend Express entry              | `backend/src/server.ts`                                        |
+| Backend route handlers             | `backend/src/app.ts` (+ `auth.ts`, `duckdbClient.ts`)          |
+| Backend tests                      | `backend/tests/*.test.ts`                                      |
+| Homepage pages / components        | `homepage/src/pages/`, `homepage/src/components/`              |
+| Homepage tests                     | `homepage/src/__tests__/*.test.tsx`                            |
+| Homepage API client                | `homepage/src/services/`                                       |
+| Image service Flask app            | `image-service/app.py`                                         |
+| Image service routes / services    | `image-service/routes/`, `image-service/services/`             |
+| Image service tests                | `image-service/tests/test_*.py`                                |
+| DuckDB service Flask app           | `duckdb-service/app.py`                                        |
+| DuckDB schema / models             | `duckdb-service/db/`, `duckdb-service/models/`                 |
+| DuckDB service tests               | `duckdb-service/tests/test_*.py`                               |
+| ESP32-CAM firmware entry           | `ESP32-CAM/ESP32-CAM.ino`                                      |
+| ESP32-CAM pure C++ (host-testable) | `ESP32-CAM/lib/{url,ring_buffer,telemetry}/`                   |
+| ESP32-CAM Unity host tests         | `ESP32-CAM/test/test_native_*/`                                |
+| End-to-end pipeline test           | `tests/e2e/test_upload_pipeline.py`                            |
+| E2E isolated compose stack         | `tests/e2e/docker-compose.test.yml` (ports +1000)              |
+| Mock ESP driver                    | `tools/mock_esp.py`                                            |
+| Compose stack                      | `docker-compose.yml`                                           |
+| CAD / laser DXFs                   | `assets/`                                                      |
+| Docs (deep dives)                  | `documentation/`                                               |
 
 ## Conventions worth knowing
 

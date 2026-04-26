@@ -1,12 +1,23 @@
 # homepage/Dockerfile.dev
+#
+# Build context is the repo root (see docker-compose.yml). Same
+# workspace setup as backend/Dockerfile.dev — see that file for the
+# rationale.
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY package.json package-lock.json ./
+COPY contracts/package.json ./contracts/package.json
+COPY backend/package.json ./backend/package.json
+COPY homepage/package.json ./homepage/package.json
+
 RUN npm ci
 
-COPY . .
+COPY contracts ./contracts
+COPY homepage ./homepage
+
+WORKDIR /app/homepage
 
 EXPOSE 5173
 ENV NODE_ENV=development

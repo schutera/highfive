@@ -1,10 +1,12 @@
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+      # Context is repo root since we need contracts/ + root lockfile
+      # for npm workspaces. Dockerfile lives under backend/.
+      context: .
+      dockerfile: backend/Dockerfile.dev
     ports:
-      - "3002:3002"
+      - '3002:3002'
     env_file:
       - .env
     environment:
@@ -12,23 +14,31 @@ services:
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       IMAGE_SERVICE_URL: http://image-service:4444
     volumes:
-      - ./backend:/app
+      # Bind-mount backend source for live reload, plus contracts so
+      # type changes flow through. Anonymous volumes shadow the
+      # in-image node_modules so the host's (Windows) node_modules
+      # don't leak in.
+      - ./backend:/app/backend
+      - ./contracts:/app/contracts
       - /app/node_modules
+      - /app/backend/node_modules
     restart: unless-stopped
     networks:
       - net
 
   homepage:
     build:
-      context: ./homepage
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: homepage/Dockerfile.dev
     ports:
-      - "5173:5173"
+      - '5173:5173'
     environment:
       NODE_ENV: development
     volumes:
-      - ./homepage:/app
+      - ./homepage:/app/homepage
+      - ./contracts:/app/contracts
       - /app/node_modules
+      - /app/homepage/node_modules
     restart: unless-stopped
     networks:
       - net
@@ -40,7 +50,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:4444"
+      - '8000:4444'
     environment:
       DUCKDB_PATH: /data/app.duckdb
     volumes:
@@ -57,16 +67,22 @@ services:
       context: ./duckdb-service
       dockerfile: Dockerfile.dev
     ports:
-      - "0.0.0.0:8002:8000"
+      - '0.0.0.0:8002:8000'
     volumes:
       - duckdb_data:/data
     env_file:
       - .env
     environment:
-      SEED_DATA: "true"
+      SEED_DATA: 'true'
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3

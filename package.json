@@ -1,6 +1,11 @@
 {
   "name": "highfive-monorepo",
   "private": true,
+  "workspaces": [
+    "contracts",
+    "backend",
+    "homepage"
+  ],
   "scripts": {
     "prepare": "husky"
   },

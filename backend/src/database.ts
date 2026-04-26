@@ -1,4 +1,4 @@
-import { Module, ModuleDetail, NestData, DailyProgress } from './types';
+import { Module, ModuleDetail, NestData, DailyProgress } from '@highfive/contracts';
 import { DUCKDB_URL } from './duckdbClient';
 
 interface ApiModule {

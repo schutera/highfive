@@ -1,4 +1,5 @@
 import type { Module, ModuleDetail, NestData, DailyProgress } from '@highfive/contracts';
+import { parseModuleId } from '@highfive/contracts';
 
 export type { Module, ModuleDetail, NestData, DailyProgress };
 
@@ -45,7 +46,11 @@ class ApiService {
     if (!response.ok) {
       throw new Error('Failed to fetch modules');
     }
-    return response.json();
+    const data: unknown = await response.json();
+    return (data as Array<Record<string, unknown>>).map((raw) => ({
+      ...raw,
+      id: parseModuleId(raw.id as string),
+    })) as Module[];
   }
 
   async getModuleById(id: string): Promise<ModuleDetail> {
@@ -55,7 +60,12 @@ class ApiService {
     if (!response.ok) {
       throw new Error(`Failed to fetch module ${id}`);
     }
-    return response.json();
+    const raw: unknown = await response.json();
+    const obj = raw as Record<string, unknown>;
+    return {
+      ...obj,
+      id: parseModuleId(obj.id as string),
+    } as ModuleDetail;
   }
 
   async getModuleLogs(id: string, limit: number = 10): Promise<TelemetryEntry[]> {

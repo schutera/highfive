@@ -1,4 +1,11 @@
-import { Module, ModuleDetail, NestData, DailyProgress } from '@highfive/contracts';
+import {
+  Module,
+  ModuleDetail,
+  NestData,
+  DailyProgress,
+  ModuleId,
+  parseModuleId,
+} from '@highfive/contracts';
 import { DUCKDB_URL } from './duckdbClient';
 
 interface ApiModule {
@@ -24,37 +31,37 @@ interface ApiModuleResponse {
   modules: ApiModule[];
 }
 
-export class ModuleCache {
-  private modules: Map<string, ModuleDetail>;
-
-  constructor() {
-    this.modules = new Map();
-    this.initWithRetry();
+/**
+ * Read-only projection of duckdb-service for the homepage.
+ *
+ * Owns no state. Each call fetches the three upstream endpoints and shapes
+ * the response. The DTO normalisation (date ISOification, lat/lng stringly-
+ * typed → numbers, status derivation, totalHatches roll-up) is the actual
+ * value of this layer — the only place where the duckdb wire shape is
+ * translated into the contracts package shape.
+ */
+export class ModuleReadModel {
+  async listModules(): Promise<Module[]> {
+    const all = await this.fetchAndAssemble();
+    return all.map(({ detail, totalHatches }) => ({
+      id: detail.id,
+      name: detail.name,
+      location: detail.location,
+      status: detail.status,
+      lastApiCall: detail.lastApiCall,
+      batteryLevel: detail.batteryLevel,
+      firstOnline: detail.firstOnline,
+      totalHatches,
+      imageCount: detail.imageCount,
+    }));
   }
 
-  private async initWithRetry(retries = 10, delayMs = 3000): Promise<void> {
-    for (let i = 0; i < retries; i++) {
-      try {
-        await this.initializeData();
-        console.log('📊 Data loaded from DuckDB service');
-        return;
-      } catch (err) {
-        const remaining = retries - i - 1;
-        if (remaining > 0) {
-          console.warn(
-            `⏳ DuckDB not ready, retrying in ${delayMs / 1000}s (${remaining} left)...`,
-          );
-          await new Promise((r) => setTimeout(r, delayMs));
-        } else {
-          console.error(
-            '❌ Could not reach DuckDB service after all retries. Starting with empty data.',
-          );
-        }
-      }
-    }
+  async getModuleDetail(id: ModuleId): Promise<ModuleDetail | null> {
+    const all = await this.fetchAndAssemble();
+    return all.find((x) => x.detail.id === id)?.detail ?? null;
   }
 
-  async initializeData(): Promise<void> {
+  private async fetchAndAssemble(): Promise<Array<{ detail: ModuleDetail; totalHatches: number }>> {
     const [modulesResult, nestsResult, progressResult] = await Promise.allSettled([
       fetch(`${DUCKDB_URL}/modules`).then((r) => r.json()),
       fetch(`${DUCKDB_URL}/nests`).then((r) => r.json()),
@@ -81,11 +88,8 @@ export class ModuleCache {
       progressResult.status === 'fulfilled' ? progressResult.value : { progress: [] }
     ) as ApiDailyProgressResponse;
 
-    this.modules.clear();
-
     // ---- 1) Progress normalisieren ----
     const progressByNest = new Map<string, DailyProgress[]>();
-
     progressData.progress.forEach((p: any) => {
       const normalized: DailyProgress = {
         progress_id: p.progress_id,
@@ -95,89 +99,52 @@ export class ModuleCache {
         sealed: p.sealed,
         hatched: p.hatched,
       };
-
-      let arr = progressByNest.get(p.nest_id);
-      if (!arr) {
-        arr = [];
-        progressByNest.set(p.nest_id, arr);
-      }
+      const arr = progressByNest.get(p.nest_id) ?? [];
       arr.push(normalized);
+      progressByNest.set(p.nest_id, arr);
     });
 
     // ---- 2) Nests bauen ----
     const nestsByModule = new Map<string, NestData[]>();
-
     nestsData.nests.forEach((n: any) => {
       const nest: NestData = {
         nest_id: n.nest_id,
         module_id: n.module_id,
         beeType: n.beeType,
-        dailyProgress: progressByNest.get(n.nest_id) || [],
+        dailyProgress: progressByNest.get(n.nest_id) ?? [],
       };
-
-      let arr = nestsByModule.get(n.module_id);
-      if (!arr) {
-        arr = [];
-        nestsByModule.set(n.module_id, arr);
-      }
+      const arr = nestsByModule.get(n.module_id) ?? [];
       arr.push(nest);
+      nestsByModule.set(n.module_id, arr);
     });
 
     // ---- 3) Module bauen ----
-    modulesData.modules.forEach((m: any) => {
+    const now = new Date();
+    return modulesData.modules.map((m) => {
       const firstOnlineDate = new Date(m.first_online);
-      const now = new Date();
       const isOnline = now.getTime() - firstOnlineDate.getTime() <= 24 * 60 * 60 * 1000;
+      const nests = nestsByModule.get(m.id) ?? [];
+      const totalHatches = nests.reduce((sum, nest) => {
+        const latest = nest.dailyProgress[nest.dailyProgress.length - 1];
+        return sum + (latest?.hatched || 0);
+      }, 0);
 
-      const module: ModuleDetail = {
-        id: m.id,
+      const detail: ModuleDetail = {
+        id: parseModuleId(m.id),
         name: m.name,
-        location: {
-          lat: Number(m.lat),
-          lng: Number(m.lng),
-        },
+        location: { lat: Number(m.lat), lng: Number(m.lng) },
         status: isOnline ? 'online' : 'offline',
         firstOnline: firstOnlineDate.toISOString(),
         lastApiCall: now.toISOString(),
         batteryLevel: m.battery_level ?? 0,
-        totalHatches: 0,
-        imageCount: m.image_count ?? 0,
-        nests: nestsByModule.get(m.id) || [],
-      };
-
-      this.modules.set(module.id, module);
-    });
-  }
-
-  async refresh() {
-    await this.initializeData();
-  }
-
-  // ---- API Methods ----
-  getAllModules(): Module[] {
-    return Array.from(this.modules.values()).map((m) => {
-      const totalHatches = m.nests.reduce((sum, nest) => {
-        const latestProgress = nest.dailyProgress[nest.dailyProgress.length - 1];
-        return sum + (latestProgress?.hatched || 0);
-      }, 0);
-
-      return {
-        id: m.id,
-        name: m.name,
-        location: m.location,
-        status: m.status,
-        lastApiCall: m.lastApiCall,
-        batteryLevel: m.batteryLevel,
-        firstOnline: m.firstOnline,
         totalHatches,
-        imageCount: m.imageCount,
+        imageCount: m.image_count ?? 0,
+        nests,
       };
-    });
-  }
 
-  getModuleById(id: string): ModuleDetail | null {
-    return this.modules.get(id) || null;
+      return { detail, totalHatches };
+    });
   }
 }
 
-export const db = new ModuleCache();
+export const db = new ModuleReadModel();

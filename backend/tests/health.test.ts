@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 
-// Mock the database module BEFORE importing app to avoid the ModuleCache
-// constructor firing real fetches against duckdb-service.
+// Mock the database module BEFORE importing app. The ModuleReadModel
+// constructor is already inert — this stub keeps things tidy and avoids
+// any accidental upstream call from a future change.
 vi.mock('../src/database', () => ({
   db: {
-    refresh: vi.fn().mockResolvedValue(undefined),
-    getAllModules: vi.fn().mockReturnValue([]),
-    getModuleById: vi.fn().mockReturnValue(null),
+    listModules: vi.fn().mockResolvedValue([]),
+    getModuleDetail: vi.fn().mockResolvedValue(null),
   },
 }));
 

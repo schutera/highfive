@@ -1,0 +1,10 @@
+{
+  "name": "hf_form_query",
+  "version": "0.1.0",
+  "description": "Pure C++ application/x-www-form-urlencoded query-string helpers (urlDecode, getParam) used by the WiFi onboarding HTTP server. Host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

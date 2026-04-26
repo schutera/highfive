@@ -3,6 +3,8 @@
 #include <FS.h>
 #include <ArduinoJson.h>
 #include "esp_init.h"   // setESPConfigured
+#include "form_query.h" // hf::urlDecode, hf::getParam (host-testable)
+#include <string>
 
 const char *HOST_SSID = "ESP32-Access-Point";
 const char *HOST_PASSWORD = "esp-12345";
@@ -30,36 +32,18 @@ int    cfg_saturation     = 0;
   ---------- HELPERS ----------
   -----------------------------
 */
+// Thin Arduino-String wrappers around the host-testable implementations
+// in lib/form_query. Behavior must remain byte-compatible with the
+// previous on-device versions; the unit tests in
+// test/test_native_form_query/ pin that contract.
 String urlDecode(const String& src) {
-  String decoded = "";
-  char c;
-  for (size_t i = 0; i < src.length(); i++) {
-    c = src[i];
-    if (c == '+') {
-      decoded += ' ';
-    } else if (c == '%' && i + 2 < src.length()) {
-      char h1 = src[i + 1];
-      char h2 = src[i + 2];
-      int hi = isdigit(h1) ? h1 - '0' : toupper(h1) - 'A' + 10;
-      int lo = isdigit(h2) ? h2 - '0' : toupper(h2) - 'A' + 10;
-      decoded += char(hi * 16 + lo);
-      i += 2;
-    } else {
-      decoded += c;
-    }
-  }
-  return decoded;
+  return String(hf::urlDecode(std::string(src.c_str())).c_str());
 }
 
 String getParam(const String& query, const String& name) {
-  String key = name + "=";
-  int start = query.indexOf(key);
-  if (start < 0) return "";
-  start += key.length();
-  int end = query.indexOf('&', start);
-  if (end < 0) end = query.length();
-  String value = query.substring(start, end);
-  return urlDecode(value);
+  return String(
+      hf::getParam(std::string(query.c_str()), std::string(name.c_str())).c_str()
+  );
 }
 
 /*

@@ -2,6 +2,7 @@
 #include "esp_wifi.h"
 #include "esp_init.h"
 #include "logbuf.h"
+#include "module_id.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <FS.h>
@@ -267,7 +268,11 @@ bool loadConfig(esp_config_t *esp_config) {
 
   // ---- setting unique ID (esp mac address) ---- //
   esp_config->esp_ID = ESP.getEfuseMac();
-  Serial.printf("------ ESP module identifier: %u\n", esp_config->esp_ID);
+  // Log the canonical module ID (12 lowercase hex chars). %u was also wrong
+  // here — it truncated the uint64_t to 32 bits — but the canonical form is
+  // what every other service in the system now expects, so emit that.
+  Serial.printf("------ ESP module identifier: %s\n",
+                hf::formatModuleId(esp_config->esp_ID).c_str());
 
   // ---- set initial battery level ---- //
   esp_config->battery_level = 90;
@@ -424,7 +429,8 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
     http.addHeader("Content-Type", "application/json");
 
     StaticJsonDocument<200> doc;
-    doc["esp_id"] = String(esp_config->esp_ID);
+    // Canonical 12-char lowercase-hex module ID — see lib/module_id/.
+    doc["esp_id"] = String(hf::formatModuleId(esp_config->esp_ID).c_str());
     doc["module_name"] = esp_config->module_name;
     doc["latitude"] = String(esp_config->geolocation.latitude);
     doc["longitude"] = String(esp_config->geolocation.longitude);

@@ -1,6 +1,7 @@
 #include "esp_camera.h"
 #include "client.h"
 #include "logbuf.h"
+#include "module_id.h"
 #include "url.h"
 #include <string>
 #include <time.h>
@@ -91,7 +92,11 @@ int postImage(esp_config_t *esp_config) {
   esp_config->battery_level = random(1, 100);
   int battery_level = esp_config->battery_level;
 
-  String macStr = String(esp_config->esp_ID);
+  // Canonical 12-char lowercase-hex module ID. Previously this stringified
+  // the uint64_t eFuse MAC directly via String(esp_config->esp_ID), which on
+  // Arduino emits a decimal truncation (unsigned long) — not a MAC. See
+  // lib/module_id/.
+  String macStr = String(hf::formatModuleId(esp_config->esp_ID).c_str());
 
   // Telemetry payload piggybacked on the upload
   String telemetry = buildTelemetryJson();

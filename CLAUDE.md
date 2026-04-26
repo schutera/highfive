@@ -32,7 +32,7 @@ DUCKDB_SERVICE_URL=http://duckdb-service:8000
 # HIGHFIVE_API_KEY=...   # optional, overrides dev fallback 'hf_dev_key_2026'
 ```
 
-Backend Swagger UI: <http://localhost:3002/api-docs>. `duckdb-service` auto-seeds five sample modules when `SEED_DATA=true` (compose default) and the DB is empty.
+`duckdb-service` auto-seeds five sample modules when `SEED_DATA=true` (compose default) and the DB is empty.
 
 Per-service dev (without compose):
 

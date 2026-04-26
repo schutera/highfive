@@ -17,13 +17,13 @@ and persistence.
 
 ## 2. Runtime Components
 
-| Component        | Tech                           | Host port -> Container port | Responsibility                                                              |
-| ---------------- | ------------------------------ | --------------------------- | --------------------------------------------------------------------------- |
-| `homepage`       | React 19 + Vite + TypeScript   | `5173 -> 5173`              | Dashboard UI, map view, module detail, setup wizard, hive-module info       |
+| Component        | Tech                           | Host port -> Container port | Responsibility                                                                              |
+| ---------------- | ------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------- |
+| `homepage`       | React 19 + Vite + TypeScript   | `5173 -> 5173`              | Dashboard UI, map view, module detail, setup wizard, hive-module info                       |
 | `backend`        | Node.js + Express + TypeScript | `3002 -> 3002`              | Auth-gated API for the frontend; aggregates module / nest / progress; admin telemetry proxy |
-| `image-service`  | Python + Flask                 | `8000 -> 4444`              | Image upload + telemetry sidecar; stub classifier; progress writeback       |
-| `duckdb-service` | Python + Flask + DuckDB        | `8002 -> 8000`              | Persistent storage API (`modules`, `nests`, `progress`)                     |
-| `ESP32-CAM`      | C++ / Arduino + PlatformIO     | n/a (edge device)           | Captures images, builds telemetry payload, uploads via multipart            |
+| `image-service`  | Python + Flask                 | `8000 -> 4444`              | Image upload + telemetry sidecar; stub classifier; progress writeback                       |
+| `duckdb-service` | Python + Flask + DuckDB        | `8002 -> 8000`              | Persistent storage API (`modules`, `nests`, `progress`)                                     |
+| `ESP32-CAM`      | C++ / Arduino + PlatformIO     | n/a (edge device)           | Captures images, builds telemetry payload, uploads via multipart                            |
 
 ## 3. Deployment Topology (Docker Compose)
 
@@ -102,7 +102,7 @@ and persistence.
 
 1. Browser loads `homepage`.
 2. Frontend calls `backend` (`/api/modules`, `/api/modules/:id`) with `X-API-Key`.
-3. `backend.ModuleCache` calls `duckdb-service`:
+3. `backend.ModuleReadModel` calls `duckdb-service` on each request:
    - `GET /modules`, `GET /nests`, `GET /progress`
 4. `backend` normalises raw rows into frontend DTOs and serves them.
 5. Frontend renders the map, module list, status, battery and nest progress.
@@ -160,9 +160,9 @@ CI in `.github/workflows/tests.yml` (jobs `esp-native`, `esp-firmware`,
 PlatformIO's `native` env. They exercise the pure C++ helpers extracted
 into `ESP32-CAM/lib/`:
 
-- `lib/url/`         — URL parsing for the upload base + endpoint config
+- `lib/url/` — URL parsing for the upload base + endpoint config
 - `lib/ring_buffer/` — fixed-size circular buffer used by `logbuf.cpp`
-- `lib/telemetry/`   — telemetry JSON builder + metrics; consumed by `client.cpp`
+- `lib/telemetry/` — telemetry JSON builder + metrics; consumed by `client.cpp`
 
 Run with `make test-esp-native`. No hardware needed. Runs in seconds.
 
@@ -197,8 +197,10 @@ diagram in §4 is the current source of truth.
 
 ## 8. Fault Tolerance and Operational Notes
 
-- `backend.ModuleCache` retries `duckdb-service` on startup with backoff
-  and starts empty if the DB is unreachable; the API still serves.
+- `backend.ModuleReadModel` is a stateless read-through projection: every
+  `/api/modules*` request fans out to duckdb-service via `Promise.allSettled`,
+  so partial upstream failures still return a usable (possibly emptier)
+  response instead of erroring the whole request.
 - DB persistence survives container recreation via `duckdb_data`.
 - Classification and persistence are decoupled over HTTP, allowing
   independent evolution.
@@ -210,8 +212,8 @@ diagram in §4 is the current source of truth.
 
 ## 9. Known Trade-offs
 
-- The backend cache refreshes the full module/nest/progress snapshot on
-  demand. Simple, not optimised for high scale.
+- The backend re-fetches the full module/nest/progress snapshot from
+  duckdb-service on every request. Simple, not optimised for high scale.
 - Classification returns stub values; MaskRCNN integration is planned.
 - Dev API key (`hf_dev_key_2026`) ships as a fallback. Override via
   `HIGHFIVE_API_KEY` for any non-local deployment.

@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import { tryParseModuleId } from '@highfive/contracts';
 import { db } from './database';
-import { setupSwagger } from './swagger';
 import { apiKeyAuth, getApiKey } from './auth';
 
 export const app = express();
@@ -10,9 +9,6 @@ export const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// Setup Swagger documentation (public, no auth required)
-setupSwagger(app);
 
 // Health check (public, no auth required)
 app.get('/api/health', (req, res) => {

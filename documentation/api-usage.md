@@ -10,8 +10,8 @@ The system has four services and three callable APIs:
 | Image Service  | `8000`    | `4444`         | ESP upload + telemetry sidecar       |
 | DuckDB Service | `8002`    | `8000`         | Persistent storage API               |
 
-The homepage itself is at <http://localhost:5173>. Swagger UI for the
-backend is at <http://localhost:3002/api-docs>.
+The homepage itself is at <http://localhost:5173>. The canonical wire shapes
+shared between backend and homepage live in `contracts/src/index.ts`.
 
 The three APIs documented below are:
 

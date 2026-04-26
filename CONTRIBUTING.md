@@ -35,14 +35,13 @@ docker compose up --build
 
 The four services come up on:
 
-| Service          | URL                       |
-| ---------------- | ------------------------- |
-| homepage         | http://localhost:5173     |
-| backend          | http://localhost:3002     |
-| image-service    | http://localhost:8000     |
-| duckdb-service   | http://localhost:8002     |
+| Service        | URL                   |
+| -------------- | --------------------- |
+| homepage       | http://localhost:5173 |
+| backend        | http://localhost:3002 |
+| image-service  | http://localhost:8000 |
+| duckdb-service | http://localhost:8002 |
 
-Backend Swagger UI is at <http://localhost:3002/api-docs>.
 The duckdb-service auto-seeds five sample modules when the DB is empty
 and `SEED_DATA=true` (the compose default).
 
@@ -136,15 +135,15 @@ The first line is `<type>: <imperative summary>` and stays under ~72 chars.
 
 Allowed types (matching recent history):
 
-| Type       | When to use                                              |
-| ---------- | -------------------------------------------------------- |
-| `feat`     | User-visible new behaviour                               |
-| `fix`      | Bug fix                                                  |
-| `refactor` | Internal restructuring with no behaviour change          |
-| `chore`    | Tooling, dependencies, repo housekeeping                 |
-| `test`     | Adding or updating tests only                            |
-| `ci`       | CI / GitHub Actions config                               |
-| `docs`     | Documentation only                                       |
+| Type       | When to use                                     |
+| ---------- | ----------------------------------------------- |
+| `feat`     | User-visible new behaviour                      |
+| `fix`      | Bug fix                                         |
+| `refactor` | Internal restructuring with no behaviour change |
+| `chore`    | Tooling, dependencies, repo housekeeping        |
+| `test`     | Adding or updating tests only                   |
+| `ci`       | CI / GitHub Actions config                      |
+| `docs`     | Documentation only                              |
 
 Examples from `git log`:
 
@@ -155,7 +154,7 @@ feat: v1.0.0 — ESP32-CAM reliability & telemetry
 docs: update HiveModule CAD files, add laser cut DXFs and ESP32-CAM stream test docs
 ```
 
-The body (optional, separated by a blank line) explains *why*, not *what*.
+The body (optional, separated by a blank line) explains _why_, not _what_.
 
 ## Code style
 

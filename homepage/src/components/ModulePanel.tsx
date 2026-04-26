@@ -3,6 +3,14 @@ import { api, type TelemetryEntry } from '../services/api';
 import type { ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
+import AdminKeyForm from './AdminKeyForm';
+
+const ADMIN_KEY_STORAGE = 'hf_admin_key';
+
+function hasAdminKey(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!sessionStorage.getItem(ADMIN_KEY_STORAGE);
+}
 
 // Admin-only UI is unlocked by opening the dashboard with ?admin=1 in the URL.
 // The flag persists in sessionStorage so it survives navigation within the
@@ -33,6 +41,10 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   const [logsOpen, setLogsOpen] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  // Tracks whether a key is currently stored. Updated explicitly on submit /
+  // forget so the AdminKeyForm shows or hides reactively.
+  const [hasKey, setHasKey] = useState<boolean>(hasAdminKey);
   const adminMode = isAdminMode();
 
   useEffect(() => {
@@ -40,6 +52,8 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
     setLogs(null);
     setLogsOpen(false);
     setLogsError(null);
+    setKeyError(null);
+    setHasKey(hasAdminKey());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [module.id]);
 
@@ -59,31 +73,27 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
     }
   };
 
-  const ensureAdminKey = (): boolean => {
-    if (typeof window === 'undefined') return false;
-    if (sessionStorage.getItem('hf_admin_key')) return true;
-    const entered = window.prompt('Enter admin key to view telemetry');
-    if (!entered) return false;
-    sessionStorage.setItem('hf_admin_key', entered);
-    return true;
-  };
-
   const loadLogs = async () => {
-    if (!ensureAdminKey()) {
-      setLogsError('Admin key required');
+    if (!hasAdminKey()) {
+      // No key stored — the inline AdminKeyForm will be rendered instead.
+      // We deliberately don't set logsError here; the form is the prompt.
+      setHasKey(false);
       return;
     }
     try {
       setLogsLoading(true);
       setLogsError(null);
+      setKeyError(null);
       const data = await api.getModuleLogs(module.id, 10);
       setLogs(data);
     } catch (err) {
       console.error('Error loading telemetry:', err);
       if (err instanceof Error && err.message === 'unauthorized') {
-        setLogsError('Invalid admin key — click Refresh to re-enter');
+        // api.getModuleLogs already cleared sessionStorage on 401/403.
+        setHasKey(false);
+        setKeyError(t('adminKey.invalid'));
       } else {
-        setLogsError('Failed to load telemetry');
+        setLogsError(t('adminKey.loadFailed'));
       }
     } finally {
       setLogsLoading(false);
@@ -93,9 +103,30 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   const toggleLogs = () => {
     const next = !logsOpen;
     setLogsOpen(next);
-    if (next && logs === null && !logsLoading) {
+    if (next && logs === null && !logsLoading && hasAdminKey()) {
       loadLogs();
     }
+  };
+
+  const submitAdminKey = (key: string) => {
+    if (typeof window === 'undefined') return;
+    sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
+    setHasKey(true);
+    setKeyError(null);
+    // Re-attempt the fetch with the freshly stored key. If it 401/403s,
+    // api.getModuleLogs clears sessionStorage and loadLogs flips hasKey
+    // back to false + sets keyError, re-rendering the form.
+    loadLogs();
+  };
+
+  const forgetAdminKey = () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+    }
+    setHasKey(false);
+    setLogs(null);
+    setLogsError(null);
+    setKeyError(null);
   };
 
   if (loading) {
@@ -254,7 +285,9 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
                     d="M9 17v-2a4 4 0 014-4h4m0 0l-3-3m3 3l-3 3M3 7h6a2 2 0 012 2v10a2 2 0 01-2 2H3"
                   />
                 </svg>
-                <span className="font-semibold text-hf-sm text-hf-fg">Telemetry</span>
+                <span className="font-semibold text-hf-sm text-hf-fg">
+                  {t('adminKey.telemetry')}
+                </span>
                 {logs && logs.length > 0 && (
                   <span className="text-hf-xs text-hf-fg-mute">({logs.length})</span>
                 )}
@@ -281,25 +314,48 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
                 className="border-t border-hf-border p-3 space-y-3"
                 style={{ background: 'var(--hf-line-soft)' }}
               >
-                {logsLoading && (
-                  <div className="text-hf-xs text-hf-fg-mute">Loading telemetry…</div>
+                {!hasKey && (
+                  <AdminKeyForm
+                    onSubmit={submitAdminKey}
+                    onCancel={() => setLogsOpen(false)}
+                    busy={logsLoading}
+                    error={keyError}
+                  />
                 )}
-                {logsError && <div className="text-hf-xs text-hf-danger">{logsError}</div>}
-                {!logsLoading && !logsError && logs && logs.length === 0 && (
-                  <div className="text-hf-xs text-hf-fg-mute">
-                    No telemetry yet. Logs arrive with each uploaded image.
+                {hasKey && logsLoading && (
+                  <div className="text-hf-xs text-hf-fg-mute">{t('adminKey.loading')}</div>
+                )}
+                {hasKey && logsError && (
+                  <div className="text-hf-xs" style={{ color: 'var(--hf-danger)' }}>
+                    {logsError}
                   </div>
                 )}
-                {!logsLoading &&
+                {hasKey && !logsLoading && !logsError && logs && logs.length === 0 && (
+                  <div className="text-hf-xs text-hf-fg-mute">{t('adminKey.empty')}</div>
+                )}
+                {hasKey &&
+                  !logsLoading &&
                   logs &&
                   logs.map((entry, i) => <TelemetryRow key={i} entry={entry} />)}
-                {logs && logs.length > 0 && (
-                  <button
-                    onClick={loadLogs}
-                    className="text-hf-xs text-hf-honey-700 hover:text-hf-honey-800 font-medium"
-                  >
-                    Refresh
-                  </button>
+                {hasKey && (
+                  <div className="flex items-center gap-3 pt-1">
+                    {logs && logs.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={loadLogs}
+                        className="text-hf-xs text-hf-honey-700 hover:text-hf-honey-800 font-medium"
+                      >
+                        {t('adminKey.refresh')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={forgetAdminKey}
+                      className="text-hf-xs text-hf-fg-mute hover:text-hf-fg-soft underline ml-auto"
+                    >
+                      {t('adminKey.forget')}
+                    </button>
+                  </div>
                 )}
               </div>
             )}

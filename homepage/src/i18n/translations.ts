@@ -70,6 +70,22 @@ const translations = {
       failedToLoad: 'Failed to load module details',
     },
 
+    // ---- Admin key (telemetry gate) ----
+    adminKey: {
+      telemetry: 'Telemetry',
+      formLabel: 'Admin key entry',
+      label: 'Admin key',
+      placeholder: 'Enter admin key',
+      unlock: 'Unlock',
+      cancel: 'Cancel',
+      forget: 'Forget admin key',
+      refresh: 'Refresh',
+      invalid: 'Invalid key. Please try again.',
+      loading: 'Loading telemetry…',
+      loadFailed: 'Failed to load telemetry.',
+      empty: 'No telemetry yet. Logs arrive with each uploaded image.',
+    },
+
     // ---- Hive Module Page ----
     hiveModule: {
       pageTitle: 'Hive Module',
@@ -117,11 +133,9 @@ const translations = {
       solderingIron: 'Soldering Iron',
       solderingIronDetail: 'For wiring the power system and ESP32-CAM connections',
       doubleSidedTape: 'Double-Sided Tape',
-      doubleSidedTapeDetail:
-        'To mount the ESP32-CAM and secure components inside the module',
+      doubleSidedTapeDetail: 'To mount the ESP32-CAM and secure components inside the module',
       smallScrewdriver: 'Small Screwdriver',
-      smallScrewdriverDetail:
-        'Phillips head for tightening terminal blocks and mounting screws',
+      smallScrewdriverDetail: 'Phillips head for tightening terminal blocks and mounting screws',
     },
 
     // ---- Assembly Guide ----
@@ -236,15 +250,18 @@ const translations = {
       installBtn: 'Install Firmware',
       skipAlreadyFlashed: 'Skip \u2014 already flashed',
       usbHintLabel: 'What to expect after clicking the button',
-      usbHint: 'A small window will ask you to select a serial port. Your ESP32 usually shows up as "USB Serial Device", "CP2102", or "CH340".',
-      usbHintDetail: 'If you don\u2019t see any device, try a different USB cable \u2014 some cables only charge and can\u2019t transfer data.',
+      usbHint:
+        'A small window will ask you to select a serial port. Your ESP32 usually shows up as "USB Serial Device", "CP2102", or "CH340".',
+      usbHintDetail:
+        'If you don\u2019t see any device, try a different USB cable \u2014 some cables only charge and can\u2019t transfer data.',
       stateConnecting: 'Connecting to device...',
       statePreparing: 'Preparing firmware...',
       stateErasing: 'Erasing flash memory...',
       stateWriting: 'Writing firmware...',
       stateFinished: 'Firmware installed successfully!',
       stateError: 'Flashing failed. Please try again.',
-      errorHint: 'Make sure the device is connected and try a different USB cable if the problem persists.',
+      errorHint:
+        'Make sure the device is connected and try a different USB cable if the problem persists.',
       markComplete: 'Flash succeeded? Click here to continue',
       unplugTitle: 'Now unplug your ESP32 and plug it back in',
       unplugStep1: 'Disconnect the USB cable from your ESP32',
@@ -264,11 +281,14 @@ const translations = {
       cantSeeNetwork: "Can't see the network?",
       troubleshoot: {
         resetTitle: 'Press the reset button',
-        resetText: 'Press the small reset button on the ESP32-CAM board. Wait 10 seconds for the network to appear.',
+        resetText:
+          'Press the small reset button on the ESP32-CAM board. Wait 10 seconds for the network to appear.',
         waitTitle: 'Give it more time',
-        waitText: 'Some boards take up to 30 seconds to start the access point after a fresh flash.',
+        waitText:
+          'Some boards take up to 30 seconds to start the access point after a fresh flash.',
         reflashTitle: 'Go back and re-flash',
-        reflashText: 'If nothing works, go back to the previous step and flash the firmware again. Make sure you see 100% progress before continuing.',
+        reflashText:
+          'If nothing works, go back to the previous step and flash the firmware again. Make sure you see 100% progress before continuing.',
       },
     },
 
@@ -287,7 +307,8 @@ const translations = {
       error: 'Could not reach the module.',
       errorHint: 'Make sure you are connected to the HiveHive-Access-Point WiFi network.',
       reconnectTitle: 'Configuration Saved!',
-      reconnectText: 'Your module saved its settings and is restarting. Now switch back to your home WiFi.',
+      reconnectText:
+        'Your module saved its settings and is restarting. Now switch back to your home WiFi.',
       reconnectWifiLabel: 'Switch your WiFi now:',
       reconnectStep1: 'Open your WiFi settings',
       reconnectStep2: 'Disconnect from HiveHive-Access-Point',
@@ -306,15 +327,15 @@ const translations = {
         'The server is not responding. Make sure it is running before continuing.',
       retryHealth: 'Check Again',
       timeoutTitle: 'Module Not Detected Yet',
-      timeoutText:
-        "We couldn't find your module on the server. Here are a few things to check:",
+      timeoutText: "We couldn't find your module on the server. Here are a few things to check:",
       waitingTitle: 'Waiting for Your Module...',
       waitingText:
         'Your module is restarting and connecting to the server. This usually takes about 30 seconds.',
       checking: 'Checking for your module',
       starting: 'Starting...',
       goBackConfig: 'Go back to configuration',
-      wifiReminder: 'Make sure your device is connected to your home WiFi, not the HiveHive-Access-Point.',
+      wifiReminder:
+        'Make sure your device is connected to your home WiFi, not the HiveHive-Access-Point.',
       troubleshoot: {
         powerTitle: 'Is the module powered on?',
         powerText:
@@ -409,6 +430,22 @@ const translations = {
       failedToLoad: 'Moduldetails konnten nicht geladen werden',
     },
 
+    // ---- Admin key (telemetry gate) ----
+    adminKey: {
+      telemetry: 'Telemetrie',
+      formLabel: 'Admin-Schlüssel eingeben',
+      label: 'Admin-Schlüssel',
+      placeholder: 'Admin-Schlüssel eingeben',
+      unlock: 'Entsperren',
+      cancel: 'Abbrechen',
+      forget: 'Admin-Schlüssel vergessen',
+      refresh: 'Aktualisieren',
+      invalid: 'Ungültiger Schlüssel. Bitte erneut versuchen.',
+      loading: 'Telemetrie wird geladen…',
+      loadFailed: 'Telemetrie konnte nicht geladen werden.',
+      empty: 'Noch keine Telemetrie. Logs werden mit jedem hochgeladenen Bild gesendet.',
+    },
+
     // ---- Hive Module Page ----
     hiveModule: {
       pageTitle: 'Hive-Modul',
@@ -454,10 +491,10 @@ const translations = {
       boostConverterDesc: 'MT3608 3,2 V \u2192 5 V Modul',
       // Tools
       solderingIron: 'L\u00F6tkolben',
-      solderingIronDetail: 'F\u00FCr die Verkabelung des Stromsystems und der ESP32-CAM-Verbindungen',
+      solderingIronDetail:
+        'F\u00FCr die Verkabelung des Stromsystems und der ESP32-CAM-Verbindungen',
       doubleSidedTape: 'Doppelseitiges Klebeband',
-      doubleSidedTapeDetail:
-        'Zum Befestigen der ESP32-CAM und Sichern von Komponenten im Modul',
+      doubleSidedTapeDetail: 'Zum Befestigen der ESP32-CAM und Sichern von Komponenten im Modul',
       smallScrewdriver: 'Kleiner Schraubendreher',
       smallScrewdriverDetail:
         'Kreuzschlitz zum Festziehen von Klemmenbl\u00F6cken und Befestigungsschrauben',
@@ -575,15 +612,18 @@ const translations = {
       installBtn: 'Firmware installieren',
       skipAlreadyFlashed: '\u00DCberspringen \u2014 bereits geflasht',
       usbHintLabel: 'Was nach dem Klick passiert',
-      usbHint: 'Ein kleines Fenster fragt nach einem seriellen Port. Dein ESP32 erscheint meist als \u201EUSB Serial Device\u201C, \u201ECP2102\u201C oder \u201ECH340\u201C.',
-      usbHintDetail: 'Falls kein Ger\u00E4t angezeigt wird, probiere ein anderes USB-Kabel \u2014 manche Kabel k\u00F6nnen nur laden, nicht Daten \u00FCbertragen.',
+      usbHint:
+        'Ein kleines Fenster fragt nach einem seriellen Port. Dein ESP32 erscheint meist als \u201EUSB Serial Device\u201C, \u201ECP2102\u201C oder \u201ECH340\u201C.',
+      usbHintDetail:
+        'Falls kein Ger\u00E4t angezeigt wird, probiere ein anderes USB-Kabel \u2014 manche Kabel k\u00F6nnen nur laden, nicht Daten \u00FCbertragen.',
       stateConnecting: 'Verbinde mit Ger\u00E4t...',
       statePreparing: 'Firmware wird vorbereitet...',
       stateErasing: 'Flash-Speicher wird gel\u00F6scht...',
       stateWriting: 'Firmware wird geschrieben...',
       stateFinished: 'Firmware erfolgreich installiert!',
       stateError: 'Flashen fehlgeschlagen. Bitte versuche es erneut.',
-      errorHint: 'Stelle sicher, dass das Ger\u00E4t verbunden ist, und probiere ggf. ein anderes USB-Kabel.',
+      errorHint:
+        'Stelle sicher, dass das Ger\u00E4t verbunden ist, und probiere ggf. ein anderes USB-Kabel.',
       markComplete: 'Flash erfolgreich? Hier klicken zum Fortfahren',
       unplugTitle: 'Jetzt den ESP32 ab- und wieder anstecken',
       unplugStep1: 'Ziehe das USB-Kabel vom ESP32 ab',
@@ -603,11 +643,14 @@ const translations = {
       cantSeeNetwork: 'Netzwerk nicht sichtbar?',
       troubleshoot: {
         resetTitle: 'Reset-Taste dr\u00FCcken',
-        resetText: 'Dr\u00FCcke die kleine Reset-Taste auf dem ESP32-CAM-Board. Warte 10 Sekunden, bis das Netzwerk erscheint.',
+        resetText:
+          'Dr\u00FCcke die kleine Reset-Taste auf dem ESP32-CAM-Board. Warte 10 Sekunden, bis das Netzwerk erscheint.',
         waitTitle: 'Etwas mehr Geduld',
-        waitText: 'Manche Boards brauchen bis zu 30 Sekunden, um den Access Point nach einem frischen Flash zu starten.',
+        waitText:
+          'Manche Boards brauchen bis zu 30 Sekunden, um den Access Point nach einem frischen Flash zu starten.',
         reflashTitle: 'Zur\u00FCck und erneut flashen',
-        reflashText: 'Falls nichts hilft, gehe zur\u00FCck und flashe die Firmware erneut. Stelle sicher, dass 100% Fortschritt angezeigt wird.',
+        reflashText:
+          'Falls nichts hilft, gehe zur\u00FCck und flashe die Firmware erneut. Stelle sicher, dass 100% Fortschritt angezeigt wird.',
       },
     },
 
@@ -626,7 +669,8 @@ const translations = {
       error: 'Modul nicht erreichbar.',
       errorHint: 'Stelle sicher, dass du mit dem HiveHive-Access-Point WLAN verbunden bist.',
       reconnectTitle: 'Konfiguration gespeichert!',
-      reconnectText: 'Dein Modul hat die Einstellungen gespeichert und startet neu. Wechsle jetzt zur\u00FCck zu deinem Heim-WLAN.',
+      reconnectText:
+        'Dein Modul hat die Einstellungen gespeichert und startet neu. Wechsle jetzt zur\u00FCck zu deinem Heim-WLAN.',
       reconnectWifiLabel: 'WLAN jetzt wechseln:',
       reconnectStep1: '\u00D6ffne deine WLAN-Einstellungen',
       reconnectStep2: 'Trenne die Verbindung zum HiveHive-Access-Point',
@@ -653,7 +697,8 @@ const translations = {
       checking: 'Suche nach deinem Modul',
       starting: 'Starte...',
       goBackConfig: 'Zur\u00FCck zur Konfiguration',
-      wifiReminder: 'Stelle sicher, dass dein Ger\u00E4t mit deinem Heim-WLAN verbunden ist, nicht mit dem HiveHive-Access-Point.',
+      wifiReminder:
+        'Stelle sicher, dass dein Ger\u00E4t mit deinem Heim-WLAN verbunden ist, nicht mit dem HiveHive-Access-Point.',
       troubleshoot: {
         powerTitle: 'Ist das Modul eingeschaltet?',
         powerText:

@@ -124,6 +124,9 @@ def mock_esp(stack):
     return MockEsp(
         upload_url=f"{stack['image_service']}/upload",
         init_url=f"{stack['duckdb']}/new_module",
-        mac=f"test-mac-{uuid.uuid4().hex[:12]}",
+        # Canonical 12-char lowercase hex per the 2B ModuleId contract.
+        # uuid4().hex is already lowercase hex; first 12 chars produce a
+        # well-formed canonical MAC that won't collide between test runs.
+        mac=uuid.uuid4().hex[:12],
         module_name=f"E2E Mock {uuid.uuid4().hex[:6]}",
     )

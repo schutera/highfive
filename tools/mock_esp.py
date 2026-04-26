@@ -75,7 +75,11 @@ class MockEsp:
     upload_url: str
     init_url: Optional[str] = None
 
-    mac: str = "test-mac-aa-bb-cc-dd-ee-ff"
+    # Canonical 12-char lowercase hex (matches the 2B ModuleId contract).
+    # The "ee" prefix is a recognisable test marker that's still a valid
+    # MAC shape — image-service /upload now strict-rejects non-canonical
+    # IDs, so the mock must emit the canonical form.
+    mac: str = "ee0011223344"
     module_name: str = "Mock Hive"
     latitude: float = 47.8086
     longitude: float = 9.6433
@@ -157,7 +161,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--init-url",
                    help="duckdb-service /new_module URL "
                         "(only needed if --register)")
-    p.add_argument("--mac", default="test-mac-aa-bb-cc-dd-ee-ff",
+    p.add_argument("--mac", default="ee0011223344",
                    help="device identifier (default: %(default)s)")
     p.add_argument("--battery", type=int, default=87,
                    help="battery percentage 0-100 (default: %(default)s)")

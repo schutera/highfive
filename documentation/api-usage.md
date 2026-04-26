@@ -3,12 +3,12 @@
 This document describes the HTTP APIs exposed by the HiveHive services.
 The system has four services and three callable APIs:
 
-| Service           | Host port | Container port | Description                            |
-| ----------------- | --------- | -------------- | -------------------------------------- |
-| Homepage          | `5173`    | `5173`         | React + Vite frontend                  |
-| Backend           | `3002`    | `3002`         | Express API consumed by the homepage   |
-| Image Service     | `8000`    | `4444`         | ESP upload + telemetry sidecar         |
-| DuckDB Service    | `8002`    | `8000`         | Persistent storage API                 |
+| Service        | Host port | Container port | Description                          |
+| -------------- | --------- | -------------- | ------------------------------------ |
+| Homepage       | `5173`    | `5173`         | React + Vite frontend                |
+| Backend        | `3002`    | `3002`         | Express API consumed by the homepage |
+| Image Service  | `8000`    | `4444`         | ESP upload + telemetry sidecar       |
+| DuckDB Service | `8002`    | `8000`         | Persistent storage API               |
 
 The homepage itself is at <http://localhost:5173>. Swagger UI for the
 backend is at <http://localhost:3002/api-docs>.
@@ -174,12 +174,12 @@ POST /upload
 Content-Type: multipart/form-data
 ```
 
-| Field     | Type   | Required | Description                                                |
-| --------- | ------ | -------- | ---------------------------------------------------------- |
-| `image`   | File   | Yes      | Captured JPEG                                              |
-| `mac`     | Text   | Yes      | Module identifier                                          |
-| `battery` | Text   | Yes      | Integer 0–100                                              |
-| `logs`    | Text   | No       | JSON telemetry payload (see [esp-reliability](esp-reliability.md)) |
+| Field     | Type | Required | Description                                                        |
+| --------- | ---- | -------- | ------------------------------------------------------------------ |
+| `image`   | File | Yes      | Captured JPEG                                                      |
+| `mac`     | Text | Yes      | Module identifier                                                  |
+| `battery` | Text | Yes      | Integer 0–100                                                      |
+| `logs`    | Text | No       | JSON telemetry payload (see [esp-reliability](esp-reliability.md)) |
 
 If `logs` is present and parseable, it is written to
 `{image_path}.log.json` next to the saved image with three extra
@@ -195,9 +195,9 @@ Response:
   "battery": 67,
   "classification": {
     "black_masked_bee": { "1": 1, "2": 0, "3": 1, "4": 0 },
-    "leafcutter_bee":   { "1": 1, "2": 1, "3": 0, "4": 1 },
-    "orchard_bee":      { "1": 0, "2": 1, "3": 1, "4": 0 },
-    "resin_bee":        { "1": 1, "2": 1, "3": 1, "4": 0 }
+    "leafcutter_bee": { "1": 1, "2": 1, "3": 0, "4": 1 },
+    "orchard_bee": { "1": 0, "2": 1, "3": 1, "4": 0 },
+    "resin_bee": { "1": 1, "2": 1, "3": 1, "4": 0 }
   }
 }
 ```
@@ -230,17 +230,7 @@ GET /health
 { "ok": true, "db": "/data/app.duckdb" }
 ```
 
-## 3.2 Initialize sample data
-
-```
-GET /initial_insert
-```
-
-Inserts development sample data. Dev/test only. The
-`docker-compose.yml` default `SEED_DATA=true` does this automatically
-on first boot if `module_configs` is empty.
-
-## 3.3 Register a module
+## 3.2 Register a module
 
 ```
 POST /new_module
@@ -265,7 +255,7 @@ Returns:
 
 A module with the same identifier is replaced.
 
-## 3.4 List modules
+## 3.3 List modules
 
 ```
 GET /modules
@@ -289,7 +279,7 @@ Returns the raw DB rows under `modules`:
 }
 ```
 
-## 3.5 List nests
+## 3.4 List nests
 
 ```
 GET /nests
@@ -297,13 +287,11 @@ GET /nests
 
 ```json
 {
-  "nests": [
-    { "nest_id": "nest-001", "module_id": "hive-001", "beeType": "blackmasked" }
-  ]
+  "nests": [{ "nest_id": "nest-001", "module_id": "hive-001", "beeType": "blackmasked" }]
 }
 ```
 
-## 3.6 List progress
+## 3.5 List progress
 
 ```
 GET /progress
@@ -327,7 +315,7 @@ GET /progress
 `progress_id` and `hatched` are spelled correctly (a recent fix
 corrected legacy `progess_id` / `hateched`).
 
-## 3.7 Add classification result
+## 3.6 Add classification result
 
 ```
 POST /add_progress_for_module
@@ -339,7 +327,7 @@ Content-Type: application/json
   "modul_id": "esp-9081726354",
   "classification": {
     "black_masked_bee": { "1": 1, "2": 1, "3": 0 },
-    "orchard_bee":      { "1": 0, "2": 1, "3": 1 }
+    "orchard_bee": { "1": 0, "2": 1, "3": 1 }
   }
 }
 ```
@@ -351,7 +339,7 @@ rows are inserted with the current date.
 
 # 4. Typical Workflow
 
-1. (Once) Seed the DB — `SEED_DATA=true` on the duckdb-service or `GET /initial_insert`.
+1. (Once) Seed the DB — set `SEED_DATA=true` on the duckdb-service.
 2. Field module boots and calls `POST /new_module` against `duckdb-service`.
 3. Module starts uploading via `POST /upload` to `image-service` (with `logs`).
 4. `image-service` writes the image + sidecar, classifies (stub), and

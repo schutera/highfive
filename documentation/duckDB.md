@@ -136,18 +136,6 @@ One possible extension for data storage would be to implement a layered model wi
 
 Checks whether the service and the database are accessible.
 
-### GET /initial_insert
-
-Inserts sample modules, nests, and progress data. This endpoint is intended for development and testing purposes.
-
-### POST /test_insert
-
-Inserts a test module into the database.
-
-### POST /remove_test
-
-Removes the test module from the database.
-
 ### POST /new_module
 
 Registers a new module in the system.

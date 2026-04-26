@@ -73,19 +73,3 @@ def test_new_module_same_id_twice_replaces_row(client, fresh_db):
     assert listed[0]["battery_level"] == 42
     # Two successful creates -> two webhook calls.
     assert len(fresh_db.discord_calls) == 2
-
-
-def test_test_insert_and_remove_test_smoke(client):
-    insert_resp = client.post("/test_insert")
-    assert insert_resp.status_code == 200
-    assert insert_resp.get_json() == {"success": True}
-
-    listed = client.get("/modules").get_json()["modules"]
-    assert any(m["id"] == "hive-091" for m in listed)
-
-    remove_resp = client.post("/remove_test")
-    assert remove_resp.status_code == 200
-    assert remove_resp.get_json() == {"success": True}
-
-    listed_after = client.get("/modules").get_json()["modules"]
-    assert not any(m["id"] == "hive-091" for m in listed_after)

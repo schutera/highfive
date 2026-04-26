@@ -1,14 +1,15 @@
-import os
-import time
-import random
-import json
 import glob
-from datetime import datetime
+import json
+import os
+import random
+import time
+
 from flask import Flask, jsonify, request
 from requests import RequestException
 
-from services.duckdb import DuckDBService
 from services.discord import send_discord_message
+from services.duckdb import DuckDBService
+from services.sidecar import LogSidecarEnvelope
 
 app = Flask(__name__)
 
@@ -91,20 +92,26 @@ def upload_image():
     file_path = os.path.join(UPLOAD_FOLDER, image.filename)
     image.save(file_path)
 
-    # Persist optional ESP telemetry beside the image
+    # Persist optional ESP telemetry beside the image as a typed envelope.
+    # On-disk shape: {"mac", "received_at", "image", "payload": {...}}.
     logs_raw = request.form.get("logs")
     if logs_raw:
         try:
             # Parse so the sidecar is valid JSON even if ESP sends garbage
-            logs_obj = json.loads(logs_raw)
+            payload = json.loads(logs_raw)
+            if not isinstance(payload, dict):
+                payload = {"raw": logs_raw, "parse_error": True}
         except ValueError:
-            logs_obj = {"raw": logs_raw, "parse_error": True}
-        logs_obj["_mac"] = mac
-        logs_obj["_received_at"] = datetime.now().isoformat(timespec="seconds")
-        logs_obj["_image"] = image.filename
+            payload = {"raw": logs_raw, "parse_error": True}
+        envelope = LogSidecarEnvelope(
+            mac=mac,
+            received_at=LogSidecarEnvelope.now_iso(),
+            image=image.filename,
+            payload=payload,
+        )
         try:
             with open(file_path + ".log.json", "w", encoding="utf-8") as f:
-                json.dump(logs_obj, f, ensure_ascii=False)
+                f.write(envelope.to_json_string())
         except OSError as exc:
             print(f"[logs] failed to write sidecar for {image.filename}: {exc}")
 
@@ -133,12 +140,14 @@ def upload_image():
             f"**File:** {image.filename}"
         )
 
-    return jsonify({
-        "message": f"Image {image.filename} uploaded successfully",
-        "mac": mac,
-        "battery": battery,
-        "classification": classification,
-    }), 200
+    return jsonify(
+        {
+            "message": f"Image {image.filename} uploaded successfully",
+            "mac": mac,
+            "battery": battery,
+            "classification": classification,
+        }
+    ), 200
 
 
 @app.get("/modules/<mac>/logs")
@@ -146,6 +155,11 @@ def get_module_logs(mac: str):
     """
     Returns the most recent ESP telemetry entries for a module, newest-first.
     Reads the .log.json sidecar files written by /upload.
+
+    Backward-compatible: tolerates both the new envelope format and the
+    legacy flat format (`_mac`, `_received_at`, `_image` at top level)
+    written by older versions of /upload. All entries are returned in the
+    new envelope shape.
     """
     try:
         limit = int(request.args.get("limit", 10))
@@ -161,13 +175,14 @@ def get_module_logs(mac: str):
         except OSError:
             continue
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError):
             continue
-        if str(data.get("_mac")) != str(mac):
+        envelope = LogSidecarEnvelope.from_disk(data)
+        if envelope is None or str(envelope.mac) != str(mac):
             continue
-        entries.append((st.st_mtime, data))
+        entries.append((st.st_mtime, envelope.model_dump()))
 
     entries.sort(key=lambda t: t[0], reverse=True)
     return jsonify([e[1] for e in entries[:limit]]), 200

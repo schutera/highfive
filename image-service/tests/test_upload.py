@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import io
 import json
-import os
 from pathlib import Path
 
 import pytest
 
-
 # --------------------------- helpers ---------------------------
+
 
 def _img_bytes() -> bytes:
     # Minimal 1x1 PNG, valid enough to be saved by Flask. Content is opaque
@@ -22,8 +21,14 @@ def _img_bytes() -> bytes:
     )
 
 
-def _make_form(*, mac="AA:BB:CC:DD:EE:FF", battery="80", filename="test.jpg",
-               include_image=True, logs=None):
+def _make_form(
+    *,
+    mac="AA:BB:CC:DD:EE:FF",
+    battery="80",
+    filename="test.jpg",
+    include_image=True,
+    logs=None,
+):
     data = {}
     if mac is not None:
         data["mac"] = mac
@@ -37,6 +42,7 @@ def _make_form(*, mac="AA:BB:CC:DD:EE:FF", battery="80", filename="test.jpg",
 
 
 # --------------------------- happy path ---------------------------
+
 
 def test_upload_happy_path_saves_image_and_returns_classification(
     client, tmp_upload_dir: Path, upload_env
@@ -54,9 +60,12 @@ def test_upload_happy_path_saves_image_and_returns_classification(
     assert "Image bee01.jpg uploaded successfully" in body["message"]
     # Classification stub structure
     assert set(body["classification"].keys()) == {
-        "black_masked_bee", "leafcutter_bee", "orchard_bee", "resin_bee"
+        "black_masked_bee",
+        "leafcutter_bee",
+        "orchard_bee",
+        "resin_bee",
     }
-    for species, slots in body["classification"].items():
+    for _species, slots in body["classification"].items():
         assert set(slots.keys()) == {"1", "2", "3", "4"}
         for v in slots.values():
             assert v in (0, 1)
@@ -79,8 +88,7 @@ def test_upload_happy_path_saves_image_and_returns_classification(
     assert "classification" in progress_calls[0]["json"]
 
     heartbeat_calls = [
-        p for p in posts
-        if p["url"].endswith("/modules/AA:BB:CC:DD:EE:FF/heartbeat")
+        p for p in posts if p["url"].endswith("/modules/AA:BB:CC:DD:EE:FF/heartbeat")
     ]
     assert len(heartbeat_calls) == 1
     assert heartbeat_calls[0]["json"] == {"battery": 80}
@@ -88,7 +96,8 @@ def test_upload_happy_path_saves_image_and_returns_classification(
     # progress_count is fetched once per upload via GET.
     gets = upload_env["duckdb_gets"]
     progress_count_calls = [
-        g for g in gets
+        g
+        for g in gets
         if g["url"].endswith("/modules/AA:BB:CC:DD:EE:FF/progress_count")
     ]
     assert len(progress_count_calls) == 1
@@ -107,17 +116,21 @@ def test_upload_with_logs_writes_sidecar(client, tmp_upload_dir: Path, upload_en
     assert sidecar.exists(), "expected .log.json sidecar"
     data = json.loads(sidecar.read_text(encoding="utf-8"))
 
-    # Original telemetry preserved
-    assert data["rssi"] == -55
-    assert data["uptime_s"] == 1234
-    assert data["fw"] == "1.0.0"
+    # New envelope schema: metadata at top level, ESP telemetry nested under `payload`.
+    assert data["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert data["image"] == "bee02.jpg"
+    assert "received_at" in data and isinstance(data["received_at"], str)
 
-    # Service-injected metadata
-    assert data["_mac"] == "AA:BB:CC:DD:EE:FF"
-    assert data["_image"] == "bee02.jpg"
-    assert "_received_at" in data and isinstance(data["_received_at"], str)
+    # Original telemetry preserved under `payload`.
+    assert data["payload"]["rssi"] == -55
+    assert data["payload"]["uptime_s"] == 1234
+    assert data["payload"]["fw"] == "1.0.0"
     # No parse error on valid JSON
-    assert "parse_error" not in data
+    assert "parse_error" not in data["payload"]
+    # Legacy flat keys must NOT be present
+    assert "_mac" not in data
+    assert "_image" not in data
+    assert "_received_at" not in data
 
 
 def test_upload_battery_accepts_zero_and_hundred(client, upload_env):
@@ -132,6 +145,7 @@ def test_upload_battery_accepts_zero_and_hundred(client, upload_env):
 
 
 # --------------------------- validation ---------------------------
+
 
 def test_upload_missing_mac_returns_400(client, upload_env):
     resp = client.post(
@@ -196,7 +210,10 @@ def test_upload_empty_filename_returns_400(client, upload_env):
 
 # --------------------------- telemetry edge cases ---------------------------
 
-def test_upload_no_logs_field_writes_no_sidecar(client, tmp_upload_dir: Path, upload_env):
+
+def test_upload_no_logs_field_writes_no_sidecar(
+    client, tmp_upload_dir: Path, upload_env
+):
     resp = client.post(
         "/upload",
         data=_make_form(filename="nolog.jpg"),
@@ -221,13 +238,15 @@ def test_upload_malformed_logs_writes_sidecar_with_parse_error(
     sidecar = tmp_upload_dir / "bad.jpg.log.json"
     assert sidecar.exists()
     data = json.loads(sidecar.read_text(encoding="utf-8"))
-    assert data.get("parse_error") is True
-    assert data.get("raw") == "this is not json {{"
-    assert data["_mac"] == "AA:BB:CC:DD:EE:FF"
-    assert data["_image"] == "bad.jpg"
+    # Parse-error markers live inside the nested payload now.
+    assert data["payload"].get("parse_error") is True
+    assert data["payload"].get("raw") == "this is not json {{"
+    assert data["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert data["image"] == "bad.jpg"
 
 
 # --------------------------- duckdb-service integration ---------------------------
+
 
 def test_upload_first_upload_triggers_discord(client, upload_env):
     """When progress_count returns 0, this is the first upload — Discord fires."""
@@ -274,8 +293,9 @@ def test_upload_heartbeat_called_with_battery_value(client, upload_env):
 
 def test_upload_survives_progress_count_failure(client, upload_env, monkeypatch):
     """A duckdb-service hiccup on /progress_count must not fail the upload."""
-    import services.duckdb as duckdb_svc_mod
     from requests import ConnectionError as RequestsConnectionError
+
+    import services.duckdb as duckdb_svc_mod
 
     def boom_get(url, **kwargs):
         raise RequestsConnectionError("duckdb-service down")
@@ -295,8 +315,9 @@ def test_upload_survives_progress_count_failure(client, upload_env, monkeypatch)
 
 def test_upload_survives_heartbeat_failure(client, upload_env, monkeypatch):
     """A duckdb-service hiccup on /heartbeat must not fail the upload."""
-    import services.duckdb as duckdb_svc_mod
     from requests import ConnectionError as RequestsConnectionError
+
+    import services.duckdb as duckdb_svc_mod
 
     posts = upload_env["duckdb_posts"]
 
@@ -307,8 +328,13 @@ def test_upload_survives_heartbeat_failure(client, upload_env, monkeypatch):
 
         class _R:
             status_code = 200
-            def json(self_inner): return {"ok": True}
-            def raise_for_status(self_inner): return None
+
+            def json(self_inner):
+                return {"ok": True}
+
+            def raise_for_status(self_inner):
+                return None
+
         return _R()
 
     monkeypatch.setattr(duckdb_svc_mod.requests, "post", selective_post)

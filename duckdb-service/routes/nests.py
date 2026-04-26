@@ -1,17 +1,11 @@
 from flask import Blueprint, jsonify
-from db.connection import lock, get_conn
+
+from db.repository import query_all
 
 nests_bp = Blueprint("nests", __name__)
 
 
 @nests_bp.get("/nests")
 def get_nests():
-    with lock:
-        con = get_conn()
-        cur = con.execute("SELECT * FROM nest_data")
-        cols = [d[0] for d in cur.description]
-        rows = cur.fetchall()
-        con.close()
-
-    nests = [dict(zip(cols, row)) for row in rows]
+    nests = query_all("SELECT * FROM nest_data")
     return jsonify(nests=nests), 200

@@ -2,7 +2,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
-from db.connection import lock, get_conn
+from db.repository import query_all, query_scalar, query_one, write_transaction
 from models.module import ModuleData
 from services.discord import send_discord_message
 
@@ -22,9 +22,8 @@ def add_module():
         print(f"[new_module] Unexpected error: {e}")
         return jsonify({"error": str(e)}), 400
 
-    with lock:
-        con = get_conn()
-        try:
+    try:
+        with write_transaction() as con:
             now = datetime.now().strftime("%Y-%m-%d")
             con.execute(
                 """
@@ -42,53 +41,36 @@ def add_module():
                     data.battery,
                 ),
             )
-            con.commit()
-            send_discord_message(
-                f"🐝 **New Hive Module registered!**\n"
-                f"**Name:** {data.module_name}\n"
-                f"**ID:** {data.mac}\n"
-                f"**Location:** {data.latitude}, {data.longitude}\n"
-                f"**Battery:** {data.battery}%"
-            )
-            return jsonify({"message": "Module added successfully", "id": data.mac})
-        except Exception as e:
-            con.rollback()
-            return jsonify({"error": str(e)}), 500
-        finally:
-            con.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    send_discord_message(
+        f"🐝 **New Hive Module registered!**\n"
+        f"**Name:** {data.module_name}\n"
+        f"**ID:** {data.mac}\n"
+        f"**Location:** {data.latitude}, {data.longitude}\n"
+        f"**Battery:** {data.battery}%"
+    )
+    return jsonify({"message": "Module added successfully", "id": data.mac})
 
 
 @modules_bp.get("/modules")
 def get_modules():
-    with lock:
-        con = get_conn()
-        cur = con.execute("SELECT * FROM module_configs")
-        cols = [d[0] for d in cur.description]
-        rows = cur.fetchall()
-        con.close()
-
-    modules = [dict(zip(cols, row)) for row in rows]
+    modules = query_all("SELECT * FROM module_configs")
     return jsonify(modules=modules), 200
 
 
 @modules_bp.get("/modules/<module_id>/progress_count")
 def progress_count(module_id):
-    with lock:
-        con = get_conn()
-        try:
-            row = con.execute(
-                """
-                SELECT COUNT(*) FROM daily_progress dp
-                JOIN nest_data nd ON dp.nest_id = nd.nest_id
-                WHERE nd.module_id = ?
-                """,
-                (module_id,),
-            ).fetchone()
-            count = int(row[0]) if row and row[0] is not None else 0
-        finally:
-            con.close()
-
-    return jsonify(count=count), 200
+    count = query_scalar(
+        """
+        SELECT COUNT(*) FROM daily_progress dp
+        JOIN nest_data nd ON dp.nest_id = nd.nest_id
+        WHERE nd.module_id = ?
+        """,
+        (module_id,),
+    )
+    return jsonify(count=int(count) if count is not None else 0), 200
 
 
 @modules_bp.post("/modules/<module_id>/heartbeat")
@@ -103,28 +85,19 @@ def heartbeat(module_id):
     ):
         return jsonify({"error": "battery must be an int in [0, 100]"}), 400
 
-    with lock:
-        con = get_conn()
-        try:
-            existing = con.execute(
-                "SELECT 1 FROM module_configs WHERE id = ?",
-                (module_id,),
-            ).fetchone()
-            if existing is None:
-                return jsonify({"error": "Module not found"}), 404
+    if query_one("SELECT 1 FROM module_configs WHERE id = ?", (module_id,)) is None:
+        return jsonify({"error": "Module not found"}), 404
 
-            now = datetime.now().strftime("%Y-%m-%d")
-            con.execute(
-                """
-                UPDATE module_configs
-                SET battery_level = ?,
-                    first_online = ?,
-                    image_count = image_count + 1
-                WHERE id = ?
-                """,
-                (battery, now, module_id),
-            )
-            con.commit()
-            return jsonify({"ok": True}), 200
-        finally:
-            con.close()
+    now = datetime.now().strftime("%Y-%m-%d")
+    with write_transaction() as con:
+        con.execute(
+            """
+            UPDATE module_configs
+            SET battery_level = ?,
+                first_online = ?,
+                image_count = image_count + 1
+            WHERE id = ?
+            """,
+            (battery, now, module_id),
+        )
+    return jsonify({"ok": True}), 200

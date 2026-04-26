@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import translations, { Language } from './translations';
 
 interface LanguageContextType {
@@ -27,9 +27,22 @@ function detectLanguage(): Language {
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Language>(detectLanguage);
 
+  // Keep <html lang> in sync for accessibility (screen readers, search,
+  // hyphenation). The bootstrap script in index.html sets it pre-paint;
+  // this effect handles toggle changes thereafter.
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('lang', lang);
+    }
+  }, [lang]);
+
   const setLang = useCallback((newLang: Language) => {
     setLangState(newLang);
-    localStorage.setItem('lang', newLang);
+    try {
+      localStorage.setItem('lang', newLang);
+    } catch {
+      /* private mode */
+    }
   }, []);
 
   const t = useCallback(
@@ -42,16 +55,14 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       if (typeof value !== 'string') return path;
       if (!params) return value;
       return value.replace(/\{(\w+)\}/g, (_, key) =>
-        params[key] !== undefined ? String(params[key]) : `{${key}}`
+        params[key] !== undefined ? String(params[key]) : `{${key}}`,
       );
     },
     [lang],
   );
 
   return (
-    <LanguageContext.Provider value={{ lang, setLang, t }}>
-      {children}
-    </LanguageContext.Provider>
+    <LanguageContext.Provider value={{ lang, setLang, t }}>{children}</LanguageContext.Provider>
   );
 }
 

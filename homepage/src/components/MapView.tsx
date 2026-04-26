@@ -1,5 +1,7 @@
 import { MapContainer, TileLayer, useMap, Circle, useMapEvents, Marker } from 'react-leaflet';
 import L from 'leaflet';
+// Co-located stylesheet so it ships in the dashboard's lazy chunk only.
+import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useState } from 'react';
 import { Module } from '../services/api';
 
@@ -48,34 +50,22 @@ const AmberIcon = L.divIcon({
   popupAnchor: [1, -34],
 });
 
-// Gray marker for offline modules
-const GrayIcon = L.divIcon({
-  className: 'custom-marker',
-  html: `
-    <svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12.5 0C5.6 0 0 5.6 0 12.5c0 8.4 12.5 28.5 12.5 28.5S25 20.9 25 12.5C25 5.6 19.4 0 12.5 0z" 
-            fill="#9ca3af" stroke="#6b7280" stroke-width="1"/>
-      <circle cx="12.5" cy="12.5" r="6" fill="white"/>
-      <circle cx="12.5" cy="12.5" r="3" fill="#6b7280"/>
-    </svg>
-  `,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-});
+// (GrayIcon was previously defined here for offline modules but is no
+// longer rendered — clusters use a count-badge icon for both states.
+// Kept intentionally removed to satisfy noUnusedLocals.)
 
 // Function to add random offset within ~1km radius for data protection
 function fuzzLocation(location: { lat: number; lng: number }, moduleId: string): [number, number] {
   // Use module ID as seed for consistent fuzzing
   const seed = moduleId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  
+
   // Pseudo-random based on seed
   const random1 = Math.sin(seed * 12.9898) * 43758.5453;
   const random2 = Math.sin(seed * 78.233) * 43758.5453;
-  
+
   const offsetLat = (random1 - Math.floor(random1)) * 0.018 - 0.009; // ~1km
   const offsetLng = (random2 - Math.floor(random2)) * 0.018 - 0.009; // ~1km
-  
+
   return [location.lat + offsetLat, location.lng + offsetLng];
 }
 
@@ -89,12 +79,12 @@ function getColorFromHatches(totalHatches: number, maxHatches: number = 1000): s
     { r: 0xf5, g: 0x9e, b: 0x0b }, // #f59e0b - amber-500 (mid activity)
     { r: 0xf4, g: 0x3f, b: 0x5e }, // #f43f5e - rose-500 (high activity)
   ];
-  
+
   // Determine which two colors to interpolate between
   let t: number;
-  let c1: typeof colors[0];
-  let c2: typeof colors[0];
-  
+  let c1: (typeof colors)[0];
+  let c2: (typeof colors)[0];
+
   if (normalized < 0.5) {
     t = normalized * 2; // 0-1 for first half
     c1 = colors[0];
@@ -104,55 +94,61 @@ function getColorFromHatches(totalHatches: number, maxHatches: number = 1000): s
     c1 = colors[1];
     c2 = colors[2];
   }
-  
+
   const r = Math.round(c1.r + (c2.r - c1.r) * t);
   const g = Math.round(c1.g + (c2.g - c1.g) * t);
   const b = Math.round(c1.b + (c2.b - c1.b) * t);
-  
+
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
 // Calculate distance between two points in km
 function getDistance(loc1: [number, number], loc2: [number, number]): number {
   const R = 6371; // Earth's radius in km
-  const dLat = (loc2[0] - loc1[0]) * Math.PI / 180;
-  const dLon = (loc2[1] - loc1[1]) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(loc1[0] * Math.PI / 180) * Math.cos(loc2[0] * Math.PI / 180) *
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const dLat = ((loc2[0] - loc1[0]) * Math.PI) / 180;
+  const dLon = ((loc2[1] - loc1[1]) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((loc1[0] * Math.PI) / 180) *
+      Math.cos((loc2[0] * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
 
 // Cluster modules that are within 12km of each other
-function clusterModules(modules: Array<Module & { fuzzedLocation: [number, number] }>, clusterThreshold: number = 12) {
+function clusterModules(
+  modules: Array<Module & { fuzzedLocation: [number, number] }>,
+  clusterThreshold: number = 12,
+) {
   const clusters: Array<Array<Module & { fuzzedLocation: [number, number] }>> = [];
   const processed = new Set<string>();
-  
-  modules.forEach(module => {
+
+  modules.forEach((module) => {
     if (processed.has(module.id)) return;
-    
+
     const cluster = [module];
     processed.add(module.id);
-    
-    modules.forEach(other => {
+
+    modules.forEach((other) => {
       if (processed.has(other.id)) return;
-      
+
       // Check if this module is close to any module in the current cluster
-      const isClose = cluster.some(clusterModule => 
-        getDistance(clusterModule.fuzzedLocation, other.fuzzedLocation) < clusterThreshold
+      const isClose = cluster.some(
+        (clusterModule) =>
+          getDistance(clusterModule.fuzzedLocation, other.fuzzedLocation) < clusterThreshold,
       );
-      
+
       if (isClose) {
         cluster.push(other);
         processed.add(other.id);
       }
     });
-    
+
     clusters.push(cluster);
   });
-  
+
   return clusters;
 }
 
@@ -173,19 +169,19 @@ interface MapViewProps {
 }
 
 // Component to track zoom level and handle map interactions
-function MapController({ 
+function MapController({
   selectedModule,
   selectedFuzzedLocation,
   onZoomChange,
-  onBoundsChange
-}: { 
+  onBoundsChange,
+}: {
   selectedModule: Module | null;
   selectedFuzzedLocation: [number, number] | null;
   onZoomChange: (zoom: number) => void;
   onBoundsChange: (bounds: L.LatLngBounds) => void;
 }) {
   const map = useMap();
-  
+
   useMapEvents({
     zoomend: () => {
       onZoomChange(map.getZoom());
@@ -195,32 +191,32 @@ function MapController({
       onBoundsChange(map.getBounds());
     },
   });
-  
+
   useEffect(() => {
     // Initial bounds
     onBoundsChange(map.getBounds());
   }, []);
-  
+
   useEffect(() => {
     if (selectedModule && selectedFuzzedLocation) {
       // Zoom to level 14 to show the full 1km circle
       map.flyTo(selectedFuzzedLocation, 14, {
-        duration: 1.5
+        duration: 1.5,
       });
     }
   }, [selectedModule, selectedFuzzedLocation, map]);
-  
+
   return null;
 }
 
 // Component for rendering a cluster
-function ClusterMarker({ 
-  cluster, 
-  clusterCenter, 
+function ClusterMarker({
+  cluster,
+  clusterCenter,
   onModuleSelect,
   clusterZoomThreshold,
-  maxHatches
-}: { 
+  maxHatches,
+}: {
   cluster: Array<Module & { fuzzedLocation: [number, number] }>;
   clusterCenter: [number, number];
   onModuleSelect: (module: Module) => void;
@@ -228,15 +224,17 @@ function ClusterMarker({
   maxHatches: number;
 }) {
   const map = useMap();
-  const onlineCount = cluster.filter(m => m.status === 'online').length;
+  const onlineCount = cluster.filter((m) => m.status === 'online').length;
   const hasOnline = onlineCount > 0;
   // Sum total hatches for the cluster
   const clusterTotalHatches = cluster.reduce((sum, m) => sum + (m.totalHatches || 0), 0);
-  const clusterColor = hasOnline ? getColorFromHatches(clusterTotalHatches, maxHatches * cluster.length) : '#94a3b8';
+  const clusterColor = hasOnline
+    ? getColorFromHatches(clusterTotalHatches, maxHatches * cluster.length)
+    : '#94a3b8';
 
   const handleClick = () => {
     map.flyTo(clusterCenter, clusterZoomThreshold + 1, {
-      duration: 1.5
+      duration: 1.5,
     });
   };
 
@@ -267,8 +265,10 @@ function ClusterMarker({
   // Single module - show circle with badge count of 1 if online, 0 if offline
   const singleOnlineCount = cluster[0].status === 'online' ? 1 : 0;
   const singleHasOnline = cluster[0].status === 'online';
-  const singleColor = singleHasOnline ? getColorFromHatches(cluster[0].totalHatches || 0, maxHatches) : '#94a3b8';
-  
+  const singleColor = singleHasOnline
+    ? getColorFromHatches(cluster[0].totalHatches || 0, maxHatches)
+    : '#94a3b8';
+
   return (
     <>
       <Circle
@@ -296,28 +296,36 @@ function ClusterMarker({
   );
 }
 
-export default function MapView({ modules, selectedModule, onModuleSelect, onVisibleModulesChange }: MapViewProps) {
+export default function MapView({
+  modules,
+  selectedModule,
+  onModuleSelect,
+  onVisibleModulesChange,
+}: MapViewProps) {
   const [zoom, setZoom] = useState(13);
   const [bounds, setBounds] = useState<L.LatLngBounds | null>(null);
   const CLUSTER_ZOOM_THRESHOLD = 13; // Show clusters below this zoom level
-  
+
   // Center map on first module or default location
-  const center: [number, number] = modules[0]?.location ? [modules[0].location.lat, modules[0].location.lng] : [47.78, 9.61];
+  const center: [number, number] = modules[0]?.location
+    ? [modules[0].location.lat, modules[0].location.lng]
+    : [47.78, 9.61];
 
   // Memoize fuzzed locations to keep them consistent
-  const fuzzedModules = useMemo(() => 
-    modules.map(module => ({
-      ...module,
-      fuzzedLocation: fuzzLocation(module.location, module.id)
-    })),
-    [modules]
+  const fuzzedModules = useMemo(
+    () =>
+      modules.map((module) => ({
+        ...module,
+        fuzzedLocation: fuzzLocation(module.location, module.id),
+      })),
+    [modules],
   );
 
   // Filter modules visible in current map bounds
   const visibleModules = useMemo(() => {
     if (!bounds) return modules;
-    return fuzzedModules.filter(module => 
-      bounds.contains(L.latLng(module.fuzzedLocation[0], module.fuzzedLocation[1]))
+    return fuzzedModules.filter((module) =>
+      bounds.contains(L.latLng(module.fuzzedLocation[0], module.fuzzedLocation[1])),
     );
   }, [bounds, fuzzedModules, modules]);
 
@@ -329,15 +337,12 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
   }, [visibleModules, onVisibleModulesChange, bounds]);
 
   // Create clusters
-  const clusters = useMemo(() => 
-    clusterModules(fuzzedModules),
-    [fuzzedModules]
-  );
+  const clusters = useMemo(() => clusterModules(fuzzedModules), [fuzzedModules]);
 
   // Calculate max hatches for normalization
-  const maxHatches = useMemo(() => 
-    Math.max(...modules.map(m => m.totalHatches || 0), 1),
-    [modules]
+  const maxHatches = useMemo(
+    () => Math.max(...modules.map((m) => m.totalHatches || 0), 1),
+    [modules],
   );
 
   const showClusters = zoom < CLUSTER_ZOOM_THRESHOLD;
@@ -354,51 +359,54 @@ export default function MapView({ modules, selectedModule, onModuleSelect, onVis
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      
-      <MapController 
+
+      <MapController
         selectedModule={selectedModule}
-        selectedFuzzedLocation={selectedModule ? fuzzedModules.find(m => m.id === selectedModule.id)?.fuzzedLocation || null : null}
+        selectedFuzzedLocation={
+          selectedModule
+            ? fuzzedModules.find((m) => m.id === selectedModule.id)?.fuzzedLocation || null
+            : null
+        }
         onZoomChange={setZoom}
         onBoundsChange={setBounds}
       />
-      
-      {showClusters ? (
-        // Show clustered circles with badges
-        clusters.map((cluster, idx) => (
-          <ClusterMarker
-            key={`cluster-${idx}`}
-            cluster={cluster}
-            clusterCenter={getClusterCenter(cluster)}
-            onModuleSelect={onModuleSelect}
-            clusterZoomThreshold={CLUSTER_ZOOM_THRESHOLD}
-            maxHatches={maxHatches}
-          />
-        ))
-      ) : (
-        // Show individual circles when zoomed in
-        fuzzedModules.map((module) => {
-          const circleColor = module.status === 'online' 
-            ? getColorFromHatches(module.totalHatches || 0, maxHatches) 
-            : '#94a3b8';
-          return (
-            <Circle
-              key={module.id}
-              center={module.fuzzedLocation}
-              radius={1000}
-              pathOptions={{
-                color: circleColor,
-                fillColor: circleColor,
-                fillOpacity: 0.2,
-                weight: 2,
-                opacity: 1,
-              }}
-              eventHandlers={{
-                click: () => onModuleSelect(module),
-              }}
+
+      {showClusters
+        ? // Show clustered circles with badges
+          clusters.map((cluster, idx) => (
+            <ClusterMarker
+              key={`cluster-${idx}`}
+              cluster={cluster}
+              clusterCenter={getClusterCenter(cluster)}
+              onModuleSelect={onModuleSelect}
+              clusterZoomThreshold={CLUSTER_ZOOM_THRESHOLD}
+              maxHatches={maxHatches}
             />
-          );
-        })
-      )}
+          ))
+        : // Show individual circles when zoomed in
+          fuzzedModules.map((module) => {
+            const circleColor =
+              module.status === 'online'
+                ? getColorFromHatches(module.totalHatches || 0, maxHatches)
+                : '#94a3b8';
+            return (
+              <Circle
+                key={module.id}
+                center={module.fuzzedLocation}
+                radius={1000}
+                pathOptions={{
+                  color: circleColor,
+                  fillColor: circleColor,
+                  fillOpacity: 0.2,
+                  weight: 2,
+                  opacity: 1,
+                }}
+                eventHandlers={{
+                  click: () => onModuleSelect(module),
+                }}
+              />
+            );
+          })}
     </MapContainer>
   );
 }

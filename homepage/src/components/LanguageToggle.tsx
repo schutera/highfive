@@ -1,15 +1,27 @@
 import { useTranslation } from '../i18n/LanguageContext';
 
-export default function LanguageToggle() {
-  const { lang, setLang } = useTranslation();
+interface LanguageToggleProps {
+  className?: string;
+}
 
+/**
+ * Two-state EN/DE toggle. Renders the *target* language code (the one
+ * you'll switch *to*) so the button label answers "what does this do?"
+ * rather than "what language am I in?".
+ */
+export default function LanguageToggle({ className = '' }: LanguageToggleProps) {
+  const { lang, setLang } = useTranslation();
+  const isDe = lang === 'de';
   return (
     <button
-      onClick={() => setLang(lang === 'en' ? 'de' : 'en')}
-      className="text-sm font-medium text-gray-500 hover:text-gray-700 transition-colors px-2 py-1 rounded-md hover:bg-gray-100"
-      title={lang === 'en' ? 'Auf Deutsch wechseln' : 'Switch to English'}
+      type="button"
+      onClick={() => setLang(isDe ? 'en' : 'de')}
+      className={`inline-flex items-center justify-center min-w-[36px] h-9 px-2 rounded-full text-hf-xs font-semibold tracking-wide text-hf-fg-soft hover:text-hf-fg hover:bg-hf-fg/5 transition-colors ${className}`}
+      title={isDe ? 'Switch to English' : 'Auf Deutsch wechseln'}
+      aria-label={isDe ? 'Switch language to English' : 'Sprache auf Deutsch wechseln'}
+      lang={isDe ? 'en' : 'de'}
     >
-      {lang === 'en' ? 'DE' : 'EN'}
+      {isDe ? 'EN' : 'DE'}
     </button>
   );
 }

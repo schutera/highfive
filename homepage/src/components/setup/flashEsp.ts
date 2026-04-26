@@ -19,7 +19,7 @@ interface ManifestBuild {
   parts: ManifestPart[];
 }
 
-interface Manifest {
+export interface Manifest {
   name: string;
   version: string;
   builds: ManifestBuild[];
@@ -29,18 +29,23 @@ interface Manifest {
  * Flash firmware to an ESP32 using Web Serial + esptool-js.
  * The only browser UI that appears is the native serial port picker.
  *
- * @param manifestUrl  Path to the manifest.json (e.g. "/manifest.json")
- * @param onProgress   Callback receiving state updates for inline UI
+ * @param manifest    Manifest object describing the firmware build(s).
+ *                    Part `path` values are fetched as URLs (absolute or
+ *                    relative to the document). Build the object in-app and
+ *                    pass Vite-imported asset URLs so the firmware binary
+ *                    gets a content hash for cache busting.
+ * @param onProgress  Callback receiving state updates for inline UI
  */
 export async function flashEsp(
-  manifestUrl: string,
+  manifest: Manifest,
   onProgress: (progress: FlashProgress) => void,
 ): Promise<void> {
   let transport: Transport | null = null;
 
   try {
     // --- 1. Request serial port (native browser picker — unavoidable) ---
-    const serial = (navigator as unknown as { serial?: { requestPort: () => Promise<SerialPort> } }).serial;
+    const serial = (navigator as unknown as { serial?: { requestPort: () => Promise<SerialPort> } })
+      .serial;
     if (!serial) {
       throw new Error('Web Serial API not supported. Use Chrome or Edge.');
     }
@@ -66,11 +71,7 @@ export async function flashEsp(
 
     onProgress({ state: 'preparing' });
 
-    // --- 3. Fetch manifest & firmware binary ---
-    const manifestResp = await fetch(manifestUrl);
-    if (!manifestResp.ok) throw new Error('Failed to fetch manifest');
-    const manifest: Manifest = await manifestResp.json();
-
+    // --- 3. Fetch firmware binary (manifest is supplied directly) ---
     const build = manifest.builds[0];
     if (!build || build.parts.length === 0) {
       throw new Error('No firmware builds found in manifest');
@@ -111,12 +112,20 @@ export async function flashEsp(
 
     // Release the serial port so the ESP can fully reboot
     if (transport) {
-      try { await transport.disconnect(); } catch { /* ignore */ }
+      try {
+        await transport.disconnect();
+      } catch {
+        /* ignore */
+      }
       transport = null;
     }
 
     // Close the port entirely to free the USB interface
-    try { await port.close(); } catch { /* ignore */ }
+    try {
+      await port.close();
+    } catch {
+      /* ignore */
+    }
 
     onProgress({ state: 'finished' });
   } catch (err) {
@@ -129,7 +138,11 @@ export async function flashEsp(
     onProgress({ state: 'error', error: message });
   } finally {
     if (transport) {
-      try { await transport.disconnect(); } catch { /* ignore */ }
+      try {
+        await transport.disconnect();
+      } catch {
+        /* ignore */
+      }
     }
   }
 }

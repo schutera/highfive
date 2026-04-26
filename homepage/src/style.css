@@ -2,14 +2,202 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ================================================================
+   Design tokens — HighFive 2026 visual language
+   Honey amber + deep forest green + warm off-white. OKLCH-first
+   for perceptual lightness, with sRGB fallback for older browsers.
+   ================================================================ */
+:root {
+  /* Brand */
+  --hf-honey-50: oklch(98% 0.02 80);
+  --hf-honey-100: oklch(96% 0.05 80);
+  --hf-honey-200: oklch(92% 0.1 80);
+  --hf-honey-300: oklch(86% 0.15 80);
+  --hf-honey-400: oklch(80% 0.18 75);
+  --hf-honey-500: oklch(72% 0.19 65); /* primary */
+  --hf-honey-600: oklch(63% 0.18 55);
+  --hf-honey-700: oklch(54% 0.16 50);
+  --hf-honey-800: oklch(42% 0.13 50);
+  --hf-honey-900: oklch(32% 0.1 50);
+
+  --hf-forest-50: oklch(96% 0.03 160);
+  --hf-forest-100: oklch(92% 0.05 160);
+  --hf-forest-300: oklch(76% 0.1 160);
+  --hf-forest-500: oklch(58% 0.13 160);
+  --hf-forest-700: oklch(42% 0.1 160);
+  --hf-forest-900: oklch(24% 0.06 160);
+
+  /* Neutrals — slightly warm so they harmonise with honey */
+  --hf-paper: oklch(99% 0.005 80); /* near-white background */
+  --hf-surface: oklch(100% 0 0); /* card surfaces */
+  --hf-ink: oklch(20% 0.015 60); /* primary text */
+  --hf-ink-soft: oklch(40% 0.015 60); /* secondary text */
+  --hf-ink-mute: oklch(60% 0.012 60); /* muted text */
+  --hf-line: oklch(90% 0.01 60); /* hairlines */
+  --hf-line-soft: oklch(95% 0.005 60);
+
+  --hf-success: oklch(64% 0.16 145);
+  --hf-warn: oklch(75% 0.16 80);
+  --hf-danger: oklch(60% 0.21 25);
+  --hf-info: oklch(60% 0.13 240);
+
+  /* Semantic surface roles */
+  --hf-bg: var(--hf-paper);
+  --hf-bg-elev: var(--hf-surface);
+  --hf-fg: var(--hf-ink);
+  --hf-fg-soft: var(--hf-ink-soft);
+  --hf-fg-mute: var(--hf-ink-mute);
+  --hf-border: var(--hf-line);
+  --hf-primary: var(--hf-honey-500);
+  --hf-primary-fg: oklch(15% 0.02 60);
+  --hf-primary-hover: var(--hf-honey-600);
+  --hf-accent: var(--hf-forest-500);
+
+  /* Type scale — modular ratio 1.25 anchored at 1rem (clamp for fluid) */
+  --fs-xs: clamp(0.75rem, 0.7rem + 0.2vw, 0.8rem);
+  --fs-sm: clamp(0.875rem, 0.83rem + 0.2vw, 0.9rem);
+  --fs-base: clamp(1rem, 0.95rem + 0.2vw, 1.05rem);
+  --fs-md: clamp(1.125rem, 1.05rem + 0.3vw, 1.25rem);
+  --fs-lg: clamp(1.4rem, 1.25rem + 0.6vw, 1.625rem);
+  --fs-xl: clamp(1.75rem, 1.5rem + 1vw, 2.25rem);
+  --fs-2xl: clamp(2.25rem, 1.8rem + 2vw, 3.25rem);
+  --fs-3xl: clamp(3rem, 2.2rem + 3.5vw, 5rem);
+
+  /* Spacing — 4px grid; expose semantic tokens too */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Radii */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+  --radius-pill: 999px;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.04), 0 1px 3px oklch(0% 0 0 / 0.06);
+  --shadow-2: 0 2px 6px oklch(0% 0 0 / 0.05), 0 8px 24px oklch(0% 0 0 / 0.08);
+  --shadow-3: 0 12px 32px oklch(0% 0 0 / 0.1), 0 24px 64px oklch(0% 0 0 / 0.12);
+  --shadow-glow: 0 0 0 4px color-mix(in oklch, var(--hf-primary) 30%, transparent);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration: 220ms;
+  --duration-slow: 380ms;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --hf-paper: oklch(18% 0.015 60);
+    --hf-surface: oklch(22% 0.015 60);
+    --hf-ink: oklch(96% 0.01 80);
+    --hf-ink-soft: oklch(80% 0.01 80);
+    --hf-ink-mute: oklch(65% 0.01 80);
+    --hf-line: oklch(32% 0.015 60);
+    --hf-line-soft: oklch(28% 0.015 60);
+    --hf-primary-fg: oklch(15% 0.02 60);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --hf-paper: oklch(18% 0.015 60);
+  --hf-surface: oklch(22% 0.015 60);
+  --hf-ink: oklch(96% 0.01 80);
+  --hf-ink-soft: oklch(80% 0.01 80);
+  --hf-ink-mute: oklch(65% 0.01 80);
+  --hf-line: oklch(32% 0.015 60);
+  --hf-line-soft: oklch(28% 0.015 60);
+  color-scheme: dark;
+}
+
+/* sRGB fallback for browsers without OKLCH */
+@supports not (color: oklch(0% 0 0)) {
+  :root {
+    --hf-honey-50: #fffaf0;
+    --hf-honey-100: #fff3d6;
+    --hf-honey-200: #ffe6a8;
+    --hf-honey-300: #fbd38d;
+    --hf-honey-400: #f6ad55;
+    --hf-honey-500: #ed8936;
+    --hf-honey-600: #dd6b20;
+    --hf-honey-700: #c05621;
+    --hf-honey-800: #9c4221;
+    --hf-honey-900: #7b341e;
+    --hf-forest-50: #f0fdf4;
+    --hf-forest-100: #dcfce7;
+    --hf-forest-300: #86efac;
+    --hf-forest-500: #22c55e;
+    --hf-forest-700: #15803d;
+    --hf-forest-900: #14532d;
+    --hf-paper: #fdfcf9;
+    --hf-surface: #ffffff;
+    --hf-ink: #1f1d18;
+    --hf-ink-soft: #54514a;
+    --hf-ink-mute: #84807a;
+    --hf-line: #e8e4dd;
+    --hf-line-soft: #f1ede6;
+    --hf-success: #16a34a;
+    --hf-warn: #eab308;
+    --hf-danger: #e11d48;
+    --hf-info: #2563eb;
+  }
+}
+
+/* ================================================================
+   Base styles
+   ================================================================ */
+html {
+  scroll-behavior: smooth;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  text-rendering: optimizeLegibility;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI Variable',
+    'Segoe UI',
+    'Inter',
+    'Roboto',
+    'Helvetica Neue',
+    Arial,
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-touch-callout: none;
+  background: var(--hf-bg);
+  color: var(--hf-fg);
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  min-height: 100dvh;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+p,
+li {
+  text-wrap: pretty;
 }
 
 /* Mobile safe area fixes */
@@ -20,39 +208,70 @@ body {
   }
 }
 
-/* Prevent horizontal scroll on mobile */
-html, body {
+html,
+body {
   width: 100%;
   overflow-x: hidden;
 }
 
 /* Better touch targets for mobile */
 @media (max-width: 768px) {
-  button, a {
+  button,
+  a {
     min-height: 44px;
   }
 }
 
-/* Smooth scrolling */
-html {
-  scroll-behavior: smooth;
-}
-
 /* Prevent zoom on input focus on iOS */
-input, textarea, select {
+input,
+textarea,
+select {
   font-size: 16px;
 }
 
-/* Fix for iOS Safari viewport height */
-body {
-  min-height: 100dvh;
+/* ================================================================
+   Visible, branded focus ring (WCAG 2.2 — focus indicator)
+   Applied only for keyboard navigation via :focus-visible.
+   ================================================================ */
+*:focus {
+  outline: none;
 }
 
-/* Mobile bottom sheet slide-up animation */
+:focus-visible {
+  outline: 2px solid var(--hf-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+  transition: outline-offset 80ms var(--ease-out);
+}
+
+a:focus-visible,
+button:focus-visible,
+[role='button']:focus-visible {
+  outline-offset: 3px;
+  box-shadow: var(--shadow-glow);
+}
+
+/* ================================================================
+   Motion — respect reduced motion preference
+   ================================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ================================================================
+   Animations (these are gated by the reduced-motion rule above)
+   ================================================================ */
 @keyframes slide-up {
   from {
     transform: translateY(100%);
-    opacity: 0.8;
+    opacity: 0.6;
   }
   to {
     transform: translateY(0);
@@ -61,55 +280,226 @@ body {
 }
 
 .animate-slide-up {
-  animation: slide-up 0.3s ease-out forwards;
+  animation: slide-up var(--duration-slow) var(--ease-out) forwards;
 }
 
-/* Safe area padding utilities */
-.pb-safe-bottom {
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes shimmer {
+  0% {
+    background-position: -300px 0;
+  }
+  100% {
+    background-position: 300px 0;
+  }
 }
 
-.pt-safe-top {
-  padding-top: max(0.5rem, env(safe-area-inset-top));
+.animate-slide-in-right {
+  animation: slide-in-right var(--duration) var(--ease-out) forwards;
+}
+.animate-slide-in-left {
+  animation: slide-in-left var(--duration) var(--ease-out) forwards;
+}
+.animate-scale-in {
+  animation: scale-in 320ms var(--ease-out) forwards;
+}
+.animate-fade-in {
+  animation: fade-in var(--duration) var(--ease-out) forwards;
 }
 
-/* Overscroll behavior for bottom sheets */
+/* ================================================================
+   Skeleton / loading shimmer
+   ================================================================ */
+.hf-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--hf-line-soft);
+  border-radius: var(--radius-md);
+}
+.hf-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--hf-surface) 70%, transparent),
+    transparent
+  );
+  background-size: 600px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* ================================================================
+   Hero image with LQIP — base64 data URL is tiny (~250B); we
+   render it scaled-up and blurred under the hi-res WebP, then
+   crossfade once the real image decodes.
+   ================================================================ */
+.hf-hero-image {
+  background-image: url('data:image/jpeg;base64,/9j/2wBDAAgQEBMQExYWFhYWFhoYGhsbGxoaGhobGxsdHR0iIiIdHR0bGx0dICAiIiUmJSMjIiMmJigoKDAwLi44ODpFRVP/xABbAAEBAAAAAAAAAAAAAAAAAAAEBgEBAAAAAAAAAAAAAAAAAAAAAxAAAgAEBwEBAQAAAAAAAAAAAQIRAzEAQQQFIRKBUbFxNBEBAQAAAAAAAAAAAAAAAAAAAGH/wAARCAAKABADASIAAhEAAxEA/9oADAMBAAIRAxEAPwCZkZgKIhcRAe4kU6Burkc5UpgRFi7MPYMcfynVl0xV5UG8sR2rYdRJGWWBP87fRYHj/9k=');
+  background-size: cover;
+  background-position: center;
+  background-color: var(--hf-honey-100);
+  filter: blur(12px) saturate(1.1);
+  transform: scale(1.05);
+  transition: opacity var(--duration-slow) var(--ease-out);
+}
+
+/* ================================================================
+   Reusable button primitives (used opt-in via @apply alternatives)
+   We avoid creating a heavy component layer; just utility classes.
+   ================================================================ */
+.hf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  transition:
+    background-color var(--duration) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration) var(--ease-out),
+    color var(--duration) var(--ease-out);
+  white-space: nowrap;
+}
+.hf-btn:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.hf-btn-primary {
+  background: var(--hf-primary);
+  color: var(--hf-primary-fg);
+  box-shadow: var(--shadow-1);
+}
+.hf-btn-primary:hover {
+  background: var(--hf-primary-hover);
+  box-shadow: var(--shadow-2);
+}
+.hf-btn-secondary {
+  background: color-mix(in oklch, var(--hf-fg) 8%, transparent);
+  color: var(--hf-fg);
+  border: 1px solid var(--hf-border);
+}
+.hf-btn-secondary:hover {
+  background: color-mix(in oklch, var(--hf-fg) 14%, transparent);
+}
+.hf-btn-ghost {
+  background: transparent;
+  color: var(--hf-fg-soft);
+}
+.hf-btn-ghost:hover {
+  background: color-mix(in oklch, var(--hf-fg) 6%, transparent);
+  color: var(--hf-fg);
+}
+
+/* Glass surface (used sparingly; over-imagery only) */
+.hf-glass {
+  background: color-mix(in oklch, var(--hf-surface) 60%, transparent);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid color-mix(in oklch, white 30%, transparent);
+}
+
+/* Card */
+.hf-card {
+  background: var(--hf-bg-elev);
+  border: 1px solid var(--hf-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+/* ================================================================
+   Utilities
+   ================================================================ */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 .overscroll-contain {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Improve touch feedback on mobile */
+.pb-safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+.pt-safe-top {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+/* Visually-hidden — for accessible icon-only buttons that still need labels */
+.sr-only-focusable:not(:focus):not(:active) {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* Mobile touch feedback */
 @media (max-width: 768px) {
   .active\:scale-95:active {
     transform: scale(0.95);
   }
 }
 
-/* Setup wizard step transitions */
-@keyframes slide-in-right {
-  from { opacity: 0; transform: translateX(30px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-@keyframes slide-in-left {
-  from { opacity: 0; transform: translateX(-30px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-@keyframes scale-in {
-  from { opacity: 0; transform: scale(0.5); }
-  to   { opacity: 1; transform: scale(1); }
+/* Container query helper — bee species cards */
+.hf-cq {
+  container-type: inline-size;
 }
 
-.animate-slide-in-right { animation: slide-in-right 0.3s ease-out forwards; }
-.animate-slide-in-left  { animation: slide-in-left 0.3s ease-out forwards; }
-.animate-scale-in       { animation: scale-in 0.4s ease-out forwards; }
-
-/* Hide scrollbar but keep functionality */
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+/* ================================================================
+   Leaflet overrides — keep map text legible in dark mode by NOT
+   inverting the tile layer (hard on imagery), but adjust controls.
+   ================================================================ */
+.leaflet-container {
+  background: var(--hf-line-soft);
 }
 
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
+/* Subtle ring on selected list items / focus targets */
+.hf-ring-primary {
+  box-shadow: 0 0 0 2px var(--hf-primary);
 }

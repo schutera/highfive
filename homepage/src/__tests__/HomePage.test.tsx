@@ -29,8 +29,11 @@ function renderHome() {
 describe('HomePage smoke', () => {
   it('renders the HighFive hero title', () => {
     renderHome();
-    // The hero contains the literal "HighFive" word (next to the emoji).
-    expect(screen.getByText(/HighFive/i)).toBeInTheDocument();
+    // The hero <h1> is identified by its accessible role + name. The
+    // wordmark in the floating top bar is a span, not a heading, so
+    // role=heading uniquely targets the hero title regardless of the
+    // floating brand mark.
+    expect(screen.getByRole('heading', { level: 1, name: /HighFive/i })).toBeInTheDocument();
   });
 
   it('renders a link pointing to /dashboard', () => {

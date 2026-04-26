@@ -1,0 +1,60 @@
+# Enforce consistent line endings across platforms.
+#
+# Reason: Husky + lint-staged on Windows hosts with core.autocrlf=true emit
+# CRLF warnings during git stash that can corrupt lint-staged's internal
+# child-process state (we hit this — pre-commit currently runs with
+# --no-stash to work around it). With this file, the working tree always
+# uses LF for the listed text formats regardless of the local autocrlf
+# setting, removing the ambiguity at the source.
+
+# Default: every text file is normalized to LF.
+* text=auto eol=lf
+
+# Source code — explicit even if covered by `text=auto` so future readers
+# don't have to wonder.
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.jsx       text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.json      text eol=lf
+*.jsonc     text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.scss      text eol=lf
+*.py        text eol=lf
+*.cpp       text eol=lf
+*.hpp       text eol=lf
+*.c         text eol=lf
+*.h         text eol=lf
+*.ino       text eol=lf
+*.sh        text eol=lf
+*.txt       text eol=lf
+
+# Shell scripts MUST be LF — CRLF breaks #! interpretation.
+*.sh        text eol=lf
+
+# Windows scripts keep CRLF.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Binary blobs — never modified by git.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.tar.gz    binary
+*.FCStd     binary
+*.FCBak     binary
+*.dxf       binary
+*.STEP      binary
+*.stl       binary

@@ -8,6 +8,12 @@ from pathlib import Path
 
 import pytest
 
+# Canonical 12-hex-char ModuleId form. The legacy AA:BB:CC:DD:EE:FF input
+# canonicalises to this same value.
+TEST_MAC = "aabbccddeeff"
+TEST_MAC_LEGACY = "AA:BB:CC:DD:EE:FF"
+
+
 # --------------------------- helpers ---------------------------
 
 
@@ -23,7 +29,7 @@ def _img_bytes() -> bytes:
 
 def _make_form(
     *,
-    mac="AA:BB:CC:DD:EE:FF",
+    mac=TEST_MAC,
     battery="80",
     filename="test.jpg",
     include_image=True,
@@ -55,7 +61,7 @@ def test_upload_happy_path_saves_image_and_returns_classification(
     assert resp.status_code == 200, resp.get_json()
     body = resp.get_json()
 
-    assert body["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert body["mac"] == TEST_MAC
     assert body["battery"] == 80
     assert "Image bee01.jpg uploaded successfully" in body["message"]
     # Classification stub structure
@@ -84,11 +90,12 @@ def test_upload_happy_path_saves_image_and_returns_classification(
 
     progress_calls = [p for p in posts if p["url"].endswith("/add_progress_for_module")]
     assert len(progress_calls) == 1
-    assert progress_calls[0]["json"]["modul_id"] == "AA:BB:CC:DD:EE:FF"
+    # Wire field is now canonical ``module_id`` (was the legacy ``modul_id`` typo).
+    assert progress_calls[0]["json"]["module_id"] == TEST_MAC
     assert "classification" in progress_calls[0]["json"]
 
     heartbeat_calls = [
-        p for p in posts if p["url"].endswith("/modules/AA:BB:CC:DD:EE:FF/heartbeat")
+        p for p in posts if p["url"].endswith(f"/modules/{TEST_MAC}/heartbeat")
     ]
     assert len(heartbeat_calls) == 1
     assert heartbeat_calls[0]["json"] == {"battery": 80}
@@ -96,11 +103,37 @@ def test_upload_happy_path_saves_image_and_returns_classification(
     # progress_count is fetched once per upload via GET.
     gets = upload_env["duckdb_gets"]
     progress_count_calls = [
-        g
-        for g in gets
-        if g["url"].endswith("/modules/AA:BB:CC:DD:EE:FF/progress_count")
+        g for g in gets if g["url"].endswith(f"/modules/{TEST_MAC}/progress_count")
     ]
     assert len(progress_count_calls) == 1
+
+
+def test_upload_canonicalises_legacy_colon_mac(client, upload_env):
+    """Legacy ``AA:BB:CC:DD:EE:FF`` form is normalised to canonical."""
+    resp = client.post(
+        "/upload",
+        data=_make_form(mac=TEST_MAC_LEGACY, filename="legacy.jpg"),
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["mac"] == TEST_MAC
+
+    # Downstream POSTs see the canonical form, not the colon-separated input.
+    posts = upload_env["duckdb_posts"]
+    progress_calls = [p for p in posts if p["url"].endswith("/add_progress_for_module")]
+    assert progress_calls[0]["json"]["module_id"] == TEST_MAC
+    heartbeat_urls = [p["url"] for p in posts if p["url"].endswith("/heartbeat")]
+    assert any(f"/modules/{TEST_MAC}/heartbeat" in u for u in heartbeat_urls)
+
+
+def test_upload_invalid_mac_returns_400(client, upload_env):
+    resp = client.post(
+        "/upload",
+        data=_make_form(mac="not-a-mac", filename="bad.jpg"),
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    assert "mac" in resp.get_json()["error"].lower()
 
 
 def test_upload_with_logs_writes_sidecar(client, tmp_upload_dir: Path, upload_env):
@@ -117,7 +150,7 @@ def test_upload_with_logs_writes_sidecar(client, tmp_upload_dir: Path, upload_en
     data = json.loads(sidecar.read_text(encoding="utf-8"))
 
     # New envelope schema: metadata at top level, ESP telemetry nested under `payload`.
-    assert data["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert data["mac"] == TEST_MAC
     assert data["image"] == "bee02.jpg"
     assert "received_at" in data and isinstance(data["received_at"], str)
 
@@ -241,7 +274,7 @@ def test_upload_malformed_logs_writes_sidecar_with_parse_error(
     # Parse-error markers live inside the nested payload now.
     assert data["payload"].get("parse_error") is True
     assert data["payload"].get("raw") == "this is not json {{"
-    assert data["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert data["mac"] == TEST_MAC
     assert data["image"] == "bad.jpg"
 
 

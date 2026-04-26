@@ -5,9 +5,11 @@ import random
 import time
 
 from flask import Flask, jsonify, request
+from pydantic import ValidationError
 
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
+from services.module_id import ModuleId
 from services.sidecar import LogSidecarEnvelope
 from services.upload_pipeline import UploadPipeline, UploadRequest
 
@@ -87,9 +89,17 @@ def upload_image():
     if image.filename == "":
         return jsonify({"error": "No selected file"}), 400
 
+    # Canonicalise the inbound mac via ``ModuleId``. Accepts the legacy
+    # colon/dash forms too. Everything downstream (sidecar, duckdb-service
+    # POSTs) sees the canonical 12-hex-char string.
+    try:
+        canonical_mac = ModuleId.model_validate(mac).root
+    except ValidationError:
+        return jsonify({"error": "invalid mac format"}), 400
+
     result = upload_pipeline.run(
         UploadRequest(
-            mac=mac,
+            mac=canonical_mac,
             battery=battery,
             image=image,
             logs_raw=request.form.get("logs"),
@@ -98,7 +108,7 @@ def upload_image():
     return jsonify(
         {
             "message": f"Image {result.filename} uploaded successfully",
-            "mac": mac,
+            "mac": canonical_mac,
             "battery": battery,
             "classification": result.classification,
         }

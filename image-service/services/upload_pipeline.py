@@ -133,8 +133,13 @@ class UploadPipeline:
             print(f"[logs] failed to write sidecar for {req.image.filename}: {exc}")
 
     def _record_progress(self, mac: str, classification: dict) -> None:
-        """POST classification results to duckdb-service. Silently tolerates failures."""
-        payload = {"modul_id": mac, "classification": classification}
+        """POST classification results to duckdb-service. Silently tolerates failures.
+
+        Wire field is the canonical ``module_id``; duckdb-service still
+        accepts the legacy ``modul_id`` typo via Pydantic ``AliasChoices``
+        for one release as the deprecation window.
+        """
+        payload = {"module_id": mac, "classification": classification}
         try:
             self.duckdb_service.add_progress_for_module(payload)
         except RequestException:

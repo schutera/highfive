@@ -43,36 +43,41 @@ def init_db():
         if os.getenv("SEED_DATA", "").lower() == "true":
             row_count = con.execute("SELECT COUNT(*) FROM module_configs").fetchone()[0]
             if row_count == 0:
+                # Seed module IDs use the canonical 12-hex-char ModuleId
+                # form. The pattern ``00000000000N`` is deliberately
+                # recognisable as test/seed data — it's a valid canonical
+                # ModuleId but cannot collide with a real ESP32 base MAC,
+                # which always has manufacturer OUI bytes set.
                 con.execute(
                     """
                     INSERT INTO module_configs (id, name, lat, lng, status, first_online, image_count) VALUES
-                    ('hive-001', 'Elias123',    47.8086, 9.6433, 'online',  '2023-04-15', 142),
-                    ('hive-002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20', 87),
-                    ('hive-003', 'Waldrand',    47.7819, 9.6107, 'online',  '2024-03-10', 53),
-                    ('hive-004', 'Schussental', 47.7850, 9.6200, 'online',  '2024-06-01', 24),
-                    ('hive-005', 'Bergblick',   47.8050, 9.6350, 'online',  '2025-02-14', 3);
+                    ('000000000001', 'Elias123',    47.8086, 9.6433, 'online',  '2023-04-15', 142),
+                    ('000000000002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20', 87),
+                    ('000000000003', 'Waldrand',    47.7819, 9.6107, 'online',  '2024-03-10', 53),
+                    ('000000000004', 'Schussental', 47.7850, 9.6200, 'online',  '2024-06-01', 24),
+                    ('000000000005', 'Bergblick',   47.8050, 9.6350, 'online',  '2025-02-14', 3);
 
                     INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
-                    ('nest-001', 'hive-001', 'blackmasked'),
-                    ('nest-002', 'hive-001', 'blackmasked'),
-                    ('nest-003', 'hive-001', 'blackmasked'),
-                    ('nest-004', 'hive-001', 'blackmasked'),
-                    ('nest-005', 'hive-001', 'resin'),
-                    ('nest-006', 'hive-001', 'resin'),
-                    ('nest-007', 'hive-001', 'resin'),
-                    ('nest-008', 'hive-001', 'resin'),
-                    ('nest-009', 'hive-002', 'leafcutter'),
-                    ('nest-010', 'hive-002', 'leafcutter'),
-                    ('nest-011', 'hive-002', 'leafcutter'),
-                    ('nest-012', 'hive-002', 'leafcutter'),
-                    ('nest-013', 'hive-003', 'orchard'),
-                    ('nest-014', 'hive-003', 'orchard'),
-                    ('nest-015', 'hive-003', 'orchard'),
-                    ('nest-016', 'hive-003', 'orchard'),
-                    ('nest-017', 'hive-004', 'blackmasked'),
-                    ('nest-018', 'hive-004', 'blackmasked'),
-                    ('nest-019', 'hive-004', 'blackmasked'),
-                    ('nest-020', 'hive-004', 'blackmasked');
+                    ('nest-001', '000000000001', 'blackmasked'),
+                    ('nest-002', '000000000001', 'blackmasked'),
+                    ('nest-003', '000000000001', 'blackmasked'),
+                    ('nest-004', '000000000001', 'blackmasked'),
+                    ('nest-005', '000000000001', 'resin'),
+                    ('nest-006', '000000000001', 'resin'),
+                    ('nest-007', '000000000001', 'resin'),
+                    ('nest-008', '000000000001', 'resin'),
+                    ('nest-009', '000000000002', 'leafcutter'),
+                    ('nest-010', '000000000002', 'leafcutter'),
+                    ('nest-011', '000000000002', 'leafcutter'),
+                    ('nest-012', '000000000002', 'leafcutter'),
+                    ('nest-013', '000000000003', 'orchard'),
+                    ('nest-014', '000000000003', 'orchard'),
+                    ('nest-015', '000000000003', 'orchard'),
+                    ('nest-016', '000000000003', 'orchard'),
+                    ('nest-017', '000000000004', 'blackmasked'),
+                    ('nest-018', '000000000004', 'blackmasked'),
+                    ('nest-019', '000000000004', 'blackmasked'),
+                    ('nest-020', '000000000004', 'blackmasked');
 
                     INSERT INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) VALUES
                     ('prog-001', 'nest-001', '2024-06-01', 5, 45, 15),

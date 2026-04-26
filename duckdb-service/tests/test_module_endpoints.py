@@ -8,7 +8,12 @@ Covers:
 from datetime import date
 
 
-def _seed_module(fresh_db, module_id="hive-001", image_count=0, battery_level=None):
+# Canonical 12-hex-char ModuleId test fixtures.
+TEST_MAC_1 = "aabbccddeeff"
+TEST_MAC_2 = "001122334455"
+
+
+def _seed_module(fresh_db, module_id=TEST_MAC_1, image_count=0, battery_level=None):
     con = fresh_db.connection.get_conn()
     try:
         con.execute(
@@ -66,36 +71,44 @@ def _fetch_module(fresh_db, module_id):
 
 
 def test_progress_count_unknown_module_returns_zero(client):
-    resp = client.get("/modules/does-not-exist/progress_count")
+    # Use a valid canonical-form MAC that simply isn't seeded; the route
+    # rejects non-canonical IDs with a 400 now.
+    resp = client.get("/modules/ffffffffffff/progress_count")
     assert resp.status_code == 200
     assert resp.get_json() == {"count": 0}
 
 
-def test_progress_count_module_no_progress_returns_zero(client, fresh_db):
-    _seed_module(fresh_db, "hive-001")
+def test_progress_count_invalid_module_id_returns_400(client):
     resp = client.get("/modules/hive-001/progress_count")
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
+def test_progress_count_module_no_progress_returns_zero(client, fresh_db):
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.get(f"/modules/{TEST_MAC_1}/progress_count")
     assert resp.status_code == 200
     assert resp.get_json() == {"count": 0}
 
 
 def test_progress_count_returns_correct_count(client, fresh_db):
-    _seed_module(fresh_db, "hive-001")
-    _seed_module(fresh_db, "hive-002")  # noise — should not be counted
-    _seed_nest(fresh_db, "nest-001", "hive-001", "blackmasked")
-    _seed_nest(fresh_db, "nest-002", "hive-001", "resin")
-    _seed_nest(fresh_db, "nest-003", "hive-002", "blackmasked")
+    _seed_module(fresh_db, TEST_MAC_1)
+    _seed_module(fresh_db, TEST_MAC_2)  # noise — should not be counted
+    _seed_nest(fresh_db, "nest-001", TEST_MAC_1, "blackmasked")
+    _seed_nest(fresh_db, "nest-002", TEST_MAC_1, "resin")
+    _seed_nest(fresh_db, "nest-003", TEST_MAC_2, "blackmasked")
 
-    # 3 progress rows for hive-001 (across two nests), 1 for hive-002.
+    # 3 progress rows for TEST_MAC_1 (across two nests), 1 for TEST_MAC_2.
     _seed_progress(fresh_db, "prog-001", "nest-001", "2024-06-01")
     _seed_progress(fresh_db, "prog-002", "nest-001", "2024-06-02")
     _seed_progress(fresh_db, "prog-003", "nest-002", "2024-06-01")
     _seed_progress(fresh_db, "prog-004", "nest-003", "2024-06-01")
 
-    resp = client.get("/modules/hive-001/progress_count")
+    resp = client.get(f"/modules/{TEST_MAC_1}/progress_count")
     assert resp.status_code == 200
     assert resp.get_json() == {"count": 3}
 
-    resp2 = client.get("/modules/hive-002/progress_count")
+    resp2 = client.get(f"/modules/{TEST_MAC_2}/progress_count")
     assert resp2.status_code == 200
     assert resp2.get_json() == {"count": 1}
 
@@ -104,29 +117,35 @@ def test_progress_count_returns_correct_count(client, fresh_db):
 
 
 def test_heartbeat_missing_battery_returns_400(client, fresh_db):
-    _seed_module(fresh_db, "hive-001")
-    resp = client.post("/modules/hive-001/heartbeat", json={})
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={})
     assert resp.status_code == 400
     assert "error" in resp.get_json()
 
 
 def test_heartbeat_battery_negative_returns_400(client, fresh_db):
-    _seed_module(fresh_db, "hive-001")
-    resp = client.post("/modules/hive-001/heartbeat", json={"battery": -1})
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={"battery": -1})
     assert resp.status_code == 400
     assert "error" in resp.get_json()
 
 
 def test_heartbeat_battery_above_100_returns_400(client, fresh_db):
-    _seed_module(fresh_db, "hive-001")
-    resp = client.post("/modules/hive-001/heartbeat", json={"battery": 101})
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={"battery": 101})
     assert resp.status_code == 400
     assert "error" in resp.get_json()
 
 
 def test_heartbeat_battery_non_int_returns_400(client, fresh_db):
-    _seed_module(fresh_db, "hive-001")
-    resp = client.post("/modules/hive-001/heartbeat", json={"battery": "abc"})
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={"battery": "abc"})
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
+def test_heartbeat_invalid_module_id_returns_400(client):
+    resp = client.post("/modules/does-not-exist/heartbeat", json={"battery": 50})
     assert resp.status_code == 400
     assert "error" in resp.get_json()
 
@@ -135,9 +154,8 @@ def test_heartbeat_battery_non_int_returns_400(client, fresh_db):
 
 
 def test_heartbeat_unknown_module_returns_404(client):
-    resp = client.post(
-        "/modules/does-not-exist/heartbeat", json={"battery": 50}
-    )
+    # A canonical-form MAC that doesn't exist in the DB → 404 (not 400).
+    resp = client.post("/modules/ffffffffffff/heartbeat", json={"battery": 50})
     assert resp.status_code == 404
     body = resp.get_json()
     assert body == {"error": "Module not found"}
@@ -147,13 +165,13 @@ def test_heartbeat_unknown_module_returns_404(client):
 
 
 def test_heartbeat_updates_battery_first_online_and_image_count(client, fresh_db):
-    _seed_module(fresh_db, "hive-001", image_count=0, battery_level=10)
+    _seed_module(fresh_db, TEST_MAC_1, image_count=0, battery_level=10)
 
-    resp = client.post("/modules/hive-001/heartbeat", json={"battery": 77})
+    resp = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={"battery": 77})
     assert resp.status_code == 200
     assert resp.get_json() == {"ok": True}
 
-    row = _fetch_module(fresh_db, "hive-001")
+    row = _fetch_module(fresh_db, TEST_MAC_1)
     assert row is not None
     assert row["battery_level"] == 77
     assert row["image_count"] == 1
@@ -162,14 +180,14 @@ def test_heartbeat_updates_battery_first_online_and_image_count(client, fresh_db
 
 
 def test_heartbeat_increments_image_count_idempotently(client, fresh_db):
-    _seed_module(fresh_db, "hive-001", image_count=5, battery_level=20)
+    _seed_module(fresh_db, TEST_MAC_1, image_count=5, battery_level=20)
 
-    r1 = client.post("/modules/hive-001/heartbeat", json={"battery": 60})
+    r1 = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={"battery": 60})
     assert r1.status_code == 200
-    r2 = client.post("/modules/hive-001/heartbeat", json={"battery": 55})
+    r2 = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={"battery": 55})
     assert r2.status_code == 200
 
-    row = _fetch_module(fresh_db, "hive-001")
+    row = _fetch_module(fresh_db, TEST_MAC_1)
     assert row["image_count"] == 7
     # Most recent battery is what stuck.
     assert row["battery_level"] == 55

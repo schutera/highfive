@@ -18,7 +18,8 @@ def get_progress():
 def add_progress_for_module():
     json_data = request.get_json()
     payload = ClassificationOutput(**json_data)
-    modul_id = payload.modul_id
+    # Pydantic ``RootModel`` exposes the underlying str via ``.root``.
+    module_id = payload.module_id.root
     today = date.today().isoformat()
 
     with write_transaction() as con:
@@ -30,7 +31,7 @@ def add_progress_for_module():
             # Get existing nests for this module + bee type
             existing_nests = con.execute(
                 "SELECT nest_id FROM nest_data WHERE module_id = ? AND beeType = ? ORDER BY nest_id",
-                (modul_id, db_bee_type),
+                (module_id, db_bee_type),
             ).fetchall()
             existing_nest_ids = [row[0] for row in existing_nests]
 
@@ -44,7 +45,7 @@ def add_progress_for_module():
 
                 con.execute(
                     "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
-                    (new_nest_id, modul_id, db_bee_type),
+                    (new_nest_id, module_id, db_bee_type),
                 )
                 existing_nest_ids.append(new_nest_id)
 

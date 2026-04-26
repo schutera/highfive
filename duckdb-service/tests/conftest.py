@@ -21,7 +21,6 @@ DuckDB file we:
 from __future__ import annotations
 
 import importlib
-import os
 import sys
 from pathlib import Path
 
@@ -48,6 +47,7 @@ def _purge_service_modules() -> None:
         "db.connection",
         "db",
         "models.module",
+        "models.module_id",
         "models.progress",
         "models",
     ]:

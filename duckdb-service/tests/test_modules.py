@@ -1,6 +1,10 @@
+TEST_MAC = "aabbccddeeff"  # canonical ModuleId form
+TEST_MAC_LEGACY = "AA:BB:CC:DD:EE:FF"  # canonicalises to TEST_MAC
+
+
 def _valid_payload(**overrides):
     payload = {
-        "esp_id": "AA:BB:CC:DD:EE:FF",
+        "esp_id": TEST_MAC,
         "module_name": "TestHive",
         "latitude": 47.8086,
         "longitude": 9.6433,
@@ -20,22 +24,40 @@ def test_new_module_creates_row_and_calls_discord(client, fresh_db):
     resp = client.post("/new_module", json=_valid_payload())
     assert resp.status_code == 200, resp.get_json()
     body = resp.get_json()
-    assert body["id"] == "AA:BB:CC:DD:EE:FF"
+    assert body["id"] == TEST_MAC
     assert body["message"] == "Module added successfully"
 
     # Discord webhook spy should have been called once.
     assert len(fresh_db.discord_calls) == 1
     msg = fresh_db.discord_calls[0]
     assert "TestHive" in msg
-    assert "AA:BB:CC:DD:EE:FF" in msg
+    assert TEST_MAC in msg
     assert "80" in msg
 
     # And the row should be visible via /modules.
     listed = client.get("/modules").get_json()["modules"]
     assert len(listed) == 1
-    assert listed[0]["id"] == "AA:BB:CC:DD:EE:FF"
+    assert listed[0]["id"] == TEST_MAC
     assert listed[0]["name"] == "TestHive"
     assert listed[0]["battery_level"] == 80
+
+
+def test_new_module_canonicalises_legacy_colon_form(client, fresh_db):
+    """Inbound colon-separated/uppercase MACs are normalised to canonical."""
+    resp = client.post("/new_module", json=_valid_payload(esp_id=TEST_MAC_LEGACY))
+    assert resp.status_code == 200, resp.get_json()
+    body = resp.get_json()
+    # Stored & echoed as the canonical 12-hex form, regardless of input shape.
+    assert body["id"] == TEST_MAC
+
+    listed = client.get("/modules").get_json()["modules"]
+    assert listed[0]["id"] == TEST_MAC
+
+
+def test_new_module_invalid_mac_returns_400(client):
+    resp = client.post("/new_module", json=_valid_payload(esp_id="hive-001"))
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
 
 
 def test_new_module_battery_above_100_returns_400(client):

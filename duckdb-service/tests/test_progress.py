@@ -1,7 +1,13 @@
 from datetime import date
 
 
-def _seed_module(fresh_db, module_id="hive-001"):
+# Canonical 12-hex-char ModuleId test fixtures.
+TEST_MAC_1 = "aabbccddeeff"
+TEST_MAC_2 = "001122334455"
+TEST_MAC_3 = "112233445566"
+
+
+def _seed_module(fresh_db, module_id=TEST_MAC_1):
     con = fresh_db.connection.get_conn()
     try:
         con.execute(
@@ -36,11 +42,11 @@ def test_get_progress_field_names_use_progress_id_and_hatched(client, fresh_db):
     try:
         con.execute(
             "INSERT INTO module_configs (id, name, lat, lng, status, first_online) "
-            "VALUES ('hive-001', 'Seed', 47.8, 9.6, 'online', '2024-01-01')"
+            f"VALUES ('{TEST_MAC_1}', 'Seed', 47.8, 9.6, 'online', '2024-01-01')"
         )
         con.execute(
             "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES "
-            "('nest-001', 'hive-001', 'blackmasked')"
+            f"('nest-001', '{TEST_MAC_1}', 'blackmasked')"
         )
         con.execute(
             "INSERT INTO daily_progress (progress_id, nest_id, date, empty, sealed, hatched) "
@@ -63,13 +69,13 @@ def test_get_progress_field_names_use_progress_id_and_hatched(client, fresh_db):
 
 
 def test_add_progress_for_module_creates_nests_and_rows(client, fresh_db):
-    _seed_module(fresh_db, "hive-001")
+    _seed_module(fresh_db, TEST_MAC_1)
 
     # ClassificationOutput is Dict[str, Dict[int, int]] (strict int values).
     # image-service/stub_classify() emits 0 or 1 per cell, which become 0 or
     # 100 in the DB (route does int(sealed * 100)).
     payload = {
-        "modul_id": "hive-001",
+        "module_id": TEST_MAC_1,
         "classification": {
             "black_masked_bee": {"0": 1, "1": 0},
             "resin_bee": {"0": 0, "1": 1, "2": 1, "3": 0},
@@ -130,11 +136,23 @@ def test_add_progress_for_module_creates_nests_and_rows(client, fresh_db):
     assert resin_sealed == [0, 100, 100, 0]
 
 
+def test_add_progress_accepts_legacy_modul_id_typo(client, fresh_db):
+    """The legacy ``modul_id`` field name must still work (deprecation alias)."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    payload = {
+        "modul_id": TEST_MAC_1,  # legacy typo'd name
+        "classification": {"leafcutter_bee": {"0": 0.5}},
+    }
+    resp = client.post("/add_progress_for_module", json=payload)
+    assert resp.status_code == 200
+    assert resp.get_json() == {"success": True}
+
+
 def test_add_progress_skips_unknown_bee_type(client, fresh_db):
-    _seed_module(fresh_db, "hive-002")
+    _seed_module(fresh_db, TEST_MAC_2)
 
     payload = {
-        "modul_id": "hive-002",
+        "module_id": TEST_MAC_2,
         "classification": {
             "not_a_real_bee": {"0": 0.5},
             "leafcutter_bee": {"0": 0.10},
@@ -151,7 +169,7 @@ def test_add_progress_skips_unknown_bee_type(client, fresh_db):
 
 
 def test_add_progress_reuses_existing_nests(client, fresh_db):
-    _seed_module(fresh_db, "hive-003")
+    _seed_module(fresh_db, TEST_MAC_3)
 
     # Pre-seed 4 leafcutter nests (already at target).
     con = fresh_db.connection.get_conn()
@@ -159,7 +177,7 @@ def test_add_progress_reuses_existing_nests(client, fresh_db):
         for i in range(1, 5):
             con.execute(
                 "INSERT INTO nest_data (nest_id, module_id, beeType) "
-                "VALUES (?, 'hive-003', 'leafcutter')",
+                f"VALUES (?, '{TEST_MAC_3}', 'leafcutter')",
                 (f"nest-{i:03d}",),
             )
         con.commit()
@@ -167,7 +185,7 @@ def test_add_progress_reuses_existing_nests(client, fresh_db):
         con.close()
 
     payload = {
-        "modul_id": "hive-003",
+        "module_id": TEST_MAC_3,
         "classification": {"leafcutter_bee": {"0": 0.25}},
     }
     resp = client.post("/add_progress_for_module", json=payload)

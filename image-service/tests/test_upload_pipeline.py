@@ -4,6 +4,10 @@ These tests construct the pipeline directly with fake collaborators —
 no Flask, no real network, no real `DuckDBService` — to verify the
 pipeline's internal orchestration. The HTTP-boundary tests in
 `test_upload.py` cover end-to-end behavior.
+
+Note: the pipeline itself does not validate ``mac``; canonicalization
+happens at the HTTP boundary in ``app.py``. These tests therefore feed
+already-canonical ``ModuleId`` strings to mirror the production flow.
 """
 
 from __future__ import annotations
@@ -14,6 +18,13 @@ from pathlib import Path
 from requests import RequestException
 
 from services.upload_pipeline import UploadPipeline, UploadRequest
+
+# Canonical 12-hex-char ModuleId fixtures.
+TEST_MAC_1 = "aabbccddeeff"
+TEST_MAC_2 = "ccddeeff0011"
+TEST_MAC_3 = "112233445566"
+TEST_MAC_4 = "778899aabbcc"
+
 
 # --------------------------- fakes ---------------------------
 
@@ -100,7 +111,7 @@ def test_pipeline_first_upload_runs_all_steps_and_pings_discord(tmp_path: Path):
 
     img = _FakeImage("first.jpg")
     req = UploadRequest(
-        mac="AA:BB",
+        mac=TEST_MAC_1,
         battery=88,
         image=img,
         logs_raw=json.dumps({"rssi": -50}),
@@ -118,24 +129,25 @@ def test_pipeline_first_upload_runs_all_steps_and_pings_discord(tmp_path: Path):
     sidecar_path = tmp_path / "first.jpg.log.json"
     assert sidecar_path.exists()
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    assert sidecar["mac"] == "AA:BB"
+    assert sidecar["mac"] == TEST_MAC_1
     assert sidecar["image"] == "first.jpg"
     assert sidecar["payload"] == {"rssi": -50}
 
     # DuckDB collaborators called once each
-    assert duckdb.progress_count_calls == ["AA:BB"]
+    assert duckdb.progress_count_calls == [TEST_MAC_1]
     assert len(duckdb.add_progress_calls) == 1
-    assert duckdb.add_progress_calls[0]["modul_id"] == "AA:BB"
+    # Wire field is now canonical ``module_id`` (was the legacy ``modul_id`` typo).
+    assert duckdb.add_progress_calls[0]["module_id"] == TEST_MAC_1
     assert duckdb.add_progress_calls[0]["classification"] == {
         "orchard_bee": {"1": 1, "2": 0}
     }
-    assert duckdb.heartbeat_calls == [("AA:BB", 88)]
+    assert duckdb.heartbeat_calls == [(TEST_MAC_1, 88)]
 
     # Discord fired with the exact message format
     assert len(discord) == 1
     msg = discord[0]
     assert msg.startswith("📸 **First image received!**\n")
-    assert "Module **AA:BB** just sent its first photo." in msg
+    assert f"Module **{TEST_MAC_1}** just sent its first photo." in msg
     assert "**Battery:** 88%" in msg
     assert "**File:** first.jpg" in msg
 
@@ -147,7 +159,7 @@ def test_pipeline_non_first_upload_skips_discord(tmp_path: Path):
     pipeline = _make_pipeline(tmp_path, duckdb, discord_sink=discord)
 
     req = UploadRequest(
-        mac="CC:DD", battery=10, image=_FakeImage("later.jpg"), logs_raw=None
+        mac=TEST_MAC_2, battery=10, image=_FakeImage("later.jpg"), logs_raw=None
     )
     pipeline.run(req)
 
@@ -157,7 +169,7 @@ def test_pipeline_non_first_upload_skips_discord(tmp_path: Path):
     # But image, progress, heartbeat all happened
     assert (tmp_path / "later.jpg").exists()
     assert len(duckdb.add_progress_calls) == 1
-    assert duckdb.heartbeat_calls == [("CC:DD", 10)]
+    assert duckdb.heartbeat_calls == [(TEST_MAC_2, 10)]
 
 
 def test_pipeline_tolerates_duckdb_failures_and_skips_discord(tmp_path: Path):
@@ -172,7 +184,7 @@ def test_pipeline_tolerates_duckdb_failures_and_skips_discord(tmp_path: Path):
     pipeline = _make_pipeline(tmp_path, duckdb, discord_sink=discord)
 
     req = UploadRequest(
-        mac="EE:FF", battery=50, image=_FakeImage("flaky.jpg"), logs_raw=None
+        mac=TEST_MAC_3, battery=50, image=_FakeImage("flaky.jpg"), logs_raw=None
     )
     # Must not raise
     result = pipeline.run(req)
@@ -190,7 +202,7 @@ def test_pipeline_malformed_logs_writes_parse_error_sidecar(tmp_path: Path):
     pipeline = _make_pipeline(tmp_path, duckdb)
 
     req = UploadRequest(
-        mac="GG:HH",
+        mac=TEST_MAC_4,
         battery=70,
         image=_FakeImage("bad.jpg"),
         logs_raw="not json {{",
@@ -200,5 +212,5 @@ def test_pipeline_malformed_logs_writes_parse_error_sidecar(tmp_path: Path):
     sidecar = json.loads((tmp_path / "bad.jpg.log.json").read_text(encoding="utf-8"))
     assert sidecar["payload"]["parse_error"] is True
     assert sidecar["payload"]["raw"] == "not json {{"
-    assert sidecar["mac"] == "GG:HH"
+    assert sidecar["mac"] == TEST_MAC_4
     assert sidecar["image"] == "bad.jpg"

@@ -7,6 +7,12 @@ import os
 import time
 from pathlib import Path
 
+# Canonical 12-hex-char ModuleId form. Sidecar files are matched by raw
+# string equality, so the writer and the request URL must use the same
+# shape — we use canonical here.
+TEST_MAC_A = "aaaaaaaaaaaa"
+TEST_MAC_B = "bbbbbbbbbbbb"
+
 
 def _write_sidecar(
     folder: Path, name: str, mac: str, received_at: str, mtime: float | None = None
@@ -43,16 +49,16 @@ def _write_legacy_sidecar(
 
 
 def test_logs_returns_only_matching_mac(client, tmp_upload_dir: Path):
-    _write_sidecar(tmp_upload_dir, "a.jpg.log.json", "AA:AA", "2026-04-25T10:00:00")
-    _write_sidecar(tmp_upload_dir, "b.jpg.log.json", "BB:BB", "2026-04-25T10:01:00")
-    _write_sidecar(tmp_upload_dir, "c.jpg.log.json", "AA:AA", "2026-04-25T10:02:00")
+    _write_sidecar(tmp_upload_dir, "a.jpg.log.json", TEST_MAC_A, "2026-04-25T10:00:00")
+    _write_sidecar(tmp_upload_dir, "b.jpg.log.json", TEST_MAC_B, "2026-04-25T10:01:00")
+    _write_sidecar(tmp_upload_dir, "c.jpg.log.json", TEST_MAC_A, "2026-04-25T10:02:00")
 
-    resp = client.get("/modules/AA:AA/logs")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs")
     assert resp.status_code == 200
     body = resp.get_json()
     assert isinstance(body, list)
     assert len(body) == 2
-    assert all(entry["mac"] == "AA:AA" for entry in body)
+    assert all(entry["mac"] == TEST_MAC_A for entry in body)
     # New envelope shape: payload nested.
     assert all("payload" in entry for entry in body)
 
@@ -62,22 +68,22 @@ def test_logs_newest_first(client, tmp_upload_dir: Path):
     _write_sidecar(
         tmp_upload_dir,
         "old.jpg.log.json",
-        "AA:AA",
+        TEST_MAC_A,
         "2026-04-25T09:00:00",
         mtime=now - 1000,
     )
     _write_sidecar(
         tmp_upload_dir,
         "mid.jpg.log.json",
-        "AA:AA",
+        TEST_MAC_A,
         "2026-04-25T09:30:00",
         mtime=now - 500,
     )
     _write_sidecar(
-        tmp_upload_dir, "new.jpg.log.json", "AA:AA", "2026-04-25T10:00:00", mtime=now
+        tmp_upload_dir, "new.jpg.log.json", TEST_MAC_A, "2026-04-25T10:00:00", mtime=now
     )
 
-    resp = client.get("/modules/AA:AA/logs")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs")
     assert resp.status_code == 200
     body = resp.get_json()
     assert [e["image"] for e in body] == ["new.jpg", "mid.jpg", "old.jpg"]
@@ -89,11 +95,11 @@ def test_logs_default_limit_is_10(client, tmp_upload_dir: Path):
         _write_sidecar(
             tmp_upload_dir,
             f"img{i:02d}.jpg.log.json",
-            "AA:AA",
+            TEST_MAC_A,
             f"2026-04-25T10:{i:02d}:00",
             mtime=now + i,  # later i = newer
         )
-    resp = client.get("/modules/AA:AA/logs")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs")
     assert resp.status_code == 200
     body = resp.get_json()
     assert len(body) == 10
@@ -108,11 +114,11 @@ def test_logs_respects_limit_query_param(client, tmp_upload_dir: Path):
         _write_sidecar(
             tmp_upload_dir,
             f"x{i}.jpg.log.json",
-            "AA:AA",
+            TEST_MAC_A,
             f"2026-04-25T11:{i:02d}:00",
             mtime=now + i,
         )
-    resp = client.get("/modules/AA:AA/logs?limit=3")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs?limit=3")
     assert resp.status_code == 200
     body = resp.get_json()
     assert len(body) == 3
@@ -127,11 +133,11 @@ def test_logs_limit_is_capped_to_100(client, tmp_upload_dir: Path):
         _write_sidecar(
             tmp_upload_dir,
             f"y{i}.jpg.log.json",
-            "AA:AA",
+            TEST_MAC_A,
             f"2026-04-25T12:{i:02d}:00",
             mtime=now + i,
         )
-    resp = client.get("/modules/AA:AA/logs?limit=99999")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs?limit=99999")
     assert resp.status_code == 200
     body = resp.get_json()
     assert len(body) <= 100
@@ -144,11 +150,11 @@ def test_logs_limit_floor_is_1(client, tmp_upload_dir: Path):
         _write_sidecar(
             tmp_upload_dir,
             f"z{i}.jpg.log.json",
-            "AA:AA",
+            TEST_MAC_A,
             f"2026-04-25T13:{i:02d}:00",
             mtime=now + i,
         )
-    resp = client.get("/modules/AA:AA/logs?limit=0")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs?limit=0")
     assert resp.status_code == 200
     body = resp.get_json()
     # max(1, min(0, 100)) == 1
@@ -161,30 +167,32 @@ def test_logs_invalid_limit_falls_back_to_default(client, tmp_upload_dir: Path):
         _write_sidecar(
             tmp_upload_dir,
             f"w{i:02d}.jpg.log.json",
-            "AA:AA",
+            TEST_MAC_A,
             f"2026-04-25T14:{i:02d}:00",
             mtime=now + i,
         )
-    resp = client.get("/modules/AA:AA/logs?limit=not-a-number")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs?limit=not-a-number")
     assert resp.status_code == 200
     body = resp.get_json()
     assert len(body) == 10  # default
 
 
 def test_logs_empty_when_no_sidecars(client, tmp_upload_dir: Path):
-    resp = client.get("/modules/AA:AA/logs")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs")
     assert resp.status_code == 200
     assert resp.get_json() == []
 
 
 def test_logs_skips_corrupt_sidecar(client, tmp_upload_dir: Path):
-    _write_sidecar(tmp_upload_dir, "good.jpg.log.json", "AA:AA", "2026-04-25T15:00:00")
+    _write_sidecar(
+        tmp_upload_dir, "good.jpg.log.json", TEST_MAC_A, "2026-04-25T15:00:00"
+    )
     # A malformed sidecar file should be skipped, not 500.
     (tmp_upload_dir / "broken.jpg.log.json").write_text(
         "{not valid json", encoding="utf-8"
     )
 
-    resp = client.get("/modules/AA:AA/logs")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs")
     assert resp.status_code == 200
     body = resp.get_json()
     assert len(body) == 1
@@ -198,16 +206,16 @@ def test_logs_reads_legacy_flat_sidecar_format(client, tmp_upload_dir: Path):
     """Files written by the old producer (flat _mac/_received_at/_image keys)
     must still be readable after the envelope refactor."""
     _write_legacy_sidecar(
-        tmp_upload_dir, "legacy.jpg.log.json", "AA:AA", "2026-04-25T16:00:00"
+        tmp_upload_dir, "legacy.jpg.log.json", TEST_MAC_A, "2026-04-25T16:00:00"
     )
 
-    resp = client.get("/modules/AA:AA/logs")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs")
     assert resp.status_code == 200
     body = resp.get_json()
     assert len(body) == 1
     entry = body[0]
     # Translated to the new envelope shape on read.
-    assert entry["mac"] == "AA:AA"
+    assert entry["mac"] == TEST_MAC_A
     assert entry["image"] == "legacy.jpg"
     assert entry["received_at"] == "2026-04-25T16:00:00"
     # ESP telemetry that was at the top level in the legacy file is now nested.
@@ -220,26 +228,26 @@ def test_logs_mixed_legacy_and_new_sidecars(client, tmp_upload_dir: Path):
     _write_legacy_sidecar(
         tmp_upload_dir,
         "old-fmt.jpg.log.json",
-        "AA:AA",
+        TEST_MAC_A,
         "2026-04-25T16:00:00",
         mtime=now - 100,
     )
     _write_sidecar(
         tmp_upload_dir,
         "new-fmt.jpg.log.json",
-        "AA:AA",
+        TEST_MAC_A,
         "2026-04-25T16:01:00",
         mtime=now,
     )
     _write_legacy_sidecar(
         tmp_upload_dir,
         "wrong-mac.jpg.log.json",
-        "BB:BB",
+        TEST_MAC_B,
         "2026-04-25T16:02:00",
         mtime=now + 50,
     )
 
-    resp = client.get("/modules/AA:AA/logs")
+    resp = client.get(f"/modules/{TEST_MAC_A}/logs")
     assert resp.status_code == 200
     body = resp.get_json()
     assert len(body) == 2

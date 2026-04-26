@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { api, Module } from '../../services/api';
+import { api } from '../../services/api';
+import type { Module } from '@highfive/contracts';
 import { sendConfigToEsp } from './espConfig';
 // Vite-managed firmware asset (content-hashed) used both as the local
 // fallback URL when the GitHub releases API is unreachable and as the

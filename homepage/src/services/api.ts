@@ -1,7 +1,5 @@
-import type { Module, ModuleDetail, NestData, DailyProgress } from '@highfive/contracts';
+import type { Module, ModuleDetail } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
-
-export type { Module, ModuleDetail, NestData, DailyProgress };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 

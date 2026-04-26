@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, ModuleDetail, TelemetryEntry } from '../services/api';
+import { api, type TelemetryEntry } from '../services/api';
+import type { ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 

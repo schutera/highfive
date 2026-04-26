@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Module } from '../../services/api';
+import { api } from '../../services/api';
+import type { Module } from '@highfive/contracts';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';

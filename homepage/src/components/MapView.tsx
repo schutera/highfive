@@ -3,7 +3,7 @@ import L from 'leaflet';
 // Co-located stylesheet so it ships in the dashboard's lazy chunk only.
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useState } from 'react';
-import { Module } from '../services/api';
+import type { Module } from '@highfive/contracts';
 
 // Create a badge icon for clusters
 function createBadgeIcon(count: number, hasOnline: boolean) {

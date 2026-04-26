@@ -3,7 +3,8 @@ import MapView from '../components/MapView';
 import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
 import { useTranslation } from '../i18n/LanguageContext';
-import { api, Module } from '../services/api';
+import { api } from '../services/api';
+import type { Module } from '@highfive/contracts';
 
 export default function DashboardPage() {
   const { t } = useTranslation();

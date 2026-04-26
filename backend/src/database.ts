@@ -105,32 +105,37 @@ export class ModuleReadModel {
     });
 
     // ---- 2) Nests bauen ----
-    const nestsByModule = new Map<string, NestData[]>();
+    // Brand `module_id` at the boundary: parseModuleId throws on a malformed
+    // upstream value, which is the right signal — duckdb-service drift should
+    // surface, not be silently swallowed. Mirrors homepage `services/api.ts`.
+    const nestsByModule = new Map<ModuleId, NestData[]>();
     nestsData.nests.forEach((n: any) => {
+      const moduleId = parseModuleId(n.module_id);
       const nest: NestData = {
         nest_id: n.nest_id,
-        module_id: n.module_id,
+        module_id: moduleId,
         beeType: n.beeType,
         dailyProgress: progressByNest.get(n.nest_id) ?? [],
       };
-      const arr = nestsByModule.get(n.module_id) ?? [];
+      const arr = nestsByModule.get(moduleId) ?? [];
       arr.push(nest);
-      nestsByModule.set(n.module_id, arr);
+      nestsByModule.set(moduleId, arr);
     });
 
     // ---- 3) Module bauen ----
     const now = new Date();
     return modulesData.modules.map((m) => {
+      const moduleId = parseModuleId(m.id);
       const firstOnlineDate = new Date(m.first_online);
       const isOnline = now.getTime() - firstOnlineDate.getTime() <= 24 * 60 * 60 * 1000;
-      const nests = nestsByModule.get(m.id) ?? [];
+      const nests = nestsByModule.get(moduleId) ?? [];
       const totalHatches = nests.reduce((sum, nest) => {
         const latest = nest.dailyProgress[nest.dailyProgress.length - 1];
         return sum + (latest?.hatched || 0);
       }, 0);
 
       const detail: ModuleDetail = {
-        id: parseModuleId(m.id),
+        id: moduleId,
         name: m.name,
         location: { lat: Number(m.lat), lng: Number(m.lng) },
         status: isOnline ? 'online' : 'offline',

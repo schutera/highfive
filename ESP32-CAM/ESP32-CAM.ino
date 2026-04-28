@@ -54,9 +54,16 @@ void setup() {
   logf("[BOOT] fw=%s reset_reason=%d boot_count=%u free_heap=%u",
        FIRMWARE_VERSION, (int)esp_reset_reason(), boot_count, ESP.getFreeHeap());
 
-  // Task watchdog — if loop() hangs for >TASK_WDT_TIMEOUT_S, reboot
-  esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
-  esp_task_wdt_add(NULL);
+  // Task watchdog — if loop() hangs for >TASK_WDT_TIMEOUT_S, reboot.
+  // TWDT is already initialized by the framework; reconfigure its timeout.
+  esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = TASK_WDT_TIMEOUT_S * 1000,
+    .idle_core_mask = 0,
+    .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&wdt_config);
+  // Remove loopTask from WDT during setup — AP mode blocks for minutes.
+  esp_task_wdt_delete(NULL);
 
   Serial.println("------ ESP STARTED ------");
 
@@ -117,6 +124,10 @@ void setup() {
   initNewModuleOnServer(&esp_config);
 
   Serial.println("[ESP] SETUP COMPLETE");
+
+  // Setup done — subscribe loopTask to WDT so loop() hangs are caught.
+  esp_task_wdt_add(NULL);
+
   Serial.println("");
   Serial.println("---------------------");
   Serial.println("");

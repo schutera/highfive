@@ -68,19 +68,27 @@ export default defineConfig({
         // they don't churn on every app deploy and the homepage can boot
         // without paying for leaflet on first paint.
         manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            if (id.includes('leaflet') || id.includes('react-leaflet')) {
-              return 'leaflet';
-            }
-            if (id.includes('esptool-js')) {
-              return 'esptool';
-            }
-            if (id.includes('react-router')) {
-              return 'router';
-            }
-            if (id.includes('react-dom') || /[\\/]react[\\/]/.test(id)) {
-              return 'react';
-            }
+          // Vite's __vite__preload helper is a virtual module
+          // (\0vite/preload-helper.js). When manualChunks doesn't claim it,
+          // Rollup colocates it with whichever async chunk happens to use
+          // it — in our case esptool. The entry then imports the helper
+          // FROM esptool, dragging a modulepreload of esptool onto every
+          // page. Pin the helper to the react chunk (always loaded) so
+          // the entry never needs to reach into a feature chunk for it.
+          if (id.includes('vite/preload-helper')) return 'react';
+
+          if (!/[\\/]node_modules[\\/]/.test(id)) return;
+          if (/[\\/]node_modules[\\/](leaflet|react-leaflet)[\\/]/.test(id)) {
+            return 'leaflet';
+          }
+          if (/[\\/]node_modules[\\/]esptool-js[\\/]/.test(id)) {
+            return 'esptool';
+          }
+          if (/[\\/]node_modules[\\/]react-router(-dom)?[\\/]/.test(id)) {
+            return 'router';
+          }
+          if (/[\\/]node_modules[\\/](react|react-dom)[\\/]/.test(id)) {
+            return 'react';
           }
         },
       },

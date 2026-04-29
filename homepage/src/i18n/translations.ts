@@ -28,20 +28,20 @@ const translations = {
       step1Title: 'Get Your Hive Module',
       step1Text:
         'Order pre-cut wooden parts, download CAD files to laser it yourself, and see what electronics you\u2019ll need.',
-      step1Cta: 'The Hive Module \u2192',
+      step1Cta: 'The Hive Module',
       step2Title: 'Flash & Setup',
       step2Text:
         'Connect your ESP32-CAM to your computer and use our installer to flash the firmware.',
       step2GuidedTitle: '\uD83D\uDCE1 Guided Setup',
       step2GuidedText:
         'Our setup wizard walks you through flashing, configuring, and connecting your module \u2014 step by step',
-      step2Cta: 'Start Setup \u2192',
+      step2Cta: 'Start Setup',
       step3Title: 'Discover & Contribute',
       step3Text:
         'Set up your hive module and monitor wild bee populations and contribute valuable data to help understand pollinator health in your area.',
       step3Community:
         '\u2728 Join a community of citizen scientists making a real difference. Perfect for nature enthusiasts, researchers, policymakers, educators, agriculture professionals, and anyone interested tapping into biomarker data.',
-      step3Cta: 'Explore Dashboard \u2192',
+      step3Cta: 'Explore Dashboard',
       footer: 'Built with \uD83D\uDC9B for wild bees everywhere',
     },
 
@@ -387,20 +387,20 @@ const translations = {
       step1Title: 'Hive-Modul besorgen',
       step1Text:
         'Bestelle vorgefertigte Holzteile, lade CAD-Dateien zum Selbstlasern herunter und sieh, welche Elektronik du brauchst.',
-      step1Cta: 'Das Hive-Modul \u2192',
+      step1Cta: 'Das Hive-Modul',
       step2Title: 'Flashen & Einrichten',
       step2Text:
         'Verbinde deine ESP32-CAM mit dem Computer und nutze unseren Installer, um die Firmware zu flashen.',
       step2GuidedTitle: '\uD83D\uDCE1 Gef\u00FChrtes Setup',
       step2GuidedText:
         'Unser Setup-Assistent f\u00FChrt dich Schritt f\u00FCr Schritt durch Flashen, Konfigurieren und Verbinden deines Moduls',
-      step2Cta: 'Setup starten \u2192',
+      step2Cta: 'Setup starten',
       step3Title: 'Entdecken & Beitragen',
       step3Text:
         'Richte dein Hive-Modul ein, beobachte Wildbienen-Populationen und trage wertvolle Daten bei, um die Best\u00E4uber-Gesundheit in deiner Region zu verstehen.',
       step3Community:
         '\u2728 Werde Teil einer Gemeinschaft von B\u00FCrgerwissenschaftlern, die einen echten Unterschied machen. Perfekt f\u00FCr Naturbegeisterte, Forschende, Entscheidungstr\u00E4ger, P\u00E4dagogen, Landwirtschaftsprofis und alle, die an Biomarker-Daten interessiert sind.',
-      step3Cta: 'Dashboard erkunden \u2192',
+      step3Cta: 'Dashboard erkunden',
       footer: 'Gemacht mit \uD83D\uDC9B f\u00FCr Wildbienen \u00FCberall',
     },
 

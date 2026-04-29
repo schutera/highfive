@@ -1,9 +1,7 @@
-export type Module = {
-  id: string;
-  name: string;
-  location: [number, number]; // [lat, lng]
-  status: 'online' | 'offline';
-};
+// The canonical Module / ModuleDetail / NestData / DailyProgress types
+// live in @highfive/contracts. A previous local Module declaration here
+// had the wrong shape (location as a tuple, no ModuleId brand) — deleted
+// in 2026-04 to remove the drift hazard.
 
 // Nest size configuration with consistent colors across the application
 export const BEE_TYPES = [
@@ -13,4 +11,4 @@ export const BEE_TYPES = [
   { key: 'orchard', size: '9 mm', color: '#22c55e', lightColor: '#dcfce7' },
 ] as const;
 
-export type BeeTypeKey = typeof BEE_TYPES[number]['key'];
+export type BeeTypeKey = (typeof BEE_TYPES)[number]['key'];

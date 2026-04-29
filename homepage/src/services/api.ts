@@ -1,4 +1,4 @@
-import type { Module, ModuleDetail } from '@highfive/contracts';
+import type { Module, ModuleDetail, ModuleId } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
@@ -51,7 +51,7 @@ class ApiService {
     })) as Module[];
   }
 
-  async getModuleById(id: string): Promise<ModuleDetail> {
+  async getModuleById(id: ModuleId): Promise<ModuleDetail> {
     const response = await fetch(`${this.baseUrl}/modules/${id}`, {
       headers: this.getHeaders(),
     });
@@ -66,7 +66,7 @@ class ApiService {
     } as ModuleDetail;
   }
 
-  async getModuleLogs(id: string, limit: number = 10): Promise<TelemetryEntry[]> {
+  async getModuleLogs(id: ModuleId, limit: number = 10): Promise<TelemetryEntry[]> {
     const adminKey = typeof window !== 'undefined' ? sessionStorage.getItem('hf_admin_key') : null;
     const headers: Record<string, string> = { ...(this.getHeaders() as Record<string, string>) };
     if (adminKey) headers['X-Admin-Key'] = adminKey;

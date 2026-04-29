@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type TelemetryEntry } from '../services/api';
-import type { ModuleDetail } from '@highfive/contracts';
+import type { Module, ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
@@ -26,7 +26,9 @@ function isAdminMode(): boolean {
 }
 
 interface ModulePanelProps {
-  module: { id: string; name: string; status: 'online' | 'offline' };
+  // Pick the fields we actually read from the contract, so the brand
+  // on `id: ModuleId` flows through to api.getModuleById / getModuleLogs.
+  module: Pick<Module, 'id' | 'name' | 'status'>;
   onClose: () => void;
   onError: (error: string) => void;
 }

@@ -154,10 +154,12 @@ export default function DashboardPage() {
             <ModulePanel
               module={selectedModule}
               onClose={() => setSelectedModule(null)}
-              onError={(errorMsg) => {
-                setError(errorMsg);
-                setSelectedModule(null);
-              }}
+              // ModulePanel renders its own inline error state; we
+              // intentionally do NOT propagate to setError here. A failed
+              // /modules/:id fetch should not blank the map and the
+              // module list — that was a user-experience bug where one
+              // bad detail wiped the whole dashboard.
+              onError={() => undefined}
             />
           </aside>
         )}
@@ -206,10 +208,8 @@ export default function DashboardPage() {
               <ModulePanel
                 module={selectedModule}
                 onClose={() => setSelectedModule(null)}
-                onError={(errorMsg) => {
-                  setError(errorMsg);
-                  setSelectedModule(null);
-                }}
+                // Same scope-the-error rule as the desktop site above.
+                onError={() => undefined}
               />
             </div>
           </div>

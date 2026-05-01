@@ -353,7 +353,10 @@ export default function MapView({
       zoom={13}
       className="h-full w-full"
       style={{ height: '100%', width: '100%' }}
-      zoomControl={false}
+      // Built-in +/- buttons re-enabled — keyboard-accessible zoom (WCAG
+      // SC 2.1.1). Without these, mouse-wheel/pinch are the only zoom
+      // paths and the map fails keyboard-only navigation.
+      zoomControl={true}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

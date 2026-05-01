@@ -61,7 +61,12 @@ export default function SiteHeader({
             >
               |
             </span>
-            <h1 className={`hidden md:block text-hf-md font-semibold ${titleColor} truncate`}>
+            {/* Visible on desktop, screen-reader-only on mobile.
+                Drops the WCAG "page lacks h1" gap on /dashboard mobile
+                without crowding the small-viewport header bar. */}
+            <h1
+              className={`text-hf-md font-semibold ${titleColor} truncate sr-only md:not-sr-only`}
+            >
               {title}
             </h1>
           </>

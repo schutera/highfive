@@ -85,17 +85,14 @@ export default function DashboardPage() {
               background: 'linear-gradient(135deg, var(--hf-honey-50), var(--hf-honey-100))',
             }}
           >
-            <div className="max-w-md text-center px-4">
-              <div className="mb-6 md:mb-8" aria-hidden="true">
-                <div className="text-5xl md:text-7xl animate-bounce">🐝</div>
-              </div>
+            <div className="max-w-md px-4">
               <h2 className="text-hf-fg mb-2 md:mb-3" style={{ fontSize: 'var(--fs-lg)' }}>
                 {t('dashboard.errorTitle')}
               </h2>
               <p className="text-hf-fg-soft mb-6 md:mb-8 text-hf-sm">
                 {t('dashboard.errorSubtitle')}
               </p>
-              <button onClick={loadModules} className="hf-btn hf-btn-primary px-6 py-3 mx-auto">
+              <button onClick={loadModules} className="hf-btn hf-btn-primary px-6 py-3">
                 <svg
                   className="w-4 h-4 md:w-5 md:h-5"
                   fill="none"
@@ -175,9 +172,9 @@ export default function DashboardPage() {
           aria-label={t('dashboard.moduleDetails')}
           onClick={() => setSelectedModule(null)}
         >
-          <div className="absolute inset-0 bg-black/40 animate-fade-in" aria-hidden="true" />
+          <div className="absolute inset-0 bg-black/40" aria-hidden="true" />
           <div
-            className="absolute inset-0 bg-hf-surface flex flex-col animate-slide-up"
+            className="absolute inset-0 bg-hf-surface flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-3 px-4 py-3 border-b border-hf-border bg-hf-surface shrink-0 pt-safe-top">
@@ -219,9 +216,9 @@ export default function DashboardPage() {
 
       {/* Desktop: floating module list */}
       {!loading && !error && visibleModules.length > 0 && (
-        <div className="hidden md:flex absolute bottom-6 left-6 w-80 hf-card hf-glass z-[999] max-h-[420px] flex-col overflow-hidden">
+        <div className="hidden md:flex absolute bottom-6 left-6 w-80 hf-card z-[999] max-h-[420px] flex-col overflow-hidden">
           <div className="p-4 border-b border-hf-border shrink-0">
-            <h2 className="font-bold text-hf-honey-700" style={{ fontSize: 'var(--fs-md)' }}>
+            <h2 className="font-semibold text-hf-fg" style={{ fontSize: 'var(--fs-md)' }}>
               {t('common.hiveModules')}
             </h2>
             <p className="text-hf-xs text-hf-fg-mute mt-0.5">
@@ -267,7 +264,7 @@ export default function DashboardPage() {
             <div className="p-3 pb-safe-bottom">
               <button
                 onClick={() => setMobileListExpanded(true)}
-                className="w-full hf-card hf-glass p-3 flex items-center justify-between active:scale-95 transition-all"
+                className="w-full hf-card p-3 flex items-center justify-between"
                 aria-expanded="false"
               >
                 <div className="flex items-center gap-3">
@@ -313,9 +310,9 @@ export default function DashboardPage() {
               aria-label={t('common.hiveModules')}
               onClick={() => setMobileListExpanded(false)}
             >
-              <div className="absolute inset-0 bg-black/30 animate-fade-in" aria-hidden="true" />
+              <div className="absolute inset-0 bg-black/30" aria-hidden="true" />
               <div
-                className="absolute inset-x-0 bottom-0 bg-hf-surface rounded-t-hf-xl shadow-hf-3 max-h-[70vh] flex flex-col animate-slide-up border-t border-hf-border"
+                className="absolute inset-x-0 bottom-0 bg-hf-surface rounded-t-hf-xl shadow-hf-3 max-h-[70vh] flex flex-col border-t border-hf-border"
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Drag handle */}

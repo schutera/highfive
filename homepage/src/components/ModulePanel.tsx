@@ -187,16 +187,11 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   return (
     <div className="h-full flex flex-col bg-hf-bg">
       {/* Header */}
-      <div
-        className="p-4 md:p-5 text-white relative"
-        style={{
-          background: 'linear-gradient(135deg, var(--hf-honey-500), var(--hf-honey-700))',
-        }}
-      >
+      <div className="p-4 md:p-5 relative bg-hf-surface border-b border-hf-border">
         <button
           onClick={onClose}
           aria-label={t('common.back')}
-          className="absolute top-3 right-3 text-white/85 hover:text-white hover:bg-white/15 rounded-full p-1.5 transition-colors hidden md:flex items-center justify-center"
+          className="absolute top-3 right-3 text-hf-fg-mute hover:text-hf-fg hover:bg-hf-fg/5 rounded-full p-1.5 transition-colors hidden md:flex items-center justify-center"
         >
           <svg
             className="w-5 h-5"
@@ -215,47 +210,30 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
         </button>
 
         <div className="pr-0 md:pr-8">
-          <h2 className="font-bold mb-2 md:mb-3" style={{ fontSize: 'var(--fs-lg)' }}>
+          <h2 className="font-semibold text-hf-fg mb-2" style={{ fontSize: 'var(--fs-lg)' }}>
             {moduleDetail.name}
           </h2>
 
-          <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
-            <div
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-hf-xs font-semibold ${isOnline ? 'bg-hf-success/90' : 'bg-hf-fg-mute/80'}`}
-            >
+          <div className="flex items-center gap-2 text-hf-xs text-hf-fg-soft">
+            <span className="inline-flex items-center gap-1.5">
               <span
-                className={`w-1.5 h-1.5 rounded-full bg-white ${isOnline ? 'animate-pulse' : 'opacity-70'}`}
+                className="w-2 h-2 rounded-full"
+                style={{
+                  background: isOnline ? 'var(--hf-success)' : 'var(--hf-fg-mute)',
+                }}
                 aria-hidden="true"
               />
               {isOnline ? t('common.online') : t('common.offline')}
-            </div>
-
-            <div className="inline-flex items-center gap-1.5 bg-white/20 rounded-full px-3 py-1 text-hf-xs font-semibold">
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
+            </span>
+            <span className="text-hf-fg-mute" aria-hidden="true">
+              ·
+            </span>
+            <span>
               {moduleDetail.imageCount} {t('modulePanel.images')}
-            </div>
+            </span>
           </div>
 
-          <p className="text-white/85 text-hf-xs">
+          <p className="text-hf-fg-mute text-hf-xs mt-1">
             {t('modulePanel.lastUpdate', { time: formattedTime })}
           </p>
         </div>
@@ -374,20 +352,14 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           {beeTypeSummaries.map((summary) => (
             <article
               key={summary.key}
-              className="rounded-hf-lg p-3 md:p-4 shadow-hf-1 border-2 transition-transform active:scale-[0.98] md:active:scale-100"
-              style={{
-                backgroundColor: summary.lightColor,
-                borderColor: summary.color,
-              }}
+              className="rounded-hf-lg p-3 md:p-4 border border-hf-border bg-hf-surface"
             >
-              <div className="flex items-start justify-between mb-2">
-                <div className="text-hf-md font-bold" style={{ color: summary.color }}>
-                  {summary.size}
-                </div>
+              <div className="flex items-start justify-between mb-3">
+                <div className="text-hf-sm font-medium text-hf-fg-soft">{summary.size}</div>
                 <div className="text-right">
                   <div
-                    className="font-bold tabular-nums"
-                    style={{ color: summary.color, fontSize: 'var(--fs-xl)' }}
+                    className="font-semibold text-hf-fg tabular-nums"
+                    style={{ fontSize: 'var(--fs-xl)' }}
                   >
                     {summary.totalHatched}
                   </div>
@@ -395,26 +367,20 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
                 </div>
               </div>
 
-              <ul className="space-y-2 mt-3">
+              <ul className="space-y-2">
                 {summary.nests.map((nest, index) => (
                   <li key={nest.nest_id}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-hf-xs text-hf-fg-soft font-medium">
+                      <span className="text-hf-xs text-hf-fg-soft">
                         {t('modulePanel.nest', { index: index + 1 })}
                       </span>
-                      <span
-                        className="text-hf-xs font-bold tabular-nums"
-                        style={{ color: summary.color }}
-                      >
+                      <span className="text-hf-xs font-medium tabular-nums text-hf-fg-soft">
                         {nest.sealed}%
                       </span>
                     </div>
                     <div
-                      className="h-2 rounded-full overflow-hidden"
-                      style={{
-                        background: 'rgba(255,255,255,0.6)',
-                        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)',
-                      }}
+                      className="h-1.5 rounded-full overflow-hidden"
+                      style={{ background: 'var(--hf-line-soft)' }}
                       role="progressbar"
                       aria-valuemin={0}
                       aria-valuemax={100}
@@ -422,7 +388,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
                       aria-label={`Nest ${index + 1} sealed`}
                     >
                       <div
-                        className="h-full transition-all duration-500 rounded-full"
+                        className="h-full rounded-full"
                         style={{ width: `${nest.sealed}%`, backgroundColor: summary.color }}
                       />
                     </div>

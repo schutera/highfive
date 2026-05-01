@@ -65,6 +65,9 @@ const translations = {
       onlineCount: '{online}/{total}',
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
+      emptyTitle: 'No modules yet',
+      emptyBody: 'Set up your first hive module to start watching wild bee activity.',
+      emptyCta: 'What is a hive module?',
     },
 
     // ---- Module Panel ----
@@ -433,6 +436,10 @@ const translations = {
       onlineCount: '{online}/{total}',
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
+      emptyTitle: 'Noch keine Module',
+      emptyBody:
+        'Richte dein erstes Hive-Modul ein, um die Aktivit\u00E4t von Wildbienen zu beobachten.',
+      emptyCta: 'Was ist ein Hive-Modul?',
     },
 
     // ---- Module Panel ----

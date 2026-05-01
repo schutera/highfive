@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import MapView from '../components/MapView';
 import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
@@ -15,9 +16,62 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [mobileListExpanded, setMobileListExpanded] = useState(false);
 
+  // Mobile sheet ref — used by the focus-trap effect below.
+  const mobileSheetRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     loadModules();
   }, []);
+
+  // Focus management for ModulePanel when it opens.
+  // - Escape closes (both desktop aside and mobile sheet).
+  // - On mobile (the sheet has role="dialog" aria-modal="true"), focus
+  //   moves into the sheet on open and is trapped (Tab cycles within it).
+  // - On any close, focus restores to whatever element was active before
+  //   the panel opened.
+  useEffect(() => {
+    if (!selectedModule) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSelectedModule(null);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const sheet = mobileSheetRef.current;
+      if (!sheet || !sheet.offsetParent) return; // not visible (desktop)
+      const focusables = sheet.querySelectorAll<HTMLElement>(
+        'button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+
+    // Move focus into the mobile sheet when it's the visible panel.
+    const sheet = mobileSheetRef.current;
+    if (sheet && sheet.offsetParent) {
+      const focusables = sheet.querySelectorAll<HTMLElement>('button, [href]');
+      focusables[0]?.focus();
+    }
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      previousFocus?.focus?.();
+    };
+  }, [selectedModule]);
 
   const loadModules = async () => {
     try {
@@ -116,8 +170,30 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Empty state — no modules registered yet. Replaces the map
+            (an empty world map signals nothing useful) with one card
+            pointing at the "what is this" page. Skill: one CTA, left-
+            aligned content, ≤2 prominent elements. */}
+        {!error && !loading && modules.length === 0 && (
+          <div className="flex-1 flex items-center justify-center p-4 md:p-8">
+            <div className="hf-card max-w-md p-6 md:p-8">
+              <h2 className="text-hf-fg mb-2" style={{ fontSize: 'var(--fs-lg)' }}>
+                {t('dashboard.emptyTitle')}
+              </h2>
+              <p className="text-hf-fg-soft mb-6 text-hf-sm">{t('dashboard.emptyBody')}</p>
+              <Link
+                to="/hive-module"
+                viewTransition
+                className="hf-btn hf-btn-primary px-6 py-3 inline-flex"
+              >
+                {t('dashboard.emptyCta')}
+              </Link>
+            </div>
+          </div>
+        )}
+
         {/* Map */}
-        {!error && (
+        {!error && (loading || modules.length > 0) && (
           <div className="flex-1 relative min-h-0">
             {!loading && (
               <MapView
@@ -170,6 +246,7 @@ export default function DashboardPage() {
           desktop layout above is the canonical main. */}
       {!error && selectedModule && (
         <div
+          ref={mobileSheetRef}
           className="fixed inset-0 z-[1000] md:hidden"
           role="dialog"
           aria-modal="true"

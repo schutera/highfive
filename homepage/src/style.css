@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Inter Variable is loaded by main.tsx (Vite's JS module graph resolves
+   the @fontsource-variable/inter package; doing the import from CSS
+   wouldn't work because PostCSS doesn't resolve node_modules paths). */
+
 /* ================================================================
    Design tokens — HighFive 2026 visual language
    Honey amber + deep forest green + warm off-white. OKLCH-first
@@ -61,7 +65,7 @@
   --fs-lg: clamp(1.4rem, 1.25rem + 0.6vw, 1.625rem);
   --fs-xl: clamp(1.75rem, 1.5rem + 1vw, 2.25rem);
   --fs-2xl: clamp(2.25rem, 1.8rem + 2vw, 3.25rem);
-  --fs-3xl: clamp(3rem, 2.2rem + 3.5vw, 5rem);
+  --fs-3xl: clamp(3rem, 2rem + 5vw, 6.5rem);
 
   /* Spacing — 4px grid; expose semantic tokens too */
   --space-1: 0.25rem;
@@ -164,7 +168,11 @@ html {
 
 body {
   margin: 0;
+  /* Inter Variable first; the system stack stays as fallback so the
+     page paints immediately while the woff2 streams in (font-display:
+     swap is set inside the @font-face declarations). */
   font-family:
+    'Inter Variable',
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -186,13 +194,33 @@ body {
   min-height: 100dvh;
 }
 
+/* Body paragraphs: prevent orphans/runts in modern browsers, and
+   relax line-height a touch for editorial readability. */
+p {
+  text-wrap: pretty;
+}
+
 h1,
 h2,
 h3,
 h4 {
   text-wrap: balance;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.022em;
   font-weight: 700;
+  line-height: 1.05;
+}
+
+/* Display headings — bigger weight, tighter tracking. Targets the
+   hero h1 on / and the section heads on long-form pages without
+   needing per-element styling. */
+h1 {
+  font-weight: 800;
+  letter-spacing: -0.028em;
+}
+h2 {
+  font-weight: 750;
+  letter-spacing: -0.024em;
+  line-height: 1.1;
 }
 
 p,

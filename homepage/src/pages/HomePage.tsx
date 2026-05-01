@@ -1,8 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n/LanguageContext';
-import { api } from '../services/api';
-import type { Module } from '@highfive/contracts';
 import SiteHeader from '../components/SiteHeader';
 import SiteFooter from '../components/SiteFooter';
 
@@ -52,30 +50,22 @@ export default function HomePage() {
         <div className="relative z-20 text-center px-4 max-w-5xl mx-auto pb-16">
           <h1
             id="hero-title"
-            className="text-white font-bold mb-4 drop-shadow-2xl"
+            className="text-white mb-6 drop-shadow-2xl"
             style={{ fontSize: 'var(--fs-3xl)' }}
           >
             <span aria-hidden="true">🙌&nbsp;</span>HighFive
           </h1>
           <p
-            className="text-hf-honey-100 mb-6 font-light tracking-wide"
-            style={{ fontSize: 'var(--fs-xl)' }}
-          >
-            {t('home.heroSubtitle')}
-          </p>
-          <p
-            className="text-white/95 mx-auto max-w-2xl mb-8"
+            className="text-white/95 mx-auto max-w-2xl mb-10"
             style={{ fontSize: 'var(--fs-md)', lineHeight: 1.6 }}
           >
             {t('home.heroText')}
           </p>
 
-          <HeroStats />
-
-          {/* Two CTAs: explore (low intent) + order (high intent). The
-              dashboard sells "what's already happening"; the hive-module
-              page sells "join the network". */}
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-center">
+          {/* One primary CTA + one quieter text-link. Matches the
+              Stripe/Linear/Vercel hero pattern: never two solid CTAs
+              side-by-side. */}
+          <div className="flex flex-col items-center gap-5">
             <Link
               to="/dashboard"
               viewTransition
@@ -101,13 +91,7 @@ export default function HomePage() {
             <Link
               to="/hive-module"
               viewTransition
-              className="hf-btn w-full sm:w-auto px-8 py-4 text-hf-md text-white"
-              style={{
-                background: 'color-mix(in oklch, white 8%, transparent)',
-                border: '1px solid color-mix(in oklch, white 50%, transparent)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-              }}
+              className="text-white/85 hover:text-white text-hf-sm underline decoration-white/40 underline-offset-4 hover:decoration-white/80 transition-colors"
             >
               {t('home.getModule')}
             </Link>
@@ -144,19 +128,21 @@ export default function HomePage() {
         aria-labelledby="how-title"
       >
         <div className="max-w-6xl mx-auto">
-          <h2
-            id="how-title"
-            className="text-center text-hf-fg mb-3"
-            style={{ fontSize: 'var(--fs-2xl)' }}
-          >
-            {t('home.getStartedTitle')}
+          {/* Left-aligned section head — skill: center kills hierarchy,
+              default to left-aligned; centre only with intent. The
+              previous subtitle here was the same phonetic IPA from the
+              hero, repeated as decoration; dropped. */}
+          <h2 id="how-title" className="text-hf-fg mb-10 md:mb-14 max-w-2xl">
+            <span
+              className="block text-hf-honey-700 font-medium tracking-wide uppercase mb-3"
+              style={{ fontSize: 'var(--fs-xs)', letterSpacing: '0.08em' }}
+            >
+              {t('common.hiveModules')}
+            </span>
+            <span style={{ fontSize: 'var(--fs-2xl)' }} className="block">
+              {t('home.getStartedTitle')}
+            </span>
           </h2>
-          <p
-            className="text-center text-hf-fg-soft mb-10 md:mb-14 max-w-xl mx-auto"
-            style={{ fontSize: 'var(--fs-base)' }}
-          >
-            {t('home.heroSubtitle')}
-          </p>
 
           {/* Responsive 3-up grid that stacks on mobile, supports container queries */}
           <ol
@@ -281,95 +267,5 @@ function StepCard({ n, title, text, cta, extra }: StepCardProps) {
         <span className="sr-only">{cta.label}</span>
       </Link>
     </li>
-  );
-}
-
-interface StatsBundle {
-  modules: number;
-  online: number;
-  images: number;
-  hatches: number;
-}
-
-const ZERO_STATS: StatsBundle = { modules: 0, online: 0, images: 0, hatches: 0 };
-
-/**
- * Live stats rendered chromeless over the hero image. Aggregated client-side
- * from the same `/api/modules` payload the dashboard fetches — no new
- * endpoint. The row never collapses: it starts at zeros, animates to real
- * numbers when the fetch resolves, and falls back to zeros on fetch error.
- * Showing zero is the design (pilot-phase honesty) — vanishing isn't.
- */
-function HeroStats() {
-  const { t, lang } = useTranslation();
-  const [stats, setStats] = useState<StatsBundle>(ZERO_STATS);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getAllModules()
-      .then((modules: Module[]) => {
-        if (cancelled) return;
-        setStats({
-          modules: modules.length,
-          online: modules.filter((m) => m.status === 'online').length,
-          images: modules.reduce((s, m) => s + (m.imageCount ?? 0), 0),
-          hatches: modules.reduce((s, m) => s + (m.totalHatches ?? 0), 0),
-        });
-      })
-      .catch(() => {
-        // Stay at ZERO_STATS — never let the row disappear under the user.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const fmt = (n: number) => n.toLocaleString(lang);
-
-  return (
-    <div
-      role="group"
-      aria-label={t('home.statsTitle')}
-      aria-live="polite"
-      className="flex items-stretch justify-center divide-x divide-white/20 mx-auto mb-10 max-w-3xl"
-    >
-      <HeroStatItem label={t('home.statsModulesLabel')} value={fmt(stats.modules)} />
-      <HeroStatItem label={t('home.statsOnlineLabel')} value={fmt(stats.online)} live />
-      <HeroStatItem label={t('home.statsImagesLabel')} value={fmt(stats.images)} />
-      <HeroStatItem label={t('home.statsHatchesLabel')} value={fmt(stats.hatches)} />
-    </div>
-  );
-}
-
-interface HeroStatItemProps {
-  label: string;
-  value: string;
-  /** Adds a pulsing dot to signal the metric is "now". */
-  live?: boolean;
-}
-
-function HeroStatItem({ label, value, live }: HeroStatItemProps) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-2 px-3 sm:px-6 first:pl-0 last:pr-0">
-      <span
-        className="text-white font-light tabular-nums leading-none drop-shadow-md transition-[font-size] duration-300"
-        style={{ fontSize: 'var(--fs-2xl)', letterSpacing: '-0.02em' }}
-      >
-        {value}
-      </span>
-      <span
-        className="flex items-center gap-1.5 text-white/70 uppercase leading-none whitespace-nowrap"
-        style={{ fontSize: 'var(--fs-xs)', letterSpacing: '0.18em' }}
-      >
-        {live && (
-          <span
-            className="w-1.5 h-1.5 rounded-full bg-hf-success animate-pulse"
-            aria-hidden="true"
-          />
-        )}
-        {label}
-      </span>
-    </div>
   );
 }

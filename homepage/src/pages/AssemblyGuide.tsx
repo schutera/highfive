@@ -14,7 +14,7 @@ export default function AssemblyGuide() {
         secondary={{ to: '/hive-module', label: t('assembly.backToModule') }}
       />
 
-      <main className="max-w-3xl w-full mx-auto py-8 md:py-12 px-4 flex-1">
+      <main id="main" className="max-w-3xl w-full mx-auto py-8 md:py-12 px-4 flex-1">
         {/* Hero */}
         <header className="mb-10 md:mb-14">
           <h1 className="text-hf-fg mb-3" style={{ fontSize: 'var(--fs-2xl)' }}>

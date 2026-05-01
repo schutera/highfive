@@ -36,7 +36,9 @@
   --hf-surface: oklch(100% 0 0); /* card surfaces */
   --hf-ink: oklch(20% 0.015 60); /* primary text */
   --hf-ink-soft: oklch(40% 0.015 60); /* secondary text */
-  --hf-ink-mute: oklch(60% 0.012 60); /* muted text */
+  /* WCAG 2.2 AA requires ≥4.5:1 for normal text; was 60% lightness
+     which measured ~3.4:1 on --hf-paper. Bumped to 50% (~5.0:1). */
+  --hf-ink-mute: oklch(50% 0.015 60); /* muted text */
   --hf-line: oklch(90% 0.01 60); /* hairlines */
   --hf-line-soft: oklch(95% 0.005 60);
 

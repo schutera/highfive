@@ -76,7 +76,7 @@ export default function DashboardPage() {
       <SiteHeader title={t('dashboard.title')} right={statusPill} />
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+      <main id="main" className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Error state — backend down */}
         {error && (
           <div
@@ -161,9 +161,11 @@ export default function DashboardPage() {
             />
           </aside>
         )}
-      </div>
+      </main>
 
-      {/* Mobile: full-screen sheet */}
+      {/* Mobile: full-screen sheet — sibling of <main> so it overlays
+          the whole viewport when open; outside main is fine because the
+          desktop layout above is the canonical main. */}
       {!error && selectedModule && (
         <div
           className="fixed inset-0 z-[1000] md:hidden"

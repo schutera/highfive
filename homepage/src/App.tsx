@@ -40,6 +40,15 @@ function App() {
     <ErrorBoundary>
       <LanguageProvider>
         <Router>
+          {/* Skip link — first focusable thing on every page (WCAG 2.4.1
+              Bypass Blocks). Only visible when keyboard-focused. The
+              target id="main" is rendered by each page's <main> element. */}
+          <a
+            href="#main"
+            className="sr-only-focusable focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:bg-hf-fg focus:text-hf-bg focus:px-4 focus:py-2 focus:rounded-md focus:font-semibold focus:outline-none focus:ring-2 focus:ring-hf-honey-500"
+          >
+            Skip to main content
+          </a>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<HomePage />} />
@@ -51,6 +60,9 @@ function App() {
               <Route path="/web-installer" element={<Navigate to="/setup" replace />} />
               <Route path="/setup-guide" element={<Navigate to="/setup" replace />} />
               <Route path="/parts-list" element={<Navigate to="/hive-module" replace />} />
+              {/* Catch-all: any unknown path redirects home, replaces history
+                  so the bad URL doesn't sit in the back-button stack. */}
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
         </Router>

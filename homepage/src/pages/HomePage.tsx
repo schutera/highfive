@@ -122,86 +122,93 @@ export default function HomePage() {
       </section>
 
       {/* ============== How it works ============== */}
-      <section
-        id="how-it-works"
-        className="relative bg-hf-surface py-16 md:py-24 px-4"
-        aria-labelledby="how-title"
-      >
-        <div className="max-w-6xl mx-auto">
-          {/* Left-aligned section head — skill: center kills hierarchy,
+      {/* <main id="main"> starts here — skip-to-main jumps past the
+          marketing hero (which is the LCP, intentional first impression)
+          to the substantive content of the page. Hero stays semantically
+          a <section> outside main since it's introductory framing. */}
+      <main id="main">
+        <section
+          id="how-it-works"
+          className="relative bg-hf-surface py-16 md:py-24 px-4"
+          aria-labelledby="how-title"
+        >
+          <div className="max-w-6xl mx-auto">
+            {/* Left-aligned section head — skill: center kills hierarchy,
               default to left-aligned; centre only with intent. The
               previous subtitle here was the same phonetic IPA from the
               hero, repeated as decoration; dropped. */}
-          <h2 id="how-title" className="text-hf-fg mb-10 md:mb-14 max-w-2xl">
-            <span
-              className="block text-hf-honey-700 font-medium tracking-wide uppercase mb-3"
-              style={{ fontSize: 'var(--fs-xs)', letterSpacing: '0.08em' }}
-            >
-              {t('common.hiveModules')}
-            </span>
-            <span style={{ fontSize: 'var(--fs-2xl)' }} className="block">
-              {t('home.getStartedTitle')}
-            </span>
-          </h2>
+            <h2 id="how-title" className="text-hf-fg mb-10 md:mb-14 max-w-2xl">
+              <span
+                className="block text-hf-honey-700 font-medium tracking-wide uppercase mb-3"
+                style={{ fontSize: 'var(--fs-xs)', letterSpacing: '0.08em' }}
+              >
+                {t('common.hiveModules')}
+              </span>
+              <span style={{ fontSize: 'var(--fs-2xl)' }} className="block">
+                {t('home.getStartedTitle')}
+              </span>
+            </h2>
 
-          {/* Responsive 3-up grid that stacks on mobile, supports container queries */}
-          <ol
-            className="grid gap-6 md:gap-8 hf-cq"
-            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))' }}
-          >
-            <StepCard
-              n={1}
-              title={t('home.step1Title')}
-              text={t('home.step1Text')}
-              cta={{ to: '/hive-module', label: t('home.step1Cta') }}
-              tint="honey"
-            />
-            <StepCard
-              n={2}
-              title={t('home.step2Title')}
-              text={t('home.step2Text')}
-              cta={{ to: '/setup', label: t('home.step2Cta') }}
-              tint="honey"
-              extra={
-                <div
-                  className="rounded-hf p-3 md:p-4 mt-3"
-                  style={{
-                    background: 'color-mix(in oklch, var(--hf-info) 8%, transparent)',
-                    border: '1px solid color-mix(in oklch, var(--hf-info) 30%, transparent)',
-                  }}
-                >
-                  <h4 className="font-bold text-hf-fg text-hf-sm mb-1.5">
-                    {t('home.step2GuidedTitle')}
-                  </h4>
-                  <p className="text-hf-fg-soft text-hf-xs leading-relaxed">
-                    {t('home.step2GuidedText')}
-                  </p>
-                </div>
-              }
-            />
-            <StepCard
-              n={3}
-              title={t('home.step3Title')}
-              text={t('home.step3Text')}
-              cta={{ to: '/dashboard', label: t('home.step3Cta') }}
-              tint="honey"
-              extra={
-                <div
-                  className="rounded-hf p-3 md:p-4 mt-3"
-                  style={{
-                    background: 'color-mix(in oklch, var(--hf-forest-500) 8%, transparent)',
-                    border: '1px solid color-mix(in oklch, var(--hf-forest-500) 30%, transparent)',
-                  }}
-                >
-                  <p className="text-hf-fg-soft text-hf-xs leading-relaxed">
-                    {t('home.step3Community')}
-                  </p>
-                </div>
-              }
-            />
-          </ol>
-        </div>
-      </section>
+            {/* Responsive 3-up grid that stacks on mobile, supports container queries */}
+            <ol
+              className="grid gap-6 md:gap-8 hf-cq"
+              style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))' }}
+            >
+              <StepCard
+                n={1}
+                title={t('home.step1Title')}
+                text={t('home.step1Text')}
+                cta={{ to: '/hive-module', label: t('home.step1Cta') }}
+                tint="honey"
+              />
+              <StepCard
+                n={2}
+                title={t('home.step2Title')}
+                text={t('home.step2Text')}
+                cta={{ to: '/setup', label: t('home.step2Cta') }}
+                tint="honey"
+                extra={
+                  <div
+                    className="rounded-hf p-3 md:p-4 mt-3"
+                    style={{
+                      background: 'color-mix(in oklch, var(--hf-info) 8%, transparent)',
+                      border: '1px solid color-mix(in oklch, var(--hf-info) 30%, transparent)',
+                    }}
+                  >
+                    <h4 className="font-bold text-hf-fg text-hf-sm mb-1.5">
+                      {t('home.step2GuidedTitle')}
+                    </h4>
+                    <p className="text-hf-fg-soft text-hf-xs leading-relaxed">
+                      {t('home.step2GuidedText')}
+                    </p>
+                  </div>
+                }
+              />
+              <StepCard
+                n={3}
+                title={t('home.step3Title')}
+                text={t('home.step3Text')}
+                cta={{ to: '/dashboard', label: t('home.step3Cta') }}
+                tint="honey"
+                extra={
+                  <div
+                    className="rounded-hf p-3 md:p-4 mt-3"
+                    style={{
+                      background: 'color-mix(in oklch, var(--hf-forest-500) 8%, transparent)',
+                      border:
+                        '1px solid color-mix(in oklch, var(--hf-forest-500) 30%, transparent)',
+                    }}
+                  >
+                    <p className="text-hf-fg-soft text-hf-xs leading-relaxed">
+                      {t('home.step3Community')}
+                    </p>
+                  </div>
+                }
+              />
+            </ol>
+          </div>
+        </section>
+      </main>
 
       <SiteFooter />
     </div>

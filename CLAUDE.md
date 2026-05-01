@@ -91,6 +91,17 @@ cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile fi
 | CAD / laser DXFs                   | `assets/`                                                      |
 | Docs (deep dives)                  | `documentation/`                                               |
 
+## ESP32-CAM hardware notes
+
+Quick reference for anyone working on or debugging the edge modules:
+
+- **Access point name / password**: `ESP32-Access-Point` / `esp-12345` (defined in `ESP32-CAM/host.cpp` lines 9–10). Old documentation incorrectly called it `HiveHive-Access-Point`.
+- **Config form browser**: the form at `http://192.168.4.1` requires **Chrome or Firefox**. Brave and some mobile browsers silently fail to submit the session token, causing the form to reload blank after Save.
+- **2.4 GHz only**: the ESP32 does not support 5 GHz Wi-Fi.
+- **LAN IP for URLs**: when configuring a module, the Init/Upload base URLs must use the host machine's **LAN IP** (not `localhost`) and the ESP32 must be on the same network as the server.
+- **Windows Firewall**: ports **8000** and **8002** need inbound TCP allow rules so LAN devices (ESP32 modules) can reach the services. See [`documentation/troubleshooting.md`](documentation/troubleshooting.md) for the PowerShell commands.
+- **Onboarding skill**: invoke `/esp32-onboarding` to step through a guided hardware setup session.
+
 ## Conventions worth knowing
 
 - **Test layout**: backend tests in `backend/tests/`, homepage tests in `homepage/src/__tests__/`, Python service tests in `<service>/tests/` next to source. ESP host tests in `ESP32-CAM/test/test_native_*/`.

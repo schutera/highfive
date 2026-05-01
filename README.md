@@ -43,6 +43,7 @@ Automated monitoring pipeline that captures images of wild bee hotels, analyzes 
 | [Deployment Guide](documentation/service-deployment.md) | How to run all services with Docker Compose |
 | [Homepage](documentation/homepage.md) | Frontend pages, routes, and backend connection |
 | [ESP Deployment](documentation/esp-deployment.md) | ESP32 firmware flashing, WiFi setup, configuration |
+| [Troubleshooting](documentation/troubleshooting.md) | ESP32-CAM setup issues, server connectivity, Windows Firewall |
 | [API Usage](documentation/api-usage.md) | All API endpoints with example requests and responses |
 | [Architecture](documentation/architecture.md) | System architecture, data flow, and design decisions |
 | [Image Service](documentation/image-service.md) | Image ingestion and analysis service |

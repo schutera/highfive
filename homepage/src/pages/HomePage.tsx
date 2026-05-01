@@ -80,6 +80,7 @@ export default function HomePage() {
           <div className="flex justify-center">
             <Link
               to="/dashboard"
+              viewTransition
               className="hf-btn hf-btn-primary w-full sm:w-auto px-8 py-4 text-hf-md"
               style={{ background: 'var(--hf-honey-500)' }}
             >
@@ -227,6 +228,7 @@ function StepCard({ n, title, text, cta, extra }: StepCardProps) {
     <li className="list-none">
       <Link
         to={cta.to}
+        viewTransition
         aria-labelledby={titleId}
         className="hf-card group p-6 md:p-7 flex flex-col gap-4 h-full transition-all duration-200 hover:shadow-hf-2 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hf-honey-500 focus-visible:ring-offset-2"
       >

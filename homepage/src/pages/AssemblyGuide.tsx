@@ -123,7 +123,7 @@ export default function AssemblyGuide() {
             {t('assembly.ctaTitle')}
           </h3>
           <p className="text-hf-fg-soft mb-6 text-hf-base">{t('assembly.ctaText')}</p>
-          <Link to="/setup" className="hf-btn hf-btn-primary inline-flex px-8 py-3">
+          <Link to="/setup" viewTransition className="hf-btn hf-btn-primary inline-flex px-8 py-3">
             {t('assembly.ctaCta')}
           </Link>
         </div>

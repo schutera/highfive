@@ -33,6 +33,7 @@ export default function SiteHeader({
       <div className="flex items-center gap-2 md:gap-4 min-w-0">
         <Link
           to="/"
+          viewTransition
           className="text-hf-md md:text-hf-lg font-bold text-hf-honey-700 hover:text-hf-honey-800 flex items-center gap-1.5 rounded-md"
           aria-label="HighFive home"
         >
@@ -60,6 +61,7 @@ export default function SiteHeader({
         {secondary && (
           <Link
             to={secondary.to}
+            viewTransition
             className="hidden md:inline-block text-hf-sm text-hf-fg-mute hover:text-hf-fg-soft transition-colors px-2 py-1"
           >
             {secondary.label}

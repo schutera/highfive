@@ -108,7 +108,11 @@ export default function Step5Verify({
           </div>
         </div>
 
-        <Link to="/dashboard" className="hf-btn hf-btn-primary w-full md:w-auto px-8 py-3">
+        <Link
+          to="/dashboard"
+          viewTransition
+          className="hf-btn hf-btn-primary w-full md:w-auto px-8 py-3"
+        >
           {t('step5.viewDashboard')}
         </Link>
       </section>

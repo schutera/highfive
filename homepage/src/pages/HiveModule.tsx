@@ -289,7 +289,11 @@ export default function HiveModule() {
             {t('hiveModule.ctaTitle')}
           </h3>
           <p className="text-hf-fg-soft mb-6 text-hf-base">{t('hiveModule.ctaText')}</p>
-          <Link to="/assembly" className="hf-btn hf-btn-primary inline-flex px-8 py-3">
+          <Link
+            to="/assembly"
+            viewTransition
+            className="hf-btn hf-btn-primary inline-flex px-8 py-3"
+          >
             {t('hiveModule.ctaCta')}
           </Link>
         </div>

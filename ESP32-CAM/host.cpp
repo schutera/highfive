@@ -2,6 +2,7 @@
 #include <SPIFFS.h>
 #include <FS.h>
 #include <ArduinoJson.h>
+#include <esp_task_wdt.h>
 #include "esp_init.h"   // setESPConfigured
 #include "form_query.h" // hf::urlDecode, hf::getParam (host-testable)
 #include <string>
@@ -344,8 +345,9 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 */
 void runAccessPoint() {
   server_running = 1;
-  
+
   while (server_running) {
+    esp_task_wdt_reset();
     WiFiClient client = server.available();
     if (client) {
       Serial.println("\n------ CLIENT CONNECTED ------");

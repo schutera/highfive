@@ -75,7 +75,9 @@ export default function HomePage() {
             {t('home.heroText')}
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-center">
+          {/* Single primary CTA — the scroll-chevron below covers the
+              "How It Works" affordance more elegantly than a second button. */}
+          <div className="flex justify-center">
             <Link
               to="/dashboard"
               className="hf-btn hf-btn-primary w-full sm:w-auto px-8 py-4 text-hf-md"
@@ -97,12 +99,6 @@ export default function HomePage() {
                 />
               </svg>
             </Link>
-            <a
-              href="#how-it-works"
-              className="hf-btn hf-glass w-full sm:w-auto px-8 py-4 text-hf-md text-white border border-white/40 hover:bg-white/15"
-            >
-              {t('home.howItWorks')}
-            </a>
           </div>
         </div>
 
@@ -224,44 +220,52 @@ interface StepCardProps {
 }
 
 function StepCard({ n, title, text, cta, extra }: StepCardProps) {
+  // Whole card is the click target — no separate CTA button at the
+  // bottom. The accessible name comes from the <h3> via aria-labelledby.
+  const titleId = `step-card-${n}-title`;
   return (
-    <li className="hf-card p-6 md:p-7 flex flex-col gap-4 transition-shadow hover:shadow-hf-2 list-none">
-      <div className="flex items-center gap-3">
-        <div
-          className="w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center text-white font-bold shrink-0"
-          style={{
-            background: 'linear-gradient(135deg, var(--hf-honey-400), var(--hf-honey-600))',
-            fontSize: 'var(--fs-md)',
-            boxShadow: 'var(--shadow-1)',
-          }}
-          aria-hidden="true"
-        >
-          {n}
+    <li className="list-none">
+      <Link
+        to={cta.to}
+        aria-labelledby={titleId}
+        className="hf-card group p-6 md:p-7 flex flex-col gap-4 h-full transition-all duration-200 hover:shadow-hf-2 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hf-honey-500 focus-visible:ring-offset-2"
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center text-white font-bold shrink-0 transition-transform group-hover:scale-105"
+            style={{
+              background: 'linear-gradient(135deg, var(--hf-honey-400), var(--hf-honey-600))',
+              fontSize: 'var(--fs-md)',
+              boxShadow: 'var(--shadow-1)',
+            }}
+            aria-hidden="true"
+          >
+            {n}
+          </div>
+          <h3
+            id={titleId}
+            className="text-hf-fg font-bold flex-1"
+            style={{ fontSize: 'var(--fs-md)' }}
+          >
+            {title}
+          </h3>
+          {/* Subtle directional cue, replaces the explicit CTA button */}
+          <svg
+            className="w-5 h-5 text-hf-fg-soft transition-transform group-hover:translate-x-0.5 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
         </div>
-        <h3 className="text-hf-fg font-bold flex-1" style={{ fontSize: 'var(--fs-md)' }}>
-          {title}
-        </h3>
-      </div>
-      <p className="text-hf-fg-soft leading-relaxed flex-1" style={{ fontSize: 'var(--fs-sm)' }}>
-        {text}
-      </p>
-      {extra}
-      <Link to={cta.to} className="hf-btn hf-btn-primary w-full px-4 py-3 mt-auto text-hf-sm">
-        {cta.label}
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M14 5l7 7m0 0l-7 7m7-7H3"
-          />
-        </svg>
+        <p className="text-hf-fg-soft leading-relaxed flex-1" style={{ fontSize: 'var(--fs-sm)' }}>
+          {text}
+        </p>
+        {extra}
+        {/* SR-only link label so the card's purpose is announced clearly */}
+        <span className="sr-only">{cta.label}</span>
       </Link>
     </li>
   );

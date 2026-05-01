@@ -23,11 +23,11 @@ export default function HiveModule() {
 
       <main className="max-w-4xl w-full mx-auto py-8 md:py-12 px-4 flex-1">
         {/* Hero */}
-        <header className="text-center mb-10 md:mb-14">
+        <header className="mb-10 md:mb-14">
           <h1 className="text-hf-fg mb-3" style={{ fontSize: 'var(--fs-2xl)' }}>
             {t('hiveModule.heroTitle')}
           </h1>
-          <p className="text-hf-fg-soft max-w-2xl mx-auto" style={{ fontSize: 'var(--fs-md)' }}>
+          <p className="text-hf-fg-soft max-w-2xl" style={{ fontSize: 'var(--fs-md)' }}>
             {t('hiveModule.heroText')}
           </p>
         </header>
@@ -54,10 +54,7 @@ export default function HiveModule() {
           style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))' }}
         >
           {/* Order */}
-          <article
-            className="hf-card p-6 flex flex-col border-2"
-            style={{ borderColor: 'color-mix(in oklch, var(--hf-honey-300) 60%, transparent)' }}
-          >
+          <article className="hf-card p-6 flex flex-col">
             <div className="flex items-center gap-3 mb-4">
               <div
                 className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
@@ -83,23 +80,24 @@ export default function HiveModule() {
               </h2>
             </div>
             <p className="text-hf-sm text-hf-fg-soft mb-4 flex-1">{t('hiveModule.orderText')}</p>
-            <a
-              href={STRIPE_LINK}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-disabled={STRIPE_LINK === '#'}
-              className={`hf-btn w-full py-3 ${STRIPE_LINK === '#' ? 'cursor-not-allowed' : 'hf-btn-primary'}`}
-              style={
-                STRIPE_LINK === '#'
-                  ? { background: 'var(--hf-line-soft)', color: 'var(--hf-fg-mute)' }
-                  : undefined
-              }
-              onClick={(e) => {
-                if (STRIPE_LINK === '#') e.preventDefault();
-              }}
-            >
-              {STRIPE_LINK === '#' ? t('hiveModule.comingSoon') : t('hiveModule.orderCta')}
-            </a>
+            {STRIPE_LINK === '#' ? (
+              <button
+                type="button"
+                disabled
+                className="hf-btn hf-btn-secondary w-full py-3 cursor-not-allowed"
+              >
+                {t('hiveModule.comingSoon')}
+              </button>
+            ) : (
+              <a
+                href={STRIPE_LINK}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hf-btn hf-btn-secondary w-full py-3"
+              >
+                {t('hiveModule.orderCta')}
+              </a>
+            )}
           </article>
 
           {/* DIY */}
@@ -155,16 +153,10 @@ export default function HiveModule() {
 
         {/* Electronics */}
         <section className="mb-10 md:mb-14" aria-labelledby="parts-title">
-          <h2
-            id="parts-title"
-            className="text-hf-fg mb-2 text-center"
-            style={{ fontSize: 'var(--fs-xl)' }}
-          >
+          <h2 id="parts-title" className="text-hf-fg mb-2" style={{ fontSize: 'var(--fs-xl)' }}>
             {t('hiveModule.electronicsTitle')}
           </h2>
-          <p className="text-hf-fg-soft text-center mb-8 text-hf-base">
-            {t('hiveModule.electronicsSubtitle')}
-          </p>
+          <p className="text-hf-fg-soft mb-8 text-hf-base">{t('hiveModule.electronicsSubtitle')}</p>
 
           <div className="hf-card overflow-hidden">
             <table className="w-full">
@@ -232,16 +224,10 @@ export default function HiveModule() {
 
         {/* Tools */}
         <section className="mb-10 md:mb-14" aria-labelledby="tools-title">
-          <h2
-            id="tools-title"
-            className="text-hf-fg mb-2 text-center"
-            style={{ fontSize: 'var(--fs-xl)' }}
-          >
+          <h2 id="tools-title" className="text-hf-fg mb-2" style={{ fontSize: 'var(--fs-xl)' }}>
             {t('hiveModule.toolsTitle')}
           </h2>
-          <p className="text-hf-fg-soft text-center mb-8 text-hf-base">
-            {t('hiveModule.toolsSubtitle')}
-          </p>
+          <p className="text-hf-fg-soft mb-8 text-hf-base">{t('hiveModule.toolsSubtitle')}</p>
 
           <div className="hf-card overflow-hidden">
             <table className="w-full">
@@ -277,14 +263,7 @@ export default function HiveModule() {
         </section>
 
         {/* Next CTA */}
-        <div
-          className="rounded-hf-xl p-6 md:p-8 text-center border-2"
-          style={{
-            background:
-              'linear-gradient(135deg, color-mix(in oklch, var(--hf-honey-100) 80%, transparent), color-mix(in oklch, var(--hf-honey-200) 60%, transparent))',
-            borderColor: 'color-mix(in oklch, var(--hf-honey-300) 50%, transparent)',
-          }}
-        >
+        <div className="hf-card p-6 md:p-8">
           <h3 className="text-hf-fg mb-2" style={{ fontSize: 'var(--fs-lg)' }}>
             {t('hiveModule.ctaTitle')}
           </h3>

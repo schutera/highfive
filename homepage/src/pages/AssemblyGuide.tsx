@@ -16,43 +16,17 @@ export default function AssemblyGuide() {
 
       <main className="max-w-3xl w-full mx-auto py-8 md:py-12 px-4 flex-1">
         {/* Hero */}
-        <header className="text-center mb-10 md:mb-14">
+        <header className="mb-10 md:mb-14">
           <h1 className="text-hf-fg mb-3" style={{ fontSize: 'var(--fs-2xl)' }}>
             {t('assembly.heroTitle')}
           </h1>
-          <p className="text-hf-fg-soft max-w-xl mx-auto text-hf-md">
-            {t('assembly.heroSubtitle')}
-          </p>
+          <p className="text-hf-fg-soft max-w-xl text-hf-md">{t('assembly.heroSubtitle')}</p>
         </header>
 
         {/* Steps */}
         <ol className="space-y-6 md:space-y-8" aria-label="Assembly steps">
           {tr.assembly.steps.map((step, i) => (
             <li key={i} className="hf-card overflow-hidden shadow-hf-1">
-              {/* Image placeholder — explicit aspect ratio prevents CLS */}
-              <div
-                className="aspect-video flex items-center justify-center border-b border-hf-border"
-                style={{ background: 'var(--hf-line-soft)' }}
-                aria-hidden="true"
-              >
-                <div className="text-center text-hf-fg-mute">
-                  <svg
-                    className="w-10 h-10 mx-auto mb-2 opacity-40"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                  <p className="text-hf-xs">{t('assembly.photoStep', { n: i + 1 })}</p>
-                </div>
-              </div>
-
               <div className="p-5 md:p-6">
                 <div className="flex items-center gap-3 mb-3">
                   <div
@@ -74,28 +48,13 @@ export default function AssemblyGuide() {
                   {step.description}
                 </p>
 
-                <div
-                  className="rounded-hf p-3 border"
-                  style={{
-                    background: 'color-mix(in oklch, var(--hf-honey-100) 60%, transparent)',
-                    borderColor: 'color-mix(in oklch, var(--hf-honey-300) 35%, transparent)',
-                  }}
-                >
-                  <h4 className="text-hf-xs font-semibold text-hf-honey-800 uppercase tracking-wider mb-2">
+                <div>
+                  <h4 className="text-hf-xs font-semibold text-hf-fg-soft uppercase tracking-wider mb-2">
                     {t('assembly.tips')}
                   </h4>
-                  <ul className="space-y-1.5">
+                  <ul className="list-disc pl-5 space-y-1.5 text-hf-sm text-hf-fg-soft">
                     {step.tips.map((tip, j) => (
-                      <li
-                        key={j}
-                        className="flex items-start gap-2 text-hf-xs md:text-hf-sm"
-                        style={{ color: 'var(--hf-honey-900)' }}
-                      >
-                        <span className="text-hf-honey-600 mt-0.5 shrink-0" aria-hidden="true">
-                          ●
-                        </span>
-                        <span>{tip}</span>
-                      </li>
+                      <li key={j}>{tip}</li>
                     ))}
                   </ul>
                 </div>
@@ -111,14 +70,7 @@ export default function AssemblyGuide() {
         </aside>
 
         {/* Next step */}
-        <div
-          className="rounded-hf-xl p-6 md:p-8 text-center mt-8 border-2"
-          style={{
-            background:
-              'linear-gradient(135deg, color-mix(in oklch, var(--hf-honey-100) 80%, transparent), color-mix(in oklch, var(--hf-honey-200) 60%, transparent))',
-            borderColor: 'color-mix(in oklch, var(--hf-honey-300) 50%, transparent)',
-          }}
-        >
+        <div className="hf-card p-6 md:p-8 mt-8">
           <h3 className="text-hf-fg mb-2" style={{ fontSize: 'var(--fs-lg)' }}>
             {t('assembly.ctaTitle')}
           </h3>

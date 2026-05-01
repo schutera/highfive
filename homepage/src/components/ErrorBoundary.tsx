@@ -47,10 +47,7 @@ export class ErrorBoundary extends Component<Props, State> {
             role="alert"
             className="min-h-[100dvh] flex items-center justify-center bg-hf-bg text-hf-fg p-6"
           >
-            <div className="hf-card p-8 max-w-md w-full text-center">
-              <div className="text-4xl mb-3" aria-hidden="true">
-                🐝
-              </div>
+            <div className="hf-card p-8 max-w-md w-full">
               <h2
                 className="font-bold mb-2"
                 style={{ fontSize: 'var(--fs-lg)', color: 'var(--hf-danger)' }}

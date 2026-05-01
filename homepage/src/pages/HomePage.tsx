@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n/LanguageContext';
-import LanguageToggle from '../components/LanguageToggle';
-import ThemeToggle from '../components/ThemeToggle';
+import { api } from '../services/api';
+import type { Module } from '@highfive/contracts';
+import SiteHeader from '../components/SiteHeader';
 import SiteFooter from '../components/SiteFooter';
 
 export default function HomePage() {
@@ -41,16 +42,10 @@ export default function HomePage() {
           aria-hidden="true"
         />
 
-        {/* Floating top bar (glass) — toggles + brand */}
-        <div className="absolute top-0 inset-x-0 z-30 px-3 md:px-6 pt-safe-top py-2 md:py-3 flex items-center justify-between">
-          <span className="text-white/95 font-bold text-hf-md md:text-hf-lg flex items-center gap-1.5">
-            <span aria-hidden="true">🙌</span>
-            <span>HighFive</span>
-          </span>
-          <div className="flex items-center gap-1.5 hf-glass rounded-full px-1.5 py-1">
-            <LanguageToggle className="!text-white/90 hover:!text-white hover:!bg-white/10" />
-            <ThemeToggle className="!text-white/90 hover:!text-white hover:!bg-white/10" />
-          </div>
+        {/* Shared SiteHeader, overlaid on the hero in dark/glass mode so
+            the same header pattern is used on every route. */}
+        <div className="absolute top-0 inset-x-0 z-30">
+          <SiteHeader variant="glass" onDark />
         </div>
 
         {/* Hero content */}
@@ -69,15 +64,18 @@ export default function HomePage() {
             {t('home.heroSubtitle')}
           </p>
           <p
-            className="text-white/95 mx-auto max-w-2xl mb-10"
+            className="text-white/95 mx-auto max-w-2xl mb-8"
             style={{ fontSize: 'var(--fs-md)', lineHeight: 1.6 }}
           >
             {t('home.heroText')}
           </p>
 
-          {/* Single primary CTA — the scroll-chevron below covers the
-              "How It Works" affordance more elegantly than a second button. */}
-          <div className="flex justify-center">
+          <HeroStats />
+
+          {/* Two CTAs: explore (low intent) + order (high intent). The
+              dashboard sells "what's already happening"; the hive-module
+              page sells "join the network". */}
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-center">
             <Link
               to="/dashboard"
               viewTransition
@@ -99,6 +97,19 @@ export default function HomePage() {
                   d="M14 5l7 7m0 0l-7 7m7-7H3"
                 />
               </svg>
+            </Link>
+            <Link
+              to="/hive-module"
+              viewTransition
+              className="hf-btn w-full sm:w-auto px-8 py-4 text-hf-md text-white"
+              style={{
+                background: 'color-mix(in oklch, white 8%, transparent)',
+                border: '1px solid color-mix(in oklch, white 50%, transparent)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+              }}
+            >
+              {t('home.getModule')}
             </Link>
           </div>
         </div>
@@ -270,5 +281,95 @@ function StepCard({ n, title, text, cta, extra }: StepCardProps) {
         <span className="sr-only">{cta.label}</span>
       </Link>
     </li>
+  );
+}
+
+interface StatsBundle {
+  modules: number;
+  online: number;
+  images: number;
+  hatches: number;
+}
+
+const ZERO_STATS: StatsBundle = { modules: 0, online: 0, images: 0, hatches: 0 };
+
+/**
+ * Live stats rendered chromeless over the hero image. Aggregated client-side
+ * from the same `/api/modules` payload the dashboard fetches — no new
+ * endpoint. The row never collapses: it starts at zeros, animates to real
+ * numbers when the fetch resolves, and falls back to zeros on fetch error.
+ * Showing zero is the design (pilot-phase honesty) — vanishing isn't.
+ */
+function HeroStats() {
+  const { t, lang } = useTranslation();
+  const [stats, setStats] = useState<StatsBundle>(ZERO_STATS);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getAllModules()
+      .then((modules: Module[]) => {
+        if (cancelled) return;
+        setStats({
+          modules: modules.length,
+          online: modules.filter((m) => m.status === 'online').length,
+          images: modules.reduce((s, m) => s + (m.imageCount ?? 0), 0),
+          hatches: modules.reduce((s, m) => s + (m.totalHatches ?? 0), 0),
+        });
+      })
+      .catch(() => {
+        // Stay at ZERO_STATS — never let the row disappear under the user.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fmt = (n: number) => n.toLocaleString(lang);
+
+  return (
+    <div
+      role="group"
+      aria-label={t('home.statsTitle')}
+      aria-live="polite"
+      className="flex items-stretch justify-center divide-x divide-white/20 mx-auto mb-10 max-w-3xl"
+    >
+      <HeroStatItem label={t('home.statsModulesLabel')} value={fmt(stats.modules)} />
+      <HeroStatItem label={t('home.statsOnlineLabel')} value={fmt(stats.online)} live />
+      <HeroStatItem label={t('home.statsImagesLabel')} value={fmt(stats.images)} />
+      <HeroStatItem label={t('home.statsHatchesLabel')} value={fmt(stats.hatches)} />
+    </div>
+  );
+}
+
+interface HeroStatItemProps {
+  label: string;
+  value: string;
+  /** Adds a pulsing dot to signal the metric is "now". */
+  live?: boolean;
+}
+
+function HeroStatItem({ label, value, live }: HeroStatItemProps) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 px-3 sm:px-6 first:pl-0 last:pr-0">
+      <span
+        className="text-white font-light tabular-nums leading-none drop-shadow-md transition-[font-size] duration-300"
+        style={{ fontSize: 'var(--fs-2xl)', letterSpacing: '-0.02em' }}
+      >
+        {value}
+      </span>
+      <span
+        className="flex items-center gap-1.5 text-white/70 uppercase leading-none whitespace-nowrap"
+        style={{ fontSize: 'var(--fs-xs)', letterSpacing: '0.18em' }}
+      >
+        {live && (
+          <span
+            className="w-1.5 h-1.5 rounded-full bg-hf-success animate-pulse"
+            aria-hidden="true"
+          />
+        )}
+        {label}
+      </span>
+    </div>
   );
 }

@@ -10,6 +10,8 @@ interface SiteHeaderProps {
   secondary?: { to: string; label: string };
   /** Visually-elevated header (used over content) vs. plain. */
   variant?: 'solid' | 'glass';
+  /** Use light text + toggle styling. For overlay on dark imagery. */
+  onDark?: boolean;
 }
 
 /**
@@ -23,8 +25,17 @@ export default function SiteHeader({
   right,
   secondary,
   variant = 'solid',
+  onDark = false,
 }: SiteHeaderProps) {
   const surface = variant === 'glass' ? 'hf-glass' : 'bg-hf-surface border-b border-hf-border';
+  const brandColor = onDark
+    ? 'text-white/95 hover:text-white'
+    : 'text-hf-honey-700 hover:text-hf-honey-800';
+  const titleColor = onDark ? 'text-white/95' : 'text-hf-fg';
+  const secondaryColor = onDark
+    ? 'text-white/80 hover:text-white'
+    : 'text-hf-fg-mute hover:text-hf-fg-soft';
+  const toggleOnDark = '!text-white/90 hover:!text-white hover:!bg-white/10';
 
   return (
     <header
@@ -34,7 +45,7 @@ export default function SiteHeader({
         <Link
           to="/"
           viewTransition
-          className="text-hf-md md:text-hf-lg font-bold text-hf-honey-700 hover:text-hf-honey-800 flex items-center gap-1.5 rounded-md"
+          className={`text-hf-md md:text-hf-lg font-bold ${brandColor} flex items-center gap-1.5 rounded-md`}
           aria-label="HighFive home"
         >
           <span className="text-xl md:text-2xl" aria-hidden="true">
@@ -44,10 +55,13 @@ export default function SiteHeader({
         </Link>
         {title && (
           <>
-            <span className="text-hf-border hidden md:inline" aria-hidden="true">
+            <span
+              className={`hidden md:inline ${onDark ? 'text-white/40' : 'text-hf-border'}`}
+              aria-hidden="true"
+            >
               |
             </span>
-            <h1 className="hidden md:block text-hf-md font-semibold text-hf-fg truncate">
+            <h1 className={`hidden md:block text-hf-md font-semibold ${titleColor} truncate`}>
               {title}
             </h1>
           </>
@@ -56,13 +70,13 @@ export default function SiteHeader({
 
       <div className="flex items-center gap-1.5 md:gap-2">
         {right}
-        <LanguageToggle />
-        <ThemeToggle />
+        <LanguageToggle className={onDark ? toggleOnDark : undefined} />
+        <ThemeToggle className={onDark ? toggleOnDark : undefined} />
         {secondary && (
           <Link
             to={secondary.to}
             viewTransition
-            className="hidden md:inline-block text-hf-sm text-hf-fg-mute hover:text-hf-fg-soft transition-colors px-2 py-1"
+            className={`hidden md:inline-block text-hf-sm ${secondaryColor} transition-colors px-2 py-1`}
           >
             {secondary.label}
           </Link>

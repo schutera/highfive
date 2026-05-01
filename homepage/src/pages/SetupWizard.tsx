@@ -8,69 +8,6 @@ import SiteHeader from '../components/SiteHeader';
 import { useSetupWizard } from '../components/setup/useSetupWizard';
 import { useTranslation } from '../i18n/LanguageContext';
 
-const STEP_ICONS = [
-  <svg
-    className="w-full h-full"
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-  >
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v12m-3-3l3 3 3-3" />
-  </svg>,
-  <svg
-    className="w-full h-full"
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M13 10V3L4 14h7v7l9-11h-7z"
-    />
-  </svg>,
-  <svg
-    className="w-full h-full"
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01"
-    />
-  </svg>,
-  <svg
-    className="w-full h-full"
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
-    />
-  </svg>,
-  <svg
-    className="w-full h-full"
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-  >
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-  </svg>,
-];
-
 export default function SetupWizard() {
   const { t } = useTranslation();
   const {
@@ -85,10 +22,13 @@ export default function SetupWizard() {
     startVerification,
   } = useSetupWizard();
 
+  // Skill rule: "At most 2 prominent elements per section. Counting decorations."
+  // The step badges no longer carry icons — numbers carry the load and the
+  // step content itself is the focus.
   const stepLabels = t('setup.stepLabels') as unknown as string[];
   const steps = (
     Array.isArray(stepLabels) ? stepLabels : ['Connect', 'Flash', 'WiFi', 'Configure', 'Verify']
-  ).map((label, i) => ({ label, icon: STEP_ICONS[i] }));
+  ).map((label) => ({ label }));
 
   const animationClass =
     state.direction === 'forward' ? 'animate-slide-in-right' : 'animate-slide-in-left';

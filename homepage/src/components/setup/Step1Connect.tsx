@@ -12,100 +12,75 @@ export default function Step1Connect({ onNext }: Step1ConnectProps) {
     return /Chrome|Edg/i.test(ua) && !/Firefox/i.test(ua);
   }, []);
 
+  // Skill rules applied:
+  // - "Default to left-aligned; center only with intent." Removed text-center.
+  // - "The fix is usually to remove three." Removed the 96px icon circle.
+  // - "Don't communicate via color alone — pair with icon, weight, or position."
+  //   Browser-check status keeps its icon but loses the heavy 2px tinted border;
+  //   it is now an inline status row, not a competing card.
+  // - Cable tip demoted from card chrome to a plain hint paragraph.
   return (
-    <section className="flex flex-col items-center text-center" aria-labelledby="step1-title">
-      <div
-        className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
-        style={{ background: 'var(--hf-honey-100)' }}
-        aria-hidden="true"
-      >
-        <svg
-          className="w-12 h-12 text-hf-honey-700"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.5}
-            d="M12 3v12m0 0l-3-3m3 3l3-3M5 20h14a1 1 0 001-1v-3a1 1 0 00-1-1h-3m-8 0H5a1 1 0 00-1 1v3a1 1 0 001 1"
-          />
-        </svg>
-      </div>
-
+    <section className="flex flex-col" aria-labelledby="step1-title">
       <h2
         id="step1-title"
-        className="font-bold text-hf-fg mb-3"
+        className="font-bold text-hf-fg mb-2"
         style={{ fontSize: 'var(--fs-xl)' }}
       >
         {t('step1.title')}
       </h2>
-      <p className="text-hf-fg-soft mb-8 max-w-md text-hf-base">{t('step1.text')}</p>
+      <p className="text-hf-fg-soft mb-6 text-hf-base">{t('step1.text')}</p>
 
-      {/* Browser check */}
-      <div
-        className={`rounded-hf-lg p-4 mb-6 w-full max-w-sm border-2`}
-        style={{
-          background: browserSupported
-            ? 'color-mix(in oklch, var(--hf-success) 8%, transparent)'
-            : 'color-mix(in oklch, var(--hf-warn) 12%, transparent)',
-          borderColor: browserSupported
-            ? 'color-mix(in oklch, var(--hf-success) 30%, transparent)'
-            : 'color-mix(in oklch, var(--hf-warn) 40%, transparent)',
-        }}
-        role={browserSupported ? 'status' : 'alert'}
-      >
-        <div className="flex items-center gap-3">
-          {browserSupported ? (
-            <svg
-              className="w-5 h-5 shrink-0"
-              style={{ color: 'var(--hf-success)' }}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
-          ) : (
-            <svg
-              className="w-5 h-5 shrink-0"
-              style={{ color: 'var(--hf-warn)' }}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 9v2m0 4h.01M12 3l9.09 16.91H2.91L12 3z"
-              />
-            </svg>
-          )}
-          <span className="text-hf-sm font-medium text-hf-fg">
-            {browserSupported ? t('step1.browserOk') : t('step1.browserFail')}
-          </span>
-        </div>
+      {/* Browser check — inline row, icon + weight, no tinted card */}
+      <div className="flex items-center gap-2 mb-3" role={browserSupported ? 'status' : 'alert'}>
+        {browserSupported ? (
+          <svg
+            className="w-4 h-4 shrink-0"
+            style={{ color: 'var(--hf-success)' }}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+        ) : (
+          <svg
+            className="w-4 h-4 shrink-0"
+            style={{ color: 'var(--hf-warn)' }}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 9v2m0 4h.01M12 3l9.09 16.91H2.91L12 3z"
+            />
+          </svg>
+        )}
+        <span className="text-hf-sm font-medium text-hf-fg">
+          {browserSupported ? t('step1.browserOk') : t('step1.browserFail')}
+        </span>
       </div>
 
-      {/* Cable tip */}
-      <aside className="hf-card p-4 mb-8 w-full max-w-sm text-left">
-        <p className="text-hf-xs text-hf-fg-soft">
-          <strong className="text-hf-fg">{t('step1.tip')}</strong> {t('step1.cableTip')}
-        </p>
-      </aside>
+      {/* Cable tip — chromeless tertiary text */}
+      <p className="text-hf-xs text-hf-fg-mute mb-8">
+        <span className="font-semibold text-hf-fg-soft">{t('step1.tip')}</span>{' '}
+        {t('step1.cableTip')}
+      </p>
 
-      <button onClick={onNext} className="hf-btn hf-btn-primary w-full md:w-auto px-8 py-3">
-        {t('common.next')}
-      </button>
+      <div className="flex justify-end">
+        <button onClick={onNext} className="hf-btn hf-btn-primary w-full md:w-auto px-8 py-3">
+          {t('common.next')}
+        </button>
+      </div>
     </section>
   );
 }

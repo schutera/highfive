@@ -42,6 +42,13 @@ const translations = {
       step3Community:
         '\u2728 Join a community of citizen scientists making a real difference. Perfect for nature enthusiasts, researchers, policymakers, educators, agriculture professionals, and anyone interested tapping into biomarker data.',
       step3Cta: 'Explore Dashboard',
+      getModule: 'Get a Hive Module',
+      statsTitle: 'Live impact',
+      statsModulesLabel: 'Modules',
+      statsOnlineLabel: 'Online now',
+      statsImagesLabel: 'Images',
+      statsHatchesLabel: 'Bees hatched',
+      statsCaption: 'Updated live from active modules in the field.',
       footer: 'Built with \uD83D\uDC9B for wild bees everywhere',
     },
 
@@ -303,7 +310,8 @@ const translations = {
       wifiPassword: 'WiFi Password',
       wifiPasswordPlaceholder: 'Your WiFi password',
       saveBtn: 'Save Configuration',
-      sending: 'Configuring your module...',
+      sending: 'Sending configuration to your module...',
+      sendingText: 'This usually takes a few seconds. Hold tight.',
       error: 'Could not reach the module.',
       errorHint: 'Make sure you are connected to the HiveHive-Access-Point WiFi network.',
       reconnectTitle: 'Configuration Saved!',
@@ -324,7 +332,7 @@ const translations = {
       viewDashboard: 'View on Dashboard',
       backendUnreachable: 'Backend Server Not Reachable',
       backendUnreachableText:
-        'The server is not responding. Make sure it is running before continuing.',
+        'The server is not responding. Make sure your device is connected to your home WiFi (not HiveHive-Access-Point) and the server is running.',
       retryHealth: 'Check Again',
       timeoutTitle: 'Module Not Detected Yet',
       timeoutText: "We couldn't find your module on the server. Here are a few things to check:",
@@ -401,6 +409,13 @@ const translations = {
       step3Community:
         '\u2728 Werde Teil einer Gemeinschaft von B\u00FCrgerwissenschaftlern, die einen echten Unterschied machen. Perfekt f\u00FCr Naturbegeisterte, Forschende, Entscheidungstr\u00E4ger, P\u00E4dagogen, Landwirtschaftsprofis und alle, die an Biomarker-Daten interessiert sind.',
       step3Cta: 'Dashboard erkunden',
+      getModule: 'Hive-Modul holen',
+      statsTitle: 'Live-Wirkung',
+      statsModulesLabel: 'Module',
+      statsOnlineLabel: 'Jetzt online',
+      statsImagesLabel: 'Bilder',
+      statsHatchesLabel: 'Geschl\u00FCpfte Bienen',
+      statsCaption: 'Live aus aktiven Modulen im Feld aktualisiert.',
       footer: 'Gemacht mit \uD83D\uDC9B f\u00FCr Wildbienen \u00FCberall',
     },
 
@@ -665,7 +680,8 @@ const translations = {
       wifiPassword: 'WLAN-Passwort',
       wifiPasswordPlaceholder: 'Dein WLAN-Passwort',
       saveBtn: 'Konfiguration speichern',
-      sending: 'Modul wird konfiguriert...',
+      sending: 'Konfiguration wird an dein Modul gesendet...',
+      sendingText: 'Das dauert normalerweise nur ein paar Sekunden.',
       error: 'Modul nicht erreichbar.',
       errorHint: 'Stelle sicher, dass du mit dem HiveHive-Access-Point WLAN verbunden bist.',
       reconnectTitle: 'Konfiguration gespeichert!',
@@ -686,7 +702,7 @@ const translations = {
       viewDashboard: 'Im Dashboard anzeigen',
       backendUnreachable: 'Backend-Server nicht erreichbar',
       backendUnreachableText:
-        'Der Server antwortet nicht. Stelle sicher, dass er l\u00E4uft, bevor du fortf\u00E4hrst.',
+        'Der Server antwortet nicht. Stelle sicher, dass dein Ger\u00E4t mit deinem Heim-WLAN verbunden ist (nicht mit dem HiveHive-Access-Point) und der Server l\u00E4uft.',
       retryHealth: 'Erneut pr\u00FCfen',
       timeoutTitle: 'Modul noch nicht erkannt',
       timeoutText:

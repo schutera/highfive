@@ -281,10 +281,24 @@ export function useSetupWizard() {
 
       try {
         const modules = await api.getAllModules();
+        // 5-minute recency fallback: covers the case where the user reloaded
+        // the wizard *after* the ESP had already phoned home — the snapshot
+        // then captured the module in its updated state, so the snapshot
+        // comparison alone would miss it. Anything updated this recently is
+        // almost certainly "the module the user is currently setting up."
+        const RECENT_MS = 5 * 60 * 1000;
+        const now = Date.now();
         const detectedModule = modules.find((m: Module) => {
           const prevTimestamp = knownModuleSnapshotRef.current.get(m.id);
-          // New module (ID not in snapshot) OR re-registered (updatedAt changed)
-          return prevTimestamp === undefined || m.updatedAt !== prevTimestamp;
+          // New ID (not in snapshot) OR re-registered (updatedAt changed)
+          if (prevTimestamp === undefined) return true;
+          if (m.updatedAt !== prevTimestamp) return true;
+          // Recency fallback for wizard-reload scenarios
+          if (m.updatedAt) {
+            const updatedMs = Date.parse(m.updatedAt);
+            if (!isNaN(updatedMs) && now - updatedMs < RECENT_MS) return true;
+          }
+          return false;
         });
         if (detectedModule) {
           console.log('[Step5] New or updated module detected:', detectedModule);

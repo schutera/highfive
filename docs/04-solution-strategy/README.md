@@ -12,10 +12,10 @@ A pipeline split into edge → ingestion → persistence → read aggregation �
 
 ```mermaid
 flowchart LR
-    ESP["ESP32-CAM<br/>(capture)"] --> IMG["image-service<br/>(Flask, ingest)"]
-    IMG --> DDB["duckdb-service<br/>(Flask + DuckDB)"]
-    DDB --> BE["backend<br/>(Express)"]
-    BE --> HP["homepage<br/>(React)"]
+    ESP["ESP32-CAM<br/>(capture)"] --> IMG["image-service<br/>(Flask, ingest)<br/>:8000 → :4444"]
+    IMG --> DDB["duckdb-service<br/>(Flask + DuckDB)<br/>:8002 → :8000"]
+    DDB --> BE["backend<br/>(Express)<br/>:3002"]
+    BE --> HP["homepage<br/>(React)<br/>:5173"]
 ```
 
 Five components, each owning one responsibility, each replaceable

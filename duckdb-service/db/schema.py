@@ -48,6 +48,20 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_progress_nest ON daily_progress(nest_id);
             CREATE INDEX IF NOT EXISTS idx_progress_date ON daily_progress(date);
             CREATE INDEX IF NOT EXISTS idx_image_module ON image_uploads(module_id);
+
+            CREATE SEQUENCE IF NOT EXISTS module_heartbeats_seq START 1;
+            CREATE TABLE IF NOT EXISTS module_heartbeats (
+                id INTEGER PRIMARY KEY DEFAULT nextval('module_heartbeats_seq'),
+                module_id VARCHAR(20) NOT NULL,
+                received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                battery INTEGER,
+                rssi INTEGER,
+                uptime_ms BIGINT,
+                free_heap INTEGER,
+                fw_version VARCHAR(40)
+            );
+            CREATE INDEX IF NOT EXISTS idx_heartbeat_module ON module_heartbeats(module_id);
+            CREATE INDEX IF NOT EXISTS idx_heartbeat_received ON module_heartbeats(received_at);
             """
         )
 

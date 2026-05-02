@@ -11,5 +11,6 @@ typedef struct {
 } url_t;
 
 int postImage(esp_config_t *esp_config);
+int sendHeartbeat(esp_config_t *esp_config);
 
 #endif

@@ -1,5 +1,14 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
+export interface HeartbeatSnapshot {
+  receivedAt: string;
+  battery: number | null;
+  rssi: number | null;
+  uptimeMs: number | null;
+  freeHeap: number | null;
+  fwVersion: string | null;
+}
+
 export interface Module {
   id: string;
   name: string;
@@ -15,6 +24,8 @@ export interface Module {
   imageCount: number;
   email: string | null;
   updatedAt?: string;
+  lastSeenAt?: string | null;
+  latestHeartbeat?: HeartbeatSnapshot | null;
 }
 
 export interface NestData {

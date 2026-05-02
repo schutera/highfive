@@ -218,3 +218,50 @@ int postImage(esp_config_t *esp_config) {
 
   return code;
 }
+
+
+// Hourly liveness ping — small POST to duckdb-service /heartbeat with
+// battery / rssi / uptime / free-heap. Fails quietly; never restarts.
+// Wire format mirrors /new_module's form-encoded body so the backend
+// can parse with the same conventions.
+#ifndef FW_VERSION
+#define FW_VERSION "honeybee"
+#endif
+int sendHeartbeat(esp_config_t *esp_config) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[heartbeat] WiFi not connected — skipping");
+    return -2;
+  }
+
+  url_t url = splitUrl(esp_config->INIT_URL);
+  String macStr = String(esp_config->esp_ID);  // decimal — matches /new_module
+
+  WiFiClient hbClient;
+  hbClient.setTimeout(5000);
+  if (!hbClient.connect(url.host.c_str(), url.port)) {
+    Serial.println("[heartbeat] connect failed");
+    return -2;
+  }
+
+  String body = String("mac=") + macStr
+              + "&battery=" + String(esp_config->battery_level)
+              + "&rssi=" + String(WiFi.RSSI())
+              + "&uptime_ms=" + String(millis())
+              + "&free_heap=" + String(ESP.getFreeHeap())
+              + "&fw_version=" + String(FW_VERSION);
+
+  hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
+               + "Host: " + url.host + ":" + String(url.port) + "\r\n"
+               + "Content-Type: application/x-www-form-urlencoded\r\n"
+               + "Content-Length: " + String(body.length()) + "\r\n"
+               + "Connection: close\r\n\r\n"
+               + body);
+  hbClient.flush();
+
+  // Read first response line for log visibility, then close.
+  String status = hbClient.readStringUntil('\n');
+  hbClient.stop();
+  Serial.print("[heartbeat] ");
+  Serial.println(status);
+  return 0;
+}

@@ -4,15 +4,19 @@
 #include "client.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
+#include <Preferences.h>
 
 
 #define CONFIG_BUTTON 0
+#define HEARTBEAT_INTERVAL_MS (60UL * 60UL * 1000UL)  // 1 hour
+#define DAILY_REBOOT_MS       (24UL * 3600UL * 1000UL)
 
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
 int counter = 0;
 bool firstCaptureDone = false;
 int lastCaptureDay = -1;
+unsigned long lastHeartbeatMs = 0;
 
 
 
@@ -129,6 +133,21 @@ void setup() {
     }
   }
 
+  // If this boot was triggered by our 24h daily-reboot path, skip the
+  // first-capture-on-boot. Hard resets / crashes / fresh flashes still
+  // get a boot image (useful smoke test); only the routine daily wake
+  // is silent so we don't double the daily image cost.
+  {
+    Preferences bootPrefs;
+    bootPrefs.begin("boot", false);
+    if (bootPrefs.getBool("daily_reboot", false)) {
+      Serial.println("[BOOT] daily-reboot wake — skipping first capture");
+      firstCaptureDone = true;
+      bootPrefs.putBool("daily_reboot", false);
+    }
+    bootPrefs.end();
+  }
+
   Serial.println("[ESP] SETUP COMPLETE");
 
   Serial.println("");
@@ -222,11 +241,24 @@ void loop() {
 
   // Daily reboot safety net: prevents long-running drift (lwIP state, NVS
   // wear oddities, slow heap fragmentation). Triggers once at 24h uptime
-  // and never again until the next boot resets millis().
-  if (millis() > 24UL * 3600UL * 1000UL) {
+  // and never again until the next boot resets millis(). Sets an NVS flag
+  // so setup() on the next boot can skip first-capture-on-boot — saves
+  // one image/day.
+  if (millis() > DAILY_REBOOT_MS) {
     Serial.println("[REBOOT] daily reboot");
+    Preferences bootPrefs;
+    bootPrefs.begin("boot", false);
+    bootPrefs.putBool("daily_reboot", true);
+    bootPrefs.end();
     delay(500);
     ESP.restart();
+  }
+
+  // Hourly heartbeat so the dashboard knows the module is alive between
+  // images. Tiny payload, no camera work, fails-quiet — never restarts.
+  if (millis() - lastHeartbeatMs > HEARTBEAT_INTERVAL_MS || lastHeartbeatMs == 0) {
+    sendHeartbeat(&esp_config);
+    lastHeartbeatMs = millis();
   }
 
   // First capture immediately after boot

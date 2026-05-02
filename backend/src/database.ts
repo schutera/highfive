@@ -1,5 +1,18 @@
-import { Module, ModuleDetail, NestData, DailyProgress } from './types';
+import { Module, ModuleDetail, NestData, DailyProgress, HeartbeatSnapshot } from './types';
 import { DUCKDB_URL } from './duckdbClient';
+
+interface ApiHeartbeatSummaryEntry {
+  last_seen: string | null;
+  battery: number | null;
+  rssi: number | null;
+  uptime_ms: number | null;
+  free_heap: number | null;
+  fw_version: string | null;
+}
+
+interface ApiHeartbeatSummaryResponse {
+  summary: Record<string, ApiHeartbeatSummaryEntry>;
+}
 
 interface ApiModule {
   id: string;
@@ -55,10 +68,11 @@ export class ModuleCache {
   }
 
   async initializeData(): Promise<void> {
-    const [modulesResult, nestsResult, progressResult] = await Promise.allSettled([
+    const [modulesResult, nestsResult, progressResult, heartbeatsResult] = await Promise.allSettled([
       fetch(`${DUCKDB_URL}/modules`).then(r => r.json()),
       fetch(`${DUCKDB_URL}/nests`).then(r => r.json()),
       fetch(`${DUCKDB_URL}/progress`).then(r => r.json()),
+      fetch(`${DUCKDB_URL}/heartbeats_summary`).then(r => r.json()),
     ]);
 
     if (modulesResult.status === 'rejected') {
@@ -70,10 +84,14 @@ export class ModuleCache {
     if (progressResult.status === 'rejected') {
       console.warn('⚠️ Failed to fetch progress:', progressResult.reason);
     }
+    if (heartbeatsResult.status === 'rejected') {
+      console.warn('⚠️ Failed to fetch heartbeats:', heartbeatsResult.reason);
+    }
 
     const modulesData = (modulesResult.status === 'fulfilled' ? modulesResult.value : { modules: [] }) as ApiModuleResponse;
     const nestsData = (nestsResult.status === 'fulfilled' ? nestsResult.value : { nests: [] }) as ApiNestResponse;
     const progressData = (progressResult.status === 'fulfilled' ? progressResult.value : { progress: [] }) as ApiDailyProgressResponse;
+    const heartbeatsData = (heartbeatsResult.status === 'fulfilled' ? heartbeatsResult.value : { summary: {} }) as ApiHeartbeatSummaryResponse;
 
     this.modules.clear();
 
@@ -118,11 +136,33 @@ export class ModuleCache {
     });
 
     // ---- 3) Module bauen ----
+    const heartbeatSummary = heartbeatsData.summary || {};
     modulesData.modules.forEach((m: any) => {
+      const hbEntry = heartbeatSummary[m.id];
+      const latestHeartbeat: HeartbeatSnapshot | null = hbEntry?.last_seen
+        ? {
+            receivedAt: hbEntry.last_seen,
+            battery: hbEntry.battery,
+            rssi: hbEntry.rssi,
+            uptimeMs: hbEntry.uptime_ms,
+            freeHeap: hbEntry.free_heap,
+            fwVersion: hbEntry.fw_version,
+          }
+        : null;
+
+      // lastSeenAt = freshest of: image upload, registration, heartbeat
+      const candidates: number[] = [];
+      if (m.last_image_at) candidates.push(new Date(m.last_image_at).getTime());
+      if (m.updated_at) candidates.push(new Date(m.updated_at).getTime());
+      if (latestHeartbeat?.receivedAt) candidates.push(new Date(latestHeartbeat.receivedAt).getTime());
+      const lastSeenAt = candidates.length > 0
+        ? new Date(Math.max(...candidates)).toISOString()
+        : null;
+
+      // A module is online if any liveness signal arrived in the last 2h
       const now = new Date();
-      // A module is online if it uploaded an image in the last 24 hours
-      const isOnline = m.last_image_at
-        ? now.getTime() - new Date(m.last_image_at).getTime() <= 24 * 60 * 60 * 1000
+      const isOnline = lastSeenAt
+        ? now.getTime() - new Date(lastSeenAt).getTime() <= 2 * 60 * 60 * 1000
         : false;
 
       // first_online is a DATE column (no time), pass the date portion only
@@ -145,6 +185,8 @@ export class ModuleCache {
         imageCount: m.real_image_count ?? m.image_count ?? 0,
         email: m.email ?? null,
         updatedAt: m.updated_at ?? undefined,
+        lastSeenAt,
+        latestHeartbeat,
         nests: nestsByModule.get(m.id) || [],
       };
 
@@ -177,6 +219,8 @@ export class ModuleCache {
         imageCount: m.imageCount,
         email: m.email,
         updatedAt: m.updatedAt,
+        lastSeenAt: m.lastSeenAt,
+        latestHeartbeat: m.latestHeartbeat,
       };
     });
   }

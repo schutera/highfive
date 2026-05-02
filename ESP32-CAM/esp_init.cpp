@@ -230,25 +230,34 @@ void setupWifiConnection(wifi_configuration_t *wifi_config) {
 /* ---------------------------------------- */
 /* ---------- MODULE NAME GENERATOR ---------- */
 /* ---------------------------------------- */
+// 32 × 32 × 32 = 32,768 unique combinations.
+// Animals are lowercase German names with umlauts substituted (ae/ue/oe)
+// so they stay ASCII-safe across the URL/JSON/filename pipeline.
 static const char* ADJECTIVES[] = {
-  "swift", "bold", "calm", "bright", "gentle", "keen", "noble", "proud",
-  "quiet", "warm", "wild", "wise", "brave", "eager", "lively", "merry"
+  "swift", "brave", "quiet", "bright", "gentle", "proud", "calm", "eager",
+  "fierce", "glad", "happy", "jolly", "kind", "lively", "merry", "noble",
+  "patient", "pure", "quick", "ready", "smart", "strong", "tame", "vivid",
+  "wise", "witty", "young", "loyal", "sleek", "spry", "mild", "keen"
 };
 static const char* FRUITS[] = {
-  "mango", "peach", "apple", "berry", "cherry", "lemon", "melon", "olive",
-  "plum", "grape", "fig", "lime", "pear", "kiwi", "guava", "date"
+  "plum", "grape", "fig", "lime", "pear", "kiwi", "guava", "date",
+  "apple", "mango", "peach", "lemon", "melon", "berry", "cherry", "papaya",
+  "lychee", "quince", "pomelo", "raisin", "banana", "currant", "olive", "coconut",
+  "citron", "ackee", "apricot", "mulberry", "persimmon", "nectarine", "raspberry", "blackberry"
 };
 static const char* ANIMALS[] = {
-  "fox", "owl", "bear", "deer", "hawk", "lynx", "wolf", "hare",
-  "wren", "dove", "otter", "finch", "crane", "robin", "badger", "raven"
+  "wolf", "fuchs", "baer", "luchs", "dachs", "iltis", "marder", "otter",
+  "biber", "hase", "eule", "uhu", "falke", "milan", "adler", "reh",
+  "hirsch", "elch", "specht", "kraehe", "amsel", "spatz", "meise", "star",
+  "schwan", "ente", "gans", "reiher", "storch", "kuckuck", "forelle", "hecht"
 };
 
 String generateModuleName() {
   uint64_t mac = ESP.getEfuseMac();
   uint8_t* bytes = (uint8_t*)&mac;
-  const char* adj = ADJECTIVES[bytes[0] % 16];
-  const char* fruit = FRUITS[bytes[1] % 16];
-  const char* animal = ANIMALS[bytes[2] % 16];
+  const char* adj = ADJECTIVES[bytes[0] % 32];
+  const char* fruit = FRUITS[bytes[1] % 32];
+  const char* animal = ANIMALS[bytes[2] % 32];
   return String(adj) + "-" + String(fruit) + "-" + String(animal);
 }
 

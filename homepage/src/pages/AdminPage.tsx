@@ -148,6 +148,32 @@ export default function AdminPage() {
     }
   };
 
+  // Relative time + color for liveness signals (lastSeenAt / heartbeat).
+  // Green <2h, amber <24h, red older / never.
+  const formatRelative = (iso: string | null | undefined): { text: string; color: string } => {
+    if (!iso) return { text: '—', color: 'text-gray-300' };
+    const ageMs = Date.now() - new Date(iso).getTime();
+    if (isNaN(ageMs)) return { text: '—', color: 'text-gray-300' };
+    const sec = Math.floor(ageMs / 1000);
+    let text: string;
+    if (sec < 60) text = `${sec}s ago`;
+    else if (sec < 3600) text = `${Math.floor(sec / 60)}m ago`;
+    else if (sec < 86400) text = `${Math.floor(sec / 3600)}h ago`;
+    else text = `${Math.floor(sec / 86400)}d ago`;
+    const color = ageMs < 2 * 3600 * 1000 ? 'text-green-700'
+                : ageMs < 24 * 3600 * 1000 ? 'text-amber-600'
+                : 'text-red-600';
+    return { text, color };
+  };
+
+  const formatUptime = (ms: number | null | undefined): string => {
+    if (ms == null) return '—';
+    const sec = Math.floor(ms / 1000);
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+    return `${Math.floor(sec / 86400)}d ${Math.floor((sec % 86400) / 3600)}h`;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -192,6 +218,8 @@ export default function AdminPage() {
                     <th className="px-4 py-3">Name</th>
                     <th className="px-4 py-3">ID</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Last Seen</th>
+                    <th className="px-4 py-3">Telemetry</th>
                     <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Location</th>
                     <th className="px-4 py-3">Images</th>
@@ -214,6 +242,21 @@ export default function AdminPage() {
                           <span className={`w-1.5 h-1.5 rounded-full ${m.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}`} />
                           {m.status}
                         </span>
+                      </td>
+                      <td className={`px-4 py-3 text-xs ${formatRelative(m.lastSeenAt).color}`} title={m.lastSeenAt || 'never seen'}>
+                        {formatRelative(m.lastSeenAt).text}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-600">
+                        {m.latestHeartbeat ? (
+                          <div className="flex flex-col gap-0.5 leading-tight">
+                            <span>🔋 {m.latestHeartbeat.battery ?? '—'}% &nbsp; 📶 {m.latestHeartbeat.rssi ?? '—'} dBm</span>
+                            <span className="text-gray-400 font-mono text-[10px]">
+                              {m.latestHeartbeat.fwVersion ?? 'unknown'} · uptime {formatUptime(m.latestHeartbeat.uptimeMs)} · heap {m.latestHeartbeat.freeHeap ? Math.floor(m.latestHeartbeat.freeHeap / 1024) + ' kB' : '—'}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-300">no heartbeat yet</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-600 text-xs">{m.email || <span className="text-gray-300">&mdash;</span>}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs font-mono">{m.location.lat.toFixed(4)}, {m.location.lng.toFixed(4)}</td>

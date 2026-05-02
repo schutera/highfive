@@ -5,42 +5,28 @@ dashboard. This is HiveHive's primary write flow.
 
 ## Sequence
 
-```
-ESP32-CAM         image-service           duckdb-service           browser
-    │                  │                        │                     │
-    │ capture          │                        │                     │
-    │ build telemetry  │                        │                     │
-    │                  │                        │                     │
-    │─ POST /upload ──▶│                        │                     │
-    │  (multipart:     │                        │                     │
-    │   image, mac,    │                        │                     │
-    │   battery, logs) │                        │                     │
-    │                  │ save image to volume   │                     │
-    │                  │ write <img>.log.json   │                     │
-    │                  │ stub_classify()        │                     │
-    │                  │                        │                     │
-    │                  │─ POST /add_progress_for_module ─────────────▶│
-    │                  │                        │ insert/replace row  │
-    │                  │                        │ in daily_progress   │
-    │                  │                        │                     │
-    │                  │─ POST /modules/<mac>/heartbeat ─────────────▶│
-    │                  │                        │ update battery,     │
-    │                  │                        │ image_count,        │
-    │                  │                        │ first_online        │
-    │                  │                        │                     │
-    │                  │─ GET /modules/<mac>/progress_count ─────────▶│
-    │                  │                        │ (used to detect     │
-    │                  │                        │ first-upload event) │
-    │                  │                        │                     │
-    │◀─ 200 OK ────────│                        │                     │
-    │                  │                        │                     │
-    │                  │              (later)   │                     │
-    │                  │                        │◀── GET /modules ────│
-    │                  │                        │     /nests          │
-    │                  │                        │     /progress       │
-    │                  │                        │                     │
-    │                  │                        │── normalised DTOs ─▶│
-    │                  │                        │                     │ render
+```mermaid
+sequenceDiagram
+    participant ESP as ESP32-CAM
+    participant IMG as image-service
+    participant DDB as duckdb-service
+    participant BR as browser
+
+    ESP->>ESP: capture, build telemetry
+    ESP->>IMG: POST /upload<br/>(multipart: image, mac, battery, logs)
+    IMG->>IMG: save image + write &lt;img&gt;.log.json
+    IMG->>IMG: stub_classify()
+    IMG->>DDB: POST /add_progress_for_module
+    DDB->>DDB: insert/replace daily_progress row
+    IMG->>DDB: POST /modules/&lt;mac&gt;/heartbeat
+    DDB->>DDB: update battery, image_count, first_online
+    IMG->>DDB: GET /modules/&lt;mac&gt;/progress_count
+    DDB-->>IMG: count (used for first-upload detection)
+    IMG-->>ESP: 200 OK
+
+    Note over BR,DDB: later, on dashboard poll
+    BR->>DDB: GET /modules /nests /progress<br/>(via backend, normalised)
+    DDB-->>BR: normalised DTOs → render
 ```
 
 ## Step-by-step

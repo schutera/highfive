@@ -10,9 +10,12 @@ why behind individual choices, see
 
 A pipeline split into edge → ingestion → persistence → read aggregation → UI:
 
-```
-ESP32-CAM   →   image-service   →   duckdb-service   →   backend   →   homepage
- (capture)      (Flask, ingest)     (Flask + DuckDB)     (Express)    (React)
+```mermaid
+flowchart LR
+    ESP["ESP32-CAM<br/>(capture)"] --> IMG["image-service<br/>(Flask, ingest)"]
+    IMG --> DDB["duckdb-service<br/>(Flask + DuckDB)"]
+    DDB --> BE["backend<br/>(Express)"]
+    BE --> HP["homepage<br/>(React)"]
 ```
 
 Five components, each owning one responsibility, each replaceable

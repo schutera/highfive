@@ -21,54 +21,22 @@ Internal calls use Docker service names (e.g. `http://duckdb-service:8000`),
 
 ## Topology
 
+```mermaid
+flowchart TD
+    ESP["ESP32-CAM<br/>(field, firmware v1.x)<br/>capture every N min"]
+    IMG["image-service (Flask)<br/>:8000 → :4444"]
+    DDB["duckdb-service (Flask)<br/>:8002 → :8000<br/>owns app.duckdb"]
+    BE["backend (Express + TS)<br/>:3002"]
+    HP["homepage (React + Vite)<br/>:5173"]
+
+    ESP -->|"POST /upload<br/>(multipart: image, mac, battery, logs)"| IMG
+    IMG -->|"POST /add_progress_for_module<br/>POST /modules/&lt;mac&gt;/heartbeat<br/>GET /modules/&lt;mac&gt;/progress_count"| DDB
+    BE -->|"GET /modules /nests /progress"| DDB
+    HP -->|"fetch (X-API-Key)"| BE
 ```
-                         field
-            ┌──────────────────────────────┐
-            │   ESP32-CAM (firmware v1.x)  │  capture every N min
-            └──────────────┬───────────────┘
-                           │  POST /upload   (multipart: image, mac, battery, logs)
-                           ▼
-            ┌──────────────────────────────┐
-            │   image-service  (Flask)     │  port 8000  (container :4444)
-            │   /upload, /modules/<mac>/   │
-            │   logs, /health              │
-            │                              │
-            │   • saves image to volume    │
-            │   • writes <img>.log.json    │
-            │   • runs stub classifier     │
-            │   • POSTs progress to DB svc │
-            │   • POSTs heartbeat to DB svc│
-            └────┬─────────────────────────┘
-                 │  POST /add_progress_for_module
-                 │  POST /modules/<mac>/heartbeat
-                 │  GET  /modules/<mac>/progress_count
-                 ▼
-            ┌──────────────────────────────┐
-            │   duckdb-service  (Flask)    │  port 8002  (container :8000)
-            │   owns app.duckdb            │
-            │   /modules, /nests,          │
-            │   /progress, /new_module,    │
-            │   /modules/<id>/heartbeat,   │
-            │   /modules/<id>/             │
-            │     progress_count, /health  │
-            └────────────────┬─────────────┘
-                             │  GET /modules /nests /progress
-                             ▼
-            ┌──────────────────────────────┐
-            │   backend  (Express + TS)    │  port 3002
-            │   /api/health (public)       │
-            │   /api/modules*              │
-            │   /api/modules/:id/logs      │
-            │     (admin-gated proxy)      │
-            └────────────────┬─────────────┘
-                             │  fetch (X-API-Key)
-                             ▼
-            ┌──────────────────────────────┐
-            │   homepage  (React + Vite)   │  port 5173
-            │   /, /dashboard, /setup,     │
-            │   /hive-module, /assembly    │
-            └──────────────────────────────┘
-```
+
+Per-service endpoints and behaviour live in the detail files linked
+above and in [api-reference.md](../api-reference.md).
 
 ## Where things live
 

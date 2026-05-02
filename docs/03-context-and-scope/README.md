@@ -3,27 +3,20 @@
 This chapter shows HiveHive's boundary: the systems it talks to, the
 people who use it, and the data that crosses each interface.
 
-## System context (text diagram)
+## System context
 
-```
-       ┌────────────────┐                ┌──────────────────┐
-       │  Field deployer│                │   Researcher     │
-       │  (hobbyist)    │                │   (biologist)    │
-       └───────┬────────┘                └─────────┬────────┘
-               │                                   │
-               │    HTTP                           │  HTTP
-               ▼                                   ▼
-       ┌──────────────────────────────────────────────────┐
-       │                   HiveHive                       │
-       │  React + Express + 2× Flask + DuckDB             │
-       │  All in one Docker Compose stack                 │
-       └────────┬───────────────────────────────────┬─────┘
-                │ HTTP (multipart upload)            │ HTTP (optional)
-                ▼                                    ▼
-       ┌────────────────────┐              ┌──────────────────┐
-       │  ESP32-CAM module  │              │ Google Maps JS   │
-       │  (n in the field)  │              │ (map view only)  │
-       └────────────────────┘              └──────────────────┘
+```mermaid
+flowchart TD
+    Deployer["Field deployer<br/>(hobbyist)"]
+    Researcher["Researcher<br/>(biologist)"]
+    HiveHive["HiveHive<br/>React + Express + 2× Flask + DuckDB<br/>(Docker Compose stack)"]
+    ESP["ESP32-CAM module<br/>(n in the field)"]
+    Maps["Google Maps JS<br/>(map view only)"]
+
+    Deployer -->|HTTP| HiveHive
+    Researcher -->|HTTP| HiveHive
+    ESP -->|HTTP multipart upload| HiveHive
+    HiveHive -.->|optional, browser-side| Maps
 ```
 
 ## Actors and external systems

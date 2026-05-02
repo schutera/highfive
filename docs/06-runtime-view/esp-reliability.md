@@ -89,18 +89,20 @@ No heap allocation per entry, no dynamic growth — safe to call from anywhere i
 
 ## Data flow
 
-```
-ESP32-CAM ─── multipart/form-data (mac, battery, logs, image) ──▶  image-service (/upload)
-                                                                         │
-                                                                         ▼
-                                                                   images/<file>.jpg
-                                                                   images/<file>.jpg.log.json
-                                                                         ▲
-                                             GET /modules/<mac>/logs  ◀──┘
-                                                     ▲
-                              GET /api/modules/:id/logs (proxies, requires X-API-Key)
-                                                     ▲
-                             HomePage → ModulePanel "Telemetry" collapsible section
+```mermaid
+flowchart TD
+    ESP["ESP32-CAM"]
+    IMG["image-service<br/>/upload"]
+    Files["images/&lt;file&gt;.jpg<br/>images/&lt;file&gt;.jpg.log.json"]
+    LogsAPI["image-service<br/>GET /modules/&lt;mac&gt;/logs"]
+    BE["backend<br/>GET /api/modules/:id/logs<br/>(proxies, X-API-Key)"]
+    HP["homepage<br/>ModulePanel<br/>'Telemetry' section"]
+
+    ESP -->|"multipart: mac, battery, logs, image"| IMG
+    IMG --> Files
+    Files --> LogsAPI
+    LogsAPI --> BE
+    BE --> HP
 ```
 
 1. ESP uploads an image. The `logs` part is parsed and written to `{image_path}.log.json`.

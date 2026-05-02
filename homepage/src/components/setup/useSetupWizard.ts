@@ -136,13 +136,27 @@ export function useSetupWizard() {
   };
 
   const loadFirmware = async () => {
-    // Skip GitHub Releases. The locally-served /firmware.bin is the canonical
-    // build for this deploy (latest GitHub release predates the auto-name and
-    // form-submit features and would regress the wizard).
+    // The locally-served /firmware.bin is the canonical build for this deploy
+    // (we deliberately don't pull from GitHub Releases; the latest one there
+    // predates auto-name and form-submit and would regress the wizard).
+    // The sidecar /firmware.json (written by ESP32-CAM/build.sh) carries the
+    // version label — releases are named after bee species (bumblebee, ...).
+    let version = 'Local';
+    try {
+      const r = await fetch('/firmware.json', { cache: 'no-cache' });
+      if (r.ok) {
+        const m = await r.json();
+        if (m && typeof m.version === 'string' && m.version.length > 0) {
+          version = m.version;
+        }
+      }
+    } catch {
+      // manifest missing → fall back to 'Local'
+    }
     setState(s => ({
       ...s,
       firmwareUrl: '/firmware.bin',
-      firmwareVersion: 'Local',
+      firmwareVersion: version,
       firmwareLoading: false,
     }));
   };

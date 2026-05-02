@@ -209,8 +209,11 @@ export default function HiveModule() {
                 />
               </tbody>
               <tfoot>
+                {/* Always-light honey background: pin text to honey-900
+                    (constant) instead of text-hf-fg (theme-aware) so the
+                    cell stays readable in dark mode. */}
                 <tr style={{ background: 'var(--hf-honey-50)' }}>
-                  <td className="px-4 md:px-6 py-3 font-bold text-hf-fg" colSpan={2}>
+                  <td className="px-4 md:px-6 py-3 font-bold text-hf-honey-900" colSpan={2}>
                     {t('hiveModule.estimatedTotal')}
                   </td>
                   <td className="px-4 md:px-6 py-3 font-bold text-right text-hf-md text-hf-honey-700 tabular-nums">

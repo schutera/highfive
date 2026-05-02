@@ -139,11 +139,17 @@ export default function DashboardPage() {
               background: 'linear-gradient(135deg, var(--hf-honey-50), var(--hf-honey-100))',
             }}
           >
+            {/* Background is always-light honey (not theme-aware), so text
+                colours have to be hard-pinned to dark honey shades — the
+                regular `text-hf-fg` flips light in dark mode and would
+                render light-on-light. honey-900 / honey-800 / honey-700
+                are constants in the brand scale and stay legible regardless
+                of theme. */}
             <div className="max-w-md px-4">
-              <h2 className="text-hf-fg mb-2 md:mb-3" style={{ fontSize: 'var(--fs-lg)' }}>
+              <h2 className="text-hf-honey-900 mb-2 md:mb-3" style={{ fontSize: 'var(--fs-lg)' }}>
                 {t('dashboard.errorTitle')}
               </h2>
-              <p className="text-hf-fg-soft mb-6 md:mb-8 text-hf-sm">
+              <p className="text-hf-honey-800 mb-6 md:mb-8 text-hf-sm">
                 {t('dashboard.errorSubtitle')}
               </p>
               <button onClick={loadModules} className="hf-btn hf-btn-primary px-6 py-3">
@@ -163,8 +169,8 @@ export default function DashboardPage() {
                 </svg>
                 {t('common.tryAgain')}
               </button>
-              <div className="mt-6 md:mt-8 p-3 md:p-4 hf-card">
-                <p className="text-hf-xs text-hf-fg-mute font-mono break-words">{error}</p>
+              <div className="mt-6 md:mt-8 p-3 md:p-4 bg-white/60 rounded-hf border border-hf-honey-200">
+                <p className="text-hf-xs text-hf-honey-700 font-mono break-words">{error}</p>
               </div>
             </div>
           </div>

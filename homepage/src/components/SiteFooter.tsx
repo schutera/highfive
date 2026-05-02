@@ -6,8 +6,11 @@ import { useTranslation } from '../i18n/LanguageContext';
  */
 export default function SiteFooter() {
   const { t } = useTranslation();
+  // Constant dark warm-honey surface — always-dark text-on-dark regardless
+  // of theme. The previous bg-hf-fg/95 flipped LIGHT in dark mode, which
+  // made the text-hf-honey-50 cream text vanish.
   return (
-    <footer className="bg-hf-fg/95 text-hf-honey-50 py-12 px-4 mt-auto">
+    <footer className="bg-hf-honey-900 text-hf-honey-50 py-12 px-4 mt-auto">
       <div className="max-w-6xl mx-auto text-center flex flex-col items-center gap-4">
         <p className="text-hf-honey-100 text-hf-sm">{t('home.footer')}</p>
         <a

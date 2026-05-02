@@ -261,7 +261,7 @@ const translations = {
       skipAlreadyFlashed: 'Skip \u2014 already flashed',
       usbHintLabel: 'What to expect after clicking the button',
       usbHint:
-        'A small window will ask you to select a serial port. Your ESP32 usually shows up as "USB Serial Device", "CP2102", or "CH340".',
+        'A small window will ask you to select a serial port. Your ESP32 usually shows up as "USB Serial Device", "CP2102", "CH340", or similar — labelled "(COMx)" on Windows or "/dev/cu.usbserial-*" on macOS.',
       usbHintDetail:
         'If you don\u2019t see any device, try a different USB cable \u2014 some cables only charge and can\u2019t transfer data.',
       stateConnecting: 'Connecting to device...',
@@ -635,7 +635,7 @@ const translations = {
       skipAlreadyFlashed: '\u00DCberspringen \u2014 bereits geflasht',
       usbHintLabel: 'Was nach dem Klick passiert',
       usbHint:
-        'Ein kleines Fenster fragt nach einem seriellen Port. Dein ESP32 erscheint meist als \u201EUSB Serial Device\u201C, \u201ECP2102\u201C oder \u201ECH340\u201C.',
+        'Ein kleines Fenster fragt nach einem seriellen Port. Dein ESP32 erscheint meist als \u201EUSB Serial Device\u201C, \u201ECP2102\u201C, \u201ECH340\u201C oder \u00E4hnlich \u2014 unter Windows mit dem Zusatz \u201E(COMx)\u201C, unter macOS als \u201E/dev/cu.usbserial-*\u201C.',
       usbHintDetail:
         'Falls kein Ger\u00E4t angezeigt wird, probiere ein anderes USB-Kabel \u2014 manche Kabel k\u00F6nnen nur laden, nicht Daten \u00FCbertragen.',
       stateConnecting: 'Verbinde mit Ger\u00E4t...',

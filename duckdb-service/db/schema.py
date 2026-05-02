@@ -77,6 +77,13 @@ def init_db():
         except Exception:
             pass  # column already exists
 
+        # Track Discord-silence-alert state so we don't spam the channel.
+        # Set to NOW() when a silence alert fires, cleared on recovery alert.
+        try:
+            con.execute("ALTER TABLE module_configs ADD COLUMN last_silence_alert_at TIMESTAMP")
+        except Exception:
+            pass  # column already exists
+
         if os.getenv("SEED_DATA", "").lower() == "true":
             row_count = con.execute("SELECT COUNT(*) FROM module_configs").fetchone()[0]
             if row_count == 0:

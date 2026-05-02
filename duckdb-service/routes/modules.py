@@ -267,7 +267,8 @@ def get_modules():
             FROM module_configs m
             LEFT JOIN image_uploads i ON m.id = i.module_id
             GROUP BY m.id, m.name, m.lat, m.lng, m.status, m.first_online,
-                     m.battery_level, m.image_count, m.email, m.updated_at
+                     m.battery_level, m.image_count, m.email, m.updated_at,
+                     m.last_silence_alert_at
             """
         )
         cols = [d[0] for d in cur.description]

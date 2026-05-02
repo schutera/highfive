@@ -50,7 +50,7 @@ export default function AdminKeyForm({ onSubmit, onCancel, busy, error }: AdminK
           placeholder={t('adminKey.placeholder')}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${id}-err` : undefined}
-          className="mt-1 w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus:ring-2 focus:ring-hf-honey-300 focus:border-hf-honey-400 disabled:opacity-50"
+          className="mt-1 w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus-visible:ring-2 focus-visible:ring-hf-honey-500 focus:border-hf-honey-400 disabled:opacity-50"
         />
       </div>
 

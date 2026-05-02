@@ -148,6 +148,7 @@ export default function Step4Configure({
 
       {configError && (
         <div
+          id="step4-error"
           className="rounded-hf p-3 mb-4 w-full border"
           role="alert"
           style={{
@@ -178,7 +179,9 @@ export default function Step4Configure({
             placeholder={t('step4.moduleNamePlaceholder')}
             autoComplete="off"
             required
-            className="mt-1 w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus:ring-2 focus:ring-hf-honey-300 focus:border-hf-honey-400"
+            aria-invalid={configError ? true : undefined}
+            aria-describedby={configError ? 'step4-error' : undefined}
+            className="mt-1 w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus-visible:ring-2 focus-visible:ring-hf-honey-500 focus:border-hf-honey-400"
           />
         </div>
 
@@ -194,7 +197,9 @@ export default function Step4Configure({
             placeholder={t('step4.wifiPlaceholder')}
             autoComplete="off"
             required
-            className="mt-1 w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus:ring-2 focus:ring-hf-honey-300 focus:border-hf-honey-400"
+            aria-invalid={configError ? true : undefined}
+            aria-describedby={configError ? 'step4-error' : undefined}
+            className="mt-1 w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus-visible:ring-2 focus-visible:ring-hf-honey-500 focus:border-hf-honey-400"
           />
         </div>
 
@@ -211,13 +216,16 @@ export default function Step4Configure({
               placeholder={t('step4.wifiPasswordPlaceholder')}
               autoComplete="new-password"
               required
-              className="w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 pr-10 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus:ring-2 focus:ring-hf-honey-300 focus:border-hf-honey-400"
+              minLength={8}
+              aria-invalid={configError ? true : undefined}
+              aria-describedby={configError ? `${id}-pwd-hint step4-error` : `${id}-pwd-hint`}
+              className="w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 pr-10 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus-visible:ring-2 focus-visible:ring-hf-honey-500 focus:border-hf-honey-400"
             />
             <button
               onClick={() => setShowPassword(!showPassword)}
               className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-hf-fg-mute hover:text-hf-fg-soft rounded-full"
               type="button"
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-label={t('step4.passwordToggle')}
               aria-pressed={showPassword}
             >
               <svg
@@ -253,6 +261,9 @@ export default function Step4Configure({
               </svg>
             </button>
           </div>
+          <p id={`${id}-pwd-hint`} className="text-hf-xs text-hf-fg-mute mt-1">
+            {t('step4.passwordMinHint')}
+          </p>
         </div>
 
         <button

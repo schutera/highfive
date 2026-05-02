@@ -533,3 +533,13 @@ button:focus-visible,
 .hf-ring-primary {
   box-shadow: 0 0 0 2px var(--hf-primary);
 }
+
+/* ================================================================
+   SetupWizard scroll container — reserves room above focused
+   elements so the sticky SiteHeader + StepIndicator do not obscure
+   them when keyboard navigation scrolls into view.
+   WCAG SC 2.4.11 Focus Not Obscured (Minimum).
+   ================================================================ */
+.hf-wizard-scroll {
+  scroll-padding-top: 5rem; /* ~80px, covers header + StepIndicator */
+}

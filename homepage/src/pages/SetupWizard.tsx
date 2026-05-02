@@ -41,7 +41,7 @@ export default function SetupWizard() {
 
       <main
         id="main"
-        className="flex-1 flex items-start md:items-center justify-center px-4 py-6 md:py-8 overflow-y-auto"
+        className="hf-wizard-scroll flex-1 flex items-start md:items-center justify-center px-4 py-6 md:py-8 overflow-y-auto"
       >
         <div key={state.currentStep} className={`w-full max-w-lg ${animationClass}`}>
           {state.currentStep === 1 && <Step1Connect onNext={goNext} />}

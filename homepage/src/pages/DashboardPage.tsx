@@ -113,6 +113,17 @@ export default function DashboardPage() {
           <span className="w-2 h-2 bg-hf-danger rounded-full" aria-hidden="true" />
           <span className="hidden sm:inline">{t('common.error')}</span>
         </span>
+      ) : modules.length === 0 ? (
+        // No modules registered yet — `0/0 Online` is a meaningless metric
+        // (nothing to be online out of), so render an em-dash placeholder.
+        // Drop the green success dot too: there's no success signal when
+        // there is nothing to measure. Skill: de-emphasize, don't decorate.
+        <span
+          className="inline-flex items-center gap-1.5 text-hf-fg-mute"
+          aria-label={t('dashboard.noModulesConnected')}
+        >
+          <span aria-hidden="true">—</span>
+        </span>
       ) : (
         <span className="inline-flex items-center gap-1.5 text-hf-fg-soft">
           <span className="w-2 h-2 bg-hf-success rounded-full" aria-hidden="true" />

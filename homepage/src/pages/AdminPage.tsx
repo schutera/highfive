@@ -249,7 +249,7 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-xs text-gray-600">
                         {m.latestHeartbeat ? (
                           <div className="flex flex-col gap-0.5 leading-tight">
-                            <span>🔋 {m.latestHeartbeat.battery ?? '—'}% &nbsp; 📶 {m.latestHeartbeat.rssi ?? '—'} dBm</span>
+                            <span>📶 {m.latestHeartbeat.rssi ?? '—'} dBm</span>
                             <span className="text-gray-400 font-mono text-[10px]">
                               {m.latestHeartbeat.fwVersion ?? 'unknown'} · uptime {formatUptime(m.latestHeartbeat.uptimeMs)} · heap {m.latestHeartbeat.freeHeap ? Math.floor(m.latestHeartbeat.freeHeap / 1024) + ' kB' : '—'}
                             </span>

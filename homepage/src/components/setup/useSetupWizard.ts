@@ -88,6 +88,24 @@ export function useSetupWizard() {
     };
   }, []);
 
+  // Listen for the post-save signal from the ESP popup
+  // (ESP firmware's /save handler calls window.opener.postMessage(...))
+  // and auto-advance to Step 5 so the user doesn't have to navigate manually.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data === 'hivehive-config-saved') {
+        setState(s => ({
+          ...s,
+          configSent: true,
+          currentStep: Math.max(s.currentStep, 5),
+          direction: 'forward',
+        }));
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
   const snapshotModules = async () => {
     try {
       const existing = await api.getAllModules();

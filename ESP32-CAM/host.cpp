@@ -395,7 +395,26 @@ void runAccessPoint() {
                     }
 
                     saveConfig();
-                    sendConfigForm(client, true);
+
+                    // Post-save response: signal the wizard tab cross-window
+                    // and close this popup automatically. Without this, the
+                    // user is stranded on a 192.168.4.1 page that becomes
+                    // unreachable as soon as the ESP leaves AP mode.
+                    client.println("HTTP/1.1 200 OK");
+                    client.println("Content-Type: text/html; charset=utf-8");
+                    client.println("Connection: close");
+                    client.println();
+                    client.println("<!DOCTYPE html><html><head><meta charset=\"utf-8\">");
+                    client.println("<title>Saved</title></head><body style=\"font-family:sans-serif;text-align:center;padding:2em;\">");
+                    client.println("<h2>Configuration saved</h2>");
+                    client.println("<p>Returning to setup...</p>");
+                    client.println("<script>");
+                    client.println("try { if (window.opener) window.opener.postMessage('hivehive-config-saved','*'); } catch(e) {}");
+                    client.println("setTimeout(function(){ try { window.close(); } catch(e) {} }, 800);");
+                    client.println("</script>");
+                    client.println("</body></html>");
+                    client.flush();
+
                     server_running = 0;
                   } else {
                     // invalid / missing session -> just show form again

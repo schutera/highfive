@@ -184,17 +184,32 @@ void tuneWifiForLatency() {
   WiFi.setTxPower(WIFI_POWER_19_5dBm);     // Max TX power (if allowed)
 }
 
+// Auto-reconnect handler: triggers a full re-association (and DHCP renew)
+// on any disconnect, including stale-lease and AP-rotation cases that
+// WiFi.setAutoReconnect alone won't recover from.
+static void onWifiEvent(WiFiEvent_t event) {
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    Serial.println("[WIFI] disconnected — reconnecting");
+    WiFi.reconnect();
+  } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+    Serial.printf("[WIFI] (re)connected, IP: %s\n", WiFi.localIP().toString().c_str());
+  }
+}
+
 void setupWifiConnection(wifi_configuration_t *wifi_config) {
-  
+
   Serial.printf("connect to SSID: %s with pw: %s\n", wifi_config->SSID, wifi_config->PASSWORD);
   Serial.printf("SSID length: %d\n", strlen(wifi_config->SSID));
   Serial.printf("PW length: %d\n", strlen(wifi_config->PASSWORD));
-  
+
   //tuneWifiForLatency();
 
   WiFi.disconnect();
   delay(100);
   WiFi.mode(WIFI_STA);
+  WiFi.persistent(true);
+  WiFi.setAutoReconnect(true);
+  WiFi.onEvent(onWifiEvent);
   WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
   //WiFi.begin("Vodafone-CAKE", "tYsjat-gakke8-kephaw");
   Serial.printf("---- connecting to %s\n", wifi_config->SSID);

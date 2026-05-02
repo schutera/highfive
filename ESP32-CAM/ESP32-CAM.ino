@@ -152,26 +152,29 @@ void captureAndUpload() {
     if (httpCode != -1) break;
   }
 
+  // Circuit breaker: if we accumulate too many consecutive upload failures
+  // it usually means the link is up but the path is broken (stale DHCP lease,
+  // zombied AP). Reboot to recover. Counter is reset on a 2xx below.
+  static uint8_t consecutiveFailures = 0;
+  bool uploadOk = false;
+
   if (httpCode == -1) {
     Serial.println("---- Camera error. Could not capture image after 3 attempts");
-    return;
   } else if (httpCode == -2) {
     Serial.println("---- Network error. Could not start the host connection");
-    return;
-  }  else if (httpCode == -3) {
+  } else if (httpCode == -3) {
     Serial.println("---- Data error. Could not send the complete image");
-    return;
   } else if (httpCode == -4) {
     Serial.println("---- HTTP error. Invalid or missing HTTP response");
-    return;
+  } else {
+    Serial.printf("---- %s responded with status: %d\n", esp_config.UPLOAD_URL, httpCode);
   }
-
-  Serial.printf("---- %s responded with status: %d\n", esp_config.UPLOAD_URL, httpCode);
 
   switch (httpCode) {
     case 200:
     case 201:
         Serial.println("------ Success");
+        uploadOk = true;
         break;
 
     case 400:
@@ -198,12 +201,33 @@ void captureAndUpload() {
         break;
   }
 
+  if (uploadOk) {
+    consecutiveFailures = 0;
+  } else {
+    consecutiveFailures++;
+    Serial.printf("---- upload failure streak: %u/5\n", consecutiveFailures);
+    if (consecutiveFailures >= 5) {
+      Serial.println("[!] 5 consecutive upload failures — restarting");
+      delay(1000);
+      ESP.restart();
+    }
+  }
+
   Serial.printf("-- Finished capturing and posting image %d\n", counter);
 }
 
 void loop() {
   // NOTE: GPIO0 config button check moved to setup() — it cannot be read
   // reliably here because the camera XCLK drives GPIO0 after init.
+
+  // Daily reboot safety net: prevents long-running drift (lwIP state, NVS
+  // wear oddities, slow heap fragmentation). Triggers once at 24h uptime
+  // and never again until the next boot resets millis().
+  if (millis() > 24UL * 3600UL * 1000UL) {
+    Serial.println("[REBOOT] daily reboot");
+    delay(500);
+    ESP.restart();
+  }
 
   // First capture immediately after boot
   if (!firstCaptureDone) {

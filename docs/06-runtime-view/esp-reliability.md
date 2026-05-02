@@ -16,7 +16,7 @@ The firmware now has four independent safety nets, each handling a different fai
 
 ### 1. WiFi watchdog
 
-[ESP32-CAM/esp_init.cpp](../ESP32-CAM/esp_init.cpp) — `reconnectWifi()`
+[ESP32-CAM/esp_init.cpp](../../ESP32-CAM/esp_init.cpp) — `reconnectWifi()`
 
 At the top of `loop()`, firmware checks `WiFi.status()`. If disconnected, it tries to reconnect for up to 15 seconds. If five consecutive reconnect attempts fail (~1 minute), the device reboots.
 
@@ -79,7 +79,7 @@ The ESP piggybacks a JSON telemetry payload onto every image upload as an additi
 
 ### Circular log buffer
 
-[ESP32-CAM/logbuf.cpp](../ESP32-CAM/logbuf.cpp) — `logf(fmt, ...)`
+[ESP32-CAM/logbuf.cpp](../../ESP32-CAM/logbuf.cpp) — `logf(fmt, ...)`
 
 A fixed 2 KB ring buffer. `logf()` works like `Serial.printf()` but also appends to the ring. Only events worth sending home go through `logf()`; noisy per-frame traces keep using `Serial.print*`. When the ring wraps, `buildTelemetryJson()` serializes it oldest→newest.
 

@@ -157,7 +157,7 @@ void setup() {
 }
 
 
-void captureAndUpload() {
+bool captureAndUpload() {
   Serial.println("");
   Serial.printf("-- Trying to capture and post image number %d\n", counter++);
 
@@ -171,9 +171,10 @@ void captureAndUpload() {
     if (httpCode != -1) break;
   }
 
-  // Circuit breaker: if we accumulate too many consecutive upload failures
-  // it usually means the link is up but the path is broken (stale DHCP lease,
-  // zombied AP). Reboot to recover. Counter is reset on a 2xx below.
+  // Circuit breaker: too many consecutive failures (any kind — camera NULL,
+  // network error, or non-2xx HTTP) and we ESP.restart(). Caller gates on
+  // the bool return so a failed first-capture-on-boot is retried on the
+  // next loop iteration (30s later), giving the breaker a chance to fire.
   static uint8_t consecutiveFailures = 0;
   bool uploadOk = false;
 
@@ -186,9 +187,14 @@ void captureAndUpload() {
   } else if (httpCode == -4) {
     Serial.println("---- HTTP error. Invalid or missing HTTP response");
   } else {
+    // Real HTTP exchange happened — classify the status code.
     Serial.printf("---- %s responded with status: %d\n", esp_config.UPLOAD_URL, httpCode);
   }
 
+  // Only run the HTTP-status switch for actual HTTP codes (>=100). Sentinel
+  // values from postImage (-1, -2, -3, -4) are not response codes and would
+  // print the misleading "Unexpected response code: -1" line.
+  if (httpCode >= 100) {
   switch (httpCode) {
     case 200:
     case 201:
@@ -219,6 +225,7 @@ void captureAndUpload() {
         Serial.printf("------ Unexpected response code: %d\n", httpCode);
         break;
   }
+  }
 
   if (uploadOk) {
     consecutiveFailures = 0;
@@ -233,6 +240,7 @@ void captureAndUpload() {
   }
 
   Serial.printf("-- Finished capturing and posting image %d\n", counter);
+  return uploadOk;
 }
 
 void loop() {
@@ -261,11 +269,16 @@ void loop() {
     lastHeartbeatMs = millis();
   }
 
-  // First capture immediately after boot
+  // First capture immediately after boot. Retry every loop iteration on
+  // failure (camera NULL, network drop, non-2xx) so the circuit breaker
+  // in captureAndUpload() can actually fire — it counts attempts, and
+  // before this fix we only ever attempted once per boot, so the breaker
+  // never reached its threshold even with a totally broken camera.
   if (!firstCaptureDone) {
     Serial.println("-- First capture after boot");
-    captureAndUpload();
-    firstCaptureDone = true;
+    if (captureAndUpload()) {
+      firstCaptureDone = true;
+    }
   }
 
   // Daily capture at noon (local time via NTP)

@@ -118,35 +118,15 @@ export function useSetupWizard() {
   };
 
   const loadFirmware = async () => {
-    try {
-      const response = await fetch(
-        'https://api.github.com/repos/schutera/highfive/releases/latest'
-      );
-      if (!response.ok) throw new Error('Failed to fetch release');
-
-      const releaseData = await response.json();
-      const firmwareAsset = releaseData.assets?.find(
-        (asset: { name: string }) => asset.name === 'firmware.bin'
-      );
-
-      if (firmwareAsset) {
-        setState(s => ({
-          ...s,
-          firmwareUrl: firmwareAsset.browser_download_url,
-          firmwareVersion: releaseData.tag_name || releaseData.name,
-          firmwareLoading: false,
-        }));
-      } else {
-        setState(s => ({ ...s, firmwareVersion: 'Local', firmwareLoading: false }));
-      }
-    } catch {
-      setState(s => ({
-        ...s,
-        firmwareUrl: '/firmware.bin',
-        firmwareVersion: 'Local (Fallback)',
-        firmwareLoading: false,
-      }));
-    }
+    // Skip GitHub Releases. The locally-served /firmware.bin is the canonical
+    // build for this deploy (latest GitHub release predates the auto-name and
+    // form-submit features and would regress the wizard).
+    setState(s => ({
+      ...s,
+      firmwareUrl: '/firmware.bin',
+      firmwareVersion: 'Local',
+      firmwareLoading: false,
+    }));
   };
 
   const goNext = useCallback(() => {

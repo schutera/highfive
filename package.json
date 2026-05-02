@@ -7,7 +7,8 @@
     "homepage"
   ],
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky || true",
+    "build": "npm run build -w @highfive/contracts && npm run build -w highfive-backend && npm run build -w homepage"
   },
   "dependencies": {
     "typescript": "^5.9.3"

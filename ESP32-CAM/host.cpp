@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include "esp_init.h"   // setESPConfigured
 #include "form_query.h" // hf::urlDecode, hf::getParam (host-testable)
+#include "module_id.h"  // hf::formatModuleId (canonical 12-hex id)
 #include <string>
 
 const char *HOST_SSID = "ESP32-Access-Point";
@@ -25,6 +26,8 @@ int    cfg_interval_ms    = 300;
 int    cfg_vflip          = 0;
 int    cfg_brightness     = 0;
 int    cfg_saturation     = 0;
+
+String moduleIdStr = "";
 
 
 /*
@@ -240,6 +243,7 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 
   client.println("<form action=\"/save\" method=\"POST\" autocomplete=\"off\" onsubmit=\"validateForm(event)\">");
   client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
+  client.println("<input type=\"hidden\" name=\"esp_id\" value=\"" + moduleIdStr + "\">");
 
   /* ===== GENERAL ===== */
   client.println("<div class=\"section\">");
@@ -383,16 +387,41 @@ void runAccessPoint() {
                 contentLength = clLine.toInt();
               }
 
-              // Read body if POST
+              // Read body if POST.
+              //
+              // The previous version had no termination guard: if the
+              // browser-side fetch aborted (10s timeout) or the TCP stream
+              // stalled, this loop spun until the task watchdog rebooted
+              // the ESP — and on partial bodies, getParam() silently
+              // returned empty SSID/password, saving a broken config.
+              //
+              // Now: bound by a wall-clock budget AND by client.connected().
               String body = "";
               if (isPost && contentLength > 0) {
+                const uint32_t BODY_READ_TIMEOUT_MS = 5000;
+                uint32_t bodyStart = millis();
                 while ((int)body.length() < contentLength) {
+                  if (!client.connected()) {
+                    Serial.printf(
+                        "[host] body read aborted: client disconnected at %u/%d bytes\n",
+                        body.length(), contentLength);
+                    break;
+                  }
+                  if (millis() - bodyStart > BODY_READ_TIMEOUT_MS) {
+                    Serial.printf(
+                        "[host] body read timed out after %u ms at %u/%d bytes\n",
+                        BODY_READ_TIMEOUT_MS, body.length(), contentLength);
+                    break;
+                  }
                   if (client.available()) {
                     char ch = client.read();
                     body += ch;
                   }
                 }
               }
+              const bool bodyComplete =
+                  isPost && contentLength > 0 &&
+                  (int)body.length() == contentLength;
 
               // --------- Handle /save ---------
               if (fullPath.startsWith("/save")) {
@@ -407,6 +436,14 @@ void runAccessPoint() {
                   query = fullPath.substring(String("/save?").length());
                 }
 
+                // Reject up front if the body was truncated — saving a
+                // partial credential is worse than asking the user to retry.
+                if (isPost && !bodyComplete) {
+                  Serial.println("[host] refusing save: incomplete POST body");
+                  sendConfigForm(client, false);
+                  break;
+                }
+
                 // If we got some parameters, process them
                 if (query.length() > 0) {
                   // Only treat as valid if session token matches
@@ -416,6 +453,31 @@ void runAccessPoint() {
 
                     cfg_ssid        = getParam(query, "ssid");
                     cfg_password    = getParam(query, "password");
+
+                    // Sanity-check the credentials against the on-device
+                    // buffer sizes BEFORE persisting. Logging only lengths,
+                    // never the password value.
+                    Serial.printf(
+                        "[host] decoded creds: ssid_len=%u pw_len=%u\n",
+                        cfg_ssid.length(), cfg_password.length());
+
+                    // 802.11 caps SSID at 32 octets. WPA2-PSK passphrase is
+                    // 8-63 ASCII chars or exactly 64 hex chars (raw PSK).
+                    // Reject anything outside those bounds rather than
+                    // silently truncating in strlcpy() later.
+                    const size_t SSID_MAX = 32;
+                    const size_t PW_MIN = 8;
+                    const size_t PW_MAX = 64;
+                    if (cfg_ssid.length() == 0 || cfg_ssid.length() > SSID_MAX ||
+                        cfg_password.length() < PW_MIN ||
+                        cfg_password.length() > PW_MAX) {
+                      Serial.printf(
+                          "[host] refusing save: cred lengths out of bounds "
+                          "(ssid=%u, pw=%u)\n",
+                          cfg_ssid.length(), cfg_password.length());
+                      sendConfigForm(client, false);
+                      break;
+                    }
 
                     // NEW: split URL fields
                     String uploadBase     = getParam(query, "upload_base");
@@ -510,6 +572,10 @@ void setupAccessPoint() {
   }
 
   loadConfig();
+
+  moduleIdStr = String(hf::formatModuleId(ESP.getEfuseMac()).c_str());
+  Serial.print("---- Module ID: ");
+  Serial.println(moduleIdStr);
 
   sessionToken = String((uint32_t)esp_random(), HEX);
 

@@ -122,6 +122,10 @@ void setup() {
 
   // Warm up: sensor needs a few frames to auto-expose before producing valid JPEGs
   Serial.println("-- warming up camera sensor");
+  // Track NULL frames during warm-up so we can attempt one round of
+  // recovery (deinit + PWDN cycle + reinit) before giving up. Same camera
+  // config — quality unchanged.
+  int warmupNulls = 0;
   for (int i = 0; i < 3; i++) {
     delay(500);
     camera_fb_t *fb = esp_camera_fb_get();
@@ -130,6 +134,27 @@ void setup() {
       Serial.printf("---- warm-up frame %d OK (%u bytes)\n", i + 1, fb->len);
     } else {
       Serial.printf("---- warm-up frame %d skipped (NULL)\n", i + 1);
+      warmupNulls++;
+    }
+  }
+
+  if (warmupNulls == 3) {
+    Serial.println("[CAM] all 3 warm-up frames NULL — attempting one recovery cycle");
+    recoverCamera(esp_config.RESOLUTION);
+    int recovNulls = 0;
+    for (int i = 0; i < 3; i++) {
+      delay(500);
+      camera_fb_t *fb = esp_camera_fb_get();
+      if (fb) {
+        esp_camera_fb_return(fb);
+        Serial.printf("---- post-recovery frame %d OK (%u bytes)\n", i + 1, fb->len);
+      } else {
+        Serial.printf("---- post-recovery frame %d skipped (NULL)\n", i + 1);
+        recovNulls++;
+      }
+    }
+    if (recovNulls == 3) {
+      Serial.println("[CAM] recovery did not help — sensor is likely hardware-faulty");
     }
   }
 

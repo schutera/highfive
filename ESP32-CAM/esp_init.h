@@ -47,6 +47,7 @@ String generateModuleName();
 bool loadConfig(esp_config_t *esp_config);
 void initEspPinout();
 void initEspCamera(framesize_t resolution);
+void recoverCamera(framesize_t resolution);
 void configure_camera_sensor(esp_config_t *esp_config);
 void setupWifiConnection(wifi_configuration_t *wifi_config);
 void getGeolocation(esp_config_t *esp_config);

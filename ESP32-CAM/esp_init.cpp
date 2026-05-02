@@ -92,6 +92,23 @@ void configure_camera_sensor(esp_config_t *esp_config) {
 }
 
 void initEspCamera(framesize_t resolution) {
+  // Loud diagnostic: print PSRAM state + camera-relevant settings up front so
+  // we never have to guess what the runtime environment looks like.
+  Serial.printf("-- PSRAM: found=%d size=%u bytes\n",
+                (int)psramFound(),
+                (unsigned)ESP.getPsramSize());
+
+  // Explicit PWDN power-cycle on the OV2640 before init. The chip otherwise
+  // inherits whatever power state it was in across a soft reset, and a
+  // half-stuck sensor will respond to I2C config (init succeeds) but never
+  // produce frames over the parallel data bus. This forces a clean cold-start.
+  Serial.println("-- power-cycling camera via PWDN");
+  pinMode(PWDN_GPIO_NUM, OUTPUT);
+  digitalWrite(PWDN_GPIO_NUM, HIGH);  // power off
+  delay(50);
+  digitalWrite(PWDN_GPIO_NUM, LOW);   // power on
+  delay(50);
+
   config.frame_size = resolution;
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
@@ -125,6 +142,21 @@ void initEspCamera(framesize_t resolution) {
     initialized = 1;
     Serial.println("---- camera initialized");
   }
+}
+
+// One-shot recovery: deinit + PWDN power-cycle + reinit. Called from setup()
+// when the warm-up loop produces all-NULL frames despite a successful init.
+// Same camera config — does not change quality or framesize.
+void recoverCamera(framesize_t resolution) {
+  Serial.println("[CAM] recovery: deinit + PWDN cycle + reinit");
+  esp_camera_deinit();
+  delay(200);
+  digitalWrite(PWDN_GPIO_NUM, HIGH);
+  delay(100);
+  digitalWrite(PWDN_GPIO_NUM, LOW);
+  delay(100);
+  initialized = 0;
+  initEspCamera(resolution);
 }
 
 /* -------------------------------- */

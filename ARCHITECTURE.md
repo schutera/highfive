@@ -134,12 +134,12 @@ Run locally with `make test-esp-native` and `make test-e2e`. See
 
 | Topic                              | Document                                           |
 | ---------------------------------- | -------------------------------------------------- |
-| Deploying the stack with Compose   | [service-deployment](documentation/service-deployment.md) |
-| Frontend pages and routes          | [homepage](documentation/homepage.md)              |
-| ESP32-CAM flashing and setup       | [esp-deployment](documentation/esp-deployment.md)  |
-| ESP reliability and telemetry      | [esp-reliability](documentation/esp-reliability.md) |
-| Backend API reference              | [api-usage](documentation/api-usage.md)            |
-| Original architecture deep-dive    | [architecture](documentation/architecture.md)      |
-| Image service                      | [image-service](documentation/image-service.md)    |
-| DuckDB schema and design           | [duckDB](documentation/duckDB.md)                  |
+| Deploying the stack with Compose   | [docker-compose](docs/07-deployment-view/docker-compose.md) |
+| Frontend pages and routes          | [homepage](docs/05-building-block-view/homepage.md) |
+| ESP32-CAM flashing and setup       | [esp-flashing](docs/07-deployment-view/esp-flashing.md) |
+| ESP reliability and telemetry      | [esp-reliability](docs/06-runtime-view/esp-reliability.md) |
+| Backend API reference              | [api-reference](docs/api-reference.md)             |
+| Building block view (architecture) | [05-building-block-view](docs/05-building-block-view/README.md) |
+| Image service                      | [image-service](docs/05-building-block-view/image-service.md) |
+| DuckDB schema and design           | [duckdb-service](docs/05-building-block-view/duckdb-service.md) |
 | Contributing, branches, tests      | [CONTRIBUTING.md](CONTRIBUTING.md)                 |

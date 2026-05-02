@@ -1,6 +1,10 @@
 <h1 align="center">🙌 HighFive</h1>
 
 <p align="center">
+  <img src="docs/_images/HiveHive_Logo.png" alt="HighFive Logo" width="180"/>
+</p>
+
+<p align="center">
   <a href="https://github.com/schutera/highfive/actions/workflows/tests.yml"><img src="https://github.com/schutera/highfive/actions/workflows/tests.yml/badge.svg" alt="tests" /></a>
 </p>
 
@@ -32,16 +36,16 @@ Automated monitoring pipeline that captures images of wild bee hotels, analyzes 
 
 ## Documentation
 
-| Guide                                                   | Description                                                   |
-| ------------------------------------------------------- | ------------------------------------------------------------- |
-| [Deployment Guide](documentation/service-deployment.md) | How to run all services with Docker Compose                   |
-| [Homepage](documentation/homepage.md)                   | Frontend pages, routes, and backend connection                |
-| [ESP Deployment](documentation/esp-deployment.md)       | ESP32 firmware flashing, WiFi setup, configuration            |
-| [Troubleshooting](documentation/troubleshooting.md)     | ESP32-CAM setup issues, server connectivity, Windows Firewall |
-| [API Usage](documentation/api-usage.md)                 | All API endpoints with example requests and responses         |
-| [Architecture](documentation/architecture.md)           | System architecture, data flow, and design decisions          |
-| [Image Service](documentation/image-service.md)         | Image ingestion and analysis service                          |
-| [DuckDB & Data Model](documentation/duckDB.md)          | Database schema and query reference                           |
+| Guide                                                                | Description                                                   |
+| -------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [Deployment Guide](docs/07-deployment-view/docker-compose.md)        | How to run all services with Docker Compose                   |
+| [Homepage](docs/05-building-block-view/homepage.md)                  | Frontend pages, routes, and backend connection                |
+| [ESP Deployment](docs/07-deployment-view/esp-flashing.md)            | ESP32 firmware flashing, WiFi setup, configuration            |
+| [Troubleshooting](docs/troubleshooting.md)                           | ESP32-CAM setup issues, server connectivity, Windows Firewall |
+| [API Reference](docs/api-reference.md)                               | All API endpoints with example requests and responses         |
+| [Architecture (arc42)](docs/05-building-block-view/README.md)        | System architecture, building blocks, and design decisions    |
+| [Image Service](docs/05-building-block-view/image-service.md)        | Image ingestion and analysis service                          |
+| [DuckDB & Data Model](docs/05-building-block-view/duckdb-service.md) | Database schema and query reference                           |
 
 <br>
 
@@ -65,7 +69,7 @@ Start all services:
 docker compose up --build
 ```
 
-See [Deployment Guide](documentation/service-deployment.md) for full setup instructions.
+See [Deployment Guide](docs/07-deployment-view/docker-compose.md) for full setup instructions.
 
 <br>
 

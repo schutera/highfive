@@ -186,11 +186,11 @@ Run with `make test-e2e`.
 
 ## 7. Architecture Diagram (legacy)
 
-The older block diagram still ships under `documentation/doc_images/`:
+The older block diagram still ships under `docs/_images/`:
 
-<img src="doc_images/HiveHiveArch.png" width="600">
+<img src="_images/HiveHiveArch.png" width="600">
 
-<img src="doc_images/IngestionHiveHive.png" width="600">
+<img src="_images/IngestionHiveHive.png" width="600">
 
 These predate the telemetry channel and the test harness; the ASCII
 diagram in §4 is the current source of truth.
@@ -208,7 +208,7 @@ diagram in §4 is the current source of truth.
   loopback.
 - The ESP firmware now has four independent recovery layers (WiFi
   watchdog, task watchdog, daily reboot, boot-time recovery) — see
-  [esp-reliability.md](esp-reliability.md).
+  [esp-reliability.md](06-runtime-view/esp-reliability.md).
 
 ## 9. Known Trade-offs
 

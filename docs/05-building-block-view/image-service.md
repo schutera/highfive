@@ -20,7 +20,7 @@ A Hive module contains multiple nesting areas and **three nesting tubes per bee 
 - Resin Bee
 
 <div align="center">
-  <img src="doc_images/hivemodule.jpeg" height="50%">
+  <img src="../_images/hivemodule.jpeg" height="50%">
 </div>
 
 _Figure 1: Example of a Hive module equipped with ESP32-camera. (Mark Schutera, 2026)_

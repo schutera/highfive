@@ -1,6 +1,6 @@
 # HiveHive Troubleshooting Guide
 
-Symptom-based guide covering the most common issues during initial hardware setup and ongoing operation. For the full hardware setup walkthrough see [esp-deployment.md](esp-deployment.md).
+Symptom-based guide covering the most common issues during initial hardware setup and ongoing operation. For the full hardware setup walkthrough see [07-deployment-view/esp-flashing.md](07-deployment-view/esp-flashing.md).
 
 ---
 

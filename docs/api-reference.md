@@ -133,7 +133,7 @@ or wrong, `502` if the image-service is unreachable.
 ```
 
 The telemetry section in the dashboard is hidden unless the URL has
-`?admin=1`; see [esp-reliability.md](esp-reliability.md) for the
+`?admin=1`; see [06-runtime-view/esp-reliability.md](06-runtime-view/esp-reliability.md) for the
 end-to-end admin flow.
 
 <br>
@@ -167,7 +167,7 @@ Content-Type: multipart/form-data
 | `image`   | File | Yes      | Captured JPEG                                                      |
 | `mac`     | Text | Yes      | Module identifier                                                  |
 | `battery` | Text | Yes      | Integer 0–100                                                      |
-| `logs`    | Text | No       | JSON telemetry payload (see [esp-reliability](esp-reliability.md)) |
+| `logs`    | Text | No       | JSON telemetry payload (see [esp-reliability](06-runtime-view/esp-reliability.md)) |
 
 If `logs` is present and parseable, it is written to
 `{image_path}.log.json` next to the saved image with three extra

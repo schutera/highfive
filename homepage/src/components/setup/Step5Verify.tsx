@@ -36,15 +36,32 @@ export default function Step5Verify({
 
   const checkBackendAndStart = async () => {
     setCheckingBackend(true);
-    try {
-      await api.healthCheck();
-      setBackendReachable(true);
-      startVerification();
-    } catch {
-      setBackendReachable(false);
-    } finally {
-      setCheckingBackend(false);
+    setBackendReachable(null);
+
+    // The user has just submitted WiFi creds to the ESP, which means their
+    // laptop is mid-handover from the ESP's now-vanished AP back to their
+    // home WiFi. Health checks during that gap fail with a network error.
+    // Retry quietly for ~16s before showing the red "unreachable" screen —
+    // the friendly waiting/spinner UI renders meanwhile (backendReachable
+    // is null, so we fall through to the default polling view).
+    const MAX_ATTEMPTS = 8;
+    const DELAY_MS = 2000;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        await api.healthCheck();
+        setBackendReachable(true);
+        setCheckingBackend(false);
+        startVerification();
+        return;
+      } catch {
+        console.log(`[Step5] backend healthcheck ${attempt}/${MAX_ATTEMPTS} failed`);
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+        }
+      }
     }
+    setBackendReachable(false);
+    setCheckingBackend(false);
   };
 
   // Check backend health on mount

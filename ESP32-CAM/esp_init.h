@@ -8,9 +8,15 @@
 #endif
 
 
+// SSID: IEEE 802.11 caps at 32 octets, so 64 has comfortable headroom.
+// PASSWORD: WPA2-PSK accepts up to 63 ASCII chars OR exactly 64 hex chars
+// (raw PSK). The previous 64-byte buffer silently truncated 64-char raw-PSK
+// values via strlcpy, producing a credential that bricked the onboarding
+// flow with no surfaced error. 96 keeps a safe margin and is enforced both
+// here and in the wizard's pre-flight check.
 typedef struct {
   char SSID[64];
-  char PASSWORD[64];
+  char PASSWORD[96];
 } wifi_configuration_t;
 
 typedef struct {

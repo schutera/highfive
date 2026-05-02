@@ -159,6 +159,110 @@ static void test_getparam_empty_query(void) {
     TEST_ASSERT_EQUAL_STRING("", getParam("", "foo").c_str());
 }
 
+// --- WiFi-credential handover regression tests ----------------------------
+//
+// These pin the credential-decode path against the failure modes that
+// previously could ship a broken WiFi config to the field:
+//
+//   1. WPA2-PSK passphrases at the upper boundary (63 ASCII chars) and at
+//      the raw-PSK length (64 hex chars) must round-trip byte-for-byte.
+//   2. Passwords containing characters that URLSearchParams percent-encodes
+//      (& = + % space, non-ASCII, ()) must round-trip — these are exactly
+//      the chars that a naive parser splits on by mistake.
+//   3. The form body the wizard actually sends (mirroring espConfig.ts)
+//      must yield the exact ssid/password the user typed.
+//
+// A failure here means a real device somewhere will refuse to associate
+// with its home WiFi. Treat regressions as ship-blockers.
+
+static void test_getparam_password_63_ascii_chars(void) {
+    // WPA2-PSK passphrase upper bound: 63 ASCII characters.
+    std::string pw63(63, 'a');  // 63x 'a'
+    std::string body = "ssid=Net&password=" + pw63 + "&interval=300";
+    std::string out = getParam(body, "password");
+    TEST_ASSERT_EQUAL_size_t(63, out.size());
+    TEST_ASSERT_EQUAL_STRING(pw63.c_str(), out.c_str());
+}
+
+static void test_getparam_password_64_hex_raw_psk(void) {
+    // WPA2-PSK raw key form: exactly 64 hex chars. These don't need
+    // percent-encoding, so the byte count on the wire equals the byte
+    // count of the credential.
+    std::string pw64 =
+        "0123456789abcdef0123456789abcdef"
+        "fedcba9876543210fedcba9876543210";
+    TEST_ASSERT_EQUAL_size_t(64, pw64.size());
+    std::string body = "ssid=Net&password=" + pw64 + "&interval=300";
+    std::string out = getParam(body, "password");
+    TEST_ASSERT_EQUAL_size_t(64, out.size());
+    TEST_ASSERT_EQUAL_STRING(pw64.c_str(), out.c_str());
+}
+
+static void test_getparam_password_contains_ampersand_encoded(void) {
+    // A password that contains '&' MUST be percent-encoded by the wizard
+    // (URLSearchParams does this). If the encoding is wrong, the parser
+    // would split the password on the literal '&' and silently truncate.
+    // The "%26" form is what URLSearchParams emits.
+    std::string body = "ssid=Net&password=foo%26bar&interval=300";
+    TEST_ASSERT_EQUAL_STRING("foo&bar", getParam(body, "password").c_str());
+}
+
+static void test_getparam_password_contains_equals_encoded(void) {
+    // Similarly for '=' — it can appear inside passwords (e.g. base64-ish
+    // generators). Encoded as %3D.
+    std::string body = "ssid=Net&password=foo%3Dbar&interval=300";
+    TEST_ASSERT_EQUAL_STRING("foo=bar", getParam(body, "password").c_str());
+}
+
+static void test_getparam_password_contains_plus_literal(void) {
+    // '+' as a literal character in the password must be sent as %2B.
+    // (A literal '+' on the wire decodes to ' '.)
+    std::string body = "ssid=Net&password=hunter%2B2&interval=300";
+    TEST_ASSERT_EQUAL_STRING("hunter+2", getParam(body, "password").c_str());
+}
+
+static void test_getparam_password_contains_percent_literal(void) {
+    // A literal '%' in the password is sent as %25.
+    std::string body = "ssid=Net&password=50%25off&interval=300";
+    TEST_ASSERT_EQUAL_STRING("50%off", getParam(body, "password").c_str());
+}
+
+static void test_getparam_password_with_non_ascii_utf8(void) {
+    // Non-ASCII chars (e.g. Umlaut) come through as percent-encoded UTF-8.
+    // 'ü' is 0xC3 0xBC.
+    std::string body = "ssid=Net&password=h%C3%BCtte42&interval=300";
+    std::string out = getParam(body, "password");
+    // Compare bytes — Unity has no UTF-8-aware comparator and we only
+    // care that the bytes survive intact.
+    const std::string expected = "h\xC3\xBCtte42";
+    TEST_ASSERT_EQUAL_size_t(expected.size(), out.size());
+    TEST_ASSERT_EQUAL_MEMORY(expected.data(), out.data(), expected.size());
+}
+
+static void test_getparam_full_wizard_body_with_special_chars(void) {
+    // What the production wizard sends: session token, module name with a
+    // space, a password with a percent-encoded ampersand, full URL-encoded
+    // base/endpoint pairs, and trailing camera defaults. This is the
+    // closest unit-test analogue to "click Save in the wizard."
+    std::string body =
+        "session=deadbeef&module_name=My+Hive&ssid=HomeNet5G&"
+        "password=p%40ss%26w0rd%21&"
+        "init_base=http%3A%2F%2F192.168.0.36%3A8002&init_endpoint=%2Fnew_module&"
+        "upload_base=http%3A%2F%2F192.168.0.36%3A8000&upload_endpoint=%2Fupload&"
+        "interval=300&res=vga&vflip=0&bright=0&sat=0";
+    TEST_ASSERT_EQUAL_STRING("My Hive", getParam(body, "module_name").c_str());
+    TEST_ASSERT_EQUAL_STRING("HomeNet5G", getParam(body, "ssid").c_str());
+    TEST_ASSERT_EQUAL_STRING("p@ss&w0rd!", getParam(body, "password").c_str());
+    TEST_ASSERT_EQUAL_STRING("http://192.168.0.36:8002",
+                             getParam(body, "init_base").c_str());
+    TEST_ASSERT_EQUAL_STRING("/new_module",
+                             getParam(body, "init_endpoint").c_str());
+    TEST_ASSERT_EQUAL_STRING("http://192.168.0.36:8000",
+                             getParam(body, "upload_base").c_str());
+    TEST_ASSERT_EQUAL_STRING("/upload",
+                             getParam(body, "upload_endpoint").c_str());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -184,6 +288,16 @@ int main(int, char**) {
     RUN_TEST(test_getparam_missing_key_returns_empty);
     RUN_TEST(test_getparam_empty_value);
     RUN_TEST(test_getparam_empty_query);
+
+    // WiFi-credential handover regression tests.
+    RUN_TEST(test_getparam_password_63_ascii_chars);
+    RUN_TEST(test_getparam_password_64_hex_raw_psk);
+    RUN_TEST(test_getparam_password_contains_ampersand_encoded);
+    RUN_TEST(test_getparam_password_contains_equals_encoded);
+    RUN_TEST(test_getparam_password_contains_plus_literal);
+    RUN_TEST(test_getparam_password_contains_percent_literal);
+    RUN_TEST(test_getparam_password_with_non_ascii_utf8);
+    RUN_TEST(test_getparam_full_wizard_body_with_special_chars);
 
     return UNITY_END();
 }

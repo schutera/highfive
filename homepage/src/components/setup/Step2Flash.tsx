@@ -41,12 +41,9 @@ export default function Step2Flash({
   const [flashState, setFlashState] = useState<FlashState>('idle');
   const [flashPercent, setFlashPercent] = useState(0);
   const [flashError, setFlashError] = useState<string | null>(null);
-  const [flashStarted, setFlashStarted] = useState(false);
-
   const startFlash = useCallback(async () => {
     setFlashState('connecting');
     setFlashError(null);
-    setFlashStarted(true);
 
     await flashEsp(FIRMWARE_MANIFEST, (progress: FlashProgress) => {
       setFlashState(progress.state);
@@ -224,14 +221,6 @@ export default function Step2Flash({
         </button>
 
         <div className="flex items-center gap-4">
-          {flashStarted && !flashComplete && (flashState === 'idle' || flashState === 'error') && (
-            <button
-              onClick={markFlashComplete}
-              className="text-hf-sm text-hf-fg-mute hover:text-hf-fg-soft underline transition-colors"
-            >
-              {t('step2.markComplete')}
-            </button>
-          )}
           {!flashComplete && (
             <button
               onClick={() => {

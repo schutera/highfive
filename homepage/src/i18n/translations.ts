@@ -273,7 +273,6 @@ const translations = {
       stateError: 'Flashing failed. Please try again.',
       errorHint:
         'Make sure the device is connected and try a different USB cable if the problem persists.',
-      markComplete: 'Flash succeeded? Click here to continue',
       unplugTitle: 'Now unplug your ESP32 and plug it back in',
       unplugStep1: 'Disconnect the USB cable from your ESP32',
       unplugStep2: 'Wait about 5 seconds',
@@ -650,7 +649,6 @@ const translations = {
       stateError: 'Flashen fehlgeschlagen. Bitte versuche es erneut.',
       errorHint:
         'Stelle sicher, dass das Ger\u00E4t verbunden ist, und probiere ggf. ein anderes USB-Kabel.',
-      markComplete: 'Flash erfolgreich? Hier klicken zum Fortfahren',
       unplugTitle: 'Jetzt den ESP32 ab- und wieder anstecken',
       unplugStep1: 'Ziehe das USB-Kabel vom ESP32 ab',
       unplugStep2: 'Warte ca. 5 Sekunden',

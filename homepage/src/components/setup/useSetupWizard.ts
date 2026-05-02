@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { api } from '../../services/api';
-import type { Module } from '@highfive/contracts';
+import type { Module, ModuleId } from '@highfive/contracts';
 import { sendConfigToEsp } from './espConfig';
 // Vite-managed firmware asset (content-hashed) used both as the local
 // fallback URL when the GitHub releases API is unreachable and as the
@@ -72,7 +72,7 @@ export function useSetupWizard() {
   });
 
   const lanIpRef = useRef<string | null>(null);
-  const baselineModuleIdsRef = useRef<Set<string>>(new Set());
+  const expectedModuleIdRef = useRef<ModuleId | null>(null);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
 
@@ -181,7 +181,7 @@ export function useSetupWizard() {
     }
 
     try {
-      await sendConfigToEsp({
+      const result = await sendConfigToEsp({
         moduleName: state.moduleName,
         ssid: state.wifiSsid,
         password: state.wifiPassword,
@@ -190,6 +190,8 @@ export function useSetupWizard() {
         uploadBase,
         uploadEndpoint: SERVER_CONFIG.uploadEndpoint,
       });
+      expectedModuleIdRef.current = result.moduleId;
+      console.log('[SetupWizard] Expected module id from ESP form:', result.moduleId);
       setState((s) => ({ ...s, configSending: false, configSent: true }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -206,14 +208,19 @@ export function useSetupWizard() {
   }, []);
 
   const startVerification = useCallback(async () => {
-    // Capture baseline module list
-    try {
-      const currentModules = await api.getAllModules();
-      baselineModuleIdsRef.current = new Set(currentModules.map((m) => m.id));
-      console.log('[Step5] Baseline captured:', baselineModuleIdsRef.current.size, 'modules');
-    } catch {
-      console.warn('[Step5] Could not capture baseline — will retry during polling');
-      baselineModuleIdsRef.current = new Set();
+    // Defensive: sendConfig must run first so we know which MAC to wait for.
+    // Without an expected id we'd be back to the flaky "spot the new MAC"
+    // baseline diff that this hook was rewritten to eliminate — refuse to
+    // start instead of guessing.
+    if (!expectedModuleIdRef.current) {
+      console.warn('[Step5] No expected module id — sendConfig must run before startVerification');
+      setState((s) => ({
+        ...s,
+        pollingActive: false,
+        verificationTimedOut: true,
+        detectedModule: null,
+      }));
+      return;
     }
 
     setState((s) => ({
@@ -224,7 +231,6 @@ export function useSetupWizard() {
       detectedModule: null,
     }));
     pollCountRef.current = 0;
-    let baselineCaptured = baselineModuleIdsRef.current.size > 0;
 
     pollingIntervalRef.current = setInterval(async () => {
       pollCountRef.current++;
@@ -240,27 +246,16 @@ export function useSetupWizard() {
 
       try {
         const modules = await api.getAllModules();
-
-        // If baseline was empty (backend wasn't reachable), capture it now
-        if (!baselineCaptured && modules.length > 0) {
-          baselineModuleIdsRef.current = new Set(modules.map((m) => m.id));
-          baselineCaptured = true;
-          console.log(
-            '[Step5] Baseline captured late:',
-            baselineModuleIdsRef.current.size,
-            'modules',
-          );
-          return; // skip this poll — baseline just set
-        }
-
         console.log(
-          `[Step5] Got ${modules.length} modules, baseline has ${baselineModuleIdsRef.current.size}`,
+          `[Step5] Got ${modules.length} modules, expecting id ${expectedModuleIdRef.current}`,
         );
-        const newModule = modules.find((m) => !baselineModuleIdsRef.current.has(m.id));
-        if (newModule) {
-          console.log('[Step5] New module detected:', newModule);
+        const expectedModule = modules.find(
+          (m) => m.id === expectedModuleIdRef.current && m.status === 'online',
+        );
+        if (expectedModule) {
+          console.log('[Step5] Expected module detected online:', expectedModule);
           stopVerification();
-          setState((s) => ({ ...s, detectedModule: newModule }));
+          setState((s) => ({ ...s, detectedModule: expectedModule }));
         }
       } catch (err) {
         console.error('[Step5] Poll error:', err);

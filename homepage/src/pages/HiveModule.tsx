@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n/LanguageContext';
 import SiteHeader from '../components/SiteHeader';
 import SiteFooter from '../components/SiteFooter';
@@ -162,10 +161,60 @@ export default function HiveModule() {
           >
             {t('hiveModule.electronicsTitle')}
           </h2>
-          <p className="text-hf-fg-soft text-center mb-8 text-hf-base">
+          <p className="text-hf-fg-soft text-center mb-8 max-w-2xl mx-auto text-hf-base">
             {t('hiveModule.electronicsSubtitle')}
           </p>
 
+          {/* Basic */}
+          <h3 className="text-lg font-bold text-hf-honey-700 mb-1">{t('hiveModule.basicTitle')}</h3>
+          <p className="text-hf-sm text-hf-fg-mute mb-3">{t('hiveModule.basicSubtitle')}</p>
+          <div className="hf-card overflow-hidden mb-6">
+            <table className="w-full">
+              <thead>
+                <tr
+                  style={{ background: 'var(--hf-line-soft)' }}
+                  className="border-b border-hf-border"
+                >
+                  <th className="text-left px-4 md:px-6 py-3 text-hf-sm font-semibold text-hf-fg-soft">
+                    {t('hiveModule.component')}
+                  </th>
+                  <th className="text-left px-4 md:px-6 py-3 text-hf-sm font-semibold text-hf-fg-soft hidden md:table-cell">
+                    {t('hiveModule.description')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-hf-border">
+                <PartRow
+                  name={t('hiveModule.esp32cam')}
+                  description={t('hiveModule.esp32camDesc')}
+                />
+                <PartRow name={t('hiveModule.antenna')} description={t('hiveModule.antennaDesc')} />
+                <PartRow
+                  name={t('hiveModule.devBoard')}
+                  description={t('hiveModule.devBoardDesc')}
+                />
+                <PartRow name={t('hiveModule.screws')} description={t('hiveModule.screwsDesc')} />
+              </tbody>
+            </table>
+          </div>
+
+          {/* Self-sufficient */}
+          <h3 className="text-lg font-bold text-hf-honey-700 mb-1">
+            {t('hiveModule.selfSufficientTitle')}
+          </h3>
+          <p className="text-hf-sm text-hf-fg-mute mb-2">
+            {t('hiveModule.selfSufficientSubtitle')}
+          </p>
+          <p
+            className="text-hf-xs px-3 py-2 mb-3 rounded-hf border"
+            style={{
+              background: 'color-mix(in oklch, var(--hf-honey-100) 50%, transparent)',
+              borderColor: 'color-mix(in oklch, var(--hf-honey-300) 50%, transparent)',
+              color: 'var(--hf-honey-800)',
+            }}
+          >
+            {t('hiveModule.selfSufficientDisclaimer')}
+          </p>
           <div className="hf-card overflow-hidden">
             <table className="w-full">
               <thead>
@@ -179,53 +228,46 @@ export default function HiveModule() {
                   <th className="text-left px-4 md:px-6 py-3 text-hf-sm font-semibold text-hf-fg-soft hidden md:table-cell">
                     {t('hiveModule.description')}
                   </th>
-                  <th className="text-right px-4 md:px-6 py-3 text-hf-sm font-semibold text-hf-fg-soft">
-                    {t('hiveModule.estPrice')}
-                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-hf-border">
                 <PartRow
-                  name={t('hiveModule.esp32cam')}
-                  description={t('hiveModule.esp32camDesc')}
-                  price="8–12€"
+                  name={t('hiveModule.currentSensor')}
+                  description={t('hiveModule.currentSensorDesc')}
+                />
+                <PartRow
+                  name={t('hiveModule.headerPins')}
+                  description={t('hiveModule.headerPinsDesc')}
                 />
                 <PartRow
                   name={t('hiveModule.pvModule')}
                   description={t('hiveModule.pvModuleDesc')}
-                  price="12–18€"
                 />
                 <PartRow
-                  name={t('hiveModule.chargeController')}
-                  description={t('hiveModule.chargeControllerDesc')}
-                  price="2–4€"
+                  name={t('hiveModule.jumperWires')}
+                  description={t('hiveModule.jumperWiresDesc')}
+                />
+                <PartRow
+                  name={t('hiveModule.usbCAdapter')}
+                  description={t('hiveModule.usbCAdapterDesc')}
+                />
+                <PartRow
+                  name={t('hiveModule.microUsbAdapter')}
+                  description={t('hiveModule.microUsbAdapterDesc')}
+                />
+                <PartRow
+                  name={t('hiveModule.wagoClamp')}
+                  description={t('hiveModule.wagoClampDesc')}
+                />
+                <PartRow
+                  name={t('hiveModule.batteryHolder')}
+                  description={t('hiveModule.batteryHolderDesc')}
                 />
                 <PartRow
                   name={t('hiveModule.batteryPack')}
                   description={t('hiveModule.batteryPackDesc')}
-                  price="8–16€"
-                />
-                <PartRow
-                  name={t('hiveModule.bms')}
-                  description={t('hiveModule.bmsDesc')}
-                  price="3–5€"
-                />
-                <PartRow
-                  name={t('hiveModule.boostConverter')}
-                  description={t('hiveModule.boostConverterDesc')}
-                  price="2–4€"
                 />
               </tbody>
-              <tfoot>
-                <tr style={{ background: 'var(--hf-honey-50)' }}>
-                  <td className="px-4 md:px-6 py-3 font-bold text-hf-fg" colSpan={2}>
-                    {t('hiveModule.estimatedTotal')}
-                  </td>
-                  <td className="px-4 md:px-6 py-3 font-bold text-right text-hf-md text-hf-honey-700 tabular-nums">
-                    35–59€
-                  </td>
-                </tr>
-              </tfoot>
             </table>
           </div>
         </section>
@@ -276,23 +318,7 @@ export default function HiveModule() {
           </div>
         </section>
 
-        {/* Next CTA */}
-        <div
-          className="rounded-hf-xl p-6 md:p-8 text-center border-2"
-          style={{
-            background:
-              'linear-gradient(135deg, color-mix(in oklch, var(--hf-honey-100) 80%, transparent), color-mix(in oklch, var(--hf-honey-200) 60%, transparent))',
-            borderColor: 'color-mix(in oklch, var(--hf-honey-300) 50%, transparent)',
-          }}
-        >
-          <h3 className="text-hf-fg mb-2" style={{ fontSize: 'var(--fs-lg)' }}>
-            {t('hiveModule.ctaTitle')}
-          </h3>
-          <p className="text-hf-fg-soft mb-6 text-hf-base">{t('hiveModule.ctaText')}</p>
-          <Link to="/assembly" className="hf-btn hf-btn-primary inline-flex px-8 py-3">
-            {t('hiveModule.ctaCta')}
-          </Link>
-        </div>
+        {/* Next step CTA — hidden until assembly guide is ready */}
       </main>
 
       <SiteFooter />
@@ -314,15 +340,7 @@ function ToolRow({ name, description }: { name: string; description: string }) {
   );
 }
 
-function PartRow({
-  name,
-  description,
-  price,
-}: {
-  name: string;
-  description: string;
-  price: string;
-}) {
+function PartRow({ name, description }: { name: string; description: string }) {
   return (
     <tr className="hover:bg-hf-fg/[0.025] transition-colors">
       <td className="px-4 md:px-6 py-3">
@@ -331,9 +349,6 @@ function PartRow({
       </td>
       <td className="px-4 md:px-6 py-3 text-hf-sm text-hf-fg-soft hidden md:table-cell">
         {description}
-      </td>
-      <td className="px-4 md:px-6 py-3 text-hf-sm font-semibold text-hf-honey-700 text-right whitespace-nowrap tabular-nums">
-        {price}
       </td>
     </tr>
   );

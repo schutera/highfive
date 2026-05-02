@@ -1,8 +1,6 @@
 #include "esp_camera.h"
 #include "esp_wifi.h"
 #include "esp_init.h"
-#include "logbuf.h"
-#include "module_id.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <FS.h>
@@ -74,14 +72,6 @@ void setESPConfigured(bool value) {
     preferences.end();
 }
 
-uint32_t incrementBootCount() {
-    preferences.begin("telemetry", false);
-    uint32_t count = preferences.getUInt("boot_count", 0) + 1;
-    preferences.putUInt("boot_count", count);
-    preferences.end();
-    return count;
-}
-
 
 /* -------------------------------- */
 /* ---------- CAMERA SETUP ---------- */
@@ -102,6 +92,23 @@ void configure_camera_sensor(esp_config_t *esp_config) {
 }
 
 void initEspCamera(framesize_t resolution) {
+  // Loud diagnostic: print PSRAM state + camera-relevant settings up front so
+  // we never have to guess what the runtime environment looks like.
+  Serial.printf("-- PSRAM: found=%d size=%u bytes\n",
+                (int)psramFound(),
+                (unsigned)ESP.getPsramSize());
+
+  // Explicit PWDN power-cycle on the OV2640 before init. The chip otherwise
+  // inherits whatever power state it was in across a soft reset, and a
+  // half-stuck sensor will respond to I2C config (init succeeds) but never
+  // produce frames over the parallel data bus. This forces a clean cold-start.
+  Serial.println("-- power-cycling camera via PWDN");
+  pinMode(PWDN_GPIO_NUM, OUTPUT);
+  digitalWrite(PWDN_GPIO_NUM, HIGH);  // power off
+  delay(50);
+  digitalWrite(PWDN_GPIO_NUM, LOW);   // power on
+  delay(50);
+
   config.frame_size = resolution;
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
@@ -111,8 +118,11 @@ void initEspCamera(framesize_t resolution) {
 
   if (psramFound()) {
     config.jpeg_quality = 10;
-    config.fb_count = 2;
-    config.grab_mode = CAMERA_GRAB_LATEST;
+    // Single buffer + GRAB_WHEN_EMPTY: camera captures one frame then waits.
+    // GRAB_LATEST + fb_count=2 is for streaming — with infrequent captures
+    // (boot + daily) the unused buffers overflow (FB-OVF) and the driver stalls.
+    config.fb_count = 1;
+    config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   } else {
     // this is just a fallback... don't know if the psram will ever not be found
     Serial.println("---- PSRAM not found. Image quality will be reduced.");
@@ -125,13 +135,28 @@ void initEspCamera(framesize_t resolution) {
   Serial.println("-- initializing ESP camera");
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    logf("[CAM] init failed: 0x%x — restarting in 3s", err);
-    delay(3000);
+    Serial.printf("---- camera init failed: 0x%x. Restarting in 5s...\n", err);
+    delay(5000);
     ESP.restart();
   } else {
     initialized = 1;
     Serial.println("---- camera initialized");
   }
+}
+
+// One-shot recovery: deinit + PWDN power-cycle + reinit. Called from setup()
+// when the warm-up loop produces all-NULL frames despite a successful init.
+// Same camera config — does not change quality or framesize.
+void recoverCamera(framesize_t resolution) {
+  Serial.println("[CAM] recovery: deinit + PWDN cycle + reinit");
+  esp_camera_deinit();
+  delay(200);
+  digitalWrite(PWDN_GPIO_NUM, HIGH);
+  delay(100);
+  digitalWrite(PWDN_GPIO_NUM, LOW);
+  delay(100);
+  initialized = 0;
+  initEspCamera(resolution);
 }
 
 /* -------------------------------- */
@@ -191,23 +216,39 @@ void tuneWifiForLatency() {
   WiFi.setTxPower(WIFI_POWER_19_5dBm);     // Max TX power (if allowed)
 }
 
+// Auto-reconnect handler: triggers a full re-association (and DHCP renew)
+// on any disconnect, including stale-lease and AP-rotation cases that
+// WiFi.setAutoReconnect alone won't recover from.
+static void onWifiEvent(WiFiEvent_t event) {
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    Serial.println("[WIFI] disconnected — reconnecting");
+    WiFi.reconnect();
+  } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+    Serial.printf("[WIFI] (re)connected, IP: %s\n", WiFi.localIP().toString().c_str());
+  }
+}
+
 void setupWifiConnection(wifi_configuration_t *wifi_config) {
 
   Serial.printf("connect to SSID: %s with pw: %s\n", wifi_config->SSID, wifi_config->PASSWORD);
   Serial.printf("SSID length: %d\n", strlen(wifi_config->SSID));
   Serial.printf("PW length: %d\n", strlen(wifi_config->PASSWORD));
 
+  //tuneWifiForLatency();
+
   WiFi.disconnect();
   delay(100);
   WiFi.mode(WIFI_STA);
+  WiFi.persistent(true);
+  WiFi.setAutoReconnect(true);
+  WiFi.onEvent(onWifiEvent);
   WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
-
-  const uint32_t WIFI_INITIAL_TIMEOUT_MS = 30000;
-  uint32_t start = millis();
+  //WiFi.begin("Vodafone-CAKE", "tYsjat-gakke8-kephaw");
+  Serial.printf("---- connecting to %s\n", wifi_config->SSID);
+  unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - start > WIFI_INITIAL_TIMEOUT_MS) {
-      logf("[WIFI] initial connect timed out — restarting");
-      delay(1000);
+    if (millis() - wifiStart > 30000) {
+      Serial.println("\n------ WiFi connection timed out after 30s. Restarting...");
       ESP.restart();
     }
     delay(500);
@@ -218,34 +259,38 @@ void setupWifiConnection(wifi_configuration_t *wifi_config) {
   setupTime();
 }
 
-/*
-  Non-blocking reconnect attempt used from loop(). Returns true if
-  WiFi is connected after the call. If disconnected, kicks off a
-  reconnect and waits up to RECONNECT_WAIT_MS for it to come up.
-  Caller is expected to restart the device if this keeps failing.
-*/
-bool reconnectWifi(wifi_configuration_t *wifi_config) {
-  if (WiFi.status() == WL_CONNECTED) return true;
+/* ---------------------------------------- */
+/* ---------- MODULE NAME GENERATOR ---------- */
+/* ---------------------------------------- */
+// 32 × 32 × 32 = 32,768 unique combinations.
+// Animals are lowercase German names with umlauts substituted (ae/ue/oe)
+// so they stay ASCII-safe across the URL/JSON/filename pipeline.
+static const char* ADJECTIVES[] = {
+  "swift", "brave", "quiet", "bright", "gentle", "proud", "calm", "eager",
+  "fierce", "glad", "happy", "jolly", "kind", "lively", "merry", "noble",
+  "patient", "pure", "quick", "ready", "smart", "strong", "tame", "vivid",
+  "wise", "witty", "young", "loyal", "sleek", "spry", "mild", "keen"
+};
+static const char* FRUITS[] = {
+  "plum", "grape", "fig", "lime", "pear", "kiwi", "guava", "date",
+  "apple", "mango", "peach", "lemon", "melon", "berry", "cherry", "papaya",
+  "lychee", "quince", "pomelo", "raisin", "banana", "currant", "olive", "coconut",
+  "citron", "ackee", "apricot", "mulberry", "persimmon", "nectarine", "raspberry", "blackberry"
+};
+static const char* ANIMALS[] = {
+  "wolf", "fuchs", "baer", "luchs", "dachs", "iltis", "marder", "otter",
+  "biber", "hase", "eule", "uhu", "falke", "milan", "adler", "reh",
+  "hirsch", "elch", "specht", "kraehe", "amsel", "spatz", "meise", "star",
+  "schwan", "ente", "gans", "reiher", "storch", "kuckuck", "forelle", "hecht"
+};
 
-  logf("[WIFI] disconnected — attempting reconnect");
-  logbufNoteWifiReconnect();
-
-  WiFi.disconnect();
-  delay(100);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
-
-  const uint32_t RECONNECT_WAIT_MS = 15000;
-  uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - start > RECONNECT_WAIT_MS) {
-      logf("[WIFI] reconnect failed after %u ms", RECONNECT_WAIT_MS);
-      return false;
-    }
-    delay(500);
-  }
-  logf("[WIFI] reconnected. IP: %s", WiFi.localIP().toString().c_str());
-  return true;
+String generateModuleName() {
+  uint64_t mac = ESP.getEfuseMac();
+  uint8_t* bytes = (uint8_t*)&mac;
+  const char* adj = ADJECTIVES[bytes[0] % 32];
+  const char* fruit = FRUITS[bytes[1] % 32];
+  const char* animal = ANIMALS[bytes[2] % 32];
+  return String(adj) + "-" + String(fruit) + "-" + String(animal);
 }
 
 /* -------------------------------- */
@@ -268,21 +313,22 @@ bool loadConfig(esp_config_t *esp_config) {
 
   // ---- setting unique ID (esp mac address) ---- //
   esp_config->esp_ID = ESP.getEfuseMac();
-  // Log the canonical module ID (12 lowercase hex chars). %u was also wrong
-  // here — it truncated the uint64_t to 32 bits — but the canonical form is
-  // what every other service in the system now expects, so emit that.
-  Serial.printf("------ ESP module identifier: %s\n",
-                hf::formatModuleId(esp_config->esp_ID).c_str());
+  Serial.printf("------ ESP module identifier: %u\n", esp_config->esp_ID);
 
   // ---- set initial battery level ---- //
   esp_config->battery_level = 90;
+  esp_config->email[0] = '\0';
 
   /* DEFAULTS */
-  esp_config->RESOLUTION = FRAMESIZE_VGA;
-  esp_config->CAPTURE_INTERVAL = 300;
+  esp_config->RESOLUTION = FRAMESIZE_UXGA;
+  esp_config->CAPTURE_INTERVAL = 86400000; // 24 hours (used as fallback)
   esp_config->vertical_flip = 1;
   esp_config->brightness = 1;
   esp_config->saturation = -1;
+
+  esp_config->geolocation.latitude  = 0.0f;
+  esp_config->geolocation.longitude = 0.0f;
+  esp_config->geolocation.accuracy  = 0.0f;
 
   if (!SPIFFS.begin(true)) {
     Serial.println("-- SPIFFS mount failed");
@@ -296,7 +342,7 @@ bool loadConfig(esp_config_t *esp_config) {
     return false;
   }
 
-  StaticJsonDocument<512> esp_config_doc;
+  StaticJsonDocument<1024> esp_config_doc;
   DeserializationError err = deserializeJson(esp_config_doc, file);
   file.close();
   if (err) {
@@ -304,11 +350,10 @@ bool loadConfig(esp_config_t *esp_config) {
     return false;
   }
 
-  strlcpy(
-    esp_config->module_name,
-    esp_config_doc["NETWORK"]["MODULE_NAME"] | "New Module",
-    sizeof(esp_config->module_name)
-  );
+  String autoName = generateModuleName();
+  strlcpy(esp_config->module_name, autoName.c_str(), sizeof(esp_config->module_name));
+  Serial.printf("------ Auto-generated module name: %s\n", esp_config->module_name);
+
   strlcpy(
     esp_config->wifi_config.SSID,
     esp_config_doc["NETWORK"]["SSID"] | "",
@@ -329,7 +374,12 @@ bool loadConfig(esp_config_t *esp_config) {
     esp_config_doc["NETWORK"]["INIT_URL"] | "",
     sizeof(esp_config->INIT_URL)
   );
-  
+  strlcpy(
+    esp_config->email,
+    esp_config_doc["NETWORK"]["EMAIL"] | "",
+    sizeof(esp_config->email)
+  );
+
   //Serial.printf("SSID: %s\n", esp_config->wifi_config.SSID);
   //Serial.printf("PASSWORD: %s\n", esp_config->wifi_config.PASSWORD);
 
@@ -339,16 +389,16 @@ bool loadConfig(esp_config_t *esp_config) {
   esp_config->brightness = esp_config_doc["CAMERA"]["BRIGHTNESS"];
   esp_config->saturation = esp_config_doc["CAMERA"]["SATURATION"];
   
-  if (!esp_config->wifi_config.SSID) {
+  if (strlen(esp_config->wifi_config.SSID) == 0) {
     Serial.println("------ Could not read SSID from config file.");
     return false;
-  } else if (!esp_config->wifi_config.PASSWORD) {
+  } else if (strlen(esp_config->wifi_config.PASSWORD) == 0) {
     Serial.println("------ Could not read PASSWORD from config file.");
     return false;
-  } else if (!esp_config->UPLOAD_URL) {
+  } else if (strlen(esp_config->UPLOAD_URL) == 0) {
     Serial.println("------ Could not read UPLOAD_URL from config file.");
     return false;
-  } else if (!esp_config->INIT_URL) {
+  } else if (strlen(esp_config->INIT_URL) == 0) {
     Serial.println("------ Could not read INIT_URL from config file.");
     return false;
   }
@@ -428,13 +478,15 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
     //http.begin("http://192.168.0.36:8002/new_module");
     http.addHeader("Content-Type", "application/json");
 
-    StaticJsonDocument<200> doc;
-    // Canonical 12-char lowercase-hex module ID — see lib/module_id/.
-    doc["esp_id"] = String(hf::formatModuleId(esp_config->esp_ID).c_str());
+    StaticJsonDocument<256> doc;
+    doc["esp_id"] = String(esp_config->esp_ID);
     doc["module_name"] = esp_config->module_name;
     doc["latitude"] = String(esp_config->geolocation.latitude);
     doc["longitude"] = String(esp_config->geolocation.longitude);
     doc["battery_level"] = String(esp_config->battery_level);
+    if (strlen(esp_config->email) > 0) {
+      doc["email"] = esp_config->email;
+    }
 
 
     String jsonData;

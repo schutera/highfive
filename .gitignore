@@ -201,6 +201,8 @@ secrets.h
 # Configuration files - server-specific
 .env
 .env.local
+.env.production
+*.env.production
 ecosystem.config.js
 
 # Build outputs
@@ -213,6 +215,13 @@ backend/node_modules/
 ESP32-CAM/.pio/
 ESP32-CAM/.pioenvs/
 ESP32-CAM/.piolibdeps/
+
+# Firmware binaries
+*.bin
+
+# Runtime data — NEVER push to remote
+image-service/data/
+duckdb-service/data/
 
 .DS_Store
 
@@ -232,3 +241,7 @@ ESP32-CAM/.piolibdeps/
 
 # Vitest coverage output (homepage; backend/coverage/ already listed above)
 homepage/coverage/
+
+# DuckDB
+*.duckdb
+*.duckdb.wal

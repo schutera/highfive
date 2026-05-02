@@ -3,7 +3,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import './style.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LanguageProvider } from './i18n/LanguageContext';
-
 // Code-split the page bundles. Each route only loads its own JS + the
 // libraries it actually uses (e.g. only /dashboard pulls leaflet).
 const HomePage = lazy(() => import('./pages/HomePage'));
@@ -11,6 +10,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const SetupWizard = lazy(() => import('./pages/SetupWizard'));
 const HiveModule = lazy(() => import('./pages/HiveModule'));
 const AssemblyGuide = lazy(() => import('./pages/AssemblyGuide'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
 
 /**
  * Branded fallback shown while a lazy route is loading. Intentionally
@@ -47,6 +47,7 @@ function App() {
               <Route path="/setup" element={<SetupWizard />} />
               <Route path="/hive-module" element={<HiveModule />} />
               <Route path="/assembly" element={<AssemblyGuide />} />
+              <Route path="/admin" element={<AdminPage />} />
               {/* Redirect old routes */}
               <Route path="/web-installer" element={<Navigate to="/setup" replace />} />
               <Route path="/setup-guide" element={<Navigate to="/setup" replace />} />

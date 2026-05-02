@@ -1,8 +1,9 @@
+import 'dotenv/config';
 import { app } from './app';
 import { getApiKey } from './auth';
 import { duckdbHealth } from './duckdbClient';
 
-const PORT = 3002;
+const PORT = parseInt(process.env.PORT || '3001', 10);
 
 async function bootstrap() {
   try {

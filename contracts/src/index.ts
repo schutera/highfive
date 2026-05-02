@@ -42,6 +42,15 @@ export const tryParseModuleId = (input: string): ModuleId | null => {
   }
 };
 
+export interface HeartbeatSnapshot {
+  receivedAt: string; // ISO timestamp
+  battery: number | null;
+  rssi: number | null;
+  uptimeMs: number | null;
+  freeHeap: number | null;
+  fwVersion: string | null;
+}
+
 export interface Module {
   id: ModuleId;
   name: string;
@@ -55,6 +64,12 @@ export interface Module {
   firstOnline: string; // ISO date string
   totalHatches: number; // Sum of all hatches across all nests
   imageCount: number; // Total images uploaded by this module
+  email: string | null;
+  updatedAt?: string; // ISO timestamp — set on every registration/UPSERT
+  // Liveness — derived from max(updatedAt, lastApiCall, latestHeartbeat.receivedAt).
+  // If null, the module has never phoned home.
+  lastSeenAt?: string | null;
+  latestHeartbeat?: HeartbeatSnapshot | null;
 }
 
 export interface NestData {

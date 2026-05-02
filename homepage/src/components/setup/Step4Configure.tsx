@@ -1,45 +1,25 @@
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface Step4ConfigureProps {
-  moduleName: string;
-  wifiSsid: string;
-  wifiPassword: string;
-  setModuleName: (v: string) => void;
-  setWifiSsid: (v: string) => void;
-  setWifiPassword: (v: string) => void;
-  configSending: boolean;
   configSent: boolean;
-  configError: string | null;
-  sendConfig: () => void;
+  markConfigDone: () => void;
   onNext: () => void;
   onBack: () => void;
 }
 
 export default function Step4Configure({
-  moduleName,
-  wifiSsid,
-  wifiPassword,
-  setModuleName,
-  setWifiSsid,
-  setWifiPassword,
-  configSending,
   configSent,
-  configError,
-  sendConfig,
+  markConfigDone,
   onNext,
   onBack,
 }: Step4ConfigureProps) {
   const { t } = useTranslation();
-  const [showPassword, setShowPassword] = useState(false);
-  const id = useId();
+  const [opened, setOpened] = useState(false);
 
-  const canSave =
-    moduleName.trim() && wifiSsid.trim() && wifiPassword.trim() && !configSending && !configSent;
-
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (canSave) sendConfig();
+  const handleOpen = () => {
+    window.open('http://192.168.4.1', '_blank');
+    setOpened(true);
   };
 
   return (
@@ -129,156 +109,41 @@ export default function Step4Configure({
         </aside>
       )}
 
+      {/* Configuration instructions — shown before done */}
       {!configSent && (
-        <form className="hf-card p-5 w-full max-w-md space-y-4" onSubmit={onSubmit}>
-          <div>
-            <label htmlFor={`${id}-name`} className="text-hf-sm font-medium text-hf-fg-soft">
-              {t('step4.moduleName')}
-            </label>
-            <input
-              id={`${id}-name`}
-              type="text"
-              value={moduleName}
-              onChange={(e) => setModuleName(e.target.value)}
-              placeholder={t('step4.moduleNamePlaceholder')}
-              disabled={configSending}
-              autoComplete="off"
-              required
-              className="mt-1 w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus:ring-2 focus:ring-hf-honey-300 focus:border-hf-honey-400 disabled:opacity-50"
-            />
-          </div>
-
-          <div>
-            <label htmlFor={`${id}-ssid`} className="text-hf-sm font-medium text-hf-fg-soft">
-              {t('step4.wifiNetwork')}
-            </label>
-            <input
-              id={`${id}-ssid`}
-              type="text"
-              value={wifiSsid}
-              onChange={(e) => setWifiSsid(e.target.value)}
-              placeholder={t('step4.wifiPlaceholder')}
-              disabled={configSending}
-              autoComplete="off"
-              required
-              className="mt-1 w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus:ring-2 focus:ring-hf-honey-300 focus:border-hf-honey-400 disabled:opacity-50"
-            />
-          </div>
-
-          <div>
-            <label htmlFor={`${id}-pwd`} className="text-hf-sm font-medium text-hf-fg-soft">
-              {t('step4.wifiPassword')}
-            </label>
-            <div className="mt-1 relative">
-              <input
-                id={`${id}-pwd`}
-                type={showPassword ? 'text' : 'password'}
-                value={wifiPassword}
-                onChange={(e) => setWifiPassword(e.target.value)}
-                placeholder={t('step4.wifiPasswordPlaceholder')}
-                disabled={configSending}
-                autoComplete="new-password"
-                required
-                className="w-full bg-hf-bg border border-hf-border rounded-hf px-3 py-2 pr-10 text-hf-sm text-hf-fg placeholder:text-hf-fg-mute focus:outline-none focus:ring-2 focus:ring-hf-honey-300 focus:border-hf-honey-400 disabled:opacity-50"
-              />
-              <button
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-hf-fg-mute hover:text-hf-fg-soft rounded-full"
-                type="button"
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                aria-pressed={showPassword}
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  {showPassword ? (
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21"
-                    />
-                  ) : (
-                    <>
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                      />
-                    </>
-                  )}
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {/* Save button — inside form so Enter submits */}
-          {!configSending && (
-            <button
-              type="submit"
-              disabled={!canSave}
-              className={`hf-btn w-full px-8 py-3 ${canSave ? 'hf-btn-primary' : 'cursor-not-allowed'}`}
-              style={
-                canSave
-                  ? undefined
-                  : {
-                      background: 'color-mix(in oklch, var(--hf-fg) 5%, transparent)',
-                      color: 'var(--hf-fg-mute)',
-                    }
-              }
+        <>
+          <button
+            onClick={handleOpen}
+            className="hf-btn hf-btn-primary px-8 py-3 inline-flex items-center gap-2"
+          >
+            {t('step4.openConfigPage')}
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
             >
-              {configError ? t('common.tryAgain') : t('step4.saveBtn')}
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </button>
+
+          {opened && (
+            <button onClick={markConfigDone} className="hf-btn hf-btn-secondary mt-4 px-8 py-3">
+              {t('step4.configDoneBtn')}
             </button>
           )}
-        </form>
+        </>
       )}
 
-      {configSending && (
-        <div className="flex items-center gap-3 mt-4 mb-2" role="status" aria-live="polite">
-          <div
-            className="w-5 h-5 border-2 border-hf-honey-500 border-t-transparent rounded-full animate-spin"
-            aria-hidden="true"
-          />
-          <span className="text-hf-sm font-medium text-hf-fg-soft">{t('step4.sending')}</span>
-        </div>
-      )}
-
-      {configError && (
-        <div
-          className="rounded-hf p-4 mt-4 w-full max-w-md border"
-          role="alert"
-          style={{
-            background: 'color-mix(in oklch, var(--hf-danger) 8%, transparent)',
-            borderColor: 'color-mix(in oklch, var(--hf-danger) 30%, transparent)',
-          }}
-        >
-          <p className="text-hf-sm font-medium" style={{ color: 'var(--hf-danger)' }}>
-            {t('step4.error')}
-          </p>
-          <p className="text-hf-xs mt-1" style={{ color: 'var(--hf-danger)' }}>
-            {configError}
-          </p>
-          <p className="text-hf-xs text-hf-fg-mute mt-2">{t('step4.errorHint')}</p>
-        </div>
-      )}
-
+      {/* Navigation */}
       <div className="flex gap-3 w-full md:w-auto mt-4">
-        <button
-          onClick={onBack}
-          disabled={configSending}
-          className="hf-btn hf-btn-secondary flex-1 md:flex-none px-6 py-3 disabled:opacity-50"
-        >
+        <button onClick={onBack} className="hf-btn hf-btn-secondary flex-1 md:flex-none px-6 py-3">
           {t('common.back')}
         </button>
         {configSent && (

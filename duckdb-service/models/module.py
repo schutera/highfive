@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from models.module_id import ModuleId
@@ -15,3 +17,4 @@ class ModuleData(BaseModel):
     latitude: float
     longitude: float
     battery: int = Field(ge=0, le=100, validation_alias="battery_level")
+    email: Optional[str] = None

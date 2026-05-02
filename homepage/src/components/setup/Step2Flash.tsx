@@ -1,18 +1,17 @@
 import { useState, useCallback } from 'react';
 import { useTranslation } from '../../i18n/LanguageContext';
 import { flashEsp, FlashProgress, Manifest } from './flashEsp';
-// Vite emits this with a content hash; only loaded when this step renders
-// (the wizard route is itself lazy-loaded, so this asset never lands in the
-// homepage's first-paint budget).
-import firmwareUrl from '../../assets/firmware.bin?url';
 
+// Firmware lives at /firmware.bin (served from public/ and dropped there by
+// ESP32-CAM/build.sh at deploy time). Importing as a Vite asset under
+// homepage/src/assets/ would re-bake a stale binary into the homepage bundle.
 const FIRMWARE_MANIFEST: Manifest = {
   name: 'HighFive ESP32',
   version: '0.2.0',
   builds: [
     {
       chipFamily: 'ESP32',
-      parts: [{ path: firmwareUrl, offset: 0 }],
+      parts: [{ path: '/firmware.bin', offset: 0 }],
     },
   ],
 };

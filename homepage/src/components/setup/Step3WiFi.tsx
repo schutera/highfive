@@ -5,11 +5,12 @@ import { useTranslation } from '../../i18n/LanguageContext';
 interface Step3WiFiProps {
   onNext: () => void;
   onBack: () => void;
+  onSkip: () => void;
 }
 
 const AP_SSID = 'HiveHive-Access-Point';
 
-export default function Step3WiFi({ onNext, onBack }: Step3WiFiProps) {
+export default function Step3WiFi({ onNext, onBack, onSkip }: Step3WiFiProps) {
   const { t } = useTranslation();
   const [showTroubleshoot, setShowTroubleshoot] = useState(false);
 
@@ -108,12 +109,24 @@ export default function Step3WiFi({ onNext, onBack }: Step3WiFiProps) {
         )}
       </div>
 
-      <div className="flex gap-3 w-full md:w-auto">
-        <button onClick={onBack} className="hf-btn hf-btn-secondary flex-1 md:flex-none px-6 py-3">
-          {t('common.back')}
-        </button>
-        <button onClick={onNext} className="hf-btn hf-btn-primary flex-1 md:flex-none px-8 py-3">
-          {t('step3.connected')}
+      {/* Navigation */}
+      <div className="flex flex-col items-center gap-2 w-full md:w-auto">
+        <div className="flex gap-3 w-full md:w-auto">
+          <button
+            onClick={onBack}
+            className="hf-btn hf-btn-secondary flex-1 md:flex-none px-6 py-3"
+          >
+            {t('common.back')}
+          </button>
+          <button onClick={onNext} className="hf-btn hf-btn-primary flex-1 md:flex-none px-8 py-3">
+            {t('step3.connected')}
+          </button>
+        </div>
+        <button
+          onClick={onSkip}
+          className="text-hf-sm text-hf-fg-mute hover:text-hf-fg-soft underline transition-colors"
+        >
+          {t('step3.skip')}
         </button>
       </div>
     </section>

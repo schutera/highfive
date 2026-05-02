@@ -243,7 +243,7 @@ function ClusterMarker({
       <>
         <Circle
           center={clusterCenter}
-          radius={7000}
+          radius={21000}
           pathOptions={{
             color: clusterColor,
             fillColor: clusterColor,
@@ -273,7 +273,7 @@ function ClusterMarker({
     <>
       <Circle
         center={cluster[0].fuzzedLocation}
-        radius={1000}
+        radius={3000}
         pathOptions={{
           color: singleColor,
           fillColor: singleColor,

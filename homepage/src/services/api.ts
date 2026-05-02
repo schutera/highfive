@@ -17,6 +17,12 @@ export interface TelemetryEntry {
   _image?: string;
 }
 
+export interface ImageUpload {
+  module_id: string;
+  filename: string;
+  uploaded_at: string;
+}
+
 // API key for authentication - in production, this should come from environment variables
 const API_KEY = import.meta.env.VITE_API_KEY || 'hf_dev_key_2026';
 
@@ -66,6 +72,16 @@ class ApiService {
     } as ModuleDetail;
   }
 
+  async deleteModule(id: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/modules/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to delete module ${id}`);
+    }
+  }
+
   async getModuleLogs(id: string, limit: number = 10): Promise<TelemetryEntry[]> {
     const adminKey = typeof window !== 'undefined' ? sessionStorage.getItem('hf_admin_key') : null;
     const headers: Record<string, string> = { ...(this.getHeaders() as Record<string, string>) };
@@ -81,6 +97,30 @@ class ApiService {
       throw new Error(`Failed to fetch logs for module ${id}`);
     }
     return response.json();
+  }
+
+  async getImages(moduleId?: string): Promise<ImageUpload[]> {
+    const url = moduleId
+      ? `${this.baseUrl}/images?module_id=${encodeURIComponent(moduleId)}`
+      : `${this.baseUrl}/images`;
+    const response = await fetch(url, {
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch images');
+    const data = await response.json();
+    return data.images;
+  }
+
+  async deleteImage(filename: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/images/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to delete image');
+  }
+
+  getImageUrl(filename: string): string {
+    return `${this.baseUrl}/images/${encodeURIComponent(filename)}`;
   }
 
   async healthCheck(): Promise<{ status: string; timestamp: string }> {

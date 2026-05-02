@@ -16,7 +16,9 @@ def init_db():
                 status VARCHAR(10) NOT NULL CHECK (status IN ('online', 'offline')),
                 first_online DATE NOT NULL,
                 battery_level INTEGER,
-                image_count INTEGER NOT NULL DEFAULT 0
+                image_count INTEGER NOT NULL DEFAULT 0,
+                email VARCHAR(255),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS nest_data (
@@ -34,11 +36,57 @@ def init_db():
                 hatched INTEGER NOT NULL
             );
 
+            CREATE SEQUENCE IF NOT EXISTS image_uploads_seq START 1;
+            CREATE TABLE IF NOT EXISTS image_uploads (
+                id INTEGER PRIMARY KEY DEFAULT nextval('image_uploads_seq'),
+                module_id VARCHAR(20) NOT NULL,
+                filename VARCHAR(255) NOT NULL,
+                uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_nest_module ON nest_data(module_id);
             CREATE INDEX IF NOT EXISTS idx_progress_nest ON daily_progress(nest_id);
             CREATE INDEX IF NOT EXISTS idx_progress_date ON daily_progress(date);
+            CREATE INDEX IF NOT EXISTS idx_image_module ON image_uploads(module_id);
+
+            CREATE SEQUENCE IF NOT EXISTS module_heartbeats_seq START 1;
+            CREATE TABLE IF NOT EXISTS module_heartbeats (
+                id INTEGER PRIMARY KEY DEFAULT nextval('module_heartbeats_seq'),
+                module_id VARCHAR(20) NOT NULL,
+                received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                battery INTEGER,
+                rssi INTEGER,
+                uptime_ms BIGINT,
+                free_heap INTEGER,
+                fw_version VARCHAR(40)
+            );
+            CREATE INDEX IF NOT EXISTS idx_heartbeat_module ON module_heartbeats(module_id);
+            CREATE INDEX IF NOT EXISTS idx_heartbeat_received ON module_heartbeats(received_at);
             """
         )
+
+        # Add email column to existing databases
+        try:
+            con.execute("ALTER TABLE module_configs ADD COLUMN email VARCHAR(255)")
+        except Exception:
+            pass  # column already exists
+
+        # Add updated_at column to existing databases
+        try:
+            con.execute(
+                "ALTER TABLE module_configs ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            )
+        except Exception:
+            pass  # column already exists
+
+        # Track Discord-silence-alert state so we don't spam the channel.
+        # Set to NOW() when a silence alert fires, cleared on recovery alert.
+        try:
+            con.execute(
+                "ALTER TABLE module_configs ADD COLUMN last_silence_alert_at TIMESTAMP"
+            )
+        except Exception:
+            pass  # column already exists
 
         if os.getenv("SEED_DATA", "").lower() == "true":
             row_count = con.execute("SELECT COUNT(*) FROM module_configs").fetchone()[0]

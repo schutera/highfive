@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import type { Module } from '@highfive/contracts';
 import { useTranslation } from '../../i18n/LanguageContext';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
+const BACKEND_URL = import.meta.env.VITE_API_URL || '/api';
 
 interface Step5VerifyProps {
   pollingActive: boolean;
@@ -22,20 +22,47 @@ export default function Step5Verify({
   onBack,
 }: Step5VerifyProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
   const [checkingBackend, setCheckingBackend] = useState(false);
 
+  // Auto-redirect to dashboard with module selected after detection
+  useEffect(() => {
+    if (!detectedModule) return;
+    const timer = setTimeout(() => {
+      navigate('/dashboard', { state: { selectModuleId: detectedModule.id } });
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [detectedModule, navigate]);
+
   const checkBackendAndStart = async () => {
     setCheckingBackend(true);
-    try {
-      await api.healthCheck();
-      setBackendReachable(true);
-      startVerification();
-    } catch {
-      setBackendReachable(false);
-    } finally {
-      setCheckingBackend(false);
+    setBackendReachable(null);
+
+    // The user has just submitted WiFi creds to the ESP, which means their
+    // laptop is mid-handover from the ESP's now-vanished AP back to their
+    // home WiFi. Health checks during that gap fail with a network error.
+    // Retry quietly for ~16s before showing the red "unreachable" screen —
+    // the friendly waiting/spinner UI renders meanwhile (backendReachable
+    // is null, so we fall through to the default polling view).
+    const MAX_ATTEMPTS = 8;
+    const DELAY_MS = 2000;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        await api.healthCheck();
+        setBackendReachable(true);
+        setCheckingBackend(false);
+        startVerification();
+        return;
+      } catch {
+        console.log(`[Step5] backend healthcheck ${attempt}/${MAX_ATTEMPTS} failed`);
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+        }
+      }
     }
+    setBackendReachable(false);
+    setCheckingBackend(false);
   };
 
   useEffect(() => {
@@ -108,7 +135,11 @@ export default function Step5Verify({
           </div>
         </div>
 
-        <Link to="/dashboard" className="hf-btn hf-btn-primary w-full md:w-auto px-8 py-3">
+        <Link
+          to="/dashboard"
+          state={{ selectModuleId: detectedModule.id }}
+          className="hf-btn hf-btn-primary w-full md:w-auto px-8 py-3 text-center block"
+        >
           {t('step5.viewDashboard')}
         </Link>
       </section>

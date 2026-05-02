@@ -151,16 +151,16 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   }
 
   const isOnline = moduleDetail.status === 'online';
-  const lastApiCall = new Date(moduleDetail.lastApiCall);
-
   const locale = lang === 'de' ? 'de-DE' : 'en-US';
-  const formattedTime = lastApiCall.toLocaleString(locale, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const formattedTime = moduleDetail.lastApiCall
+    ? new Date(moduleDetail.lastApiCall).toLocaleString(locale, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
 
   const beeTypeSummaries = BEE_TYPES.map((beeType) => {
     const nestsForType = moduleDetail.nests.filter((n) => n.beeType === beeType.key);
@@ -253,9 +253,11 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
             </div>
           </div>
 
-          <p className="text-white/85 text-hf-xs">
-            {t('modulePanel.lastUpdate', { time: formattedTime })}
-          </p>
+          {formattedTime && (
+            <p className="text-white/85 text-hf-xs">
+              {t('modulePanel.lastUpdate', { time: formattedTime })}
+            </p>
+          )}
         </div>
       </div>
 

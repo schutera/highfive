@@ -2,10 +2,6 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { api } from '../../services/api';
 import type { Module } from '@highfive/contracts';
 import { sendConfigToEsp } from './espConfig';
-// Vite-managed firmware asset (content-hashed) used both as the local
-// fallback URL when the GitHub releases API is unreachable and as the
-// canonical path for esptool-js inside Step 2.
-import firmwareUrl from '../../assets/firmware.bin?url';
 
 export interface WizardState {
   currentStep: number;
@@ -16,7 +12,6 @@ export interface WizardState {
   firmwareLoading: boolean;
   flashComplete: boolean;
   // Step 4
-  moduleName: string;
   wifiSsid: string;
   wifiPassword: string;
   configSending: boolean;
@@ -29,7 +24,7 @@ export interface WizardState {
   verificationTimedOut: boolean;
 }
 
-const INIT_BASE_URL = import.meta.env.VITE_INIT_BASE_URL || 'http://localhost:8002';
+const INIT_BASE_URL = import.meta.env.VITE_INIT_BASE_URL || 'http://localhost:8000';
 const UPLOAD_BASE_URL = import.meta.env.VITE_UPLOAD_BASE_URL || 'http://localhost:8000';
 
 export const SERVER_CONFIG = {
@@ -55,11 +50,10 @@ export function useSetupWizard() {
   const [state, setState] = useState<WizardState>({
     currentStep: 1,
     direction: 'forward',
-    firmwareUrl: firmwareUrl,
+    firmwareUrl: '/firmware.bin',
     firmwareVersion: '',
     firmwareLoading: true,
     flashComplete: false,
-    moduleName: '',
     wifiSsid: '',
     wifiPassword: '',
     configSending: false,
@@ -72,14 +66,18 @@ export function useSetupWizard() {
   });
 
   const lanIpRef = useRef<string | null>(null);
-  const baselineModuleIdsRef = useRef<Set<string>>(new Set());
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
+  const knownModuleSnapshotRef = useRef<Map<string, string | undefined>>(new Map());
 
-  // Load firmware info + detect LAN IP on mount (while still on home WiFi)
+  // Load firmware info, detect LAN IP, and snapshot modules on mount.
+  // The module snapshot must be taken NOW (before the user configures the ESP)
+  // so that when the ESP later calls /new_module, we can detect the changed
+  // updated_at in the verification poll.
   useEffect(() => {
     loadFirmware();
     detectLanIp();
+    snapshotModules();
   }, []);
 
   // Cleanup polling on unmount
@@ -88,6 +86,38 @@ export function useSetupWizard() {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     };
   }, []);
+
+  // Listen for the post-save signal from the ESP popup
+  // (ESP firmware's /save handler calls window.opener.postMessage(...))
+  // and auto-advance to Step 5 so the user doesn't have to navigate manually.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data === 'hivehive-config-saved') {
+        setState((s) => ({
+          ...s,
+          configSent: true,
+          currentStep: Math.max(s.currentStep, 5),
+          direction: 'forward',
+        }));
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  const snapshotModules = async () => {
+    try {
+      const existing = await api.getAllModules();
+      knownModuleSnapshotRef.current = new Map(existing.map((m: Module) => [m.id, m.updatedAt]));
+      console.log('[SetupWizard] Module snapshot taken on mount:', [
+        ...knownModuleSnapshotRef.current.keys(),
+      ]);
+    } catch {
+      // Backend might not be reachable yet (user on ESP AP) — that's fine,
+      // startVerification will take a fallback snapshot.
+      console.log('[SetupWizard] Could not snapshot modules on mount (backend unreachable)');
+    }
+  };
 
   const detectLanIp = async () => {
     try {
@@ -105,35 +135,29 @@ export function useSetupWizard() {
   };
 
   const loadFirmware = async () => {
+    // The locally-served /firmware.bin is the canonical build for this deploy
+    // (we deliberately don't pull from GitHub Releases; the latest one there
+    // predates auto-name and form-submit and would regress the wizard).
+    // The sidecar /firmware.json (written by ESP32-CAM/build.sh) carries the
+    // version label — releases are named after bee species (bumblebee, ...).
+    let version = 'Local';
     try {
-      const response = await fetch(
-        'https://api.github.com/repos/schutera/highfive/releases/latest',
-      );
-      if (!response.ok) throw new Error('Failed to fetch release');
-
-      const releaseData = await response.json();
-      const firmwareAsset = releaseData.assets?.find(
-        (asset: { name: string }) => asset.name === 'firmware.bin',
-      );
-
-      if (firmwareAsset) {
-        setState((s) => ({
-          ...s,
-          firmwareUrl: firmwareAsset.browser_download_url,
-          firmwareVersion: releaseData.tag_name || releaseData.name,
-          firmwareLoading: false,
-        }));
-      } else {
-        setState((s) => ({ ...s, firmwareVersion: 'Local', firmwareLoading: false }));
+      const r = await fetch('/firmware.json', { cache: 'no-cache' });
+      if (r.ok) {
+        const m = await r.json();
+        if (m && typeof m.version === 'string' && m.version.length > 0) {
+          version = m.version;
+        }
       }
     } catch {
-      setState((s) => ({
-        ...s,
-        firmwareUrl: firmwareUrl,
-        firmwareVersion: 'Local (Fallback)',
-        firmwareLoading: false,
-      }));
+      // manifest missing → fall back to 'Local'
     }
+    setState((s) => ({
+      ...s,
+      firmwareUrl: '/firmware.bin',
+      firmwareVersion: version,
+      firmwareLoading: false,
+    }));
   };
 
   const goNext = useCallback(() => {
@@ -152,12 +176,20 @@ export function useSetupWizard() {
     }));
   }, []);
 
-  const markFlashComplete = useCallback(() => {
-    setState((s) => ({ ...s, flashComplete: true }));
+  const goToStep = useCallback((step: number) => {
+    setState((s) => ({
+      ...s,
+      currentStep: step,
+      direction: step > s.currentStep ? 'forward' : 'back',
+    }));
   }, []);
 
-  const setModuleName = useCallback((v: string) => {
-    setState((s) => ({ ...s, moduleName: v }));
+  const markConfigDone = useCallback(() => {
+    setState((s) => ({ ...s, configSent: true }));
+  }, []);
+
+  const markFlashComplete = useCallback(() => {
+    setState((s) => ({ ...s, flashComplete: true }));
   }, []);
 
   const setWifiSsid = useCallback((v: string) => {
@@ -182,7 +214,6 @@ export function useSetupWizard() {
 
     try {
       await sendConfigToEsp({
-        moduleName: state.moduleName,
         ssid: state.wifiSsid,
         password: state.wifiPassword,
         initBase,
@@ -195,7 +226,7 @@ export function useSetupWizard() {
       const message = err instanceof Error ? err.message : String(err);
       setState((s) => ({ ...s, configSending: false, configError: message }));
     }
-  }, [state.moduleName, state.wifiSsid, state.wifiPassword]);
+  }, [state.wifiSsid, state.wifiPassword]);
 
   const stopVerification = useCallback(() => {
     if (pollingIntervalRef.current) {
@@ -206,14 +237,22 @@ export function useSetupWizard() {
   }, []);
 
   const startVerification = useCallback(async () => {
-    // Capture baseline module list
-    try {
-      const currentModules = await api.getAllModules();
-      baselineModuleIdsRef.current = new Set(currentModules.map((m) => m.id));
-      console.log('[Step5] Baseline captured:', baselineModuleIdsRef.current.size, 'modules');
-    } catch {
-      console.warn('[Step5] Could not capture baseline — will retry during polling');
-      baselineModuleIdsRef.current = new Set();
+    console.log('[Step5] Starting verification, looking for any new module');
+
+    // Use the snapshot taken on wizard mount so we detect any module that
+    // registered/re-registered since the user opened the setup wizard.
+    // Only take a fresh snapshot as fallback if the mount snapshot failed
+    // (e.g., backend was unreachable when the wizard first opened).
+    if (knownModuleSnapshotRef.current.size === 0) {
+      try {
+        const existing = await api.getAllModules();
+        knownModuleSnapshotRef.current = new Map(existing.map((m: Module) => [m.id, m.updatedAt]));
+        console.log('[Step5] Fallback snapshot:', [...knownModuleSnapshotRef.current.keys()]);
+      } catch {
+        knownModuleSnapshotRef.current = new Map();
+      }
+    } else {
+      console.log('[Step5] Using mount snapshot:', [...knownModuleSnapshotRef.current.keys()]);
     }
 
     setState((s) => ({
@@ -224,7 +263,6 @@ export function useSetupWizard() {
       detectedModule: null,
     }));
     pollCountRef.current = 0;
-    let baselineCaptured = baselineModuleIdsRef.current.size > 0;
 
     pollingIntervalRef.current = setInterval(async () => {
       pollCountRef.current++;
@@ -240,27 +278,29 @@ export function useSetupWizard() {
 
       try {
         const modules = await api.getAllModules();
-
-        // If baseline was empty (backend wasn't reachable), capture it now
-        if (!baselineCaptured && modules.length > 0) {
-          baselineModuleIdsRef.current = new Set(modules.map((m) => m.id));
-          baselineCaptured = true;
-          console.log(
-            '[Step5] Baseline captured late:',
-            baselineModuleIdsRef.current.size,
-            'modules',
-          );
-          return; // skip this poll — baseline just set
-        }
-
-        console.log(
-          `[Step5] Got ${modules.length} modules, baseline has ${baselineModuleIdsRef.current.size}`,
-        );
-        const newModule = modules.find((m) => !baselineModuleIdsRef.current.has(m.id));
-        if (newModule) {
-          console.log('[Step5] New module detected:', newModule);
+        // 5-minute recency fallback: covers the case where the user reloaded
+        // the wizard *after* the ESP had already phoned home — the snapshot
+        // then captured the module in its updated state, so the snapshot
+        // comparison alone would miss it. Anything updated this recently is
+        // almost certainly "the module the user is currently setting up."
+        const RECENT_MS = 5 * 60 * 1000;
+        const now = Date.now();
+        const detectedModule = modules.find((m: Module) => {
+          const prevTimestamp = knownModuleSnapshotRef.current.get(m.id);
+          // New ID (not in snapshot) OR re-registered (updatedAt changed)
+          if (prevTimestamp === undefined) return true;
+          if (m.updatedAt !== prevTimestamp) return true;
+          // Recency fallback for wizard-reload scenarios
+          if (m.updatedAt) {
+            const updatedMs = Date.parse(m.updatedAt);
+            if (!isNaN(updatedMs) && now - updatedMs < RECENT_MS) return true;
+          }
+          return false;
+        });
+        if (detectedModule) {
+          console.log('[Step5] New or updated module detected:', detectedModule);
           stopVerification();
-          setState((s) => ({ ...s, detectedModule: newModule }));
+          setState((s) => ({ ...s, detectedModule }));
         }
       } catch (err) {
         console.error('[Step5] Poll error:', err);
@@ -272,8 +312,9 @@ export function useSetupWizard() {
     state,
     goNext,
     goBack,
+    goToStep,
+    markConfigDone,
     markFlashComplete,
-    setModuleName,
     setWifiSsid,
     setWifiPassword,
     sendConfig,

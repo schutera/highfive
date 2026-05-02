@@ -1,6 +1,7 @@
 #ifndef ESP_INIT_H
 #define ESP_INIT_H
 
+#include <Arduino.h>
 #include "esp_camera.h"
 
 #ifndef FIRMWARE_VERSION
@@ -25,6 +26,7 @@ typedef struct {
   /* esp module information */
   uint64_t esp_ID;
   char module_name[64];
+  char email[128];
   uint8_t battery_level;
   bool is_configured;
 
@@ -45,9 +47,11 @@ typedef struct {
 
 bool isESPConfigured();
 void setESPConfigured(bool value);
+String generateModuleName();
 bool loadConfig(esp_config_t *esp_config);
 void initEspPinout();
 void initEspCamera(framesize_t resolution);
+void recoverCamera(framesize_t resolution);
 void configure_camera_sensor(esp_config_t *esp_config);
 void setupWifiConnection(wifi_configuration_t *wifi_config);
 void getGeolocation(esp_config_t *esp_config);

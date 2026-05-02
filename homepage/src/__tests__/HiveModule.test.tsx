@@ -16,10 +16,11 @@ describe('HiveModule smoke', () => {
 
     // From translations: hiveModule.electronicsTitle = "Electronics You'll Need"
     expect(screen.getByText(/Electronics You'?ll Need/i)).toBeInTheDocument();
-    // Specific parts from the table — "ESP32-CAM" appears in both the row name
-    // and its description, so allow multiple matches.
+    // Specific parts from the Basic + Self-Sufficient tables — "ESP32-CAM"
+    // appears in both the row name and its description, so allow multiple matches.
     expect(screen.getAllByText(/ESP32-CAM/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/PV Module/i)).toBeInTheDocument();
-    expect(screen.getByText(/Boost Converter/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/PV Module/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/External Antenna/i)).toBeInTheDocument();
+    expect(screen.getByText(/Current Sensor/i)).toBeInTheDocument();
   });
 });

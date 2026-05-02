@@ -73,17 +73,8 @@ const STEP_ICONS = [
 
 export default function SetupWizard() {
   const { t } = useTranslation();
-  const {
-    state,
-    goNext,
-    goBack,
-    markFlashComplete,
-    setModuleName,
-    setWifiSsid,
-    setWifiPassword,
-    sendConfig,
-    startVerification,
-  } = useSetupWizard();
+  const { state, goNext, goBack, goToStep, markFlashComplete, markConfigDone, startVerification } =
+    useSetupWizard();
 
   const stepLabels = t('setup.stepLabels') as unknown as string[];
   const steps = (
@@ -113,19 +104,13 @@ export default function SetupWizard() {
               onBack={goBack}
             />
           )}
-          {state.currentStep === 3 && <Step3WiFi onNext={goNext} onBack={goBack} />}
+          {state.currentStep === 3 && (
+            <Step3WiFi onNext={goNext} onBack={goBack} onSkip={() => goToStep(5)} />
+          )}
           {state.currentStep === 4 && (
             <Step4Configure
-              moduleName={state.moduleName}
-              wifiSsid={state.wifiSsid}
-              wifiPassword={state.wifiPassword}
-              setModuleName={setModuleName}
-              setWifiSsid={setWifiSsid}
-              setWifiPassword={setWifiPassword}
-              configSending={state.configSending}
               configSent={state.configSent}
-              configError={state.configError}
-              sendConfig={sendConfig}
+              markConfigDone={markConfigDone}
               onNext={goNext}
               onBack={goBack}
             />

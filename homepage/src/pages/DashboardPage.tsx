@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import MapView from '../components/MapView';
 import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
@@ -8,6 +9,7 @@ import type { Module } from '@highfive/contracts';
 
 export default function DashboardPage() {
   const { t } = useTranslation();
+  const location = useLocation();
   const [modules, setModules] = useState<Module[]>([]);
   const [visibleModules, setVisibleModules] = useState<Module[]>([]);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
@@ -25,6 +27,15 @@ export default function DashboardPage() {
       setError(null);
       const data = await api.getAllModules();
       setModules(data);
+
+      // Auto-select module passed from setup wizard
+      const navState = location.state as { selectModuleId?: string } | null;
+      if (navState?.selectModuleId) {
+        const match = data.find((m: Module) => m.id === navState.selectModuleId);
+        if (match) setSelectedModule(match);
+        // Clear the navigation state so refresh doesn't re-select
+        window.history.replaceState({}, '');
+      }
     } catch (err) {
       setError(t('dashboard.errorDetail'));
       console.error('Error loading modules:', err);
@@ -351,10 +362,10 @@ export default function DashboardPage() {
                   </button>
                 </div>
                 <ul className="overflow-y-auto overscroll-contain flex-1 p-4 pb-safe-bottom space-y-2">
-                  {visibleModules.map((module) => (
-                    <li key={module.id}>
+                  {visibleModules.map((m) => (
+                    <li key={m.id}>
                       <button
-                        onClick={() => handleModuleSelect(module)}
+                        onClick={() => handleModuleSelect(m)}
                         className="w-full text-left p-3 rounded-hf-lg border min-h-[56px] flex items-center transition-all bg-hf-fg/[0.025] active:bg-hf-honey-50 border-hf-border"
                       >
                         <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -362,7 +373,7 @@ export default function DashboardPage() {
                             className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
                             style={{
                               background:
-                                module.status === 'online'
+                                m.status === 'online'
                                   ? 'var(--hf-forest-100)'
                                   : 'var(--hf-line-soft)',
                             }}
@@ -372,18 +383,16 @@ export default function DashboardPage() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
-                              {module.name}
+                              {m.name}
                             </h3>
                             <p
                               className="text-hf-xs"
                               style={{
                                 color:
-                                  module.status === 'online'
-                                    ? 'var(--hf-success)'
-                                    : 'var(--hf-fg-mute)',
+                                  m.status === 'online' ? 'var(--hf-success)' : 'var(--hf-fg-mute)',
                               }}
                             >
-                              {module.status === 'online'
+                              {m.status === 'online'
                                 ? t('dashboard.statusOnline')
                                 : t('dashboard.statusOffline')}
                             </p>

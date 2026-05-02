@@ -4,7 +4,8 @@ import os
 import random
 import time
 
-from flask import Flask, jsonify, request
+import requests as http_requests
+from flask import Flask, jsonify, request, send_from_directory
 from pydantic import ValidationError
 
 from services.discord import send_discord_message
@@ -18,6 +19,7 @@ app = Flask(__name__)
 UPLOAD_FOLDER = os.getenv("IMAGE_STORE_PATH", "/data/images")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+DUCKDB_SERVICE_URL = os.getenv("DUCKDB_SERVICE_URL", "http://duckdb-service:8000")
 duckdb_service = DuckDBService()
 
 
@@ -78,7 +80,7 @@ def upload_image():
     if not battery:
         return jsonify({"error": "Missing parameter: battery"}), 400
     try:
-        battery = int(battery)
+        battery = int(battery) if battery else None
     except ValueError:
         return jsonify({"error": "battery must be an integer"}), 400
     if not (0 <= battery <= 100):
@@ -151,6 +153,47 @@ def get_module_logs(mac: str):
 
     entries.sort(key=lambda t: t[0], reverse=True)
     return jsonify([e[1] for e in entries[:limit]]), 200
+
+
+@app.get("/images")
+def list_images():
+    """List all uploaded images, proxied from duckdb-service."""
+    module_id = request.args.get("module_id")
+    try:
+        resp = http_requests.get(
+            f"{DUCKDB_SERVICE_URL}/image_uploads",
+            params={"module_id": module_id} if module_id else {},
+            timeout=5,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.delete("/images/<path:filename>")
+def delete_image(filename):
+    """Delete an image file and its DB record."""
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    try:
+        resp = http_requests.delete(
+            f"{DUCKDB_SERVICE_URL}/image_uploads/{filename}", timeout=5
+        )
+        if resp.status_code == 404:
+            return jsonify({"error": "Image not found"}), 404
+    except Exception as e:
+        print(f"Warning: failed to delete image record: {e}")
+    if os.path.isfile(file_path):
+        os.remove(file_path)
+    return jsonify({"message": "Image deleted"}), 200
+
+
+@app.get("/images/<path:filename>")
+def serve_image(filename):
+    """Serve an image file from the upload folder."""
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    if not os.path.isfile(file_path):
+        return jsonify({"error": "Image not found"}), 404
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 
 if __name__ == "__main__":

@@ -93,4 +93,37 @@ describe('DashboardPage smoke', () => {
       expect(screen.queryByText(/Loading/i)).not.toBeInTheDocument();
     });
   });
+
+  it('renders the empty state CTA when there are no modules', async () => {
+    render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+
+    // Empty state replaces the map. Verify the "What is a hive module?"
+    // link is rendered and points at /hive-module so cold visitors with
+    // no modules have an obvious next step.
+    const cta = await screen.findByRole('link', { name: /hive module/i });
+    expect(cta).toBeInTheDocument();
+    expect(cta).toHaveAttribute('href', '/hive-module');
+  });
+
+  it('renders <main id="main"> as the skip-link target', async () => {
+    const { container } = render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+
+    // Required by the global skip-to-main link in App.tsx (WCAG 2.4.1).
+    await waitFor(() => {
+      const main = container.querySelector('main#main');
+      expect(main).not.toBeNull();
+    });
+  });
 });

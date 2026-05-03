@@ -16,8 +16,10 @@ message when the module phones home again
 The watcher needs three things:
 
 1. **Liveness state for every module.** It computes the freshest of
-   `module_configs.updated_at`, last API call, and the latest row in
-   `module_heartbeats` (`silence_watcher.py:42-65`).
+   `module_configs.updated_at`, the latest `image_uploads.uploaded_at`
+   per module, and the latest `module_heartbeats.received_at` per
+   module. The `SELECT` block is at `silence_watcher.py:38-52`; the
+   per-row liveness max is at `silence_watcher.py:60-65`.
 2. **A place to record "we already alerted on this silence so don't
    re-fire for `REALERT_INTERVAL_S` seconds"** — done with a single
    nullable `last_silence_alert_at TIMESTAMP` column on
@@ -46,13 +48,33 @@ directly from the local DB and writes alert-suppression state
 reached via the same `services/discord.py` helper the rest of the
 service already uses.
 
-Tunables (`SILENCE_THRESHOLD_S`, `REALERT_INTERVAL_S`) live as
-module-level constants in `silence_watcher.py:14-18`.
+Tunables live as module-level constants in `silence_watcher.py`:
+`SILENCE_THRESHOLD_S` at line 16, `REALERT_INTERVAL_S` at line 19.
 
 The schema change is additive: `db/schema.py:84-87` runs an
 `ALTER TABLE module_configs ADD COLUMN last_silence_alert_at TIMESTAMP`
 guarded by the migration helper, so existing DBs upgrade in place
 without a separate table or join.
+
+## Alternatives considered
+
+- **Separate "watcher" microservice.** Rejected — would either need
+  a second writer (violates ADR-001) or a remote HTTP read of liveness
+  from `duckdb-service`, adding a service, deployment unit, and new
+  failure mode for negligible benefit.
+- **Polling cron job outside the stack** (e.g. a host cron + curl).
+  Rejected — couldn't observe alert-suppression state without DB
+  access; would either re-fire alerts every tick or maintain its own
+  state-file with no atomicity guarantee.
+- **Push from the data path** (have `routes/heartbeats.py` /
+  `routes/upload.py` notify when a recent gap closes). Rejected —
+  no event source for "nothing happened for N hours"; the silence
+  detection inherently needs a periodic scan.
+- **Separate `module_silence_alerts` table.** Rejected — single
+  per-module nullable timestamp column is simpler, atomic with the
+  existing module write path, and avoids a join on every silence
+  scan. Re-evaluate if a multi-channel alerter (Slack + Discord +
+  email) lands.
 
 ## Consequences
 

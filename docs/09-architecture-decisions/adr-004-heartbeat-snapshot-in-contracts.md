@@ -55,6 +55,21 @@ parsed by `routes/heartbeats.py:18-30`. The snake-case→camelCase
 translation happens in the backend serializer when shaping the
 `Module.latestHeartbeat` response.
 
+## Alternatives considered
+
+- **Per-service DTO copies** (one in `backend/src/types.ts`, one in
+  `homepage/src/types/`). Rejected — exactly the failure mode that
+  `@highfive/contracts` was created to prevent (see chapter 11
+  lesson "Frontend / backend type drift before `@highfive/contracts`").
+- **Pydantic codegen from a shared schema** (e.g. JSON Schema feeding
+  both TypeScript and Python). Rejected — adds toolchain weight for
+  one wire shape, and the Python side is one route handler. Re-evaluate
+  when the count of cross-language shapes exceeds, say, four.
+- **Backend-side computed snapshot** (don't store rows; aggregate from
+  individual upload telemetry on read). Rejected — drives the dashboard
+  poll cost up linearly with module count, and forfeits the per-row
+  history that admin telemetry needs.
+
 ## Consequences
 
 **Positive**:

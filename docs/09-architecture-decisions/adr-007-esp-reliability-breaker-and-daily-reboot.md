@@ -60,9 +60,11 @@ The three mechanisms live in `ESP32-CAM/ESP32-CAM.ino` and the
   retry path eventually feeds the breaker; it does not defer the
   restart itself.
 - Daily-reboot wake flagged in NVS namespace `"boot"` key
-  `daily_reboot` (`ESP32-CAM.ino:186, 190, 306`); consumed and
-  cleared at the top of `setup()` before `captureAndUpload` is
-  called.
+  `daily_reboot`; written by the daily-trigger path at
+  `ESP32-CAM.ino:307` (`putBool("daily_reboot", true)`), then
+  read + cleared at boot at `ESP32-CAM.ino:186, 190` (`getBool`
+  + `putBool(..., false)` in the same Preferences block) before
+  `captureAndUpload` is called.
 - Camera recovery: `captureAndUpload` calls
   `esp_camera_deinit()`, drives PWDN, re-inits the camera, and
   retries the capture if `esp_camera_fb_get()` returns NULL.
@@ -78,6 +80,29 @@ the breaker only counts upload-path failures from
 `captureAndUpload`. A heartbeating device that fails to upload
 images will trip the breaker; a device whose uploads succeed
 but whose heartbeats fail will not.
+
+## Alternatives considered
+
+- **Naive 5-fail-reconnect-then-reboot** (count only WiFi reconnect
+  failures). Rejected — too eager (a transient AP outage kills
+  good devices) and too lax (silent on JPEG-encode failures or
+  HTTP 5xx). Replaced by the consecutive-failure breaker that
+  treats all upload-path failure modes uniformly.
+- **Watchdog only.** Rejected — would catch hard hangs but not slow
+  degradation (heap fragmentation, gradually-failing camera sensor).
+  The daily reboot + breaker pair handles the slow-degradation
+  half; the watchdog stays as the deadlock backstop.
+- **Cron-style scheduled-restart only** (e.g. every 6 hours). Rejected
+  as the *only* reliability mechanism — too coarse for sub-hour
+  failure modes (camera lock-up mid-day waits up to 6 h before
+  recovery). Kept as one of three layers (the daily reboot) rather
+  than the only one.
+- **Routing heartbeat status into the breaker counter.** Considered
+  during PR-17 review and rejected — it would couple the two
+  channels and make it harder to reason about why a module rebooted.
+  A device whose heartbeats fail but uploads succeed should *not*
+  reboot; its silence will be caught by the watcher (ADR-005) on
+  the receiving side.
 
 ## Consequences
 
@@ -116,5 +141,5 @@ but whose heartbeats fail will not.
   is the last one that audited it).
 - Don't move the `daily_reboot` NVS flag out of the `boot`
   namespace without updating both the writer
-  (`ESP32-CAM.ino:306`) and the reader (`ESP32-CAM.ino:186`)
-  in the same commit.
+  (`ESP32-CAM.ino:307`) and the reader/clear path
+  (`ESP32-CAM.ino:186, 190`) in the same commit.

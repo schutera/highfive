@@ -71,6 +71,21 @@ The semver scheme is retained for the **server-side** stack
 (`v1.0.0` and onwards in `CHANGELOG.md`) — only the embedded
 firmware uses bee names.
 
+## Alternatives considered
+
+- **Strict semver** (`v1.0.0`, `v1.1.0`, …). Used for `v1.0.0` and
+  rejected for subsequent firmware. The minor/patch axis carries no
+  real meaning for an embedded artefact we ship as a single binary
+  per release, and nobody talked about firmware as `v1.2.3` in chat
+  or bug reports. **Kept** for the server-side stack (`CHANGELOG.md`).
+- **Date-stamped builds** (`2026-04-25`). Rejected — unmemorable;
+  field reports still need a human-readable referent.
+- **Sequential integers** (firmware #1, #2, …). Rejected — same
+  failure mode as semver minor/patch (no operator-friendly
+  identifier in chat).
+- **Auto-derived from git short SHA**. Rejected — opaque to operators,
+  and field-deployed devices are not necessarily on a clean tag.
+
 ## Consequences
 
 **Positive**:

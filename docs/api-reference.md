@@ -323,6 +323,67 @@ Content-Type: application/json
 Returns `{ "success": true }`. Missing nests are auto-created. Progress
 rows are inserted with the current date.
 
+## 3.7 Telemetry heartbeat
+
+```
+POST /heartbeat
+Content-Type: application/x-www-form-urlencoded
+```
+
+Form fields:
+
+| Field        | Type   | Notes                                                    |
+|--------------|--------|----------------------------------------------------------|
+| `mac`        | string | canonical 12-char hex MAC (or `esp_id` alias)            |
+| `battery`    | int    | optional                                                 |
+| `rssi`       | int    | optional, dBm                                            |
+| `uptime_ms`  | int    | optional, since last boot                                |
+| `free_heap`  | int    | optional, bytes                                          |
+| `fw_version` | string | optional, ≤40 chars (currently a bee-name; see ADR-006)  |
+
+Returns `{ "ok": true }`, `200`. Missing `mac` returns
+`{ "error": "missing mac" }`, `400`.
+
+Side effect: a single `INSERT` into `module_heartbeats`. The handler
+does **not** update `module_configs`. Implementation in
+`duckdb-service/routes/heartbeats.py:17-55`.
+
+This is the **telemetry heartbeat** fired hourly by firmware
+(`ESP32-CAM/client.cpp:260`). It is distinct from the post-upload
+aggregate at `POST /modules/<id>/heartbeat` below — same word, different
+endpoint, different body, different table. See
+[../12-glossary/README.md](../12-glossary/README.md) "Heartbeat (telemetry)"
+vs "Heartbeat (post-upload aggregate)".
+
+## 3.8 Post-upload aggregate heartbeat
+
+```
+POST /modules/<module_id>/heartbeat
+Content-Type: application/json
+```
+
+```json
+{ "battery": 87 }
+```
+
+| Field     | Type | Notes                                |
+|-----------|------|--------------------------------------|
+| `battery` | int  | required, 0-100                      |
+
+Returns `{ "ok": true }`, `200`. Missing/invalid `battery` returns
+`{ "error": "battery must be an int in [0, 100]" }`, `400`. Unknown
+module returns `{ "error": "Module not found" }`, `404`.
+
+Side effect (single `UPDATE` on `module_configs`):
+- `battery_level` ← supplied value
+- `first_online` ← today's date (overwritten — see glossary
+  "Flagged ambiguities")
+- `image_count` ← `image_count + 1`
+
+Does **not** insert into `module_heartbeats`. Called by `image-service`
+after every accepted upload (`image-service/services/duckdb.py:53`).
+Implementation in `duckdb-service/routes/modules.py:266-298`.
+
 <br>
 
 # 4. Typical Workflow

@@ -86,7 +86,9 @@ and flags the synonyms, typos, and overloads that have caused bugs.
 - A **Module** is identified by its **MAC**, which is the value of
   `module_id` everywhere it appears.
 - An **Upload** produces one image, optionally one **Log Sidecar**, one
-  **Classification Output**, and exactly one **Heartbeat**.
+  **Classification Output**, and exactly one **post-upload aggregate
+  heartbeat** (the telemetry heartbeat is independent and fires
+  hourly regardless of uploads).
 
 ## Example dialogue
 
@@ -94,11 +96,13 @@ and flags the synonyms, typos, and overloads that have caused bugs.
 > persist on the **Module**?"
 
 > **Domain expert:** "It calls `/modules/<mac>/heartbeat` on
-> duckdb-service. That bumps **Battery Level**, **Image Count**, and
-> sets **First Online** to today."
+> duckdb-service — the *post-upload aggregate*, not to be confused
+> with the firmware-direct telemetry `POST /heartbeat`. That bumps
+> **Battery Level**, **Image Count**, and sets **First Online** to
+> today."
 
-> **Dev:** "Wait — every heartbeat resets **First Online**? I'd expect
-> that to stick from the first sighting."
+> **Dev:** "Wait — every post-upload aggregate resets **First Online**?
+> I'd expect that to stick from the first sighting."
 
 > **Domain expert:** "Yes, that's the bug-shaped corner today. The name
 > says first, the implementation behaves like last. Use **Last API

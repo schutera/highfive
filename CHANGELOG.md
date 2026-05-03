@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Documentation
+
+- arc42 restructure (PR 27): the `documentation/` folder is gone; all docs live under `docs/<chapter>/`. Notable relocations:
+  - `documentation/esp-reliability.md` → [`docs/06-runtime-view/esp-reliability.md`](docs/06-runtime-view/esp-reliability.md)
+  - `documentation/service-deployment.md` → [`docs/07-deployment-view/docker-compose.md`](docs/07-deployment-view/docker-compose.md)
+  - `UBIQUITOUS_LANGUAGE.md` → [`docs/12-glossary/README.md`](docs/12-glossary/README.md)
+  - top-level `DEPLOYMENT.md` / `DEPLOYMENT_PRODUCTION.md` → [`docs/07-deployment-view/production-runbook.md`](docs/07-deployment-view/production-runbook.md) and [`docs/07-deployment-view/production-deployment.md`](docs/07-deployment-view/production-deployment.md)
+  - top-level `ARCHITECTURE.md` → split across [`docs/03-context-and-scope/`](docs/03-context-and-scope/README.md) and [`docs/05-building-block-view/`](docs/05-building-block-view/README.md)
+
 ## v1.0.0 — 2026-04-11
 
 First tagged release aimed at keeping deployed modules alive in the field and making failures diagnosable after the fact.
@@ -40,7 +51,7 @@ First tagged release aimed at keeping deployed modules alive in the field and ma
 
 ### Documentation
 
-- New [`docs/06-runtime-view/esp-reliability.md`](docs/06-runtime-view/esp-reliability.md) — reliability strategy, telemetry schema, data-flow diagram, how to read logs from the admin view. (Originally landed as `documentation/esp-reliability.md`; relocated by the arc42 restructure in PR 27.)
+- New `documentation/esp-reliability.md` — reliability strategy, telemetry schema, data-flow diagram, how to read logs from the admin view.
 
 ### Not in this release
 

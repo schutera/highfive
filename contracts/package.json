@@ -2,6 +2,11 @@
   "name": "@highfive/contracts",
   "version": "0.0.0",
   "private": true,
-  "main": "src/index.ts",
-  "types": "src/index.ts"
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/cjs/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json",
+    "prepare": "npm run build"
+  }
 }

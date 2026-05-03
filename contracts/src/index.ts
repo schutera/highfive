@@ -23,14 +23,31 @@
 export type ModuleId = string & { readonly __brand: unique symbol };
 
 const MODULE_ID = /^[0-9a-f]{12}$/;
+const LEGACY_DECIMAL_MAC = /^[0-9]+$/;
+
+// Max value of a 48-bit MAC = 2^48 - 1. Used to clamp legacy decimal input
+// so we don't silently accept overflowing strings that just happen to be
+// all digits (e.g. an oversized opaque ID).
+const MAX_MAC = 0xffffffffffffn;
 
 /** Canonicalize and validate. Throws on invalid input. */
 export const parseModuleId = (input: string): ModuleId => {
   const c = input.replace(/[:\-\s]/g, '').toLowerCase();
-  if (!MODULE_ID.test(c)) {
-    throw new Error(`invalid ModuleId: ${input}`);
+  if (MODULE_ID.test(c)) {
+    return c as ModuleId;
   }
-  return c as ModuleId;
+  // Legacy compatibility: ESP firmware on prod-carpenter sent the MAC as a
+  // decimal integer string (e.g. "273227831496128" → "f89180d71400"). The
+  // duckdb-service stored it verbatim, so existing rows still come through
+  // in that shape. Convert here at the boundary; the rest of the system
+  // continues to see the canonical 12-char hex form.
+  if (LEGACY_DECIMAL_MAC.test(c)) {
+    const n = BigInt(c);
+    if (n <= MAX_MAC) {
+      return n.toString(16).padStart(12, '0') as ModuleId;
+    }
+  }
+  throw new Error(`invalid ModuleId: ${input}`);
 };
 
 /** Non-throwing variant for boundary code that wants to surface a 400. */

@@ -98,7 +98,8 @@ Every PR that changes behaviour, adds a feature, or fixes a non-obvious bug must
 | New service or major component | [`docs/05-building-block-view/`](docs/05-building-block-view/README.md) (add a per-service file + link from the index) |
 | New API endpoint or wire-shape change | [`docs/api-reference.md`](docs/api-reference.md) **and** [`docs/08-crosscutting-concepts/api-contracts.md`](docs/08-crosscutting-concepts/api-contracts.md) |
 | Behaviour change in upload / heartbeat / classification flow | [`docs/06-runtime-view/image-upload-flow.md`](docs/06-runtime-view/image-upload-flow.md) |
-| Deployment / Docker Compose change | [`docs/07-deployment-view/docker-compose.md`](docs/07-deployment-view/docker-compose.md) |
+| Dev Docker Compose change | [`docs/07-deployment-view/docker-compose.md`](docs/07-deployment-view/docker-compose.md) |
+| Production deployment change | [`docs/07-deployment-view/production-deployment.md`](docs/07-deployment-view/production-deployment.md) (Docker) **or** [`docs/07-deployment-view/production-runbook.md`](docs/07-deployment-view/production-runbook.md) (PM2) |
 | ESP firmware change affecting onboarding | [`docs/07-deployment-view/esp-flashing.md`](docs/07-deployment-view/esp-flashing.md) and (if a gotcha) [`docs/troubleshooting.md`](docs/troubleshooting.md) |
 | New CI job or test layer | [`docs/10-quality-requirements/ci-gates.md`](docs/10-quality-requirements/ci-gates.md) |
 | New design decision (dependency, pattern, trade-off) | [`docs/09-architecture-decisions/`](docs/09-architecture-decisions/README.md) — write a new `adr-NNN-*.md` and add it to the index |
@@ -112,7 +113,7 @@ If unsure, default to [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-te
 
 ## Critical rules (do NOT violate)
 
-These are the most-violated rules from past incidents. Full list in [`docs/02-constraints/`](docs/02-constraints/README.md).
+These are the most-violated rules from past incidents. Full list in [`docs/02-constraints/`](docs/02-constraints/README.md). Lessons from individual incidents live in [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md).
 
 - **Never force-push to `main`.** A discarded production attempt once broke ESP firmware in the field this way.
 - **Never bypass hooks** (`--no-verify`, `--no-gpg-sign`). Fix the hook failure.
@@ -120,6 +121,9 @@ These are the most-violated rules from past incidents. Full list in [`docs/02-co
 - **Never open a DuckDB connection from `image-service`.** See [ADR-001](docs/09-architecture-decisions/adr-001-duckdb-as-sole-writer.md).
 - **Never hardcode `localhost`** in inter-service URLs — use the Docker service name.
 - **Never ship the dev API key (`hf_dev_key_2026`)** as a production fallback. Override `HIGHFIVE_API_KEY`.
+- **Never remove `PORT=3002` from the backend service in `docker-compose.yml`** — `server.ts` defaults to the legacy `3001`, which leaves the host port unbound and silently breaks the dashboard. PR-17 review critical, see chapter 11.
+- **Never lower `TASK_WDT_TIMEOUT_S` in firmware below 60 s** without re-running the worst-case `captureAndUpload` + heartbeat scenario. PR-17 review critical, see [ADR-007](docs/09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md).
+- **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` so admin telemetry surfaces failures. PR-17 review critical.
 
 ## Branch model
 

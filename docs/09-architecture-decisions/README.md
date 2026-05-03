@@ -12,6 +12,10 @@ and link backwards.
 | [001](adr-001-duckdb-as-sole-writer.md) | DuckDB-service is the sole writer of `app.duckdb` | Accepted |
 | [002](adr-002-esp-host-testable-lib.md) | Pure C++ helpers under `ESP32-CAM/lib/` for host testability | Accepted |
 | [003](adr-003-shared-api-key-for-admin.md) | `HIGHFIVE_API_KEY` reused for both API key and admin key | Accepted |
+| [004](adr-004-heartbeat-snapshot-in-contracts.md) | `HeartbeatSnapshot` lives in `@highfive/contracts` | Accepted |
+| [005](adr-005-silence-watcher-in-duckdb-service.md) | Discord silence watcher lives in `duckdb-service` | Accepted |
+| [006](adr-006-bee-name-firmware-versioning.md) | ESP firmware uses bee-species names as version identifiers | Accepted |
+| [007](adr-007-esp-reliability-breaker-and-daily-reboot.md) | ESP reliability — circuit breaker + daily reboot + camera PWDN recovery | Accepted |
 
 ## When to create an ADR
 

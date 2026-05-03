@@ -30,10 +30,19 @@ flowchart TD
     HP["homepage (React + Vite)<br/>:5173"]
 
     ESP -->|"POST /upload<br/>(multipart: image, mac, battery, logs)"| IMG
-    IMG -->|"POST /add_progress_for_module<br/>POST /modules/&lt;mac&gt;/heartbeat<br/>GET /modules/&lt;mac&gt;/progress_count"| DDB
+    ESP -->|"POST /heartbeat<br/>(telemetry; hourly; mac, battery, rssi, uptime_ms, free_heap, fw_version)"| DDB
+    IMG -->|"POST /add_progress_for_module<br/>POST /modules/&lt;mac&gt;/heartbeat (post-upload aggregate; battery only)<br/>GET /modules/&lt;mac&gt;/progress_count"| DDB
     BE -->|"GET /modules /nests /progress"| DDB
     HP -->|"fetch (X-API-Key)"| BE
 ```
+
+> Two endpoints share the word "heartbeat":
+> `POST /heartbeat` is the **telemetry** channel fired hourly by
+> firmware (inserts into `module_heartbeats`); `POST /modules/<mac>/heartbeat`
+> is the **post-upload aggregate** fired by `image-service` after every
+> upload (updates `module_configs`). See
+> [12-glossary](../12-glossary/README.md) and
+> [duckdb-service.md](duckdb-service.md) for the full disambiguation.
 
 Per-service endpoints and behaviour live in the detail files linked
 above and in [api-reference.md](../api-reference.md).

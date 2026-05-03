@@ -164,23 +164,51 @@ This endpoint is used by the AI model to save classification results.
 - Missing nests are automatically generated
 - Progress values are saved for the current date
 
-### POST /modules/<module_id>/heartbeat
+### POST /modules/<module_id>/heartbeat — post-upload aggregate
 
-Called by `image-service` on every accepted upload **and** by the
-ESP32-CAM directly once per hour (via `duckdb-service/routes/heartbeats.py`).
+Called by `image-service` after every accepted upload
+(`image-service/services/duckdb.py:53`). Implementation in
+`duckdb-service/routes/modules.py:266`.
 
-Image-upload-side payload: `{"battery": <int>}` → returns `{"ok": true}`.
-- Updates `battery_level` on `module_configs`
-- Sets `first_online` to today if it has not been set yet
-- Increments `image_count`
+Body: `{"battery": <int 0-100>}` → returns `{"ok": true}`.
 
-ESP-side payload: `{"mac", "battery", "rssi", "uptime_ms",
-"free_heap", "fw_version"}` → also returns `{"ok": true}`.
-- Inserts a row into `module_heartbeats` (history table)
-- Updates `module_configs.updated_at` for liveness tracking
-- The most recent row is materialised as `Module.latestHeartbeat`
-  (shape: [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md))
-  per [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
+Side effects (single `UPDATE` on `module_configs`, see
+`routes/modules.py:285-296`):
+
+- Sets `battery_level` to the supplied value.
+- Sets `first_online` to today's date (overwrites — this is the
+  documented `first_online` ambiguity, see [glossary](../12-glossary/README.md#flagged-ambiguities)).
+- Increments `image_count` by 1.
+
+Does **not** insert into `module_heartbeats` and does **not** touch
+the telemetry-heartbeat path. Despite the shared name, the two
+endpoints are wholly separate.
+
+### POST /heartbeat — telemetry heartbeat
+
+Called by ESP32-CAM firmware directly, hourly
+(`ESP32-CAM/client.cpp:260`). Implementation in
+`duckdb-service/routes/heartbeats.py:17`.
+
+Body (form-encoded): `mac`, `battery`, `rssi`, `uptime_ms`,
+`free_heap`, `fw_version` → returns `{"ok": true}`.
+
+Side effect: a single `INSERT` into `module_heartbeats`
+(`routes/heartbeats.py:45-52`). The handler does **not** update
+`module_configs` — liveness derivation in the backend reads
+`module_configs.updated_at`, the latest `module_heartbeats.received_at`,
+and the latest `image_uploads.uploaded_at` separately and takes the
+freshest (`backend/src/database.ts:174-184`). The most recent
+`module_heartbeats` row is materialised on the wire as
+`Module.latestHeartbeat`
+(shape: [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md))
+per [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
+
+> ⚠️ **Endpoint naming hazard.** Two endpoints share the word
+> "heartbeat" but do different things and write different tables.
+> See the [glossary](../12-glossary/README.md) entries
+> "Heartbeat (telemetry)" and "Heartbeat (post-upload aggregate)".
+> Don't add a third heartbeat endpoint without renaming.
 
 ### GET /modules/<module_id>/progress_count
 

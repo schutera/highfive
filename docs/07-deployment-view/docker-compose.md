@@ -4,7 +4,8 @@ This guide describes how to run the server-side components of the
 HighFive system on a developer laptop using Docker Compose.
 
 For production, see [production-deployment.md](production-deployment.md)
-(Docker Compose with `docker-compose.production.yml` + Nginx) or
+(Docker Compose with `docker-compose.prod.yml` + host-Nginx for the API
+subdomain, frontend container handles its own 80/443) or
 [production-runbook.md](production-runbook.md) (Nginx + PM2 bare-metal).
 
 The system consists of four services:

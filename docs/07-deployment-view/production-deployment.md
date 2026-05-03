@@ -1,7 +1,7 @@
 # Production Deployment (Docker Compose + Nginx)
 
 Deploy HighFive to production from the `production` branch using
-`docker-compose.production.yml`, with Nginx as the public reverse
+`docker-compose.prod.yml`, with Nginx as the public reverse
 proxy and Let's Encrypt for TLS.
 
 For a non-Docker production option (Nginx + PM2 on bare metal),
@@ -32,24 +32,25 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 sudo mkdir -p /opt/highfive
 sudo chown $USER:$USER /opt/highfive
 cd /opt/highfive
-git clone -b production https://github.com/yourusername/highfive.git .
+git clone -b production https://github.com/schutera/highfive.git .
 
 # 3. Build Docker images
-docker compose -f docker-compose.production.yml build backend
-docker compose -f docker-compose.production.yml build frontend
+docker compose -f docker-compose.prod.yml build backend
+docker compose -f docker-compose.prod.yml build frontend
 
 # 4. Start services
-docker compose -f docker-compose.production.yml up -d
-docker compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml ps
 
-# 5. Configure Nginx proxies
+# 5. Configure host-Nginx for the API (the frontend container binds
+#    80/443 directly — see Step 5 below for the topology note)
 sudo tee /etc/nginx/sites-available/highfive-api > /dev/null <<'EOF'
 server {
-    listen 80;
+    listen 8080;  # NOT 80 — port 80 is bound by the frontend container
     server_name api.highfive.schutera.com;
 
     location / {
-        proxy_pass http://localhost:3008;
+        proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -65,32 +66,20 @@ server {
 }
 EOF
 
-sudo tee /etc/nginx/sites-available/highfive-frontend > /dev/null <<'EOF'
-server {
-    listen 80;
-    server_name highfive.schutera.com;
+# NOTE: The frontend does NOT need a host-Nginx proxy. The homepage
+# container ships its own Nginx (homepage/nginx.conf) and binds host
+# ports 80:80 + 443:443 directly (docker-compose.prod.yml lines 27-29).
+# A second host-Nginx listener on :80 would conflict with that bind.
 
-    location / {
-        proxy_pass http://localhost:5173;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-EOF
-
-# 6. Enable sites and reload Nginx
+# 6. Enable site and reload Nginx
 sudo ln -sf /etc/nginx/sites-available/highfive-api /etc/nginx/sites-enabled/
-sudo ln -sf /etc/nginx/sites-available/highfive-frontend /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 
-# 7. Get SSL certificate
+# 7. Get SSL certificate (frontend cert is handled separately —
+# either inside the frontend container's Nginx, or via DNS-01)
 sudo certbot --nginx \
-  -d api.highfive.schutera.com \
-  -d highfive.schutera.com
+  -d api.highfive.schutera.com
 
 # 8. Verify deployment
 curl https://api.highfive.schutera.com/api/health
@@ -120,7 +109,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 ```bash
 cd /opt/highfive
-git clone -b production https://github.com/yourusername/highfive.git .
+git clone -b production https://github.com/schutera/highfive.git .
 git status  # Should show production branch
 ```
 
@@ -130,10 +119,10 @@ git status  # Should show production branch
 cd /opt/highfive
 
 # Build backend (takes 2-3 minutes)
-docker compose -f docker-compose.production.yml build backend
+docker compose -f docker-compose.prod.yml build backend
 
 # Build frontend (takes 3-5 minutes)
-docker compose -f docker-compose.production.yml build frontend
+docker compose -f docker-compose.prod.yml build frontend
 
 # Verify images
 docker images | grep highfive
@@ -143,36 +132,42 @@ docker images | grep highfive
 
 ```bash
 # Start containers
-docker compose -f docker-compose.production.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Check status
-docker compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.prod.yml ps
 
 # View logs
-docker compose -f docker-compose.production.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f
 ```
 
 Both services should show `Up` status.
 
-### Step 5: Configure Nginx Reverse Proxy
+### Step 5: Configure Nginx Reverse Proxy (API only)
 
-The Dockerfiles expose:
+Topology — what `docker-compose.prod.yml` actually maps:
 
-- **Backend**: http://localhost:3008
-- **Frontend**: http://localhost:5173
+| Service                                                | Container port | Host port      | Notes |
+|--------------------------------------------------------|----------------|----------------|-------|
+| `backend` (Express)                                    | 3001           | **3001**       | bound on host; host-Nginx proxies here |
+| `frontend` (Nginx-in-container, serving Vite build)    | 80 / 443       | **80 / 443**   | binds the host's 80/443 directly via `homepage/Dockerfile` + `homepage/nginx.conf` |
 
-Nginx proxies these to public HTTPS URLs.
+So host-Nginx (`/etc/nginx/`) is **only** needed for the API
+subdomain. A second host-Nginx listener on `:80` would conflict with
+the frontend container's bind. The frontend gets its TLS cert either
+inside the container's nginx or via certbot's DNS-01 challenge.
 
-Create API proxy:
+Create the API proxy on a free host port (e.g. `8080`) — let the
+frontend container own `80/443`:
 
 ```bash
 sudo tee /etc/nginx/sites-available/highfive-api > /dev/null <<'EOF'
 server {
-    listen 80;
+    listen 8080;  # NOT 80 — frontend container holds 80
     server_name api.highfive.schutera.com;
 
     location / {
-        proxy_pass http://localhost:3008;
+        proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -189,35 +184,20 @@ server {
 EOF
 ```
 
-Create frontend proxy:
-
-```bash
-sudo tee /etc/nginx/sites-available/highfive-frontend > /dev/null <<'EOF'
-server {
-    listen 80;
-    server_name highfive.schutera.com;
-
-    location / {
-        proxy_pass http://localhost:5173;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-EOF
-```
-
 Enable and reload:
 
 ```bash
 sudo ln -sf /etc/nginx/sites-available/highfive-api /etc/nginx/sites-enabled/
-sudo ln -sf /etc/nginx/sites-available/highfive-frontend /etc/nginx/sites-enabled/
 
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+If you want host-Nginx on `:443` for both, you'll need to either run
+host-Nginx in front of the entire stack (and rebind the frontend
+container off 80/443 — diverges from `docker-compose.prod.yml` as it
+ships) or add a dedicated reverse-proxy container in compose. Both are
+out of scope here.
 
 ### Step 6: Setup SSL with Certbot
 
@@ -228,10 +208,10 @@ nslookup highfive.schutera.com
 
 # Both should return your server IP
 
-# Get SSL certificate
+# Get SSL certificate for the API only — the frontend container
+# handles its own TLS (or use certbot DNS-01 separately for it)
 sudo certbot --nginx \
-  -d api.highfive.schutera.com \
-  -d highfive.schutera.com
+  -d api.highfive.schutera.com
 
 # Choose option 2: Redirect HTTP to HTTPS
 # Certificate auto-renews
@@ -247,8 +227,8 @@ curl https://api.highfive.schutera.com/api/health
 curl -L https://highfive.schutera.com | head -20
 
 # Check logs
-docker compose -f docker-compose.production.yml logs backend
-docker compose -f docker-compose.production.yml logs frontend
+docker compose -f docker-compose.prod.yml logs backend
+docker compose -f docker-compose.prod.yml logs frontend
 ```
 
 ## Troubleshooting
@@ -269,7 +249,7 @@ sudo swapon /swapfile
 free -h
 
 # Retry build
-docker compose -f docker-compose.production.yml build --no-cache
+docker compose -f docker-compose.prod.yml build --no-cache
 ```
 
 ### Certbot DNS Error
@@ -289,16 +269,19 @@ nslookup api.highfive.schutera.com
 
 ### Port Already in Use
 
-If port 3008 or 5173 is already in use:
+If port 3001, 80 or 443 is already in use:
 
 ```bash
 # Check what's using the port
-sudo netstat -tulpn | grep :3008
-sudo netstat -tulpn | grep :5173
+sudo netstat -tulpn | grep -E ':(3001|80|443)\b'
+
+# Common culprits:
+#   - 80/443: another web server (Apache, host-Nginx default vhost)
+#   - 3001: a dev backend you forgot to stop
 
 # Stop the service and rebuild
-docker compose -f docker-compose.production.yml down
-docker compose -f docker-compose.production.yml up -d
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## Running Services
@@ -307,33 +290,33 @@ docker compose -f docker-compose.production.yml up -d
 
 ```bash
 # All services
-docker compose -f docker-compose.production.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f
 
 # Backend only
-docker compose -f docker-compose.production.yml logs -f backend
+docker compose -f docker-compose.prod.yml logs -f backend
 
 # Frontend only
-docker compose -f docker-compose.production.yml logs -f frontend
+docker compose -f docker-compose.prod.yml logs -f frontend
 ```
 
 ### Restart Services
 
 ```bash
 # Restart all
-docker compose -f docker-compose.production.yml restart
+docker compose -f docker-compose.prod.yml restart
 
 # Restart specific service
-docker compose -f docker-compose.production.yml restart backend
+docker compose -f docker-compose.prod.yml restart backend
 ```
 
 ### Stop Services
 
 ```bash
 # Stop all
-docker compose -f docker-compose.production.yml down
+docker compose -f docker-compose.prod.yml down
 
 # Stop without removing volumes
-docker compose -f docker-compose.production.yml stop
+docker compose -f docker-compose.prod.yml stop
 ```
 
 ### Update to Latest Code
@@ -343,8 +326,8 @@ cd /opt/highfive
 git pull origin production
 
 # Rebuild and restart
-docker compose -f docker-compose.production.yml build
-docker compose -f docker-compose.production.yml up -d
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## Access Application
@@ -362,7 +345,7 @@ For issues:
 ```bash
 # Check Docker status
 docker ps
-docker compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.prod.yml ps
 
 # View system resources
 free -h

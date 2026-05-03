@@ -53,26 +53,40 @@ hangs, any other deadlock.
 
 ### 3. Consecutive-failure circuit breaker (new in PR 17)
 
-`loop()` keeps a static counter of *consecutive* failures of any
-kind — camera NULL, WiFi down, HTTP non-2xx. When it crosses a
-threshold the breaker fires, but reboot is deferred to the **next**
-loop iteration so the device gets one more chance and the reboot
-runs from a clean stack frame.
+`captureAndUpload` keeps a `static uint8_t consecutiveFailures` counter
+([`ESP32-CAM/ESP32-CAM.ino:222`](../../ESP32-CAM/ESP32-CAM.ino)) of
+consecutive **upload-path** failures of any kind — camera NULL,
+network start-error, send-failure, HTTP non-2xx. The counter resets
+to 0 on a successful upload (line 275) and increments on any other
+outcome (line 277). At >= 5 it runs `delay(1000); ESP.restart()`
+**immediately** from inside the upload routine (lines 281-283).
 
-Heartbeat status-code parsing
-(`sendHeartbeat` reads the HTTP status line and returns 0 only on
-2xx) feeds the same counter — silent HTTP 500s used to look like
-success and never trip the breaker. See
+A separate behaviour, often confused with the breaker: a single failed
+first-capture-on-boot returns `false` from `captureAndUpload`, the
+caller proceeds, and the next `loop()` iteration (~30 s later) tries
+again. That **retry** is deferred; the **restart** is not. The
+distinction is described in the comment block at
+[`ESP32-CAM.ino:218-221`](../../ESP32-CAM/ESP32-CAM.ino).
+
+`sendHeartbeat` was hardened in PR-17 review (commit `ea7dc73`):
+it parses the HTTP status line and returns 0 only on 2xx, and on any
+non-2xx (or WiFi-down / connect-fail) it writes to the logbuf ring via
+`logbufNoteHttpCode` ([`ESP32-CAM/client.cpp:283`](../../ESP32-CAM/client.cpp)).
+That gives admin telemetry a record of heartbeat failures. The
+heartbeat status code is **not** wired to `consecutiveFailures` — the
+breaker only counts upload failures. See
 [ADR-007](../09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md)
 for the full rationale.
 
 ### 4. Daily reboot (with capture-skip)
 
 After 24 hours of uptime the module restarts itself. Before
-`ESP.restart()`, the path sets NVS namespace `"telemetry"` key
-`daily_reboot=true`. On boot, `setup()` reads and clears the flag;
-when set, it **skips** the first `captureAndUpload` so the daily
-reboot doesn't double the daily image cost.
+`ESP.restart()`, the path sets NVS namespace `"boot"` key
+`daily_reboot=true` ([`ESP32-CAM.ino:306`](../../ESP32-CAM/ESP32-CAM.ino)).
+On boot, `setup()` reads and clears the flag at
+[`ESP32-CAM.ino:186-190`](../../ESP32-CAM/ESP32-CAM.ino); when set,
+it **skips** the first `captureAndUpload` so the daily reboot doesn't
+double the daily image cost.
 
 Clears heap fragmentation, stale TCP state, anything else that
 degrades over time.
@@ -119,7 +133,7 @@ The ESP piggybacks a JSON telemetry payload onto every image upload as an additi
 
 | Field | Source | Meaning |
 |---|---|---|
-| `fw` | `FIRMWARE_VERSION` macro | Firmware version string |
+| `fw` | `FIRMWARE_VERSION` macro in `esp_init.h` (currently `"1.0.0"`) | Firmware version string. ⚠️ Distinct from the `fw_version` field in the heartbeat body, which uses the `FW_VERSION` macro in `client.cpp` (`"honeybee"`), and from `ESP32-CAM/VERSION` (`"carpenter"`) consumed by `build.sh`. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md) for the unification status. |
 | `uptime_s` | `millis()/1000` | Seconds since last boot |
 | `last_reset_reason` | `esp_reset_reason()` | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc. |
 | `free_heap` | `ESP.getFreeHeap()` | Current free heap in bytes |

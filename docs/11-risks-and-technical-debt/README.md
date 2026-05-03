@@ -48,6 +48,46 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   The data-flow contract is what MaskRCNN will fill — replacing the
   classifier doesn't change the persistence layer.
 
+## Active tech debt
+
+### Firmware version: three uncoordinated sources of truth
+
+As of `upstream/main` HEAD `a3675de`, three different files each carry
+a different "firmware version" string and each is read by a different
+consumer:
+
+| File / location | Current value | Read by | Consumer |
+|---|---|---|---|
+| `ESP32-CAM/VERSION` | `carpenter` | `ESP32-CAM/build.sh:29` | OTA manifest `homepage/public/firmware.json` `version` field |
+| `ESP32-CAM/esp_init.h:8` | `1.0.0` | `ESP32-CAM/logbuf.cpp:86`, `ESP32-CAM/ESP32-CAM.ino:55` | Telemetry sidecar `fw` field on every upload + boot log |
+| `ESP32-CAM/client.cpp:232` | `honeybee` | `ESP32-CAM/client.cpp:258` | Heartbeat body `fw_version` field → `module_heartbeats.fw_version` → `Module.latestHeartbeat.fwVersion` |
+
+So a single `carpenter` device today reports three different versions
+on three different surfaces. ADR-006 documents the desired bee-name
+convention but is currently flagged "Accepted (partial)" because the
+implementation hasn't caught up.
+
+**Proposed fix (next firmware PR):** make `ESP32-CAM/VERSION` the sole
+source. Inject it via `platformio.ini`:
+
+```ini
+[env:esp32cam]
+build_flags =
+    ${env.build_flags}
+    -DFIRMWARE_VERSION=\"$(shell cat ESP32-CAM/VERSION)\"
+```
+
+Delete the `#ifndef`/`#define` guards in `esp_init.h:7-8` and
+`client.cpp:231-232`. Replace `String(FW_VERSION)` in `client.cpp:258`
+with `String(FIRMWARE_VERSION)`. `build.sh` continues reading
+`VERSION` directly. One writer, three readers, no drift.
+
+**Why it's not fixed in this PR.** PR 27 is documentation-only — the
+plan is to land the doc-honest description first and let the firmware
+unification be a small, focused next PR (ideally before the next field
+deployment, or you will spend a debugging session figuring out which
+"version" is real).
+
 ## Lessons learned
 
 This section grows over time. Each entry is a problem we paid for —
@@ -116,24 +156,24 @@ Caught only because reviewers cross-referenced `docker-compose.yml`,
 `server.ts`, and the firmware loop while reading PR 17. None of the
 three would have been caught by the existing test suites alone.
 
-**1. Backend port mismatch.** `backend/src/server.ts` defaulted
-`PORT=3001` (a legacy production value); the dev compose stack maps
-`3002:3002` and the homepage API client targets `:3002`. The
-container was listening on `3001`, host port `3002` was unbound, and
-the dashboard couldn't reach the backend. Fix: set `PORT=3002`
-explicitly in the backend service environment in
-`docker-compose.yml`.
+**1. Backend port mismatch (commit `ea7dc73`).**
+`backend/src/server.ts` defaulted `PORT=3001` (a legacy production
+value); the dev compose stack maps `3002:3002` and the homepage API
+client targets `:3002`. The container was listening on `3001`, host
+port `3002` was unbound, and the dashboard couldn't reach the
+backend. Fix: set `PORT=3002` explicitly in the backend service
+environment in `docker-compose.yml`.
 
-**2. `sendHeartbeat()` swallowed non-2xx responses.**
+**2. `sendHeartbeat()` swallowed non-2xx responses (commit `ea7dc73`).**
 `readStringUntil('\n')` returned 0 (success) even on HTTP 500. The
 firmware then carried on as if the heartbeat had landed; the silence
 watcher couldn't tell the difference between a truly healthy module
 and one that was repeatedly failing to register. Fix: parse the
-status code from the first response line and return non-zero on
-non-2xx; route the failure through `logbufNoteHttpCode` so admin
-telemetry shows it.
+status code from the first response line (`ESP32-CAM/client.cpp:283`)
+and return non-zero on non-2xx; route the failure through
+`logbufNoteHttpCode` so admin telemetry shows it.
 
-**3. Task watchdog cadence on a knife-edge.**
+**3. Task watchdog cadence on a knife-edge (commit `ea7dc73`).**
 `TASK_WDT_TIMEOUT_S = 30` with a 30 s `delay()` at the end of
 `loop()` left zero slack for `captureAndUpload` (3 retries × 2 s +
 JPEG encode + HTTP) plus heartbeat (5 s connect timeout). Worst-case
@@ -148,3 +188,38 @@ add the boundary to the e2e test in
 `tests/e2e/test_upload_pipeline.py`. CI alone can't see the dev
 stack misconfiguration; only an end-to-end test that reaches the
 host-mapped port can.
+
+### Documentation drifted from code in PR 27 first-pass review
+
+**What happened.** PR 27 (this one) introduced ADRs 004-007 and
+updated arc42 chapters 05/06/08/11/12 to reflect PR-17's code. An
+independent senior-developer review found six P0 factual errors in
+the first-pass content: ADR-005 named a `module_silence_alerts` table
+that doesn't exist (real impl is a column on `module_configs`);
+ADR-007 named NVS namespace `"telemetry"` (real namespace is `"boot"`);
+ADR-007 + esp-reliability.md claimed heartbeat status feeds the
+breaker (it doesn't — heartbeat status only feeds `logbufNoteHttpCode`
+for telemetry); ADR-006 described firmware version as a single source
+of truth (three sources, all currently disagreeing); ADR-004 +
+image-upload-flow.md + esp32cam.md collapsed two distinct heartbeat
+endpoints (`POST /heartbeat` telemetry vs `POST /modules/<mac>/heartbeat`
+post-upload aggregate) into one; production-deployment.md referenced
+`docker-compose.production.yml` (real file is `docker-compose.prod.yml`)
+on every step.
+
+**Why it happened.** The first-pass author wrote the ADR/runtime-view
+content from the **commit messages** of PR 17 rather than reading the
+code that PR 17 merged. Commit messages summarise intent; code is
+what shipped. A bee-name commit message says "single source of truth";
+the code merged with three uncoordinated `#define` macros. A breaker
+commit message says "feeds the same counter"; the code wires
+heartbeat status to a different sink entirely.
+
+**How to avoid it next time.** When writing or reviewing arc42
+chapters, ADRs, or runtime-view docs, **read the actual files** in
+`ESP32-CAM/`, `duckdb-service/`, `image-service/`, etc. and **cite
+line numbers** in the doc text. If the doc claims the value of an NVS
+key or the name of a DB column, the cited file must contain that
+value or column. If a reviewer can't `git grep` your claim and find
+it in code, it's not documentation, it's storytelling. The rule is
+captured in the [CLAUDE.md never-violate list](../../CLAUDE.md).

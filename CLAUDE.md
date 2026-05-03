@@ -121,9 +121,10 @@ These are the most-violated rules from past incidents. Full list in [`docs/02-co
 - **Never open a DuckDB connection from `image-service`.** See [ADR-001](docs/09-architecture-decisions/adr-001-duckdb-as-sole-writer.md).
 - **Never hardcode `localhost`** in inter-service URLs — use the Docker service name.
 - **Never ship the dev API key (`hf_dev_key_2026`)** as a production fallback. Override `HIGHFIVE_API_KEY`.
-- **Never remove `PORT=3002` from the backend service in `docker-compose.yml`** — `server.ts` defaults to the legacy `3001`, which leaves the host port unbound and silently breaks the dashboard. PR-17 review critical, see chapter 11.
-- **Never lower `TASK_WDT_TIMEOUT_S` in firmware below 60 s** without re-running the worst-case `captureAndUpload` + heartbeat scenario. PR-17 review critical, see [ADR-007](docs/09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md).
-- **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` so admin telemetry surfaces failures. PR-17 review critical.
+- **Never remove `PORT=3002` from the backend service in `docker-compose.yml`** — `server.ts` defaults to the legacy `3001`, which leaves the host port unbound and silently breaks the dashboard. Fixed in commit `ea7dc73` (PR-17 review critical), see [chapter 11](docs/11-risks-and-technical-debt/README.md).
+- **Never lower `TASK_WDT_TIMEOUT_S` in firmware below 60 s** without re-running the worst-case `captureAndUpload` + heartbeat scenario. Bumped from 30 s in commit `ea7dc73` (PR-17 review critical), see [ADR-007](docs/09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md).
+- **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` (`ESP32-CAM/client.cpp:283`) so admin telemetry surfaces failures. Fixed in commit `ea7dc73` (PR-17 review critical).
+- **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. and cite line numbers — commit messages summarise intent, not what shipped. Lesson from this PR's review (see [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned").
 
 ## Branch model
 

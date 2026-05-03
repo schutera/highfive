@@ -20,6 +20,32 @@ workspace package made any future drift fail at TypeScript compile.
 If you change a wire field, update `contracts/src/index.ts` first
 and let the compile errors guide the rest.
 
+## `HeartbeatSnapshot` and the extended `Module`
+
+PR 17 added the heartbeat channel
+(`POST /modules/<mac>/heartbeat`) and surfaced the most recent
+snapshot on every `Module`:
+
+```ts
+export interface HeartbeatSnapshot {
+  receivedAt: string;        // ISO timestamp
+  battery: number | null;
+  rssi: number | null;
+  uptimeMs: number | null;
+  freeHeap: number | null;
+  fwVersion: string | null;  // bee-name string, see ADR-006
+}
+```
+
+`Module` gained `email`, `updatedAt`, `lastSeenAt` (derived as
+`max(updatedAt, lastApiCall, latestHeartbeat.receivedAt)`), and
+`latestHeartbeat`. The shape lives in the shared package by
+deliberate decision —
+[ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
+Backend reads these from `duckdb-service` JSON; if the Python
+side renames a key, the e2e test in
+`tests/e2e/test_upload_pipeline.py` is the canary.
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing

@@ -109,3 +109,42 @@ the read.
 by one letter from a real English word as a smell. Add a contract
 test that reads a known row and checks the field values, not just
 that the call succeeds.
+
+### Three "PR-17 review" criticals (fixed `ea7dc73`, `0d1b48f`)
+
+Caught only because reviewers cross-referenced `docker-compose.yml`,
+`server.ts`, and the firmware loop while reading PR 17. None of the
+three would have been caught by the existing test suites alone.
+
+**1. Backend port mismatch.** `backend/src/server.ts` defaulted
+`PORT=3001` (a legacy production value); the dev compose stack maps
+`3002:3002` and the homepage API client targets `:3002`. The
+container was listening on `3001`, host port `3002` was unbound, and
+the dashboard couldn't reach the backend. Fix: set `PORT=3002`
+explicitly in the backend service environment in
+`docker-compose.yml`.
+
+**2. `sendHeartbeat()` swallowed non-2xx responses.**
+`readStringUntil('\n')` returned 0 (success) even on HTTP 500. The
+firmware then carried on as if the heartbeat had landed; the silence
+watcher couldn't tell the difference between a truly healthy module
+and one that was repeatedly failing to register. Fix: parse the
+status code from the first response line and return non-zero on
+non-2xx; route the failure through `logbufNoteHttpCode` so admin
+telemetry shows it.
+
+**3. Task watchdog cadence on a knife-edge.**
+`TASK_WDT_TIMEOUT_S = 30` with a 30 s `delay()` at the end of
+`loop()` left zero slack for `captureAndUpload` (3 retries × 2 s +
+JPEG encode + HTTP) plus heartbeat (5 s connect timeout). Worst-case
+loop iteration could exceed 30 s and silently reboot mid-upload.
+Fix: bump to **60 s** and `esp_task_wdt_reset()` immediately before
+the long sleep so the timer starts fresh. See
+[ADR-007](../09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md).
+
+**How to avoid it next time.** When a PR touches transport contracts
+across more than one process boundary (compose ↔ container ↔ wire),
+add the boundary to the e2e test in
+`tests/e2e/test_upload_pipeline.py`. CI alone can't see the dev
+stack misconfiguration; only an end-to-end test that reaches the
+host-mapped port can.

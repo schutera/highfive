@@ -1,6 +1,15 @@
 # ESP32-CAM Reliability & Telemetry
 
-This document describes the reliability strategy, telemetry channel, and admin log-viewing flow introduced in **v1.0.0**.
+This document describes the reliability strategy, the heartbeat
+telemetry channel, and the admin log-viewing flow.
+
+The base architecture was introduced in **v1.0.0** and hardened by
+PR 17 (firmware names `bumblebee`/`honeybee`/`mason`/`carpenter` —
+see [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)).
+The end-state is captured in
+[ADR-007](../09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md):
+**every failure path eventually reboots the device**, with state
+preserved in NVS so the next boot can act on it.
 
 ---
 
@@ -12,36 +21,79 @@ An earlier firmware revision ran for 8–10 days and then went silent in the fie
 
 ## Reliability layers
 
-The firmware now has four independent safety nets, each handling a different failure mode.
+The firmware has six independent safety nets, each handling a
+different failure mode.
 
 ### 1. WiFi watchdog
 
 [ESP32-CAM/esp_init.cpp](../../ESP32-CAM/esp_init.cpp) — `reconnectWifi()`
 
-At the top of `loop()`, firmware checks `WiFi.status()`. If disconnected, it tries to reconnect for up to 15 seconds. If five consecutive reconnect attempts fail (~1 minute), the device reboots.
+At the top of `loop()`, firmware checks `WiFi.status()`. If
+disconnected it tries to reconnect for up to 15 seconds. If five
+consecutive reconnect attempts fail (~1 minute), the device reboots.
 
 Covers: router reboots, DHCP lease expiry, AP channel changes.
 
 ### 2. Task watchdog
 
-Initialised in `setup()` via `esp_task_wdt_init(30, true)` and `esp_task_wdt_add(NULL)`. Reset at the top of `loop()`. Any hang longer than 30 seconds triggers an automatic reboot with `reset_reason = TASK_WDT`.
+Initialised in `setup()` via `esp_task_wdt_init(TASK_WDT_TIMEOUT_S,
+true)` and `esp_task_wdt_add(NULL)`. Reset at the top of `loop()`
+**and** before the long `delay(30000)` at the end of each iteration
+so the long sleep starts fresh. Any hang longer than
+`TASK_WDT_TIMEOUT_S` triggers a reboot with `reset_reason = TASK_WDT`.
 
-Covers: stuck sockets in `client.readStringUntil`, camera driver hangs, any other deadlock.
+`TASK_WDT_TIMEOUT_S` is **60 s** as of PR 17 — bumped from 30 s
+because the worst-case `captureAndUpload` (3 retries × 2 s + JPEG
+encode + HTTP) plus heartbeat (5 s connect timeout) could exceed
+30 s and silently reboot mid-upload. See lessons register entry in
+[`CLAUDE.md`](../../CLAUDE.md).
 
-### 3. Daily reboot
+Covers: stuck sockets in `client.readStringUntil`, camera driver
+hangs, any other deadlock.
 
-```c
-if (millis() > 24UL*60*60*1000UL) ESP.restart();
-```
+### 3. Consecutive-failure circuit breaker (new in PR 17)
 
-A crude but effective reliability trick. Clears heap fragmentation, stale TCP state, and anything else that degrades over time.
+`loop()` keeps a static counter of *consecutive* failures of any
+kind — camera NULL, WiFi down, HTTP non-2xx. When it crosses a
+threshold the breaker fires, but reboot is deferred to the **next**
+loop iteration so the device gets one more chance and the reboot
+runs from a clean stack frame.
 
-### 4. Boot-time recovery
+Heartbeat status-code parsing
+(`sendHeartbeat` reads the HTTP status line and returns 0 only on
+2xx) feeds the same counter — silent HTTP 500s used to look like
+success and never trip the breaker. See
+[ADR-007](../09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md)
+for the full rationale.
 
-- `initEspCamera()` no longer has a `while(true)` hard-lock on camera init failure. It now calls `ESP.restart()` after logging the error.
-- `setupWifiConnection()` now has a 30-second initial-connect timeout that also triggers a restart.
+### 4. Daily reboot (with capture-skip)
 
-Together these ensure no failure mode can leave the device stuck indefinitely.
+After 24 hours of uptime the module restarts itself. Before
+`ESP.restart()`, the path sets NVS namespace `"telemetry"` key
+`daily_reboot=true`. On boot, `setup()` reads and clears the flag;
+when set, it **skips** the first `captureAndUpload` so the daily
+reboot doesn't double the daily image cost.
+
+Clears heap fragmentation, stale TCP state, anything else that
+degrades over time.
+
+### 5. Camera recovery via PWDN cycle (new in PR 17)
+
+When `esp_camera_fb_get()` returns NULL, `captureAndUpload` does
+not just retry — it cycles the PWDN pin, calls `esp_camera_deinit()`
+and `esp_camera_init()` again, then retries. Recovers the module
+from sensor lock-ups that previously required a power cycle.
+
+### 6. Boot-time recovery
+
+- `initEspCamera()` no longer has a `while(true)` hard-lock on
+  camera init failure. It now calls `ESP.restart()` after logging
+  the error.
+- `setupWifiConnection()` now has a 30-second initial-connect
+  timeout that also triggers a restart.
+
+Together these ensure no failure mode can leave the device stuck
+indefinitely.
 
 ---
 
@@ -144,7 +196,19 @@ Reading the telemetry is a good first stop whenever a module looks unhealthy: a 
 
 On top of the `?admin=1` UI flag, the `GET /api/modules/:id/logs` endpoint requires an `X-Admin-Key` header matching the existing `HIGHFIVE_API_KEY`. This is the same key used by all `/api` routes, but regular dashboard pages send it automatically (via the bundled `VITE_API_KEY`). The admin endpoint demands it be provided *explicitly* as `X-Admin-Key` — casual visitors who just open the dashboard will never trigger that header.
 
-**Frontend UX:** the admin key is **not** sent automatically. The first time a user opens the Telemetry section in a tab, the page prompts for the key via `window.prompt()` and stores it in `sessionStorage['hf_admin_key']` (cleared on tab close). If the backend returns 403, the stored key is cleared and re-requested on the next Refresh. No extra env vars needed — you reuse the `HIGHFIVE_API_KEY` you already have.
+**Frontend UX:** the admin key is **not** sent automatically. The first
+time a user opens the Telemetry section in a tab, the page renders an
+inline `AdminKeyForm` (React component, replaced the legacy
+`window.prompt()` flow in PR 17 commit `5b110de`) and stores the
+submitted key in `sessionStorage['hf_admin_key']` (cleared on tab
+close). If the backend returns 403, the stored key is cleared and the
+form is re-shown. No extra env vars needed — you reuse the
+`HIGHFIVE_API_KEY` you already have.
+
+The same `AdminPage` is the admin telemetry table at `/admin?admin=1`
+with the per-module heartbeat snapshot (`HeartbeatSnapshot`,
+[ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md)),
+the image inspector, and the Discord webhook test surface.
 
 **Scope:** this gate only affects `GET /api/modules/:id/logs`. ESPs post images to `image-service:/upload` directly and are completely unaffected — the upload path has no admin requirement.
 

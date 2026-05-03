@@ -41,8 +41,14 @@ around line 50. Layered on top of the API-key middleware:
 
 The admin UI is gated by `?admin=1` in the URL, stored in
 `sessionStorage['hf_admin']`. The admin key itself is collected via
-`window.prompt()` and stored in `sessionStorage['hf_admin_key']` —
-never persisted in code.
+the inline `AdminKeyForm` React component (replaced the legacy
+`window.prompt()` flow in PR 17 commit `5b110de`) and stored in
+`sessionStorage['hf_admin_key']` — never persisted in code.
+
+The same admin gate protects the `/admin` route in the homepage
+(`AdminPage` — telemetry table with the per-module
+[`HeartbeatSnapshot`](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md),
+the image inspector, and the Discord webhook test surface).
 
 ## Why one secret, two header names
 

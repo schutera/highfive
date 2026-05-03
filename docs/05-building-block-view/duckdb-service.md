@@ -166,18 +166,35 @@ This endpoint is used by the AI model to save classification results.
 
 ### POST /modules/<module_id>/heartbeat
 
-Called by `image-service` on every accepted upload. Body:
-`{"battery": <int>}` → returns `{"ok": true}`.
+Called by `image-service` on every accepted upload **and** by the
+ESP32-CAM directly once per hour (via `duckdb-service/routes/heartbeats.py`).
 
+Image-upload-side payload: `{"battery": <int>}` → returns `{"ok": true}`.
 - Updates `battery_level` on `module_configs`
 - Sets `first_online` to today if it has not been set yet
 - Increments `image_count`
+
+ESP-side payload: `{"mac", "battery", "rssi", "uptime_ms",
+"free_heap", "fw_version"}` → also returns `{"ok": true}`.
+- Inserts a row into `module_heartbeats` (history table)
+- Updates `module_configs.updated_at` for liveness tracking
+- The most recent row is materialised as `Module.latestHeartbeat`
+  (shape: [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md))
+  per [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
 
 ### GET /modules/<module_id>/progress_count
 
 Returns `{"count": <int>}` — the number of `daily_progress` rows
 associated with the given module. Used by `image-service` to detect
 first-upload events without opening a direct DuckDB connection.
+
+## Internal services (no HTTP surface)
+
+| Module                                  | Role                                                                                          |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `services/silence_watcher.py`           | Periodic Discord alert when a module goes silent for >3 h, recovery message on return — see [ADR-005](../09-architecture-decisions/adr-005-silence-watcher-in-duckdb-service.md) |
+| `services/backup.py`                    | Periodic snapshot of `app.duckdb` to a sibling backup file under `/data`                      |
+| `services/discord.py`                   | Thin webhook wrapper used by the silence watcher and the AI-classification flow               |
 
 ## References:
 

@@ -19,12 +19,19 @@ After initial configuration the device operates fully automatically:
 - Registers itself as a new module if not already known to the server
 - Captures images at the configured interval and uploads them to
   `image-service` via multipart `POST /upload`
+- Sends an hourly heartbeat to `duckdb-service`
+  (`POST /modules/<mac>/heartbeat`) carrying battery, RSSI,
+  uptime, free heap, and `fw_version`. The wire shape is
+  [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md)
+  in `@highfive/contracts` —
+  [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
 - Attaches a JSON `logs` field with firmware version, uptime, free
   heap, RSSI, last reset reason, last HTTP codes, and the last ~2 KB
   of the on-device circular log buffer
-- Runs four independent recovery layers (Wi-Fi reconnect watchdog,
-  task watchdog, daily reboot, boot-time recovery) — see
-  [esp-reliability](../06-runtime-view/esp-reliability.md)
+- Runs the reliability stack — circuit breaker, daily reboot, camera
+  PWDN recovery, and a 60 s task watchdog — see
+  [esp-reliability](../06-runtime-view/esp-reliability.md) and
+  [ADR-007](../09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md)
 
 ## File layout
 
@@ -32,9 +39,11 @@ After initial configuration the device operates fully automatically:
 | ----------------------------------- | ------------------------------------- |
 | `ESP32-CAM/ESP32-CAM.ino`           | Arduino entry point                   |
 | `ESP32-CAM/host.cpp`                | Access-point + config form (lines 9–10 hold AP credentials) |
-| `ESP32-CAM/client.cpp`              | Wi-Fi join, upload loop               |
-| `ESP32-CAM/esp_init.cpp`            | NVS-backed configuration              |
+| `ESP32-CAM/client.cpp`              | Wi-Fi join, upload loop, heartbeat sender |
+| `ESP32-CAM/esp_init.{cpp,h}`        | NVS-backed configuration; `FIRMWARE_VERSION` macro |
 | `ESP32-CAM/logbuf.cpp`              | On-device circular log buffer (consumes `lib/ring_buffer/`) |
+| `ESP32-CAM/VERSION`                 | Single-line bee-species version (see [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)) |
+| `ESP32-CAM/build.sh`                | Reads `VERSION` to tag built artifacts |
 | `ESP32-CAM/lib/url/`                | Pure C++ URL helpers (host-testable)  |
 | `ESP32-CAM/lib/ring_buffer/`        | Pure C++ ring buffer (host-testable)  |
 | `ESP32-CAM/lib/telemetry/`          | Pure C++ telemetry JSON builder (host-testable) |

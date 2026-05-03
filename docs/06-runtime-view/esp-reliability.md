@@ -45,8 +45,9 @@ so the long sleep starts fresh. Any hang longer than
 `TASK_WDT_TIMEOUT_S` is **60 s** as of PR 17 — bumped from 30 s
 because the worst-case `captureAndUpload` (3 retries × 2 s + JPEG
 encode + HTTP) plus heartbeat (5 s connect timeout) could exceed
-30 s and silently reboot mid-upload. See lessons register entry in
-[`CLAUDE.md`](../../CLAUDE.md).
+30 s and silently reboot mid-upload. See the lessons register
+entry in [`docs/11-risks-and-technical-debt/`](../11-risks-and-technical-debt/README.md)
+("Three PR-17 review criticals").
 
 Covers: stuck sockets in `client.readStringUntil`, camera driver
 hangs, any other deadlock.

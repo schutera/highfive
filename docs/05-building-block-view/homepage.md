@@ -142,29 +142,52 @@ Three-step configuration guide shown after flashing:
 
 ## 4. Backend Connection
 
-The homepage connects to two backend services at runtime.
+The homepage talks to **only one** server-side endpoint:
+`backend` (port `3002` in dev, configurable via `VITE_API_URL`).
+All HTTP calls go through `homepage/src/services/api.ts:4`:
 
-### DuckDB Service (port `8002`)
-
-Used by the dashboard to load module data. All requests go through
-`homepage/src/services/api.ts`.
-
-Example calls:
-
-```
-GET http://<host>:8002/modules        → list all registered modules
-GET http://<host>:8002/module/<id>    → get single module details
+```ts
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 ```
 
-### Classification Backend (port `8000`)
+`backend` is the only thing the dashboard reaches; it then
+orchestrates `duckdb-service` (DB reads) internally. The homepage
+never opens a connection to `duckdb-service:8002` or
+`image-service:8000` directly. This single seam is enforced by
+ADR-001 (sole-writer for the DB) and is what keeps
+`@highfive/contracts` tractable — there is one wire shape between
+two TS services rather than three.
 
-The ESP32 modules upload images directly to this service — not through
-the homepage. The homepage only reads the processed results via the
-DuckDB service.
+### What the homepage calls
 
-```
-POST http://<host>:8000/upload        → image upload from ESP32 module
-```
+All under `${API_BASE_URL}` (`http://localhost:3002/api` in dev,
+the prod hostname in deployed builds via the build-time
+`VITE_API_URL` env var):
+
+| Method | Path                  | Purpose                                |
+|--------|-----------------------|----------------------------------------|
+| `GET`  | `/modules`            | list all registered modules            |
+| `GET`  | `/modules/:id`        | single module + nests                  |
+| `GET`  | `/modules/:id/logs`   | admin telemetry sidecars (X-Admin-Key) |
+
+For the wire shape see
+[../08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md);
+for the HTTP envelope see [../api-reference.md](../api-reference.md).
+
+### What the ESP32-CAM modules call (not the homepage)
+
+The ESP32-CAM does **not** go through the homepage or the backend
+for uploads or heartbeats. It posts directly to the upload pipeline:
+
+| Method | Endpoint                                       | Caller                              |
+|--------|------------------------------------------------|-------------------------------------|
+| `POST` | `image-service:8000/upload`                    | firmware (per capture)              |
+| `POST` | `duckdb-service:8002/heartbeat`                | firmware (hourly telemetry)         |
+| `POST` | `duckdb-service:8002/modules/<mac>/heartbeat`  | image-service (post-upload aggregate) |
+
+These are listed here only to be explicit that they are **not**
+homepage-originated traffic. See
+[../06-runtime-view/image-upload-flow.md](../06-runtime-view/image-upload-flow.md).
 
 <br>
 

@@ -22,9 +22,19 @@ and let the compile errors guide the rest.
 
 ## `HeartbeatSnapshot` and the extended `Module`
 
-PR 17 added the heartbeat channel
-(`POST /modules/<mac>/heartbeat`) and surfaced the most recent
-snapshot on every `Module`:
+PR 17 added the **telemetry heartbeat** channel
+(`POST /heartbeat` — `duckdb-service/routes/heartbeats.py:17`,
+fired hourly by firmware at `ESP32-CAM/client.cpp:260`) and
+surfaced the most recent snapshot on every `Module`. This is
+**distinct from** the post-upload aggregate at
+`POST /modules/<mac>/heartbeat`
+(`duckdb-service/routes/modules.py:266`), which is a separate
+endpoint with a different body and different side effects — see
+[duckdb-service.md](../05-building-block-view/duckdb-service.md)
+and the [glossary](../12-glossary/README.md) for the full
+disambiguation.
+
+The wire shape:
 
 ```ts
 export interface HeartbeatSnapshot {
@@ -37,13 +47,29 @@ export interface HeartbeatSnapshot {
 }
 ```
 
-`Module` gained `email`, `updatedAt`, `lastSeenAt` (derived as
-`max(updatedAt, lastApiCall, latestHeartbeat.receivedAt)`), and
+`Module` gained `email`, `updatedAt`, `lastSeenAt`, and
 `latestHeartbeat`. The shape lives in the shared package by
 deliberate decision —
 [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
-Backend reads these from `duckdb-service` JSON; if the Python
-side renames a key, the e2e test in
+
+`Module.lastSeenAt` is **derived** in the backend, not stored. The
+formula at `backend/src/database.ts:174-184` reads three wire
+fields off the duckdb response and takes the freshest:
+
+```ts
+// pseudocode of backend/src/database.ts:174-184
+const candidates = [
+  m.updated_at,                      // module_configs.updated_at
+  m.last_image_at,                   // SELECT MAX(uploaded_at) FROM image_uploads ...
+  m.latestHeartbeat?.receivedAt,     // SELECT MAX(received_at) FROM module_heartbeats ...
+].filter(Boolean);
+const lastSeenAt = max(candidates.map(toEpoch));
+```
+
+The DTO field that exposes `last_image_at` to the frontend is
+`Module.lastApiCall` (database.ts:205) — same data, different name
+on the wire vs. the DTO. If the Python side renames any of the
+three source columns, the e2e test in
 `tests/e2e/test_upload_pipeline.py` is the canary.
 
 ## Field-name drift to watch for

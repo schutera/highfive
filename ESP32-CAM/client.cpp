@@ -221,16 +221,19 @@ int postImage(esp_config_t *esp_config) {
 }
 
 
-// Hourly liveness ping — small POST to duckdb-service /heartbeat with
+// Hourly liveness ping — small form-encoded POST to duckdb-service with
 // battery / rssi / uptime / free-heap. Fails quietly; never restarts.
-// Wire format mirrors /new_module's form-encoded body so the backend
-// can parse with the same conventions.
+//
+// Path is intentionally hardcoded `/heartbeat`: INIT_URL points at the
+// registration endpoint (`/new_module`), but heartbeat is a sibling on
+// the same host:port — only the path differs. We use INIT_URL purely
+// as the carrier of host+port and discard its path.
 #ifndef FW_VERSION
 #define FW_VERSION "honeybee"
 #endif
 int sendHeartbeat(esp_config_t *esp_config) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[heartbeat] WiFi not connected — skipping");
+    logf("[heartbeat] WiFi not connected — skipping");
     return -2;
   }
 
@@ -241,7 +244,9 @@ int sendHeartbeat(esp_config_t *esp_config) {
   WiFiClient hbClient;
   hbClient.setTimeout(5000);
   if (!hbClient.connect(url.host.c_str(), (uint16_t)url.port)) {
-    Serial.println("[heartbeat] connect failed");
+    logf("[heartbeat] connect failed to %s:%u",
+         url.host.c_str(), (unsigned)url.port);
+    logbufNoteHttpCode(-2);
     return -2;
   }
 
@@ -260,10 +265,25 @@ int sendHeartbeat(esp_config_t *esp_config) {
                + body);
   hbClient.flush();
 
-  // Read first response line for log visibility, then close.
-  String status = hbClient.readStringUntil('\n');
+  // Parse the HTTP status from the first response line. Format is
+  // "HTTP/1.1 200 OK\r\n"; we want the integer between the first and
+  // second space. Anything not 2xx is a real upload failure that
+  // belongs in the telemetry ring buffer.
+  String statusLine = hbClient.readStringUntil('\n');
   hbClient.stop();
   Serial.print("[heartbeat] ");
-  Serial.println(status);
+  Serial.println(statusLine);
+
+  int firstSpace = statusLine.indexOf(' ');
+  int secondSpace = statusLine.indexOf(' ', firstSpace + 1);
+  int httpCode = -4; // sentinel: invalid/missing response
+  if (firstSpace > 0 && secondSpace > firstSpace) {
+    httpCode = statusLine.substring(firstSpace + 1, secondSpace).toInt();
+  }
+  logbufNoteHttpCode(httpCode);
+  if (httpCode < 200 || httpCode >= 300) {
+    logf("[heartbeat] non-2xx: %d", httpCode);
+    return httpCode;
+  }
   return 0;
 }

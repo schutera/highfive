@@ -13,7 +13,11 @@
 #define CONFIG_BUTTON 0
 #define HEARTBEAT_INTERVAL_MS (60UL * 60UL * 1000UL)  // 1 hour
 #define DAILY_REBOOT_MS       (24UL * 3600UL * 1000UL)
-#define TASK_WDT_TIMEOUT_S    30
+// Watchdog timeout: budget = capture+upload+heartbeat (~10–25 s under
+// retries) + 30 s sleep at end of loop = up to ~55 s between feeds in
+// the worst case. 60 s gives a safety margin while still rebooting on
+// genuine deadlocks within ~1 minute.
+#define TASK_WDT_TIMEOUT_S    60
 
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
@@ -335,5 +339,10 @@ void loop() {
     }
   }
 
+  // Feed the watchdog one more time before the long sleep so the 30 s
+  // delay starts the timer fresh. Combined with TASK_WDT_TIMEOUT_S=60,
+  // this guarantees the next loop iteration's work has at least 30 s
+  // of slack before the watchdog can fire.
+  esp_task_wdt_reset();
   delay(30000);  // check every 30 seconds
 }

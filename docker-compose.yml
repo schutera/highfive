@@ -11,6 +11,10 @@ services:
       - .env
     environment:
       NODE_ENV: development
+      # PORT must match the host:container mapping above. server.ts defaults
+      # to 3001 (legacy production), so set it explicitly here for the dev
+      # stack — the homepage's API client also targets :3002.
+      PORT: '3002'
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       IMAGE_SERVICE_URL: http://image-service:4444
     volumes:

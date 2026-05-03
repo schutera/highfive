@@ -234,12 +234,13 @@ int sendHeartbeat(esp_config_t *esp_config) {
     return -2;
   }
 
-  url_t url = splitUrl(esp_config->INIT_URL);
-  String macStr = String(esp_config->esp_ID);  // decimal — matches /new_module
+  hf::Url url = hf::parseUrl(std::string(esp_config->INIT_URL));
+  // Canonical 12-char lowercase-hex module ID (same as /upload + /new_module).
+  String macStr = String(hf::formatModuleId(esp_config->esp_ID).c_str());
 
   WiFiClient hbClient;
   hbClient.setTimeout(5000);
-  if (!hbClient.connect(url.host.c_str(), url.port)) {
+  if (!hbClient.connect(url.host.c_str(), (uint16_t)url.port)) {
     Serial.println("[heartbeat] connect failed");
     return -2;
   }
@@ -252,7 +253,7 @@ int sendHeartbeat(esp_config_t *esp_config) {
               + "&fw_version=" + String(FW_VERSION);
 
   hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
-               + "Host: " + url.host + ":" + String(url.port) + "\r\n"
+               + "Host: " + String(url.host.c_str()) + ":" + String((unsigned)url.port) + "\r\n"
                + "Content-Type: application/x-www-form-urlencoded\r\n"
                + "Content-Length: " + String(body.length()) + "\r\n"
                + "Connection: close\r\n\r\n"

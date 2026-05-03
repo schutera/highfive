@@ -1,8 +1,23 @@
 # Production Deployment (Docker Compose + Nginx)
 
+> ⚠️ **This runbook is incomplete and deploys a partial stack.**
+> `docker-compose.prod.yml` defines only `backend` and `frontend` —
+> the upload pipeline (`image-service` + `duckdb-service`) is **not**
+> brought up by following the steps below, and the backend is not
+> configured to reach them. Following this guide as-shipped gives
+> you a dashboard that loads but cannot ingest images, plus a
+> frontend container with no TLS path. Tracked as a follow-up
+> issue (see chapter 11 for the cross-link). Use this runbook only
+> for partial-stack experiments until that issue lands.
+
 Deploy HighFive to production from the `production` branch using
-`docker-compose.prod.yml`, with Nginx as the public reverse
-proxy and Let's Encrypt for TLS.
+`docker-compose.prod.yml`. The compose file as shipped binds the
+backend on host port `3001` and the frontend on host ports `80` and
+`443`. The frontend container, however, only listens on port `80`
+(`homepage/nginx.conf:1-2`) and only `EXPOSE 80` is declared in
+`homepage/Dockerfile:30` — **the `:443` host binding is a no-op and
+the frontend has no TLS path inside the container.** Two realistic
+topologies are documented below; pick one.
 
 For a non-Docker production option (Nginx + PM2 on bare metal),
 see [production-runbook.md](production-runbook.md). For dev-laptop
@@ -15,7 +30,34 @@ setup, see [docker-compose.md](docker-compose.md).
 - API subdomain: api.highfive.schutera.com pointing to server IP
 - Root/sudo access
 
-## Quick Deploy (5 minutes)
+## Topologies
+
+### Topology A — HTTP-only LAN deploy (matches compose as-shipped)
+
+The frontend container binds host port `80` directly and serves the
+SPA over HTTP. The backend binds host port `3001` directly. No
+host-Nginx, no TLS. Suitable only for trusted networks (lab,
+home-LAN, behind a separate VPN/edge).
+
+The `'443:443'` line in `docker-compose.prod.yml:29` does nothing
+in this topology — leave it alone or remove it; either is fine.
+Browsers hitting `https://highfive.schutera.com` will fail because
+nothing is listening on `:443`.
+
+### Topology B — TLS via host-Nginx in front of everything
+
+A host-level Nginx terminates TLS on `:443` for both `*.schutera.com`
+and `api.*.schutera.com`, proxying to the backend (`:3001`) and
+frontend (some non-80 port like `:8081`). This **requires** changing
+the frontend port mapping in `docker-compose.prod.yml` away from
+`80:80`/`443:443` (e.g. to `8081:80`) so the host can own `:80` and
+`:443`. That edit is infra work and is not part of this PR — it lives
+on the GitHub issue tracking the prod-stack rework.
+
+The Quick Deploy below covers Topology A. For Topology B, follow
+Quick Deploy steps 1-4, then defer to the issue once it lands.
+
+## Quick Deploy (Topology A — HTTP-only)
 
 ```bash
 # SSH into server
@@ -34,7 +76,7 @@ sudo chown $USER:$USER /opt/highfive
 cd /opt/highfive
 git clone -b production https://github.com/schutera/highfive.git .
 
-# 3. Build Docker images
+# 3. Build Docker images (only the two services compose knows about)
 docker compose -f docker-compose.prod.yml build backend
 docker compose -f docker-compose.prod.yml build frontend
 
@@ -42,49 +84,20 @@ docker compose -f docker-compose.prod.yml build frontend
 docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml ps
 
-# 5. Configure host-Nginx for the API (the frontend container binds
-#    80/443 directly — see Step 5 below for the topology note)
-sudo tee /etc/nginx/sites-available/highfive-api > /dev/null <<'EOF'
-server {
-    listen 8080;  # NOT 80 — port 80 is bound by the frontend container
-    server_name api.highfive.schutera.com;
+# 5. Verify what came up — both containers should be `Up`. Note that
+# image-service and duckdb-service are NOT started by this compose
+# file; the upload pipeline will not function until the prod-stack
+# issue is resolved.
+docker ps
 
-    location / {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-}
-EOF
-
-# NOTE: The frontend does NOT need a host-Nginx proxy. The homepage
-# container ships its own Nginx (homepage/nginx.conf) and binds host
-# ports 80:80 + 443:443 directly (docker-compose.prod.yml lines 27-29).
-# A second host-Nginx listener on :80 would conflict with that bind.
-
-# 6. Enable site and reload Nginx
-sudo ln -sf /etc/nginx/sites-available/highfive-api /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-
-# 7. Get SSL certificate (frontend cert is handled separately —
-# either inside the frontend container's Nginx, or via DNS-01)
-sudo certbot --nginx \
-  -d api.highfive.schutera.com
-
-# 8. Verify deployment
-curl https://api.highfive.schutera.com/api/health
-curl https://highfive.schutera.com
+# 6. Smoke-test (HTTP only)
+curl http://localhost:3001/api/health
+curl http://localhost:80/   # SPA index served by frontend container
 ```
+
+There is no certbot step in Topology A — the frontend container has
+no TLS terminator. Anyone browsing to `https://highfive.schutera.com`
+will get a connection refused on `:443`.
 
 ## Detailed Steps
 
@@ -143,93 +156,46 @@ docker compose -f docker-compose.prod.yml logs -f
 
 Both services should show `Up` status.
 
-### Step 5: Configure Nginx Reverse Proxy (API only)
+### Step 5: Topology and TLS — read this before going any further
 
-Topology — what `docker-compose.prod.yml` actually maps:
+The compose file as shipped maps:
 
 | Service                                                | Container port | Host port      | Notes |
 |--------------------------------------------------------|----------------|----------------|-------|
-| `backend` (Express)                                    | 3001           | **3001**       | bound on host; host-Nginx proxies here |
-| `frontend` (Nginx-in-container, serving Vite build)    | 80 / 443       | **80 / 443**   | binds the host's 80/443 directly via `homepage/Dockerfile` + `homepage/nginx.conf` |
+| `backend` (Express)                                    | 3001           | **3001**       | bound on host                                                                                       |
+| `frontend` (Nginx-in-container, serves Vite build)     | 80             | **80**         | binds host `:80` directly via `homepage/Dockerfile:30` (`EXPOSE 80`) and `homepage/nginx.conf:1-2` (`listen 80;`) |
+| `frontend` (TLS)                                       | (none)         | (`443:443` no-op) | the container does **not** listen on 443 and ships no certs; the `:443` host binding has nothing to forward to |
 
-So host-Nginx (`/etc/nginx/`) is **only** needed for the API
-subdomain. A second host-Nginx listener on `:80` would conflict with
-the frontend container's bind. The frontend gets its TLS cert either
-inside the container's nginx or via certbot's DNS-01 challenge.
+Topology A (what this guide deploys) is HTTP-only. There is no
+certbot step because there's nothing to terminate TLS on. Anyone
+hitting `https://highfive.schutera.com` will see a connection
+refused on `:443`.
 
-Create the API proxy on a free host port (e.g. `8080`) — let the
-frontend container own `80/443`:
+Topology B requires changing `docker-compose.prod.yml`'s frontend
+port mapping (e.g. to `8081:80`) so the host can own `:80` and `:443`,
+then setting up a host-Nginx in front of everything. That edit is
+infra work tracked in the prod-stack issue (see chapter 11). Do not
+attempt it from this runbook in its current form.
 
-```bash
-sudo tee /etc/nginx/sites-available/highfive-api > /dev/null <<'EOF'
-server {
-    listen 8080;  # NOT 80 — frontend container holds 80
-    server_name api.highfive.schutera.com;
-
-    location / {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-}
-EOF
-```
-
-Enable and reload:
+### Step 6: Smoke-test (HTTP only)
 
 ```bash
-sudo ln -sf /etc/nginx/sites-available/highfive-api /etc/nginx/sites-enabled/
+# Backend health
+curl http://localhost:3001/api/health
 
-sudo nginx -t
-sudo systemctl reload nginx
+# Frontend SPA index
+curl -L http://localhost/ | head -20
+
+# Container status
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs --tail=50 backend
+docker compose -f docker-compose.prod.yml logs --tail=50 frontend
 ```
 
-If you want host-Nginx on `:443` for both, you'll need to either run
-host-Nginx in front of the entire stack (and rebind the frontend
-container off 80/443 — diverges from `docker-compose.prod.yml` as it
-ships) or add a dedicated reverse-proxy container in compose. Both are
-out of scope here.
-
-### Step 6: Setup SSL with Certbot
-
-```bash
-# Verify DNS first
-nslookup api.highfive.schutera.com
-nslookup highfive.schutera.com
-
-# Both should return your server IP
-
-# Get SSL certificate for the API only — the frontend container
-# handles its own TLS (or use certbot DNS-01 separately for it)
-sudo certbot --nginx \
-  -d api.highfive.schutera.com
-
-# Choose option 2: Redirect HTTP to HTTPS
-# Certificate auto-renews
-```
-
-### Step 7: Verify Deployment
-
-```bash
-# Test API
-curl https://api.highfive.schutera.com/api/health
-
-# Test frontend
-curl -L https://highfive.schutera.com | head -20
-
-# Check logs
-docker compose -f docker-compose.prod.yml logs backend
-docker compose -f docker-compose.prod.yml logs frontend
-```
+Note that the upload pipeline (`image-service` + `duckdb-service`)
+is **not** part of this compose file and the dashboard cannot
+ingest images until those services are added. Tracking issue is
+the same prod-stack issue referenced in Step 5.
 
 ## Troubleshooting
 
@@ -250,21 +216,6 @@ free -h
 
 # Retry build
 docker compose -f docker-compose.prod.yml build --no-cache
-```
-
-### Certbot DNS Error
-
-If DNS lookup fails:
-
-```bash
-# Verify DNS is configured
-nslookup api.highfive.schutera.com
-
-# If NXDOMAIN, add DNS records to your provider:
-# A record: api.highfive → your-server-ip
-# A record: highfive → your-server-ip
-
-# Wait 5-10 minutes for propagation, then retry certbot
 ```
 
 ### Port Already in Use
@@ -332,11 +283,14 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## Access Application
 
-Once deployed:
+Once deployed (Topology A — HTTP only):
 
-- **Frontend**: https://highfive.schutera.com
-- **API**: https://api.highfive.schutera.com/api/modules
-- **Health Check**: https://api.highfive.schutera.com/api/health
+- **Frontend**: `http://<server-ip>/` (or `http://highfive.schutera.com` if DNS points at the box)
+- **API**: `http://<server-ip>:3001/api/modules`
+- **Health Check**: `http://<server-ip>:3001/api/health`
+
+`https://` URLs **will not work** in this topology. See Step 5 for
+why and the prod-stack issue for the path to TLS.
 
 ## Support
 

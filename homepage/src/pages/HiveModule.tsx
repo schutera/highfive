@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n/LanguageContext';
 import SiteHeader from '../components/SiteHeader';
 import SiteFooter from '../components/SiteFooter';
@@ -7,8 +8,6 @@ import hiveshowMp4 from '../assets/hiveshow.mp4?url';
 import hiveshowPoster from '../assets/hiveshow-poster.webp?url';
 // CAD source file — same idea; preserves cache busting on update.
 import cadFileUrl from '../assets/HiveModule.FCStd?url';
-
-const STRIPE_LINK = import.meta.env.VITE_STRIPE_LINK || '#';
 
 export default function HiveModule() {
   const { t } = useTranslation();
@@ -82,23 +81,9 @@ export default function HiveModule() {
               </h2>
             </div>
             <p className="text-hf-sm text-hf-fg-soft mb-4 flex-1">{t('hiveModule.orderText')}</p>
-            <a
-              href={STRIPE_LINK}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-disabled={STRIPE_LINK === '#'}
-              className={`hf-btn w-full py-3 ${STRIPE_LINK === '#' ? 'cursor-not-allowed' : 'hf-btn-primary'}`}
-              style={
-                STRIPE_LINK === '#'
-                  ? { background: 'var(--hf-line-soft)', color: 'var(--hf-fg-mute)' }
-                  : undefined
-              }
-              onClick={(e) => {
-                if (STRIPE_LINK === '#') e.preventDefault();
-              }}
-            >
-              {STRIPE_LINK === '#' ? t('hiveModule.comingSoon') : t('hiveModule.orderCta')}
-            </a>
+            <Link to="/waitlist" className="hf-btn hf-btn-primary w-full py-3">
+              {t('hiveModule.joinWaitlistCta')}
+            </Link>
           </article>
 
           {/* DIY */}

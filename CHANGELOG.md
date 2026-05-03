@@ -40,7 +40,7 @@ First tagged release aimed at keeping deployed modules alive in the field and ma
 
 ### Documentation
 
-- New `documentation/esp-reliability.md` — reliability strategy, telemetry schema, data-flow diagram, how to read logs from the admin view.
+- New [`docs/06-runtime-view/esp-reliability.md`](docs/06-runtime-view/esp-reliability.md) — reliability strategy, telemetry schema, data-flow diagram, how to read logs from the admin view. (Originally landed as `documentation/esp-reliability.md`; relocated by the arc42 restructure in PR 27.)
 
 ### Not in this release
 

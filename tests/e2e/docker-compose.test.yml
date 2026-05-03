@@ -68,6 +68,10 @@ services:
       - '4002:3002'
     environment:
       NODE_ENV: production
+      # PORT must match the host:container mapping above (4002:3002).
+      # server.ts defaults to 3001 (legacy production), so set it
+      # explicitly here. Same fix as the root docker-compose.yml.
+      PORT: '3002'
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       IMAGE_SERVICE_URL: http://image-service:4444
       HIGHFIVE_API_KEY: hf_test_key

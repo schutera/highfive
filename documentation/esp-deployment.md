@@ -1,158 +1,204 @@
-# HiveHive ESP32-CAM Module
+# HiveHive ESP32-CAM Module — Setup & Deployment
 
-HiveHive is a hardware module based on an ESP32 with an integrated camera.  
-It captures images and uploads them to a server for processing and analysis.
-
----
-
-# Initial Setup
-
-## 1. Power On the Module
-- Connect the HiveHive module to a power source
-- On first startup, the module creates its own Wi-Fi network
-
-## 2. Connect to the Module
-- Open Wi-Fi settings on your computer or smartphone
-- Connect to: **HiveHive-Access-Point**
-- If connection fails:
-  - Disconnect the module from power
-  - Plug it in again and retry
-
-## 3. Open Configuration Page
-- Once connected, open a browser and go to:  
-  **http://192.168.4.1**
-- A configuration page will appear
-- The module **must be configured before first use**
+HiveHive edge modules are based on the ESP32-CAM. They capture images and upload them to the server for processing and analysis.
 
 ---
 
-## Configuration Fields
+## Prerequisites — verify the server stack first
 
-### General
-- **Module Name**  
-  - Custom name of the module  
-  - Can be set freely
+Before touching the hardware, make sure the server is running and reachable.
 
-- **Wi-Fi SSID & Password**  
-  - Credentials of your local Wi-Fi network  
+```bash
+docker compose up --build   # from the repo root
+```
 
----
+Check all four services are healthy (substitute your machine's LAN IP):
 
-### Developer Setup
+| Check | Expected response |
+|-------|-------------------|
+| `http://localhost:5173` | Dashboard loads |
+| `http://<LAN-IP>:3002/api/health` | `{"status":"ok"}` |
+| `http://<LAN-IP>:8000/health` | `ok` |
+| `http://<LAN-IP>:8002/health` | `ok` |
 
-- **Initialization Base URL**  
-  - IP address and port of the HiveHive manager server  
-  - Default port: `8002`
+> **Find your LAN IP:** `ipconfig` on Windows (look for the WLAN or Ethernet adapter), `ip addr` on Linux/Mac. Use this IP — not `localhost` — when configuring the module, because the ESP32 is a separate device on the network.
 
-- **Initialization Endpoint**  
-  - Endpoint path for module registration  
-  - Default: `/new_module`
-
-- **Upload Base URL**  
-  - IP address and port of the image processing server  
-  - Default port: `8000`
-
-- **Upload Endpoint**  
-  - Endpoint path for image upload  
-  - Default: `/upload`
+> **Windows Firewall:** ports 8000 and 8002 must accept inbound TCP connections from LAN devices. If modules register on the network but never appear on the dashboard, run this once in an **admin** PowerShell:
+> ```powershell
+> New-NetFirewallRule -DisplayName "HiveHive image-service" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Any
+> New-NetFirewallRule -DisplayName "HiveHive duckdb-service" -Direction Inbound -Protocol TCP -LocalPort 8002 -Action Allow -Profile Any
+> ```
 
 ---
 
-### Optional
+## Flashing firmware onto a blank ESP32-CAM
 
-- **Image Quality Settings**  
-  - Adjust image resolution and quality  
+Skip this section if the module already runs HiveHive firmware (it will open the `ESP32-Access-Point` Wi-Fi network on boot).
 
----
+### Hardware variants
 
-## What Happens After Configuration
-- The ESP32 creates a HiveHive module automatically  
-- The module appears on the dashboard:  
-  **http://<hivehive.com>:5173/dashboard**  
-- It automatically transmits:
-  - Current location  
-  - Battery level  
-- The module connects to the backend and starts uploading images automatically  
+**ESP32-CAM-MB (motherboard)** — identified by a micro-USB port and "ESP32-CAM-MB" printed on the board. Has a built-in CH340 USB-serial chip. **No FTDI adapter needed.**
 
----
+**Bare ESP32-CAM** — no USB port. Requires a separate USB-to-TTL adapter (FTDI FT232 or CH340, 3.3 V logic) wired to GND, 5 V, U0T→RX, U0R→TX, plus IO0→GND for flash mode.
 
-## Network Requirements
-- The module **requires a 2.4 GHz Wi-Fi network**
-- A valid **server base URL** and **endpoint** must be provided
-- Final request URLs are constructed as:  
-  `Base URL + Endpoint`
+### Install PlatformIO
 
----
+```bash
+pip install platformio
+```
 
-## Reconfiguration (Factory Reset)
-To reset and reconfigure the module:
-- Press and hold the **left button** on the module for **10–15 seconds**
-- The configuration will be reset
-- Repeat the initial setup process
+If you have multiple Python versions on the same machine and `python -m platformio` fails, call the interpreter explicitly:
+```bash
+# Windows example — find yours with: where python
+& "C:\Users\<you>\AppData\Local\Programs\Python\Python311\python.exe" -m platformio ...
+```
 
----
+### Enter flash mode (ESP32-CAM-MB)
 
-# Firmware Update
+1. Hold the **IO0** (or **BOOT**) button on the MB board.
+2. While holding IO0, press and release **RST**.
+3. Release IO0.
 
-## Update Process
-1. Connect the ESP32 module to your computer via USB  
-2. Open:  
-   **http://<hivehive.com>/web-installer**  
-3. Use **Google Chrome** or **Microsoft Edge**  
-4. Once the device is detected, click:  
-   **"Firmware aufspielen"**  
-5. The update process will start  
-6. **Do not disconnect the USB cable during the update**
+The chip is now waiting for firmware.
+
+### Flash
+
+```bash
+cd ESP32-CAM
+pio run -e esp32cam --target upload --upload-port <port>
+```
+
+Find the port: **Device Manager → Ports → USB-SERIAL CH340 (COMx)** on Windows; `/dev/ttyUSB0` or `/dev/cu.usbserial-*` on Linux/Mac.
+
+### Boot normally after flashing
+
+Press **RST** once (without IO0). The module boots, opens the configuration access point, and the LED flashes.
 
 ---
 
-# Developer Notes (Troubleshooting)
+## Initial setup — configuring a module for the first time
 
-## Compiling & Flashing via Arduino IDE
+### 1. Connect to the module's access point
 
-### Prerequisites
-- Arduino IDE with ESP32 support installed  
-- USB adapter for ESP32-CAM  
-- 2.4 GHz Wi-Fi network  
+| Setting | Value |
+|---------|-------|
+| Wi-Fi network | `ESP32-Access-Point` |
+| Password | `esp-12345` |
 
-### Steps
-1. Open the project in Arduino IDE  
-2. Select the correct ESP32 board and serial port  
-3. Compile and upload the firmware  
-4. Open **Tools → Serial Monitor**  
-5. Set baud rate to **115200**  
+> **Browser:** use **Chrome or Firefox**. Brave and some other mobile browsers silently fail to submit the configuration form due to session-token handling — the form will appear to reload blank after you click Save.
 
-The Serial Monitor provides logs for:
-- Wi-Fi connection  
-- Image capture  
-- Upload attempts  
-- Errors and debugging  
+### 2. Open the configuration page
+
+Navigate to **http://192.168.4.1**
+
+### 3. Fill in the configuration form
+
+| Field | Value |
+|-------|-------|
+| Module Name | Any label, e.g. `hive-01` |
+| Wi-Fi SSID | Your 2.4 GHz network name (case-sensitive — copy-paste, don't retype) |
+| Wi-Fi Password | Your network password |
+| Initialization Base URL | `http://<LAN-IP>:8002` |
+| Initialization Endpoint | `/new_module` |
+| Upload Base URL | `http://<LAN-IP>:8000` |
+| Upload Endpoint | `/upload` |
+
+> **2.4 GHz only.** The ESP32 does not support 5 GHz. If your router shows a single SSID for both bands (band steering), the ESP32 should be assigned to 2.4 GHz automatically — but if it fails to connect, check your router's band-steering settings.
+
+> **Same network.** The ESP32 must be on the same LAN as the server. If you configure it to join a phone hotspot while the server runs on your home router, the module cannot reach the server.
+
+Click **Save Configuration**. The module reboots, joins your Wi-Fi, registers itself with the server, and starts uploading images. It will appear on the dashboard at `http://localhost:5173/dashboard` within a minute.
 
 ---
 
--------
+## Verifying a successful setup
 
-# Design Decisions
+```bash
+# Check registered modules (replace with your LAN IP or use localhost)
+curl http://localhost:8002/modules
+```
 
-## Technology Choice
-- The ESP32 firmware is implemented in **C++ using the Arduino IDE**
+Your module should appear with its MAC address as ID, the name you gave it, battery level, and `"status": "online"`.
 
-## User Experience Focus
-The system is designed to minimize user effort:
+---
 
-- The user only needs to:
-  - Connect once to the ESP32 access point  
-  - Set a module name  
-  - Enter Wi-Fi credentials  
+## Reading serial output
 
-- After that, everything happens automatically:
-  - The ESP detects its location  
-  - Connects to the target server  
-  - Registers itself as a new module  
-  - Starts automatic image uploads  
+The serial monitor is useful for diagnosing connection issues.
 
-- The backend system:
-  - Performs intelligent beehive detection  
-  - Displays results in the HiveHive dashboard  
+### Interactive monitor (works on most setups)
 
-This ensures a **fully automated workflow after initial setup**, requiring no further user interaction.
+```bash
+# PlatformIO
+pio device monitor --port <port> --baud 115200
+
+# Windows with explicit Python path
+& "C:\...\python.exe" -m platformio device monitor --port COM9 --baud 115200
+```
+
+Press **RST** after starting the monitor to see the full boot log.
+
+### File capture (if the interactive monitor shows nothing)
+
+Some MB board variants receive data but don't echo it to the terminal due to control-line behaviour. Capture to a file instead:
+
+```python
+import serial, time
+
+s = serial.Serial('COM9', 115200, timeout=0.5, rtscts=False, dsrdtr=False)
+s.setRTS(False)
+s.setDTR(False)
+# Press RST on the board now
+deadline = time.time() + 20
+buf = b''
+while time.time() < deadline:
+    data = s.read(256)
+    if data:
+        buf += data
+s.close()
+open('esp_log.txt', 'wb').write(buf)
+```
+
+Then open `esp_log.txt` to read the boot log.
+
+---
+
+## Reconfiguration (factory reset)
+
+To clear the saved configuration and re-enter setup mode:
+
+- Press and hold the **IO0** button for **7 seconds** while the module is powered.
+- The module resets its configuration and reopens the `ESP32-Access-Point`.
+- Repeat the initial setup process.
+
+> Do not press RST during the hold — that enters flash mode instead of triggering the config reset.
+
+---
+
+## Firmware update
+
+### Via PlatformIO (recommended)
+
+Enter flash mode (IO0 + RST as above), then:
+
+```bash
+cd ESP32-CAM
+pio run -e esp32cam --target upload --upload-port <port>
+```
+
+### Via web installer
+
+Connect the module via USB, open **http://\<hivehive-server\>/web-installer** in **Chrome or Edge** (Web Serial API required), and follow the on-screen instructions.
+
+---
+
+## Design notes
+
+The ESP32 firmware is written in C++17 using the Arduino framework and built with PlatformIO. After initial configuration the device operates fully automatically:
+
+- Connects to the configured Wi-Fi network on boot
+- Registers itself as a new module if not already known to the server
+- Captures images at the configured interval and uploads them to the image service
+- Includes a task watchdog (30 s), a Wi-Fi reconnect watchdog (reboot after 5 consecutive failures), and a daily reboot for long-term stability
+
+See [esp-reliability.md](esp-reliability.md) for the full reliability and telemetry design.

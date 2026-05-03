@@ -73,19 +73,21 @@ def get_heartbeats(module_id):
             [module_id, limit],
         ).fetchall()
 
-    return jsonify({
-        "heartbeats": [
-            {
-                "received_at": r[0].isoformat() if r[0] else None,
-                "battery": r[1],
-                "rssi": r[2],
-                "uptime_ms": r[3],
-                "free_heap": r[4],
-                "fw_version": r[5],
-            }
-            for r in rows
-        ]
-    })
+    return jsonify(
+        {
+            "heartbeats": [
+                {
+                    "received_at": r[0].isoformat() if r[0] else None,
+                    "battery": r[1],
+                    "rssi": r[2],
+                    "uptime_ms": r[3],
+                    "free_heap": r[4],
+                    "fw_version": r[5],
+                }
+                for r in rows
+            ]
+        }
+    )
 
 
 @heartbeats_bp.get("/heartbeats_summary")
@@ -108,16 +110,18 @@ def get_heartbeats_summary():
             """
         ).fetchall()
 
-    return jsonify({
-        "summary": {
-            r[0]: {
-                "last_seen": r[1].isoformat() if r[1] else None,
-                "battery": r[2],
-                "rssi": r[3],
-                "uptime_ms": r[4],
-                "free_heap": r[5],
-                "fw_version": r[6],
+    return jsonify(
+        {
+            "summary": {
+                r[0]: {
+                    "last_seen": r[1].isoformat() if r[1] else None,
+                    "battery": r[2],
+                    "rssi": r[3],
+                    "uptime_ms": r[4],
+                    "free_heap": r[5],
+                    "fw_version": r[6],
+                }
+                for r in rows
             }
-            for r in rows
         }
-    })
+    )

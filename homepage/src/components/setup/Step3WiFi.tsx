@@ -15,50 +15,81 @@ export default function Step3WiFi({ onNext, onBack, onSkip }: Step3WiFiProps) {
   const [showTroubleshoot, setShowTroubleshoot] = useState(false);
 
   return (
-    <div className="flex flex-col items-center text-center">
-      {/* WiFi icon */}
-      <div className="w-24 h-24 rounded-full bg-amber-100 flex items-center justify-center mb-6">
-        <svg className="w-12 h-12 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0" />
+    <section className="flex flex-col items-center text-center" aria-labelledby="step3-title">
+      <div
+        className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
+        style={{ background: 'var(--hf-honey-100)' }}
+        aria-hidden="true"
+      >
+        <svg
+          className="w-12 h-12 text-hf-honey-700"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0"
+          />
         </svg>
       </div>
 
-      <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-3">
+      <h2
+        id="step3-title"
+        className="font-bold text-hf-fg mb-3"
+        style={{ fontSize: 'var(--fs-xl)' }}
+      >
         {t('step3.title')}
       </h2>
-      <p className="text-gray-600 mb-6 max-w-md">
-        {t('step3.text')}
-      </p>
+      <p className="text-hf-fg-soft mb-6 max-w-md text-hf-base">{t('step3.text')}</p>
 
-      {/* AP network card */}
-      <div className="bg-white border-2 border-amber-200 rounded-xl p-6 mb-6 w-full max-w-sm shadow-sm">
-        <label className="text-xs text-gray-500 uppercase tracking-wider font-medium">{t('step3.networkName')}</label>
-        <div className="flex items-center justify-between mt-1 bg-gray-50 rounded-lg px-4 py-3">
-          <code className="text-lg font-mono font-bold text-gray-900">{AP_SSID}</code>
+      <div
+        className="rounded-hf-xl p-6 mb-6 w-full max-w-sm border-2 hf-card"
+        style={{ borderColor: 'color-mix(in oklch, var(--hf-honey-400) 60%, transparent)' }}
+      >
+        <label
+          className="text-hf-xs text-hf-fg-mute uppercase tracking-wider font-medium"
+          htmlFor="ap-ssid"
+        >
+          {t('step3.networkName')}
+        </label>
+        <div
+          className="flex items-center justify-between mt-1 rounded-hf px-4 py-3"
+          style={{ background: 'var(--hf-line-soft)' }}
+        >
+          <code id="ap-ssid" className="text-hf-md font-mono font-bold text-hf-fg">
+            {AP_SSID}
+          </code>
           <CopyButton text={AP_SSID} label={t('step3.networkName')} />
         </div>
-        <p className="text-xs text-gray-400 mt-2">{t('step3.openNetwork')}</p>
+        <p className="text-hf-xs text-hf-fg-mute mt-2">{t('step3.openNetwork')}</p>
       </div>
 
-      {/* Info callout */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 w-full max-w-sm">
-        <p className="text-sm text-amber-800">
+      <aside
+        className="rounded-hf-lg p-4 mb-4 w-full max-w-sm border"
+        style={{
+          background: 'color-mix(in oklch, var(--hf-warn) 10%, transparent)',
+          borderColor: 'color-mix(in oklch, var(--hf-warn) 35%, transparent)',
+        }}
+      >
+        <p className="text-hf-sm" style={{ color: 'var(--hf-honey-800)' }}>
           {t('step3.disconnectNotice')}
         </p>
-      </div>
+      </aside>
 
-      {/* Troubleshooting section */}
       <div className="w-full max-w-sm mb-6">
         <button
           onClick={() => setShowTroubleshoot(!showTroubleshoot)}
-          className="text-sm text-gray-500 hover:text-gray-700 underline transition-colors"
+          aria-expanded={showTroubleshoot}
+          className="text-hf-sm text-hf-fg-mute hover:text-hf-fg-soft underline transition-colors"
         >
           {t('step3.cantSeeNetwork')}
         </button>
 
         {showTroubleshoot && (
-          <div className="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-4 text-left space-y-3">
+          <div className="mt-3 hf-card p-4 text-left space-y-3">
             <TroubleshootItem
               number={1}
               title={t('step3.troubleshoot.resetTitle')}
@@ -83,37 +114,45 @@ export default function Step3WiFi({ onNext, onBack, onSkip }: Step3WiFiProps) {
         <div className="flex gap-3 w-full md:w-auto">
           <button
             onClick={onBack}
-            className="flex-1 md:flex-none px-6 py-3 rounded-lg font-semibold border-2 border-gray-200 text-gray-600 hover:border-gray-300 transition-colors"
+            className="hf-btn hf-btn-secondary flex-1 md:flex-none px-6 py-3"
           >
             {t('common.back')}
           </button>
-          <button
-            onClick={onNext}
-            className="flex-1 md:flex-none bg-amber-500 hover:bg-amber-600 text-white px-8 py-3 rounded-lg font-semibold transition-colors"
-          >
+          <button onClick={onNext} className="hf-btn hf-btn-primary flex-1 md:flex-none px-8 py-3">
             {t('step3.connected')}
           </button>
         </div>
         <button
           onClick={onSkip}
-          className="text-sm text-gray-400 hover:text-gray-600 underline transition-colors"
+          className="text-hf-sm text-hf-fg-mute hover:text-hf-fg-soft underline transition-colors"
         >
           {t('step3.skip')}
         </button>
       </div>
-    </div>
+    </section>
   );
 }
 
-function TroubleshootItem({ number, title, text }: { number: number; title: string; text: string }) {
+function TroubleshootItem({
+  number,
+  title,
+  text,
+}: {
+  number: number;
+  title: string;
+  text: string;
+}) {
   return (
     <div className="flex gap-3">
-      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-200 text-gray-600 text-xs font-bold flex items-center justify-center mt-0.5">
+      <span
+        className="flex-shrink-0 w-6 h-6 rounded-full text-hf-xs font-bold flex items-center justify-center mt-0.5"
+        style={{ background: 'var(--hf-line-soft)', color: 'var(--hf-fg-soft)' }}
+      >
         {number}
       </span>
       <div>
-        <p className="text-sm font-medium text-gray-800">{title}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{text}</p>
+        <p className="text-hf-sm font-medium text-hf-fg">{title}</p>
+        <p className="text-hf-xs text-hf-fg-mute mt-0.5">{text}</p>
       </div>
     </div>
   );

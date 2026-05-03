@@ -42,8 +42,9 @@ export async function sendConfigToEsp(config: EspConfig): Promise<void> {
 
   const html = await formResp.text();
   console.log('[espConfig] Got form HTML, length:', html.length);
-  const match = html.match(/name=["']session["']\s+value=["']([^"']+)["']/i)
-    || html.match(/name=session\s+value=["']?([^"'\s>]+)/i);
+  const match =
+    html.match(/name=["']session["']\s+value=["']([^"']+)["']/i) ||
+    html.match(/name=session\s+value=["']?([^"'\s>]+)/i);
   if (match) {
     sessionToken = match[1];
     console.log('[espConfig] Extracted session token:', sessionToken);
@@ -133,7 +134,11 @@ function submitConfigViaForm(config: EspConfig): void {
   // Auto-close the popup after the ESP has time to process
   if (popup) {
     setTimeout(() => {
-      try { popup.close(); } catch { /* cross-origin or already closed */ }
+      try {
+        popup.close();
+      } catch {
+        /* cross-origin or already closed */
+      }
     }, 5000);
   }
 

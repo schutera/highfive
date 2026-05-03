@@ -1,6 +1,6 @@
-import { defineConfig, Plugin } from 'vite'
-import react from '@vitejs/plugin-react'
-import os from 'os'
+import { defineConfig, Plugin } from 'vite';
+import react from '@vitejs/plugin-react';
+import os from 'os';
 
 /**
  * Vite plugin that serves the machine's LAN IP at /__dev-api/lan-ip.
@@ -12,42 +12,45 @@ function lanIpPlugin(): Plugin {
     name: 'lan-ip',
     configureServer(server) {
       server.middlewares.use('/__dev-api/lan-ip', (_req, res) => {
-        const ip = getLocalIp()
-        res.setHeader('Content-Type', 'application/json')
-        res.end(JSON.stringify({ ip }))
-      })
+        const ip = getLocalIp();
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ip }));
+      });
     },
-  }
+  };
 }
 
 function getLocalIp(): string {
-  const nets = os.networkInterfaces()
+  const nets = os.networkInterfaces();
   // Prefer common real adapter names (Wi-Fi, Ethernet, en0, wlan0, eth0)
-  const preferredPatterns = /^(Wi-Fi|WiFi|Ethernet|en\d|wlan\d|eth\d)$/i
-  const allIps: { name: string; ip: string }[] = []
+  const preferredPatterns = /^(Wi-Fi|WiFi|Ethernet|en\d|wlan\d|eth\d)$/i;
+  const allIps: { name: string; ip: string }[] = [];
 
   for (const name of Object.keys(nets)) {
     for (const net of nets[name] ?? []) {
       if (!net.internal && net.family === 'IPv4') {
-        allIps.push({ name, ip: net.address })
+        allIps.push({ name, ip: net.address });
       }
     }
   }
 
   // 1st choice: preferred adapter name
-  const preferred = allIps.find(e => preferredPatterns.test(e.name))
-  if (preferred) return preferred.ip
+  const preferred = allIps.find((e) => preferredPatterns.test(e.name));
+  if (preferred) return preferred.ip;
 
   // 2nd choice: common LAN ranges (192.168.x.x, 10.x.x.x)
-  const lan = allIps.find(e => e.ip.startsWith('192.168.') || e.ip.startsWith('10.'))
-  if (lan) return lan.ip
+  const lan = allIps.find((e) => e.ip.startsWith('192.168.') || e.ip.startsWith('10.'));
+  if (lan) return lan.ip;
 
-  return allIps[0]?.ip || 'localhost'
+  return allIps[0]?.ip || 'localhost';
 }
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), lanIpPlugin()],
+  // Treat .bin and .FCStd files as binary assets so we can import them with
+  // `?url` and Vite will emit them with content hashes.
+  assetsInclude: ['**/*.bin', '**/*.FCStd'],
   server: {
     proxy: {
       // Proxy requests to the ESP module's config portal (bypasses CORS in dev)
@@ -58,4 +61,29 @@ export default defineConfig({
       },
     },
   },
-})
+  build: {
+    rollupOptions: {
+      output: {
+        // Manual chunks: split heavy/cacheable libs into long-lived chunks so
+        // they don't churn on every app deploy and the homepage can boot
+        // without paying for leaflet on first paint.
+        manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+            if (id.includes('leaflet') || id.includes('react-leaflet')) {
+              return 'leaflet';
+            }
+            if (id.includes('esptool-js')) {
+              return 'esptool';
+            }
+            if (id.includes('react-router')) {
+              return 'router';
+            }
+            if (id.includes('react-dom') || /[\\/]react[\\/]/.test(id)) {
+              return 'react';
+            }
+          }
+        },
+      },
+    },
+  },
+});

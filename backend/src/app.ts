@@ -1,28 +1,23 @@
 import express from 'express';
 import cors from 'cors';
+import { tryParseModuleId } from '@highfive/contracts';
 import { db } from './database';
-import { setupSwagger } from './swagger';
-import { apiKeyAuth } from './auth';
+import { apiKeyAuth, getApiKey } from './auth';
 import { DUCKDB_URL } from './duckdbClient';
 
-const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://127.0.0.1:4444';
+const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://image-service:4444';
 
 export const app = express();
 
 // Middleware - Configure CORS for production
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? 'https://highfive.schutera.com'
-    : '*',
+  origin: process.env.NODE_ENV === 'production' ? 'https://highfive.schutera.com' : '*',
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
-
-// Setup Swagger documentation (public, no auth required)
-setupSwagger(app);
 
 // Health check (public, no auth required)
 app.get('/api/health', (req, res) => {
@@ -32,7 +27,9 @@ app.get('/api/health', (req, res) => {
 // Serve images without auth — <img> tags cannot send custom headers
 app.get('/api/images/:filename', async (req, res) => {
   try {
-    const response = await fetch(`${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`);
+    const response = await fetch(
+      `${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`,
+    );
     if (!response.ok) {
       res.status(response.status).json({ error: 'Image not found' });
       return;
@@ -53,8 +50,7 @@ app.use('/api', apiKeyAuth);
 
 app.get('/api/modules', async (req, res) => {
   try {
-    await db.refresh();
-    const modules = db.getAllModules();
+    const modules = await db.listModules();
     res.json(modules);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch modules' });
@@ -62,9 +58,13 @@ app.get('/api/modules', async (req, res) => {
 });
 
 app.get('/api/modules/:id', async (req, res) => {
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
   try {
-    await db.refresh();
-    const module = db.getModuleById(req.params.id);
+    const module = await db.getModuleDetail(id);
     if (module) {
       res.json(module);
     } else {
@@ -75,8 +75,7 @@ app.get('/api/modules/:id', async (req, res) => {
   }
 });
 
-// Image routes (proxied to image-service)
-
+// Image listing (proxied to image-service)
 app.get('/api/images', async (req, res) => {
   try {
     const moduleId = req.query.module_id;
@@ -94,9 +93,12 @@ app.get('/api/images', async (req, res) => {
 
 app.delete('/api/images/:filename', async (req, res) => {
   try {
-    const response = await fetch(`${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`, {
-      method: 'DELETE',
-    });
+    const response = await fetch(
+      `${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`,
+      {
+        method: 'DELETE',
+      },
+    );
     const data = await response.json();
     res.status(response.status).json(data);
   } catch (error) {
@@ -105,33 +107,46 @@ app.delete('/api/images/:filename', async (req, res) => {
 });
 
 app.delete('/api/modules/:id', async (req, res) => {
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
   try {
-    const response = await fetch(`${DUCKDB_URL}/modules/${encodeURIComponent(req.params.id)}`, {
+    const response = await fetch(`${DUCKDB_URL}/modules/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
     const data = await response.json();
-    if (response.ok) await db.refresh();
     res.status(response.status).json(data);
   } catch (error) {
     res.status(502).json({ error: 'Failed to delete module' });
   }
 });
 
-app.patch('/api/modules/:id/status', async (req, res) => {
+// Admin-only: telemetry sidecar logs. Layered on top of the existing X-API-Key
+// middleware. Requires an additional X-Admin-Key header matching HIGHFIVE_API_KEY.
+app.get('/api/modules/:id/logs', async (req, res) => {
+  const provided = req.header('X-Admin-Key');
+  if (!provided || provided !== getApiKey()) {
+    res.status(403).json({ error: 'Forbidden: admin key required' });
+    return;
+  }
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
   try {
-    const { status } = req.body;
-    if (status !== 'online' && status !== 'offline') {
-      res.status(400).json({ error: 'Invalid status. Must be "online" or "offline"' });
+    const limit = req.query.limit ? `?limit=${encodeURIComponent(String(req.query.limit))}` : '';
+    const url = `${IMAGE_SERVICE_URL}/modules/${encodeURIComponent(id)}/logs${limit}`;
+    const upstream = await fetch(url);
+    if (!upstream.ok) {
+      res.status(upstream.status).json({ error: 'Failed to fetch module logs' });
       return;
     }
-    const success = db.updateModuleStatus(req.params.id, status);
-    await db.refresh();
-    if (success) {
-      res.json({ message: 'Status updated successfully' });
-    } else {
-      res.status(404).json({ error: 'Module not found' });
-    }
+    const payload = await upstream.json();
+    res.json(payload);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update module status' });
+    res.status(502).json({ error: 'image-service unreachable' });
   }
 });

@@ -136,18 +136,6 @@ One possible extension for data storage would be to implement a layered model wi
 
 Checks whether the service and the database are accessible.
 
-### GET /initial_insert
-
-Inserts sample modules, nests, and progress data. This endpoint is intended for development and testing purposes.
-
-### POST /test_insert
-
-Inserts a test module into the database.
-
-### POST /remove_test
-
-Removes the test module from the database.
-
 ### POST /new_module
 
 Registers a new module in the system.
@@ -175,6 +163,21 @@ This endpoint is used by the AI model to save classification results.
 - There are three nests per bee species per module
 - Missing nests are automatically generated
 - Progress values are saved for the current date
+
+### POST /modules/<module_id>/heartbeat
+
+Called by `image-service` on every accepted upload. Body:
+`{"battery": <int>}` → returns `{"ok": true}`.
+
+- Updates `battery_level` on `module_configs`
+- Sets `first_online` to today if it has not been set yet
+- Increments `image_count`
+
+### GET /modules/<module_id>/progress_count
+
+Returns `{"count": <int>}` — the number of `daily_progress` rows
+associated with the given module. Used by `image-service` to detect
+first-upload events without opening a direct DuckDB connection.
 
 ## References:
 

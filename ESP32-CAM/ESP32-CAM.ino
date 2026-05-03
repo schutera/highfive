@@ -2,14 +2,22 @@
 #include "esp_init.h"
 #include "host.h"
 #include "client.h"
+#include "logbuf.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
 #include <Preferences.h>
+#include <esp_task_wdt.h>
+#include <esp_system.h>
 
 
 #define CONFIG_BUTTON 0
 #define HEARTBEAT_INTERVAL_MS (60UL * 60UL * 1000UL)  // 1 hour
 #define DAILY_REBOOT_MS       (24UL * 3600UL * 1000UL)
+// Watchdog timeout: budget = capture+upload+heartbeat (~10–25 s under
+// retries) + 30 s sleep at end of loop = up to ~55 s between feeds in
+// the worst case. 60 s gives a safety margin while still rebooting on
+// genuine deadlocks within ~1 minute.
+#define TASK_WDT_TIMEOUT_S    60
 
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
@@ -39,6 +47,17 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println();
   delay(200);
+
+  // Telemetry: ring buffer + boot marker with reset reason
+  logbufInit();
+  uint32_t boot_count = incrementBootCount();
+  logf("[BOOT] fw=%s reset_reason=%d boot_count=%u free_heap=%u",
+       FIRMWARE_VERSION, (int)esp_reset_reason(), boot_count, ESP.getFreeHeap());
+
+  // Task watchdog — if loop() (or AP server) hangs for >TASK_WDT_TIMEOUT_S,
+  // reboot. host.cpp's runAccessPoint() also feeds it; loop() resets at top.
+  esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
+  esp_task_wdt_add(NULL);
 
   Serial.println("------ ESP STARTED ------");
 
@@ -269,6 +288,10 @@ bool captureAndUpload() {
 }
 
 void loop() {
+  // Feed the task watchdog. If the loop hangs for >TASK_WDT_TIMEOUT_S,
+  // the watchdog fires and reboots the device.
+  esp_task_wdt_reset();
+
   // NOTE: GPIO0 config button check moved to setup() — it cannot be read
   // reliably here because the camera XCLK drives GPIO0 after init.
 
@@ -316,5 +339,10 @@ void loop() {
     }
   }
 
+  // Feed the watchdog one more time before the long sleep so the 30 s
+  // delay starts the timer fresh. Combined with TASK_WDT_TIMEOUT_S=60,
+  // this guarantees the next loop iteration's work has at least 30 s
+  // of slack before the watchdog can fire.
+  esp_task_wdt_reset();
   delay(30000);  // check every 30 seconds
 }

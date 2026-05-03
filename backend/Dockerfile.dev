@@ -1,12 +1,32 @@
 # backend/Dockerfile.dev
+#
+# Build context is the repo root (see docker-compose.yml). The image
+# installs the whole npm workspace (contracts + backend + homepage) so
+# the `@highfive/contracts` workspace symlink resolves at runtime.
+# Only the backend's `src/` is bind-mounted in dev (see compose), so
+# the in-image install handles the contracts package + node_modules.
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+# Copy lockfile + every workspace package.json so `npm ci` can resolve
+# the workspace graph without needing the rest of the source.
+COPY package.json package-lock.json ./
+COPY contracts/package.json ./contracts/package.json
+COPY backend/package.json ./backend/package.json
+COPY homepage/package.json ./homepage/package.json
+
+# Install workspaces. `npm ci` honours the root lockfile and creates
+# the @highfive/contracts symlink under node_modules/.
 RUN npm ci
 
-COPY . .
+# Copy the contracts source — backend imports its types at compile time.
+COPY contracts ./contracts
+
+# Copy the backend source last so changes don't bust the install layer.
+COPY backend ./backend
+
+WORKDIR /app/backend
 
 EXPOSE 3002
 ENV NODE_ENV=development

@@ -13,10 +13,10 @@ from db.connection import lock, get_conn
 from services.discord import send_discord_message
 
 # A module is "silent" once nothing has been heard from it for this long.
-SILENCE_THRESHOLD_S = 3 * 3600        # 3 hours
+SILENCE_THRESHOLD_S = 3 * 3600  # 3 hours
 
 # Don't re-fire a silence alert more often than this for the same module.
-REALERT_INTERVAL_S = 6 * 3600         # 6 hours
+REALERT_INTERVAL_S = 6 * 3600  # 6 hours
 
 
 def _fmt_age(seconds: float) -> str:
@@ -54,7 +54,9 @@ def check_silence():
             mid, name, updated_at, alerted_at, last_image_at, last_hb_at = row
 
             # lastSeenAt = freshest of the three liveness signals; ignore NULLs.
-            candidates = [t for t in (updated_at, last_image_at, last_hb_at) if t is not None]
+            candidates = [
+                t for t in (updated_at, last_image_at, last_hb_at) if t is not None
+            ]
             if not candidates:
                 continue  # never seen — don't alert; setup is in progress.
             last_seen = max(candidates)
@@ -62,7 +64,10 @@ def check_silence():
 
             if age_s > SILENCE_THRESHOLD_S:
                 # Currently silent.
-                if alerted_at is None or (now - alerted_at).total_seconds() > REALERT_INTERVAL_S:
+                if (
+                    alerted_at is None
+                    or (now - alerted_at).total_seconds() > REALERT_INTERVAL_S
+                ):
                     silence_alerts.append((mid, name, last_seen, age_s))
                     con.execute(
                         "UPDATE module_configs SET last_silence_alert_at = ? WHERE id = ?",

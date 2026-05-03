@@ -1,35 +1,100 @@
-# HighFive Architecture
+# HiveHive Architecture
+
+For a one-page summary aimed at new contributors, see
+[`/ARCHITECTURE.md`](../ARCHITECTURE.md) at the repo root. This
+document is the deeper deep-dive.
 
 ## 1. System Purpose
 
-HighFive monitors wild-bee nesting activity with camera-enabled edge modules (ESP32-CAM), classifies nesting images, persists progress data in DuckDB, and visualizes module status and nest progress in a web dashboard.
+HiveHive monitors wild-bee nesting activity with camera-enabled edge
+modules (ESP32-CAM), classifies nesting images, persists progress data
+in DuckDB, and visualizes module status and nest progress in a web
+dashboard.
 
-The platform follows a microservice architecture with clear responsibility boundaries between UI, API aggregation, image classification, and persistence.
+The platform follows a microservice architecture with clear
+responsibility boundaries between UI, API aggregation, image ingestion,
+and persistence.
 
 ## 2. Runtime Components
 
-| Component                | Tech                           | Host Port -> Container Port | Responsibility                                                             |
-| ------------------------ | ------------------------------ | --------------------------- | -------------------------------------------------------------------------- |
-| `homepage`               | React + Vite + TypeScript      | `5173 -> 5173`              | Dashboard UI, map view, module detail UI, setup pages                      |
-| `backend`                | Node.js + Express + TypeScript | `3002 -> 3002`              | Authenticated API for frontend, aggregation of module/nest/progress data   |
-| `image-service`            | Python + Flask               | `8000 -> 4444`              | Image upload endpoint, storage, classification stub, progress writeback    |
-| `duckdb-service`         | Python + Flask + DuckDB        | `8002 -> 8000`              | Persistent storage API (`modules`, `nests`, `progress`)                    |
-| `ESP32-CAM`              | C++/Arduino firmware           | n/a (edge device)           | Captures images and uploads to classification endpoint                     |
+| Component        | Tech                           | Host port -> Container port | Responsibility                                                                              |
+| ---------------- | ------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------- |
+| `homepage`       | React 19 + Vite + TypeScript   | `5173 -> 5173`              | Dashboard UI, map view, module detail, setup wizard, hive-module info                       |
+| `backend`        | Node.js + Express + TypeScript | `3002 -> 3002`              | Auth-gated API for the frontend; aggregates module / nest / progress; admin telemetry proxy |
+| `image-service`  | Python + Flask                 | `8000 -> 4444`              | Image upload + telemetry sidecar; stub classifier; progress writeback                       |
+| `duckdb-service` | Python + Flask + DuckDB        | `8002 -> 8000`              | Persistent storage API (`modules`, `nests`, `progress`)                                     |
+| `ESP32-CAM`      | C++ / Arduino + PlatformIO     | n/a (edge device)           | Captures images, builds telemetry payload, uploads via multipart                            |
 
 ## 3. Deployment Topology (Docker Compose)
 
-- All services run in one shared Docker bridge network: `net`.
-- Persistent DB file is stored in Docker volume `duckdb_data`.
-- Shared volume mount for stateful services:
-  - `image-service` mounts `duckdb_data:/data`
-  - `duckdb-service` mounts `duckdb_data:/data`
-- Inter-service communication inside Docker uses service DNS names, not `localhost`:
-  - `backend` -> `http://duckdb-service:8000`
-  - `image-service` -> `http://duckdb-service:8000`
+- All four services run on a single shared Docker bridge network: `net`.
+- The DuckDB file lives in volume `duckdb_data`, mounted into both
+  `image-service` and `duckdb-service` at `/data`.
+- Inter-service URLs use Docker service names, **not** `localhost`:
+  - `backend` → `http://duckdb-service:8000`
+  - `backend` → `http://image-service:4444` (admin telemetry proxy)
+  - `image-service` → `http://duckdb-service:8000`
 
-## 4. Architecture Diagram
+## 4. Data-flow Diagram
 
-<img src="doc_images/HiveHiveArch.png" width="600">
+```
+                                                 field
+                                ┌──────────────────────────────┐
+                                │  ESP32-CAM (firmware ≥1.0.0) │
+                                │  capture every N min         │
+                                │  builds {fw, uptime_s,       │
+                                │   free_heap, rssi,           │
+                                │   wifi_reconnects, log…}     │
+                                └──────────────┬───────────────┘
+                                               │ POST /upload
+                                               │ multipart: image, mac,
+                                               │            battery, logs
+                                               ▼
+                                ┌──────────────────────────────┐
+                                │  image-service  (Flask)      │  :4444
+                                │  • saves <file>.jpg          │
+                                │  • writes <file>.jpg.log.json│
+                                │  • stub classifier           │
+                                │  • POST /add_progress…       │
+                                │  • POST /modules/<mac>/      │
+                                │    heartbeat (battery,       │
+                                │    image_count, first_online)│
+                                └────┬─────────────────────────┘
+                                     │
+                          POST /add_progress_for_module
+                          POST /modules/<mac>/heartbeat
+                          GET  /modules/<mac>/progress_count
+                                     ▼
+                                ┌─────────────────────────────┐
+                                │  duckdb-service (Flask)     │  :8000
+                                │  owns app.duckdb            │
+                                │  /modules /nests /progress  │
+                                │  /new_module /add_progress… │
+                                │  /modules/<id>/heartbeat    │
+                                │  /modules/<id>/             │
+                                │     progress_count          │
+                                │  /health                    │
+                                └────────────────┬────────────┘
+                                                 │ GET /modules /nests /progress
+                                                 ▼
+                                ┌─────────────────────────────┐
+                                │  backend (Express + TS)     │  :3002
+                                │  in-memory cache            │
+                                │  /api/health (public)       │
+                                │  /api/modules*  X-API-Key   │
+                                │  /api/modules/:id/logs      │
+                                │     X-API-Key + X-Admin-Key │
+                                │     proxies to image-service│
+                                └────────────────┬────────────┘
+                                                 │ fetch + X-API-Key
+                                                 ▼
+                                ┌─────────────────────────────┐
+                                │  homepage (React 19 + Vite) │  :5173
+                                │  / /dashboard /setup        │
+                                │  /hive-module /assembly     │
+                                │  Telemetry UI gated ?admin=1│
+                                └─────────────────────────────┘
+```
 
 ## 5. Core Data Flows
 
@@ -37,49 +102,127 @@ The platform follows a microservice architecture with clear responsibility bound
 
 1. Browser loads `homepage`.
 2. Frontend calls `backend` (`/api/modules`, `/api/modules/:id`) with `X-API-Key`.
-3. `backend` refreshes in-memory view by reading from `duckdb-service` endpoints:
-   - `GET /modules`
-   - `GET /nests`
-   - `GET /progress`
-4. `backend` maps/normalizes raw DB payload into frontend DTOs.
-5. Frontend renders module map, status, battery and nest progress.
+3. `backend.ModuleReadModel` calls `duckdb-service` on each request:
+   - `GET /modules`, `GET /nests`, `GET /progress`
+4. `backend` normalises raw rows into frontend DTOs and serves them.
+5. Frontend renders the map, module list, status, battery and nest progress.
 
 ### 5.2 Edge Ingestion + Classification Flow
 
-0. ESP32-CAM captures image on interval.
-1. Device uploads form data (`image`, `mac`, `battery`) to `image-service /upload`.
-2. Classification service runs detection pipeline and sends json Object `duckdb-service /add_progress_for_module`. At the same time it updates the module's battery and last-online Date in the database.
-3. The `duckdb-service` endpoint:
-   - Validates the module exists
-   - transforms the classification result into a progress entry for the current date
-   - If the referenced nest does not exist, it creates it
-   - Inserts the progress entry with the classification result and timestamp.
+0. ESP32-CAM captures an image on its configured interval.
+1. Device uploads multipart form data (`image`, `mac`, `battery`, optional
+   `logs`) to `image-service /upload`.
+2. `image-service` saves the image, writes a `.log.json` sidecar if `logs`
+   is present, runs the stub classifier, and then:
+   - `POST /add_progress_for_module` to the duckdb-service, **and**
+   - `POST /modules/<mac>/heartbeat` to the duckdb-service to update
+     battery, `image_count`, and `first_online` (on first sighting it
+     also uses `GET /modules/<mac>/progress_count` to detect first
+     upload).
+3. The duckdb-service either inserts a new progress row for the day or
+   replaces an existing one. Missing nests are auto-created.
+4. The frontend reflects the new data on the next `/api/modules` poll.
 
-   The `backend` reads the updated progress data on the next frontend request, so there is no direct notification mechanism from the `duckdb-service` to the `backend`. This design choice keeps the services decoupled and allows for a simple pull-based data refresh strategy. (here the read flow from the dashboard is described in 5.1)
+### 5.3 Admin Telemetry Read Flow
 
-4. The frontend reflects the updated progress data on the next dashboard load or refresh.
+1. Operator opens the dashboard with `?admin=1`. The flag is stored in
+   `sessionStorage['hf_admin']`.
+2. Telemetry section in the module panel is now visible. On open, the
+   frontend prompts for the admin key via `window.prompt()` and stores
+   it in `sessionStorage['hf_admin_key']`.
+3. Frontend calls `GET /api/modules/:id/logs` with both `X-API-Key` and
+   `X-Admin-Key`.
+4. `backend` checks `X-Admin-Key` against `HIGHFIVE_API_KEY` and proxies
+   to `image-service /modules/<mac>/logs?limit=N`.
+5. `image-service` globs `*.log.json`, filters by `_mac`, returns the
+   newest N entries.
 
-### 5.3 Sequence Diagram (Ingestion)
+### 5.4 Persistence Invariant
+
+All DuckDB writes flow through `duckdb-service`. `image-service` no
+longer opens its own DuckDB connection and has no `DUCKDB_PATH` env
+var — battery / `image_count` / `first_online` updates go through
+`POST /modules/<mac>/heartbeat`, and first-upload detection uses
+`GET /modules/<mac>/progress_count`. `image-service` still writes
+images and `.log.json` sidecars to the shared volume locally; only the
+DB writes are HTTP. This restores the "duckdb-service owns the DB"
+invariant (Phase 4).
+
+## 6. Test Stack
+
+Two layers of automated testing back the architecture, both wired into
+CI in `.github/workflows/tests.yml` (jobs `esp-native`, `esp-firmware`,
+`e2e-pipeline`):
+
+### 6.1 ESP32-CAM native unit tests
+
+`ESP32-CAM/test/test_native_*/` — 38 Unity tests run on the host via
+PlatformIO's `native` env. They exercise the pure C++ helpers extracted
+into `ESP32-CAM/lib/`:
+
+- `lib/url/` — URL parsing for the upload base + endpoint config
+- `lib/ring_buffer/` — fixed-size circular buffer used by `logbuf.cpp`
+- `lib/telemetry/` — telemetry JSON builder + metrics; consumed by `client.cpp`
+
+Run with `make test-esp-native`. No hardware needed. Runs in seconds.
+
+A second CI job (`esp-firmware`) cross-compiles the actual firmware
+against the `esp32cam` env so that any breakage from `.ino`/`.cpp`
+linkage is caught even though the binary cannot run on the CI host.
+
+### 6.2 End-to-end pipeline test
+
+`tests/e2e/test_upload_pipeline.py` boots an isolated docker-compose
+stack (`tests/e2e/docker-compose.test.yml`, project name
+`highfive-e2e`, ports +1000 from dev), drives it with
+`tools/mock_esp.py`, and asserts:
+
+- `image-service /upload` returns 200 and writes both image and sidecar
+- `duckdb-service /modules` reflects updated `image_count` + battery
+- `image-service /modules/<mac>/logs` round-trips the telemetry sidecar
+- `backend /api/modules/:id/logs` enforces the admin gate
+
+Run with `make test-e2e`.
+
+## 7. Architecture Diagram (legacy)
+
+The older block diagram still ships under `documentation/doc_images/`:
+
+<img src="doc_images/HiveHiveArch.png" width="600">
 
 <img src="doc_images/IngestionHiveHive.png" width="600">
 
-## 9. Fault Tolerance and Operational Notes
+These predate the telemetry channel and the test harness; the ASCII
+diagram in §4 is the current source of truth.
 
-- `backend` tries DuckDB health check on startup; if unavailable, it logs a warning and still starts.
-- DB persistence survives container recreation via `duckdb_data` volume.
-- Classification and persistence are decoupled over HTTP APIs, allowing independent evolution.
-- Internal container requests must use Docker service names, not host loopback.
+## 8. Fault Tolerance and Operational Notes
 
-## 10. Known Trade-offs
+- `backend.ModuleReadModel` is a stateless read-through projection: every
+  `/api/modules*` request fans out to duckdb-service via `Promise.allSettled`,
+  so partial upstream failures still return a usable (possibly emptier)
+  response instead of erroring the whole request.
+- DB persistence survives container recreation via `duckdb_data`.
+- Classification and persistence are decoupled over HTTP, allowing
+  independent evolution.
+- Internal container requests use Docker service names, not host
+  loopback.
+- The ESP firmware now has four independent recovery layers (WiFi
+  watchdog, task watchdog, daily reboot, boot-time recovery) — see
+  [esp-reliability.md](esp-reliability.md).
 
-- Current backend read path refreshes full module/nest/progress snapshots on demand, which is simple but not optimized for high scale.
-- Classification currently returns stub/dummy values; MaskRCNN integration is planned.
-- Some write paths currently update DuckDB directly from classification service (fast, but tighter coupling than API-only writes).
+## 9. Known Trade-offs
 
-## 11. Recommended Next Architecture Steps
+- The backend re-fetches the full module/nest/progress snapshot from
+  duckdb-service on every request. Simple, not optimised for high scale.
+- Classification returns stub values; MaskRCNN integration is planned.
+- Dev API key (`hf_dev_key_2026`) ships as a fallback. Override via
+  `HIGHFIVE_API_KEY` for any non-local deployment.
 
-1. Route all DB writes through `duckdb-service` for a single persistence boundary.
-2. Add asynchronous queue (e.g. Redis stream/RabbitMQ) between upload and classification for burst handling.
-3. Add structured observability (central logs + trace IDs across services).
-4. Harden secrets handling by removing dev fallback API keys in production builds.
-5. Add migration/versioning strategy for DuckDB schema evolution.
+## 10. Recommended Next Architecture Steps
+
+1. Add an asynchronous queue between upload and classification for
+   burst handling.
+2. Add structured observability (central logs + trace IDs across
+   services).
+3. Harden secrets handling — drop dev fallback in production builds.
+4. Add a migration / versioning strategy for DuckDB schema evolution.

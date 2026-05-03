@@ -1,14 +1,10 @@
 #ifndef CLIENT_H
 #define CLIENT_H
 
-#include <Arduino.h>
 #include "esp_init.h"
 
-typedef struct {
-  String host;
-  uint16_t port;
-  String path;
-} url_t;
+// URL parsing now lives in lib/url (host-testable). The old url_t struct
+// has been retired; client.cpp uses hf::Url internally.
 
 int postImage(esp_config_t *esp_config);
 int sendHeartbeat(esp_config_t *esp_config);

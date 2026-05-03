@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { api, Module } from '../../services/api';
+import { api } from '../../services/api';
+import type { Module } from '@highfive/contracts';
 import { sendConfigToEsp } from './espConfig';
 
 export interface WizardState {
@@ -42,9 +43,7 @@ const POLL_INTERVAL = 5000;
  * from its perspective, localhost is the ESP itself.
  */
 function replaceLocalhost(url: string, lanIp: string): string {
-  return url
-    .replace('://localhost', `://${lanIp}`)
-    .replace('://127.0.0.1', `://${lanIp}`);
+  return url.replace('://localhost', `://${lanIp}`).replace('://127.0.0.1', `://${lanIp}`);
 }
 
 export function useSetupWizard() {
@@ -94,7 +93,7 @@ export function useSetupWizard() {
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.data === 'hivehive-config-saved') {
-        setState(s => ({
+        setState((s) => ({
           ...s,
           configSent: true,
           currentStep: Math.max(s.currentStep, 5),
@@ -109,10 +108,10 @@ export function useSetupWizard() {
   const snapshotModules = async () => {
     try {
       const existing = await api.getAllModules();
-      knownModuleSnapshotRef.current = new Map(
-        existing.map((m: Module) => [m.id, m.updatedAt])
-      );
-      console.log('[SetupWizard] Module snapshot taken on mount:', [...knownModuleSnapshotRef.current.keys()]);
+      knownModuleSnapshotRef.current = new Map(existing.map((m: Module) => [m.id, m.updatedAt]));
+      console.log('[SetupWizard] Module snapshot taken on mount:', [
+        ...knownModuleSnapshotRef.current.keys(),
+      ]);
     } catch {
       // Backend might not be reachable yet (user on ESP AP) — that's fine,
       // startVerification will take a fallback snapshot.
@@ -153,7 +152,7 @@ export function useSetupWizard() {
     } catch {
       // manifest missing → fall back to 'Local'
     }
-    setState(s => ({
+    setState((s) => ({
       ...s,
       firmwareUrl: '/firmware.bin',
       firmwareVersion: version,
@@ -162,7 +161,7 @@ export function useSetupWizard() {
   };
 
   const goNext = useCallback(() => {
-    setState(s => ({
+    setState((s) => ({
       ...s,
       currentStep: Math.min(s.currentStep + 1, 5),
       direction: 'forward',
@@ -170,7 +169,7 @@ export function useSetupWizard() {
   }, []);
 
   const goBack = useCallback(() => {
-    setState(s => ({
+    setState((s) => ({
       ...s,
       currentStep: Math.max(s.currentStep - 1, 1),
       direction: 'back',
@@ -178,7 +177,7 @@ export function useSetupWizard() {
   }, []);
 
   const goToStep = useCallback((step: number) => {
-    setState(s => ({
+    setState((s) => ({
       ...s,
       currentStep: step,
       direction: step > s.currentStep ? 'forward' : 'back',
@@ -186,23 +185,23 @@ export function useSetupWizard() {
   }, []);
 
   const markConfigDone = useCallback(() => {
-    setState(s => ({ ...s, configSent: true }));
+    setState((s) => ({ ...s, configSent: true }));
   }, []);
 
   const markFlashComplete = useCallback(() => {
-    setState(s => ({ ...s, flashComplete: true }));
+    setState((s) => ({ ...s, flashComplete: true }));
   }, []);
 
   const setWifiSsid = useCallback((v: string) => {
-    setState(s => ({ ...s, wifiSsid: v }));
+    setState((s) => ({ ...s, wifiSsid: v }));
   }, []);
 
   const setWifiPassword = useCallback((v: string) => {
-    setState(s => ({ ...s, wifiPassword: v }));
+    setState((s) => ({ ...s, wifiPassword: v }));
   }, []);
 
   const sendConfig = useCallback(async () => {
-    setState(s => ({ ...s, configSending: true, configError: null }));
+    setState((s) => ({ ...s, configSending: true, configError: null }));
 
     // Replace localhost with LAN IP if detected
     let initBase = SERVER_CONFIG.initBaseUrl;
@@ -222,10 +221,10 @@ export function useSetupWizard() {
         uploadBase,
         uploadEndpoint: SERVER_CONFIG.uploadEndpoint,
       });
-      setState(s => ({ ...s, configSending: false, configSent: true }));
+      setState((s) => ({ ...s, configSending: false, configSent: true }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setState(s => ({ ...s, configSending: false, configError: message }));
+      setState((s) => ({ ...s, configSending: false, configError: message }));
     }
   }, [state.wifiSsid, state.wifiPassword]);
 
@@ -234,7 +233,7 @@ export function useSetupWizard() {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
     }
-    setState(s => ({ ...s, pollingActive: false }));
+    setState((s) => ({ ...s, pollingActive: false }));
   }, []);
 
   const startVerification = useCallback(async () => {
@@ -247,9 +246,7 @@ export function useSetupWizard() {
     if (knownModuleSnapshotRef.current.size === 0) {
       try {
         const existing = await api.getAllModules();
-        knownModuleSnapshotRef.current = new Map(
-          existing.map((m: Module) => [m.id, m.updatedAt])
-        );
+        knownModuleSnapshotRef.current = new Map(existing.map((m: Module) => [m.id, m.updatedAt]));
         console.log('[Step5] Fallback snapshot:', [...knownModuleSnapshotRef.current.keys()]);
       } catch {
         knownModuleSnapshotRef.current = new Map();
@@ -258,7 +255,7 @@ export function useSetupWizard() {
       console.log('[Step5] Using mount snapshot:', [...knownModuleSnapshotRef.current.keys()]);
     }
 
-    setState(s => ({
+    setState((s) => ({
       ...s,
       pollingActive: true,
       pollCount: 0,
@@ -269,13 +266,13 @@ export function useSetupWizard() {
 
     pollingIntervalRef.current = setInterval(async () => {
       pollCountRef.current++;
-      setState(s => ({ ...s, pollCount: pollCountRef.current }));
+      setState((s) => ({ ...s, pollCount: pollCountRef.current }));
       console.log(`[Step5] Poll ${pollCountRef.current}/${MAX_POLLS}`);
 
       if (pollCountRef.current > MAX_POLLS) {
         console.warn('[Step5] Max polls reached, timing out');
         stopVerification();
-        setState(s => ({ ...s, verificationTimedOut: true }));
+        setState((s) => ({ ...s, verificationTimedOut: true }));
         return;
       }
 
@@ -303,7 +300,7 @@ export function useSetupWizard() {
         if (detectedModule) {
           console.log('[Step5] New or updated module detected:', detectedModule);
           stopVerification();
-          setState(s => ({ ...s, detectedModule }));
+          setState((s) => ({ ...s, detectedModule }));
         }
       } catch (err) {
         console.error('[Step5] Poll error:', err);

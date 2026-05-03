@@ -1,0 +1,10 @@
+{
+    "name": "hf_ring_buffer",
+    "version": "0.1.0",
+    "description": "Pure C++ fixed-capacity byte ring buffer for HiveHive ESP32-CAM telemetry. Host-testable.",
+    "frameworks": "*",
+    "platforms": "*",
+    "build": {
+        "srcFilter": ["+<*>"]
+    }
+}

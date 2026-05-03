@@ -1,0 +1,10 @@
+{
+    "name": "hf_url",
+    "version": "0.1.0",
+    "description": "Pure C++ URL parsing for HiveHive ESP32-CAM firmware. Host-testable.",
+    "frameworks": "*",
+    "platforms": "*",
+    "build": {
+        "srcFilter": ["+<*>"]
+    }
+}

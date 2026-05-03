@@ -21,7 +21,9 @@ app.register_blueprint(heartbeats_bp)
 init_db()
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(run_backup, "cron", day_of_week="sun", hour=3, minute=0, id="weekly_backup")
+scheduler.add_job(
+    run_backup, "cron", day_of_week="sun", hour=3, minute=0, id="weekly_backup"
+)
 scheduler.add_job(check_silence, "interval", minutes=15, id="silence_watcher")
 scheduler.start()
 

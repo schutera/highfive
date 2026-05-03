@@ -151,6 +151,7 @@ Both services should show `Up` status.
 ### Step 5: Configure Nginx Reverse Proxy
 
 The Dockerfiles expose:
+
 - **Backend**: http://localhost:3008
 - **Frontend**: http://localhost:5173
 

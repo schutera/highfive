@@ -1,0 +1,10 @@
+{
+    "name": "hf_telemetry",
+    "version": "0.1.0",
+    "description": "Pure C++ telemetry primitives (HTTP code ring, reconnect counter, JSON builder) for HiveHive ESP32-CAM. Host-testable.",
+    "frameworks": "*",
+    "platforms": "*",
+    "build": {
+        "srcFilter": ["+<*>"]
+    }
+}

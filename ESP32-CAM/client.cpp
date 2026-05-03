@@ -1,5 +1,9 @@
 #include "esp_camera.h"
 #include "client.h"
+#include "logbuf.h"
+#include "module_id.h"
+#include "url.h"
+#include <string>
 #include <time.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -8,34 +12,6 @@
 #include <ArduinoJson.h>
 
 static WiFiClient client;
-/*
-  Extracts host, port, and endpoint path from URL
-*/
-static url_t splitUrl(const char* urlChars) {
-  url_t url;
-  url.port = 80;
-  url.path = "/";
-
-  String urlString(urlChars);
-  int doubleslashPosition = urlString.indexOf("://");
-  int hostIndex = doubleslashPosition >= 0 ? doubleslashPosition + 3 : 0;
-
-  int slash = urlString.indexOf('/', hostIndex);
-  String host = slash >= 0 ? urlString.substring(hostIndex, slash) : urlString.substring(hostIndex);
-
-  if (slash >= 0) {
-    url.path = urlString.substring(slash);
-  }
-
-  int colon = host.indexOf(':');
-  if (colon >= 0) {
-    url.host = host.substring(0, colon);
-    url.port = host.substring(colon + 1).toInt();
-  } else {
-    url.host = host;
-  }
-  return url;
-}
 
 /*
   Creates unique filename of format: esp_capture_YYYYMMDDhhmmss.jpg
@@ -111,8 +87,15 @@ int postImage(esp_config_t *esp_config) {
   // for now the battery percentage is randomized!
   esp_config->battery_level = random(1, 100);
   int battery_level = esp_config->battery_level;
-    
-  String macStr = String(esp_config->esp_ID);
+
+  // Canonical 12-char lowercase-hex module ID. Previously this stringified
+  // the uint64_t eFuse MAC directly via String(esp_config->esp_ID), which on
+  // Arduino emits a decimal truncation (unsigned long) — not a MAC. See
+  // lib/module_id/.
+  String macStr = String(hf::formatModuleId(esp_config->esp_ID).c_str());
+
+  // Telemetry payload piggybacked on the upload
+  String telemetry = buildTelemetryJson();
 
   // --- build multipart/form-data ---
   String head =
@@ -123,6 +106,11 @@ int postImage(esp_config_t *esp_config) {
       "--" + boundary + "\r\n"
       "Content-Disposition: form-data; name=\"battery\"\r\n\r\n" +
       String(battery_level) + "\r\n" +
+
+      "--" + boundary + "\r\n"
+      "Content-Disposition: form-data; name=\"logs\"\r\n"
+      "Content-Type: application/json\r\n\r\n" +
+      telemetry + "\r\n" +
 
       "--" + boundary + "\r\n"
       "Content-Disposition: form-data; name=\"image\"; filename=\"" + filename + "\"\r\n"
@@ -137,7 +125,7 @@ int postImage(esp_config_t *esp_config) {
   //Serial.println(tail.substring(0, 100)); // first 100 bytes of tail
 
 
-  url_t url = splitUrl(UPLOAD_URL);
+  hf::Url url = hf::parseUrl(std::string(UPLOAD_URL));
 
   // Initialize client
   static bool clientInitialized = false;
@@ -148,19 +136,23 @@ int postImage(esp_config_t *esp_config) {
     clientInitialized = true;
   }
 
-  Serial.printf("---- trying to send image to: %s:%u\n", url.host.c_str(), url.port);
+  Serial.printf("---- trying to send image to: %s:%u\n",
+                url.host.c_str(), (unsigned)url.port);
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
     if (!client.connect(url.host.c_str(), url.port)) {
-      Serial.println("[!client.connect(xxx)]");
+      logf("[HTTP] connect failed to %s:%u",
+           url.host.c_str(), (unsigned)url.port);
+      client.stop();
       esp_camera_fb_return(fb);
+      logbufNoteHttpCode(-2);
       return -2;
     }
   }
 
   // POST headers
-  client.print(String("POST ") + url.path + " HTTP/1.1\r\n");
-  client.print(String("Host: ") + url.host + "\r\n");
+  client.print(String("POST ") + url.path.c_str() + " HTTP/1.1\r\n");
+  client.print(String("Host: ") + url.host.c_str() + "\r\n");
   client.print("Connection: keep-alive\r\n");
   client.print("Content-Type: multipart/form-data; boundary=" + boundary + "\r\n");
   client.print("Content-Length: " + String(contentLength) + "\r\n\r\n");
@@ -171,16 +163,21 @@ int postImage(esp_config_t *esp_config) {
   while (sent < fb->len) {
     size_t chunk = client.write(fb->buf + sent, min((size_t)16384, fb->len - sent));
     if (chunk == 0) {
+      logf("[HTTP] body write failed at %u/%u bytes", (unsigned)sent, (unsigned)fb->len);
       client.stop();
       esp_camera_fb_return(fb);
+      logbufNoteHttpCode(-3);
       return -3;
     }
     sent += chunk;
   }
   size_t tailSent = client.write((uint8_t*)tail.c_str(), tail.length());
   if (tailSent != tail.length()) {
+    logf("[HTTP] tail write failed at %u/%u bytes",
+         (unsigned)tailSent, (unsigned)tail.length());
     client.stop();
     esp_camera_fb_return(fb);
+    logbufNoteHttpCode(-3);
     return -3;
   }
 
@@ -210,7 +207,11 @@ int postImage(esp_config_t *esp_config) {
   if (status.startsWith("HTTP/1.1 ")) {
     code = status.substring(9, 12).toInt();
   }
-  if (code < 200 || code >= 300) client.stop();
+  logbufNoteHttpCode(code);
+  if (code < 200 || code >= 300) {
+    logf("[HTTP] non-2xx %d — dropping socket", code);
+    client.stop();
+  }
 
   esp_camera_fb_return(fb);
   unsigned long __t_all_end = millis();
@@ -220,26 +221,32 @@ int postImage(esp_config_t *esp_config) {
 }
 
 
-// Hourly liveness ping — small POST to duckdb-service /heartbeat with
+// Hourly liveness ping — small form-encoded POST to duckdb-service with
 // battery / rssi / uptime / free-heap. Fails quietly; never restarts.
-// Wire format mirrors /new_module's form-encoded body so the backend
-// can parse with the same conventions.
+//
+// Path is intentionally hardcoded `/heartbeat`: INIT_URL points at the
+// registration endpoint (`/new_module`), but heartbeat is a sibling on
+// the same host:port — only the path differs. We use INIT_URL purely
+// as the carrier of host+port and discard its path.
 #ifndef FW_VERSION
 #define FW_VERSION "honeybee"
 #endif
 int sendHeartbeat(esp_config_t *esp_config) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[heartbeat] WiFi not connected — skipping");
+    logf("[heartbeat] WiFi not connected — skipping");
     return -2;
   }
 
-  url_t url = splitUrl(esp_config->INIT_URL);
-  String macStr = String(esp_config->esp_ID);  // decimal — matches /new_module
+  hf::Url url = hf::parseUrl(std::string(esp_config->INIT_URL));
+  // Canonical 12-char lowercase-hex module ID (same as /upload + /new_module).
+  String macStr = String(hf::formatModuleId(esp_config->esp_ID).c_str());
 
   WiFiClient hbClient;
   hbClient.setTimeout(5000);
-  if (!hbClient.connect(url.host.c_str(), url.port)) {
-    Serial.println("[heartbeat] connect failed");
+  if (!hbClient.connect(url.host.c_str(), (uint16_t)url.port)) {
+    logf("[heartbeat] connect failed to %s:%u",
+         url.host.c_str(), (unsigned)url.port);
+    logbufNoteHttpCode(-2);
     return -2;
   }
 
@@ -251,17 +258,32 @@ int sendHeartbeat(esp_config_t *esp_config) {
               + "&fw_version=" + String(FW_VERSION);
 
   hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
-               + "Host: " + url.host + ":" + String(url.port) + "\r\n"
+               + "Host: " + String(url.host.c_str()) + ":" + String((unsigned)url.port) + "\r\n"
                + "Content-Type: application/x-www-form-urlencoded\r\n"
                + "Content-Length: " + String(body.length()) + "\r\n"
                + "Connection: close\r\n\r\n"
                + body);
   hbClient.flush();
 
-  // Read first response line for log visibility, then close.
-  String status = hbClient.readStringUntil('\n');
+  // Parse the HTTP status from the first response line. Format is
+  // "HTTP/1.1 200 OK\r\n"; we want the integer between the first and
+  // second space. Anything not 2xx is a real upload failure that
+  // belongs in the telemetry ring buffer.
+  String statusLine = hbClient.readStringUntil('\n');
   hbClient.stop();
   Serial.print("[heartbeat] ");
-  Serial.println(status);
+  Serial.println(statusLine);
+
+  int firstSpace = statusLine.indexOf(' ');
+  int secondSpace = statusLine.indexOf(' ', firstSpace + 1);
+  int httpCode = -4; // sentinel: invalid/missing response
+  if (firstSpace > 0 && secondSpace > firstSpace) {
+    httpCode = statusLine.substring(firstSpace + 1, secondSpace).toInt();
+  }
+  logbufNoteHttpCode(httpCode);
+  if (httpCode < 200 || httpCode >= 300) {
+    logf("[heartbeat] non-2xx: %d", httpCode);
+    return httpCode;
+  }
   return 0;
 }

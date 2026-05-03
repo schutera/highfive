@@ -7,7 +7,9 @@ DISCORD_WEBHOOK_URL = os.getenv(
 )
 
 if not DISCORD_WEBHOOK_URL:
-    print("WARNING: DISCORD_WEBHOOK_URL is not set — Discord notifications are disabled")
+    print(
+        "WARNING: DISCORD_WEBHOOK_URL is not set — Discord notifications are disabled"
+    )
 
 
 def send_discord_message(content: str):

@@ -13,8 +13,12 @@ interface State {
 // Note: ErrorBoundary is a class component and cannot use hooks.
 // It uses both EN and DE strings inline with a helper that reads localStorage.
 function getLang(): 'en' | 'de' {
-  const stored = localStorage.getItem('lang');
-  if (stored === 'de' || stored === 'en') return stored;
+  try {
+    const stored = localStorage.getItem('lang');
+    if (stored === 'de' || stored === 'en') return stored;
+  } catch {
+    /* ignore */
+  }
   return navigator.language.startsWith('de') ? 'de' : 'en';
 }
 
@@ -37,19 +41,34 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       const s = strings[getLang()];
-      return this.props.fallback || (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-          <div className="p-8 text-center">
-            <h2 className="text-xl font-bold text-red-600 mb-2">{s.title}</h2>
-            <p className="text-gray-600">{this.state.error?.message}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="mt-4 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg"
-            >
-              {s.reload}
-            </button>
+      return (
+        this.props.fallback || (
+          <div
+            role="alert"
+            className="min-h-[100dvh] flex items-center justify-center bg-hf-bg text-hf-fg p-6"
+          >
+            <div className="hf-card p-8 max-w-md w-full text-center">
+              <div className="text-4xl mb-3" aria-hidden="true">
+                🐝
+              </div>
+              <h2
+                className="font-bold mb-2"
+                style={{ fontSize: 'var(--fs-lg)', color: 'var(--hf-danger)' }}
+              >
+                {s.title}
+              </h2>
+              <p className="text-hf-fg-soft text-hf-sm mb-6 break-words">
+                {this.state.error?.message}
+              </p>
+              <button
+                onClick={() => window.location.reload()}
+                className="hf-btn hf-btn-primary px-6 py-3"
+              >
+                {s.reload}
+              </button>
+            </div>
           </div>
-        </div>
+        )
       );
     }
     return this.props.children;

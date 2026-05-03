@@ -1,38 +1,102 @@
-version: '3.8'
-
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: highfive-backend
+      # Context is repo root since we need contracts/ + root lockfile
+      # for npm workspaces. Dockerfile lives under backend/.
+      context: .
+      dockerfile: backend/Dockerfile.dev
     ports:
-      - "3001:3001"
+      - '3002:3002'
+    env_file:
+      - .env
     environment:
-      - NODE_ENV=production
-      - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:-hf_dev_key_2026}
-      - PORT=3001
+      NODE_ENV: development
+      # PORT must match the host:container mapping above. server.ts defaults
+      # to 3001 (legacy production), so set it explicitly here for the dev
+      # stack — the homepage's API client also targets :3002.
+      PORT: '3002'
+      DUCKDB_SERVICE_URL: http://duckdb-service:8000
+      IMAGE_SERVICE_URL: http://image-service:4444
+    volumes:
+      # Bind-mount backend source for live reload, plus contracts so
+      # type changes flow through. Anonymous volumes shadow the
+      # in-image node_modules so the host's (Windows) node_modules
+      # don't leak in.
+      - ./backend:/app/backend
+      - ./contracts:/app/contracts
+      - /app/node_modules
+      - /app/backend/node_modules
     restart: unless-stopped
     networks:
-      - highfive-network
+      - net
 
-  frontend:
+  homepage:
     build:
-      context: ./homepage
-      dockerfile: Dockerfile
-      args:
-        - VITE_API_URL=https://api.highfive.schutera.com
-        - VITE_API_KEY=${VITE_API_KEY:-hf_dev_key_2026}
-    container_name: highfive-frontend
+      context: .
+      dockerfile: homepage/Dockerfile.dev
     ports:
-      - "80:80"
-      - "443:443"
+      - '5173:5173'
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./homepage:/app/homepage
+      - ./contracts:/app/contracts
+      - /app/node_modules
+      - /app/homepage/node_modules
     restart: unless-stopped
     networks:
-      - highfive-network
+      - net
+
+  image-service:
+    build:
+      context: ./image-service
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
+    ports:
+      - '8000:4444'
+    environment:
+      DUCKDB_PATH: /data/app.duckdb
+    volumes:
+      - duckdb_data:/data
+    restart: unless-stopped
     depends_on:
-      - backend
+      duckdb-service:
+        condition: service_healthy
+    networks:
+      - net
+
+  duckdb-service:
+    build:
+      context: ./duckdb-service
+      dockerfile: Dockerfile.dev
+    ports:
+      - '0.0.0.0:8002:8000'
+    volumes:
+      - duckdb_data:/data
+    env_file:
+      - .env
+    environment:
+      SEED_DATA: 'true'
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - net
+
+volumes:
+  duckdb_data:
 
 networks:
-  highfive-network:
+  net:
     driver: bridge

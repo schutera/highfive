@@ -1,4 +1,12 @@
-import { Module, ModuleDetail, NestData, DailyProgress, HeartbeatSnapshot } from './types';
+import {
+  Module,
+  ModuleDetail,
+  NestData,
+  DailyProgress,
+  HeartbeatSnapshot,
+  ModuleId,
+  parseModuleId,
+} from '@highfive/contracts';
 import { DUCKDB_URL } from './duckdbClient';
 
 interface ApiHeartbeatSummaryEntry {
@@ -41,39 +49,49 @@ interface ApiModuleResponse {
   modules: ApiModule[];
 }
 
-export class ModuleCache {
-  private modules: Map<string, ModuleDetail>;
-
-  constructor() {
-    this.modules = new Map();
-    this.initWithRetry();
+/**
+ * Read-only projection of duckdb-service for the homepage.
+ *
+ * Owns no state. Each call fetches the four upstream endpoints and shapes
+ * the response. The DTO normalisation (date ISOification, lat/lng stringly-
+ * typed → numbers, status derivation, totalHatches roll-up, heartbeat fold-in)
+ * is the actual value of this layer — the only place where the duckdb wire
+ * shape is translated into the contracts package shape.
+ */
+export class ModuleReadModel {
+  async listModules(): Promise<Module[]> {
+    const all = await this.fetchAndAssemble();
+    return all.map(({ detail, totalHatches }) => ({
+      id: detail.id,
+      name: detail.name,
+      location: detail.location,
+      status: detail.status,
+      lastApiCall: detail.lastApiCall,
+      batteryLevel: detail.batteryLevel,
+      firstOnline: detail.firstOnline,
+      totalHatches,
+      imageCount: detail.imageCount,
+      email: detail.email,
+      updatedAt: detail.updatedAt,
+      lastSeenAt: detail.lastSeenAt,
+      latestHeartbeat: detail.latestHeartbeat,
+    }));
   }
 
-  private async initWithRetry(retries = 10, delayMs = 3000): Promise<void> {
-    for (let i = 0; i < retries; i++) {
-      try {
-        await this.initializeData();
-        console.log('📊 Data loaded from DuckDB service');
-        return;
-      } catch (err) {
-        const remaining = retries - i - 1;
-        if (remaining > 0) {
-          console.warn(`⏳ DuckDB not ready, retrying in ${delayMs / 1000}s (${remaining} left)...`);
-          await new Promise(r => setTimeout(r, delayMs));
-        } else {
-          console.error('❌ Could not reach DuckDB service after all retries. Starting with empty data.');
-        }
-      }
-    }
+  async getModuleDetail(id: ModuleId): Promise<ModuleDetail | null> {
+    const all = await this.fetchAndAssemble();
+    return all.find((x) => x.detail.id === id)?.detail ?? null;
   }
 
-  async initializeData(): Promise<void> {
-    const [modulesResult, nestsResult, progressResult, heartbeatsResult] = await Promise.allSettled([
-      fetch(`${DUCKDB_URL}/modules`).then(r => r.json()),
-      fetch(`${DUCKDB_URL}/nests`).then(r => r.json()),
-      fetch(`${DUCKDB_URL}/progress`).then(r => r.json()),
-      fetch(`${DUCKDB_URL}/heartbeats_summary`).then(r => r.json()),
-    ]);
+  private async fetchAndAssemble(): Promise<Array<{ detail: ModuleDetail; totalHatches: number }>> {
+    const [modulesResult, nestsResult, progressResult, heartbeatsResult] = await Promise.allSettled(
+      [
+        fetch(`${DUCKDB_URL}/modules`).then((r) => r.json()),
+        fetch(`${DUCKDB_URL}/nests`).then((r) => r.json()),
+        fetch(`${DUCKDB_URL}/progress`).then((r) => r.json()),
+        fetch(`${DUCKDB_URL}/heartbeats_summary`).then((r) => r.json()),
+      ],
+    );
 
     if (modulesResult.status === 'rejected') {
       console.warn('⚠️ Failed to fetch modules:', modulesResult.reason);
@@ -88,16 +106,21 @@ export class ModuleCache {
       console.warn('⚠️ Failed to fetch heartbeats:', heartbeatsResult.reason);
     }
 
-    const modulesData = (modulesResult.status === 'fulfilled' ? modulesResult.value : { modules: [] }) as ApiModuleResponse;
-    const nestsData = (nestsResult.status === 'fulfilled' ? nestsResult.value : { nests: [] }) as ApiNestResponse;
-    const progressData = (progressResult.status === 'fulfilled' ? progressResult.value : { progress: [] }) as ApiDailyProgressResponse;
-    const heartbeatsData = (heartbeatsResult.status === 'fulfilled' ? heartbeatsResult.value : { summary: {} }) as ApiHeartbeatSummaryResponse;
-
-    this.modules.clear();
+    const modulesData = (
+      modulesResult.status === 'fulfilled' ? modulesResult.value : { modules: [] }
+    ) as ApiModuleResponse;
+    const nestsData = (
+      nestsResult.status === 'fulfilled' ? nestsResult.value : { nests: [] }
+    ) as ApiNestResponse;
+    const progressData = (
+      progressResult.status === 'fulfilled' ? progressResult.value : { progress: [] }
+    ) as ApiDailyProgressResponse;
+    const heartbeatsData = (
+      heartbeatsResult.status === 'fulfilled' ? heartbeatsResult.value : { summary: {} }
+    ) as ApiHeartbeatSummaryResponse;
 
     // ---- 1) Progress normalisieren ----
     const progressByNest = new Map<string, DailyProgress[]>();
-
     progressData.progress.forEach((p: any) => {
       const normalized: DailyProgress = {
         progress_id: p.progress_id,
@@ -107,37 +130,35 @@ export class ModuleCache {
         sealed: p.sealed,
         hatched: p.hatched,
       };
-
-      let arr = progressByNest.get(p.nest_id);
-      if (!arr) {
-        arr = [];
-        progressByNest.set(p.nest_id, arr);
-      }
+      const arr = progressByNest.get(p.nest_id) ?? [];
       arr.push(normalized);
+      progressByNest.set(p.nest_id, arr);
     });
 
     // ---- 2) Nests bauen ----
-    const nestsByModule = new Map<string, NestData[]>();
-
+    // Brand `module_id` at the boundary: parseModuleId throws on a malformed
+    // upstream value, which is the right signal — duckdb-service drift should
+    // surface, not be silently swallowed. Mirrors homepage `services/api.ts`.
+    const nestsByModule = new Map<ModuleId, NestData[]>();
     nestsData.nests.forEach((n: any) => {
+      const moduleId = parseModuleId(n.module_id);
       const nest: NestData = {
         nest_id: n.nest_id,
-        module_id: n.module_id,
+        module_id: moduleId,
         beeType: n.beeType,
-        dailyProgress: progressByNest.get(n.nest_id) || [],
+        dailyProgress: progressByNest.get(n.nest_id) ?? [],
       };
-
-      let arr = nestsByModule.get(n.module_id);
-      if (!arr) {
-        arr = [];
-        nestsByModule.set(n.module_id, arr);
-      }
+      const arr = nestsByModule.get(moduleId) ?? [];
       arr.push(nest);
+      nestsByModule.set(moduleId, arr);
     });
 
     // ---- 3) Module bauen ----
     const heartbeatSummary = heartbeatsData.summary || {};
-    modulesData.modules.forEach((m: any) => {
+    const now = new Date();
+    return modulesData.modules.map((m) => {
+      const moduleId = parseModuleId(m.id);
+
       const hbEntry = heartbeatSummary[m.id];
       const latestHeartbeat: HeartbeatSnapshot | null = hbEntry?.last_seen
         ? {
@@ -154,13 +175,12 @@ export class ModuleCache {
       const candidates: number[] = [];
       if (m.last_image_at) candidates.push(new Date(m.last_image_at).getTime());
       if (m.updated_at) candidates.push(new Date(m.updated_at).getTime());
-      if (latestHeartbeat?.receivedAt) candidates.push(new Date(latestHeartbeat.receivedAt).getTime());
-      const lastSeenAt = candidates.length > 0
-        ? new Date(Math.max(...candidates)).toISOString()
-        : null;
+      if (latestHeartbeat?.receivedAt)
+        candidates.push(new Date(latestHeartbeat.receivedAt).getTime());
+      const lastSeenAt =
+        candidates.length > 0 ? new Date(Math.max(...candidates)).toISOString() : null;
 
       // A module is online if any liveness signal arrived in the last 2h
-      const now = new Date();
       const isOnline = lastSeenAt
         ? now.getTime() - new Date(lastSeenAt).getTime() <= 2 * 60 * 60 * 1000
         : false;
@@ -168,75 +188,34 @@ export class ModuleCache {
       // first_online is a DATE column (no time), pass the date portion only
       const firstOnlineStr = m.first_online
         ? new Date(m.first_online).toISOString().split('T')[0]
-        : null;
+        : '';
 
-      const module: ModuleDetail = {
-        id: m.id,
+      const nests = nestsByModule.get(moduleId) ?? [];
+      const totalHatches = nests.reduce((sum, nest) => {
+        const latest = nest.dailyProgress[nest.dailyProgress.length - 1];
+        return sum + (latest?.hatched || 0);
+      }, 0);
+
+      const detail: ModuleDetail = {
+        id: moduleId,
         name: m.name,
-        location: {
-          lat: Number(m.lat),
-          lng: Number(m.lng),
-        },
+        location: { lat: Number(m.lat), lng: Number(m.lng) },
         status: isOnline ? 'online' : 'offline',
-        firstOnline: firstOnlineStr ?? '',
+        firstOnline: firstOnlineStr,
         lastApiCall: m.last_image_at ? new Date(m.last_image_at).toISOString() : '',
         batteryLevel: m.battery_level ?? 0,
-        totalHatches: 0,
+        totalHatches,
         imageCount: m.real_image_count ?? m.image_count ?? 0,
         email: m.email ?? null,
         updatedAt: m.updated_at ?? undefined,
         lastSeenAt,
         latestHeartbeat,
-        nests: nestsByModule.get(m.id) || [],
+        nests,
       };
 
-      this.modules.set(module.id, module);
+      return { detail, totalHatches };
     });
-  }
-
-  async refresh() {
-    await this.initializeData();
-  }
-
-  // ---- API Methods ----
-  getAllModules(): Module[] {
-    return Array.from(this.modules.values()).map((m) => {
-      const totalHatches = m.nests.reduce((sum, nest) => {
-        const latestProgress =
-          nest.dailyProgress[nest.dailyProgress.length - 1];
-        return sum + (latestProgress?.hatched || 0);
-      }, 0);
-
-      return {
-        id: m.id,
-        name: m.name,
-        location: m.location,
-        status: m.status,
-        lastApiCall: m.lastApiCall,
-        batteryLevel: m.batteryLevel,
-        firstOnline: m.firstOnline,
-        totalHatches,
-        imageCount: m.imageCount,
-        email: m.email,
-        updatedAt: m.updatedAt,
-        lastSeenAt: m.lastSeenAt,
-        latestHeartbeat: m.latestHeartbeat,
-      };
-    });
-  }
-
-  getModuleById(id: string): ModuleDetail | null {
-    return this.modules.get(id) || null;
-  }
-
-  updateModuleStatus(id: string, status: 'online' | 'offline'): boolean {
-    const module = this.modules.get(id);
-    if (!module) return false;
-
-    module.status = status;
-    module.lastApiCall = new Date().toISOString();
-    return true;
   }
 }
 
-export const db = new ModuleCache();
+export const db = new ModuleReadModel();

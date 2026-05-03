@@ -504,3 +504,16 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
     http.end();
   }
 }
+
+/*
+ * Boot counter — survives reboots via NVS. Incremented each boot in
+ * setup(); the returned value is logged into the telemetry ring buffer
+ * so a "stuck in boot loop" pattern shows up in the admin sidecar logs.
+ */
+uint32_t incrementBootCount() {
+  preferences.begin("telemetry", false);
+  uint32_t count = preferences.getUInt("boot_count", 0) + 1;
+  preferences.putUInt("boot_count", count);
+  preferences.end();
+  return count;
+}

@@ -1,19 +1,25 @@
+import glob
+import json
 import os
-import time
 import random
-from datetime import datetime
-from flask import Flask, jsonify, request, send_from_directory
-import requests as http_requests
+import time
 
-from services.duckdb import DuckDBService
+import requests as http_requests
+from flask import Flask, jsonify, request, send_from_directory
+from pydantic import ValidationError
+
 from services.discord import send_discord_message
+from services.duckdb import DuckDBService
+from services.module_id import ModuleId
+from services.sidecar import LogSidecarEnvelope
+from services.upload_pipeline import UploadPipeline, UploadRequest
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = os.getenv("IMAGE_STORE_PATH", "/data/images")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-DUCKDB_SERVICE_URL = os.getenv("DUCKDB_SERVICE_URL", "http://127.0.0.1:8000")
+DUCKDB_SERVICE_URL = os.getenv("DUCKDB_SERVICE_URL", "http://duckdb-service:8000")
 duckdb_service = DuckDBService()
 
 
@@ -30,17 +36,6 @@ def test_duckdb(retries: int = 20, delay: float = 0.5):
             time.sleep(delay)
 
 
-def update_module(module_id: str, battery: int):
-    try:
-        http_requests.post(
-            f"{DUCKDB_SERVICE_URL}/update_module_status",
-            json={"module_id": module_id, "battery": battery},
-            timeout=5,
-        )
-    except Exception as e:
-        print(f"Warning: failed to update module: {e}")
-
-
 def stub_classify() -> dict:
     """Return dummy classification values. Replace with MaskRCNN later."""
     return {
@@ -51,78 +46,113 @@ def stub_classify() -> dict:
     }
 
 
+def _send_discord(content: str) -> None:
+    """Indirection so tests can monkeypatch `app.send_discord_message` and
+    have the pipeline pick up the replacement at call time."""
+    send_discord_message(content)
+
+
+upload_pipeline = UploadPipeline(
+    upload_folder=UPLOAD_FOLDER,
+    duckdb_service=duckdb_service,
+    send_discord=_send_discord,
+    classify=stub_classify,
+)
+
+
+@app.get("/health")
+def health():
+    """Liveness probe. Returns 200 once the Flask app is ready to serve.
+
+    Does not verify downstream DuckDB connectivity — image-service can
+    still queue uploads even if the DB is briefly unavailable. Use
+    duckdb-service's /health for that check.
+    """
+    return jsonify({"ok": True, "service": "image-service"}), 200
+
+
 @app.post("/upload")
 def upload_image():
     mac = request.form.get("mac") or request.args.get("mac")
     battery = request.form.get("battery") or request.args.get("battery")
-
     if not mac:
         return jsonify({"error": "Missing parameter: mac"}), 400
+    if not battery:
+        return jsonify({"error": "Missing parameter: battery"}), 400
     try:
         battery = int(battery) if battery else None
     except ValueError:
-        battery = None
-
-    if battery is not None and not (0 <= battery <= 100):
-        battery = None
-
+        return jsonify({"error": "battery must be an integer"}), 400
+    if not (0 <= battery <= 100):
+        return jsonify({"error": "battery must be between 0 and 100"}), 400
     if "image" not in request.files:
         return jsonify({"error": "No image file provided"}), 400
-
     image = request.files["image"]
     if image.filename == "":
         return jsonify({"error": "No selected file"}), 400
 
-    # Check if this is the module's first upload via duckdb-service
-    is_first_upload = False
+    # Canonicalise the inbound mac via ``ModuleId``. Accepts the legacy
+    # colon/dash forms too. Everything downstream (sidecar, duckdb-service
+    # POSTs) sees the canonical 12-hex-char string.
     try:
-        resp = http_requests.get(
-            f"{DUCKDB_SERVICE_URL}/image_uploads",
-            params={"module_id": mac},
-            timeout=5,
+        canonical_mac = ModuleId.model_validate(mac).root
+    except ValidationError:
+        return jsonify({"error": "invalid mac format"}), 400
+
+    result = upload_pipeline.run(
+        UploadRequest(
+            mac=canonical_mac,
+            battery=battery,
+            image=image,
+            logs_raw=request.form.get("logs"),
         )
-        if resp.ok:
-            is_first_upload = len(resp.json().get("images", [])) == 0
-    except Exception:
-        pass
+    )
+    return jsonify(
+        {
+            "message": f"Image {result.filename} uploaded successfully",
+            "mac": canonical_mac,
+            "battery": battery,
+            "classification": result.classification,
+        }
+    ), 200
 
-    # Save image with module prefix for traceability
-    safe_filename = f"{mac}_{image.filename}"
-    file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
-    image.save(file_path)
 
-    # Record upload via duckdb-service
+@app.get("/modules/<mac>/logs")
+def get_module_logs(mac: str):
+    """
+    Returns the most recent ESP telemetry entries for a module, newest-first.
+    Reads the .log.json sidecar files written by /upload.
+
+    Backward-compatible: tolerates both the new envelope format and the
+    legacy flat format (`_mac`, `_received_at`, `_image` at top level)
+    written by older versions of /upload. All entries are returned in the
+    new envelope shape.
+    """
     try:
-        http_requests.post(
-            f"{DUCKDB_SERVICE_URL}/record_image",
-            json={"module_id": mac, "filename": safe_filename},
-            timeout=5,
-        )
-    except Exception as e:
-        print(f"Warning: failed to record image upload: {e}")
+        limit = int(request.args.get("limit", 10))
+    except ValueError:
+        limit = 10
+    limit = max(1, min(limit, 100))
 
-    # Classification disabled until real model is integrated
-    # classification = stub_classify()
-    # payload = {"modul_id": mac, "classification": classification}
-    # http_requests.post(f"{DUCKDB_SERVICE_URL}/add_progress_for_module", json=payload)
+    pattern = os.path.join(UPLOAD_FOLDER, "*.log.json")
+    entries = []
+    for path in glob.glob(pattern):
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        envelope = LogSidecarEnvelope.from_disk(data)
+        if envelope is None or str(envelope.mac) != str(mac):
+            continue
+        entries.append((st.st_mtime, envelope.model_dump()))
 
-    # Update module battery and online status
-    if battery is not None:
-        update_module(mac, battery)
-
-    if is_first_upload:
-        send_discord_message(
-            f"📸 **First image received!**\n"
-            f"Module **{mac}** just sent its first photo.\n"
-            f"**Battery:** {battery}%\n"
-            f"**File:** {image.filename}"
-        )
-
-    return jsonify({
-        "message": f"Image {image.filename} uploaded successfully",
-        "mac": mac,
-        "battery": battery,
-    }), 200
+    entries.sort(key=lambda t: t[0], reverse=True)
+    return jsonify([e[1] for e in entries[:limit]]), 200
 
 
 @app.get("/images")
@@ -144,7 +174,6 @@ def list_images():
 def delete_image(filename):
     """Delete an image file and its DB record."""
     file_path = os.path.join(UPLOAD_FOLDER, filename)
-    # Delete DB record via duckdb-service
     try:
         resp = http_requests.delete(
             f"{DUCKDB_SERVICE_URL}/image_uploads/{filename}", timeout=5
@@ -153,7 +182,6 @@ def delete_image(filename):
             return jsonify({"error": "Image not found"}), 404
     except Exception as e:
         print(f"Warning: failed to delete image record: {e}")
-    # Delete file
     if os.path.isfile(file_path):
         os.remove(file_path)
     return jsonify({"message": "Image deleted"}), 200

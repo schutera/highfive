@@ -1,0 +1,89 @@
+# End-to-end test stack.
+#
+# Boots the same services as the root docker-compose.yml but with isolated
+# state (own volume, own network, own project name) and shifted host ports
+# so it can run alongside a dev stack on the same machine without clashing.
+#
+# Host port mapping:
+#   image-service     8000  →  9000   (container's 4444 internal stays the same)
+#   duckdb-service    8002  →  9002   (container's 8000 internal stays the same)
+#   backend           3002  →  4002
+#   homepage                          not started — e2e tests do not need it
+#
+# Run via: docker compose -f docker-compose.test.yml -p highfive-e2e up -d
+# Tests in this directory drive it programmatically through conftest.py.
+
+services:
+  duckdb-service:
+    build:
+      context: ../../duckdb-service
+      dockerfile: Dockerfile.dev
+    ports:
+      - '0.0.0.0:9002:8000'
+    environment:
+      DEBUG: 'false'
+      SEED_DATA: 'false' # tests assert against state they explicitly create
+    volumes:
+      - duckdb_test_data:/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    networks:
+      - testnet
+
+  image-service:
+    build:
+      context: ../../image-service
+      dockerfile: Dockerfile.dev
+    ports:
+      - '9000:4444'
+    environment:
+      DEBUG: 'false'
+      DUCKDB_PATH: /data/app.duckdb
+      DUCKDB_SERVICE_URL: http://duckdb-service:8000
+    volumes:
+      - duckdb_test_data:/data
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
+    networks:
+      - testnet
+
+  backend:
+    build:
+      # Context is repo root (npm workspaces — needs contracts/ + root
+      # lockfile). Dockerfile lives under backend/.
+      context: ../..
+      dockerfile: backend/Dockerfile.dev
+    ports:
+      - '4002:3002'
+    environment:
+      NODE_ENV: production
+      # PORT must match the host:container mapping above (4002:3002).
+      # server.ts defaults to 3001 (legacy production), so set it
+      # explicitly here. Same fix as the root docker-compose.yml.
+      PORT: '3002'
+      DUCKDB_SERVICE_URL: http://duckdb-service:8000
+      IMAGE_SERVICE_URL: http://image-service:4444
+      HIGHFIVE_API_KEY: hf_test_key
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
+    networks:
+      - testnet
+
+volumes:
+  duckdb_test_data:
+
+networks:
+  testnet:
+    driver: bridge

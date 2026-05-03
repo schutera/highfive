@@ -1,0 +1,10 @@
+{
+  "name": "hf_module_id",
+  "version": "0.1.0",
+  "description": "Canonical module-ID formatting for HiveHive ESP32-CAM firmware. Pure C++17, host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

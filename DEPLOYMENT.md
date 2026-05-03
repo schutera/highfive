@@ -1,9 +1,11 @@
 # HighFive Production Deployment Guide
 
 ## Overview
+
 This guide covers deploying HighFive to production at `highfive.schutera.com`.
 
 ## Prerequisites
+
 - Linux server (Ubuntu 20.04+ recommended)
 - Node.js 18+ installed
 - Nginx installed
@@ -15,6 +17,7 @@ This guide covers deploying HighFive to production at `highfive.schutera.com`.
 ## Initial Server Setup
 
 ### 1. Clone the Production Branch
+
 ```bash
 # SSH into your server
 ssh username@your-server-ip
@@ -29,6 +32,7 @@ git clone -b production https://github.com/your-username/highfive.git .
 ```
 
 ### 2. Install Dependencies
+
 ```bash
 # Backend
 cd backend
@@ -41,6 +45,7 @@ cd ..
 ```
 
 ### 3. Create Environment File (on server)
+
 ```bash
 # Create .env file with production environment variables
 cat > .env << EOF
@@ -58,6 +63,7 @@ EOF
 ```
 
 ### 4. Get SSL Certificate
+
 ```bash
 sudo apt-get update
 sudo apt-get install certbot python3-certbot-nginx
@@ -67,6 +73,7 @@ sudo certbot certonly --standalone -d highfive.schutera.com
 ```
 
 ### 5. Create Nginx Configuration (on server)
+
 Create `/etc/nginx/sites-available/highfive`:
 
 ```bash
@@ -106,11 +113,11 @@ server {
     location / {
         root /var/www/highfive/homepage/dist;
         try_files $uri $uri/ /index.html;
-        
+
         location = /index.html {
             add_header Cache-Control "no-cache, no-store, must-revalidate";
         }
-        
+
         location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
             expires 1y;
             add_header Cache-Control "public, immutable";
@@ -144,6 +151,7 @@ EOF
 ```
 
 Enable the site:
+
 ```bash
 sudo ln -s /etc/nginx/sites-available/highfive /etc/nginx/sites-enabled/
 sudo nginx -t
@@ -151,6 +159,7 @@ sudo systemctl restart nginx
 ```
 
 ### 6. Create PM2 Ecosystem Config (on server)
+
 Create `ecosystem.config.js` in `/var/www/highfive/`:
 
 ```bash
@@ -180,6 +189,7 @@ EOF
 ```
 
 ### 7. Build and Start Application
+
 ```bash
 cd /var/www/highfive
 
@@ -231,22 +241,26 @@ pm2 restart highfive-api
 ## Verification
 
 ### Check Backend is Running
+
 ```bash
 pm2 status
 pm2 logs highfive-api
 ```
 
 ### Test API
+
 ```bash
 curl https://highfive.schutera.com/api/modules
 ```
 
 ### Check Frontend
+
 Visit `https://highfive.schutera.com` in a browser.
 
 ## Monitoring
 
 ### View Logs
+
 ```bash
 # Backend logs
 pm2 logs highfive-api
@@ -257,6 +271,7 @@ sudo tail -f /var/log/nginx/error.log
 ```
 
 ### Monitor Resources
+
 ```bash
 pm2 monit
 ```
@@ -264,12 +279,14 @@ pm2 monit
 ## Troubleshooting
 
 ### Port Already in Use
+
 ```bash
 lsof -i :3001
 kill -9 <PID>
 ```
 
 ### SSL Certificate Renewal
+
 ```bash
 sudo certbot renew --dry-run
 sudo certbot renew
@@ -277,6 +294,7 @@ sudo systemctl restart nginx
 ```
 
 ### Clear PM2 and Restart
+
 ```bash
 pm2 delete all
 pm2 start ecosystem.config.js
@@ -286,6 +304,7 @@ pm2 save
 ## Environment Configuration
 
 The `.env.production` file in the repository contains generic production settings:
+
 - `NODE_ENV=production`
 - `PORT=3001`
 
@@ -308,17 +327,19 @@ git push origin production
 ## API Key Management
 
 ### Generating a Secure API Key
+
 ```bash
 # Use OpenSSL to generate a 32-byte random key
 openssl rand -base64 32
 
-# Example output: 
+# Example output:
 # a7K9mL2pQ8wX5yZ1nB3vC6dE8fG0hI2jK4lM6nO8pQ0rS
 ```
 
 ### Setting API Key in Production
 
 #### Option 1: Using docker-compose (recommended)
+
 ```bash
 # Create or edit .env file in project root
 HIGHFIVE_API_KEY=your_generated_key_here
@@ -329,6 +350,7 @@ docker-compose up -d
 ```
 
 #### Option 2: Using PM2
+
 ```bash
 # In /var/www/highfive/.env
 HIGHFIVE_API_KEY=your_generated_key_here
@@ -338,6 +360,7 @@ pm2 start backend/dist/server.js --name "highfive-backend"
 ```
 
 #### Option 3: Environment variables (systemd)
+
 ```bash
 # Edit /etc/systemd/system/highfive.service
 [Service]
@@ -345,7 +368,9 @@ Environment="HIGHFIVE_API_KEY=your_generated_key_here"
 ```
 
 ### Frontend Configuration
+
 The frontend API key is built into the image during Docker build:
+
 ```bash
 docker build \
   --build-arg VITE_API_KEY=your_key \

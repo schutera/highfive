@@ -1,48 +1,20 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+import type { Module, ModuleDetail } from '@highfive/contracts';
+import { parseModuleId } from '@highfive/contracts';
 
-export interface HeartbeatSnapshot {
-  receivedAt: string;
-  battery: number | null;
-  rssi: number | null;
-  uptimeMs: number | null;
-  freeHeap: number | null;
-  fwVersion: string | null;
-}
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 
-export interface Module {
-  id: string;
-  name: string;
-  location: {
-    lat: number;
-    lng: number;
-  };
-  status: 'online' | 'offline';
-  lastApiCall: string;
-  batteryLevel: number;
-  firstOnline: string;
-  totalHatches: number;
-  imageCount: number;
-  email: string | null;
-  updatedAt?: string;
-  lastSeenAt?: string | null;
-  latestHeartbeat?: HeartbeatSnapshot | null;
-}
-
-export interface NestData {
-  nestId: number;
-  beeType: 'blackmasked' | 'resin' | 'leafcutter' | 'orchard';
-  dailyProgress: DailyProgress[];
-}
-
-export interface DailyProgress {
-  date: string;
-  empty: number;
-  sealed: number;
-  hatched: number;
-}
-
-export interface ModuleDetail extends Module {
-  nests: NestData[];
+export interface TelemetryEntry {
+  fw?: string;
+  uptime_s?: number;
+  last_reset_reason?: string;
+  free_heap?: number;
+  min_free_heap?: number;
+  rssi?: number;
+  wifi_reconnects?: number;
+  last_http_codes?: number[];
+  log?: string;
+  _received_at?: string;
+  _image?: string;
 }
 
 export interface ImageUpload {
@@ -72,13 +44,17 @@ class ApiService {
 
   async getAllModules(): Promise<Module[]> {
     const response = await fetch(`${this.baseUrl}/modules`, {
-    //const response = await fetch(`localhost:8002/modules`, {
+      //const response = await fetch(`localhost:8002/modules`, {
       headers: this.getHeaders(),
     });
     if (!response.ok) {
       throw new Error('Failed to fetch modules');
     }
-    return response.json();
+    const data: unknown = await response.json();
+    return (data as Array<Record<string, unknown>>).map((raw) => ({
+      ...raw,
+      id: parseModuleId(raw.id as string),
+    })) as Module[];
   }
 
   async getModuleById(id: string): Promise<ModuleDetail> {
@@ -88,7 +64,12 @@ class ApiService {
     if (!response.ok) {
       throw new Error(`Failed to fetch module ${id}`);
     }
-    return response.json();
+    const raw: unknown = await response.json();
+    const obj = raw as Record<string, unknown>;
+    return {
+      ...obj,
+      id: parseModuleId(obj.id as string),
+    } as ModuleDetail;
   }
 
   async deleteModule(id: string): Promise<void> {
@@ -101,15 +82,21 @@ class ApiService {
     }
   }
 
-  async updateModuleStatus(id: string, status: 'online' | 'offline'): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/modules/${id}/status`, {
-      method: 'PATCH',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ status }),
+  async getModuleLogs(id: string, limit: number = 10): Promise<TelemetryEntry[]> {
+    const adminKey = typeof window !== 'undefined' ? sessionStorage.getItem('hf_admin_key') : null;
+    const headers: Record<string, string> = { ...(this.getHeaders() as Record<string, string>) };
+    if (adminKey) headers['X-Admin-Key'] = adminKey;
+    const response = await fetch(`${this.baseUrl}/modules/${id}/logs?limit=${limit}`, {
+      headers,
     });
-    if (!response.ok) {
-      throw new Error(`Failed to update module ${id} status`);
+    if (response.status === 401 || response.status === 403) {
+      if (typeof window !== 'undefined') sessionStorage.removeItem('hf_admin_key');
+      throw new Error('unauthorized');
     }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch logs for module ${id}`);
+    }
+    return response.json();
   }
 
   async getImages(moduleId?: string): Promise<ImageUpload[]> {

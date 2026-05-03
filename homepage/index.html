@@ -2,9 +2,39 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🙌</text></svg>">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HighFive</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%99%8C</text></svg>"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="description"
+      content="HighFive — open citizen-science kit for monitoring wild bee populations with a solar-powered ESP32-CAM hive module."
+    />
+    <meta name="theme-color" content="#fdfcf9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1f1d18" media="(prefers-color-scheme: dark)" />
+    <title>HighFive — wild bee monitoring</title>
+    <!-- Preload the hero (LCP) image so it can race the JS bundle -->
+    <link rel="preload" as="image" href="/heroimage_hive.webp" fetchpriority="high" />
+    <!-- Apply the user's saved theme (or 'auto') before paint to avoid a flash. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('hf-theme');
+          if (t === 'dark' || t === 'light') {
+            document.documentElement.setAttribute('data-theme', t);
+          }
+          var l = localStorage.getItem('lang');
+          if (l === 'de' || l === 'en') {
+            document.documentElement.setAttribute('lang', l);
+          } else if (navigator.language && navigator.language.indexOf('de') === 0) {
+            document.documentElement.setAttribute('lang', 'de');
+          }
+        } catch (e) {
+          /* localStorage may be blocked */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

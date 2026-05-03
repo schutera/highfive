@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Module, ImageUpload } from '../services/api';
+import { api, ImageUpload } from '../services/api';
+import type { Module } from '@highfive/contracts';
 
 const SESSION_KEY = 'highfive_admin_auth';
 
@@ -12,10 +13,9 @@ function LoginGate({ onAuth }: { onAuth: () => void }) {
     e.preventDefault();
     setError(false);
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || '/api'}/health`,
-        { headers: { 'X-API-Key': password } }
-      );
+      const res = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/health`, {
+        headers: { 'X-API-Key': password },
+      });
       if (res.ok) {
         sessionStorage.setItem(SESSION_KEY, password);
         onAuth();
@@ -29,7 +29,10 @@ function LoginGate({ onAuth }: { onAuth: () => void }) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg border border-gray-200 p-8 w-full max-w-sm">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white rounded-xl shadow-lg border border-gray-200 p-8 w-full max-w-sm"
+      >
         <div className="text-center mb-6">
           <div className="text-4xl mb-2">🔒</div>
           <h1 className="text-xl font-bold text-gray-900">Admin Access</h1>
@@ -43,9 +46,7 @@ function LoginGate({ onAuth }: { onAuth: () => void }) {
           className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none mb-3"
           autoFocus
         />
-        {error && (
-          <p className="text-red-600 text-xs mb-3">Invalid API key. Try again.</p>
-        )}
+        {error && <p className="text-red-600 text-xs mb-3">Invalid API key. Try again.</p>}
         <button
           type="submit"
           className="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
@@ -114,7 +115,7 @@ export default function AdminPage() {
   };
 
   const getModuleName = (moduleId: string) => {
-    const mod = modules.find(m => m.id === moduleId);
+    const mod = modules.find((m) => m.id === moduleId);
     return mod ? mod.name : moduleId;
   };
 
@@ -122,7 +123,7 @@ export default function AdminPage() {
     if (!confirm(`Delete module "${mod.name}" (${mod.id}) and all its data?`)) return;
     try {
       await api.deleteModule(mod.id);
-      setModules(prev => prev.filter(m => m.id !== mod.id));
+      setModules((prev) => prev.filter((m) => m.id !== mod.id));
       if (selectedModule === mod.id) setSelectedModule('');
     } catch (err) {
       console.error('Failed to delete module:', err);
@@ -133,7 +134,7 @@ export default function AdminPage() {
     if (!confirm(`Delete ${img.filename}?`)) return;
     try {
       await api.deleteImage(img.filename);
-      setImages(prev => prev.filter(i => i.filename !== img.filename));
+      setImages((prev) => prev.filter((i) => i.filename !== img.filename));
       if (lightboxImage?.filename === img.filename) setLightboxImage(null);
     } catch (err) {
       console.error('Failed to delete image:', err);
@@ -160,9 +161,12 @@ export default function AdminPage() {
     else if (sec < 3600) text = `${Math.floor(sec / 60)}m ago`;
     else if (sec < 86400) text = `${Math.floor(sec / 3600)}h ago`;
     else text = `${Math.floor(sec / 86400)}d ago`;
-    const color = ageMs < 2 * 3600 * 1000 ? 'text-green-700'
-                : ageMs < 24 * 3600 * 1000 ? 'text-amber-600'
-                : 'text-red-600';
+    const color =
+      ageMs < 2 * 3600 * 1000
+        ? 'text-green-700'
+        : ageMs < 24 * 3600 * 1000
+          ? 'text-amber-600'
+          : 'text-red-600';
     return { text, color };
   };
 
@@ -180,7 +184,10 @@ export default function AdminPage() {
       <header className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link to="/" className="text-2xl font-bold text-amber-600 hover:text-amber-700 flex items-center gap-2">
+            <Link
+              to="/"
+              className="text-2xl font-bold text-amber-600 hover:text-amber-700 flex items-center gap-2"
+            >
               <span className="text-2xl">🙌</span>
               <span>HighFive</span>
             </Link>
@@ -195,7 +202,10 @@ export default function AdminPage() {
               Dashboard
             </Link>
             <button
-              onClick={() => { sessionStorage.removeItem(SESSION_KEY); setAuthed(false); }}
+              onClick={() => {
+                sessionStorage.removeItem(SESSION_KEY);
+                setAuthed(false);
+              }}
               className="text-sm text-gray-400 hover:text-gray-600 font-medium"
             >
               Logout
@@ -238,12 +248,19 @@ export default function AdminPage() {
                       <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">{m.id}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${m.status === 'online' ? 'text-green-700' : 'text-gray-500'}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${m.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}`} />
+                        <span
+                          className={`inline-flex items-center gap-1.5 text-xs font-medium ${m.status === 'online' ? 'text-green-700' : 'text-gray-500'}`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${m.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}`}
+                          />
                           {m.status}
                         </span>
                       </td>
-                      <td className={`px-4 py-3 text-xs ${formatRelative(m.lastSeenAt).color}`} title={m.lastSeenAt || 'never seen'}>
+                      <td
+                        className={`px-4 py-3 text-xs ${formatRelative(m.lastSeenAt).color}`}
+                        title={m.lastSeenAt || 'never seen'}
+                      >
                         {formatRelative(m.lastSeenAt).text}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600">
@@ -251,26 +268,55 @@ export default function AdminPage() {
                           <div className="flex flex-col gap-0.5 leading-tight">
                             <span>📶 {m.latestHeartbeat.rssi ?? '—'} dBm</span>
                             <span className="text-gray-400 font-mono text-[10px]">
-                              {m.latestHeartbeat.fwVersion ?? 'unknown'} · uptime {formatUptime(m.latestHeartbeat.uptimeMs)} · heap {m.latestHeartbeat.freeHeap ? Math.floor(m.latestHeartbeat.freeHeap / 1024) + ' kB' : '—'}
+                              {m.latestHeartbeat.fwVersion ?? 'unknown'} · uptime{' '}
+                              {formatUptime(m.latestHeartbeat.uptimeMs)} · heap{' '}
+                              {m.latestHeartbeat.freeHeap
+                                ? Math.floor(m.latestHeartbeat.freeHeap / 1024) + ' kB'
+                                : '—'}
                             </span>
                           </div>
                         ) : (
                           <span className="text-gray-300">no heartbeat yet</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{m.email || <span className="text-gray-300">&mdash;</span>}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs font-mono">{m.location.lat.toFixed(4)}, {m.location.lng.toFixed(4)}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">
+                        {m.email || <span className="text-gray-300">&mdash;</span>}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs font-mono">
+                        {m.location.lat.toFixed(4)}, {m.location.lng.toFixed(4)}
+                      </td>
                       <td className="px-4 py-3 text-gray-600">{m.imageCount}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{m.firstOnline || <span className="text-gray-300">&mdash;</span>}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{m.lastApiCall ? formatDate(m.lastApiCall) : <span className="text-gray-300">&mdash;</span>}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">
+                        {m.firstOnline || <span className="text-gray-300">&mdash;</span>}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">
+                        {m.lastApiCall ? (
+                          formatDate(m.lastApiCall)
+                        ) : (
+                          <span className="text-gray-300">&mdash;</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleDeleteModule(m); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteModule(m);
+                          }}
                           className="text-red-400 hover:text-red-600 transition-colors"
                           title="Delete module"
                         >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
                           </svg>
                         </button>
                       </td>
@@ -366,16 +412,30 @@ export default function AdminPage() {
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
                       target.style.display = 'none';
-                      target.parentElement!.innerHTML = '<div class="flex items-center justify-center w-full h-full text-gray-400 text-4xl">🖼️</div>';
+                      target.parentElement!.innerHTML =
+                        '<div class="flex items-center justify-center w-full h-full text-gray-400 text-4xl">🖼️</div>';
                     }}
                   />
                   <div
                     className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => { e.stopPropagation(); handleDelete(img); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(img);
+                    }}
                   >
                     <span className="bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow cursor-pointer">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
                       </svg>
                     </span>
                   </div>
@@ -384,9 +444,7 @@ export default function AdminPage() {
                   <p className="text-xs font-medium text-amber-700 truncate">
                     {getModuleName(img.module_id)}
                   </p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">
-                    {formatDate(img.uploaded_at)}
-                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{formatDate(img.uploaded_at)}</p>
                 </div>
               </button>
             ))}
@@ -429,9 +487,7 @@ export default function AdminPage() {
                 <span className="text-white/80">{lightboxImage.module_id}</span>
               </div>
               <div className="flex items-center gap-4">
-                <span className="text-white/60">
-                  {formatDate(lightboxImage.uploaded_at)}
-                </span>
+                <span className="text-white/60">{formatDate(lightboxImage.uploaded_at)}</span>
                 <button
                   onClick={() => handleDelete(lightboxImage)}
                   className="px-3 py-1 bg-red-500/80 hover:bg-red-500 text-white text-xs font-medium rounded transition-colors"

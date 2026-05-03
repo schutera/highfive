@@ -11,19 +11,21 @@ ESP32-CAM modules deployed in the field died after roughly 8–10
 days with no recovery path. PR 17 hardened the reliability story
 along three independent axes:
 
-1. **WiFi auto-recovery + circuit breaker.** A simple "reboot
+1. **Consecutive-failure circuit breaker.** A simple "reboot
    after 5 reconnect failures" rule is too eager (kills good
    devices on a transient AP outage) and too lax (does nothing if
    the failure is in JPEG capture or HTTP). The breaker counts
-   *consecutive failures of any kind* (camera NULL, WiFi down,
-   HTTP non-2xx) and, when it trips, defers a reboot to the next
-   loop iteration so the device gets one more chance.
+   *consecutive failures of any kind on the upload path* (camera
+   NULL frame, network start-error, send-failure, HTTP non-2xx)
+   and, when it trips at >= 5, calls `delay(1000); ESP.restart()`
+   immediately from inside the upload routine.
 
 2. **Daily reboot.** After 24 hours of uptime, the module
    restarts itself to clear heap fragmentation and stale TCP
    state. To avoid doubling the daily image cost, the boot path
    skips `captureAndUpload` if the wake was triggered by the
-   daily timer (signalled via NVS key `daily_reboot`).
+   daily timer (signalled via NVS key `daily_reboot` in the
+   `boot` namespace).
 
 3. **Camera recovery via PWDN cycle.** When the sensor returns
    NULL frames repeatedly, `captureAndUpload` cycles the PWDN
@@ -42,20 +44,40 @@ The three mechanisms live in `ESP32-CAM/ESP32-CAM.ino` and the
 `ESP32-CAM/esp_init.{h,cpp}` pair:
 
 - `TASK_WDT_TIMEOUT_S = 60` — the task watchdog. Bumped from 30 s
-  in PR-17 review (see CLAUDE.md lessons register) because the
-  worst-case loop iteration (`captureAndUpload` 3× retry +
-  heartbeat) could exceed 30 s and silently reboot mid-upload.
-- Consecutive-failure breaker tracked in a static counter local
-  to `loop()`; reboot deferred by one iteration.
-- Daily-reboot wake flagged in NVS namespace `"telemetry"` key
-  `daily_reboot`; consumed and cleared at the top of `setup()`.
+  in PR-17 review (commit `ea7dc73`; see CLAUDE.md never-violate
+  rules) because the worst-case loop iteration
+  (`captureAndUpload` 3× retry + heartbeat) could exceed 30 s
+  and silently reboot mid-upload.
+- Consecutive-failure breaker tracked in a `static uint8_t
+  consecutiveFailures` local to `captureAndUpload`
+  (`ESP32-CAM.ino:222`). Incremented at line 277 on any
+  non-2xx outcome, reset at line 275 on success. At >= 5 it runs
+  `delay(1000); ESP.restart()` immediately at lines 281-283.
+  The pre-existing comment at lines 218-221 describes a
+  **separate** behaviour: a single failed first-capture-on-boot
+  returns `false` from `captureAndUpload`, the caller proceeds,
+  and the next `loop()` iteration (~30 s later) tries again. That
+  retry path eventually feeds the breaker; it does not defer the
+  restart itself.
+- Daily-reboot wake flagged in NVS namespace `"boot"` key
+  `daily_reboot` (`ESP32-CAM.ino:186, 190, 306`); consumed and
+  cleared at the top of `setup()` before `captureAndUpload` is
+  called.
 - Camera recovery: `captureAndUpload` calls
   `esp_camera_deinit()`, drives PWDN, re-inits the camera, and
   retries the capture if `esp_camera_fb_get()` returns NULL.
 
-Heartbeat status-code parsing (`sendHeartbeat` reads the HTTP
-status line and returns 0 only on 2xx) feeds the breaker — silent
-HTTP 500s used to look like success and never trip the counter.
+`sendHeartbeat` was hardened separately in the same PR-17
+review (`ea7dc73`): it now parses the HTTP status line and
+returns 0 only on 2xx, and on any non-2xx (or WiFi-down /
+connect-fail) it writes to the logbuf ring via
+`logbufNoteHttpCode` (`ESP32-CAM/client.cpp:283`). That gives
+admin telemetry a record of heartbeat failures. Important: the
+heartbeat status code is **not** wired to the breaker counter —
+the breaker only counts upload-path failures from
+`captureAndUpload`. A heartbeating device that fails to upload
+images will trip the breaker; a device whose uploads succeed
+but whose heartbeats fail will not.
 
 ## Consequences
 
@@ -63,8 +85,8 @@ HTTP 500s used to look like success and never trip the counter.
 
 - A module that loses WiFi, returns NULL frames, or hits any
   capture failure recovers within one or two loop iterations
-  (~30–60 s) — or, failing that, reboots within 60 s and starts
-  fresh.
+  (~30–60 s) — or, failing that, reboots within a few minutes
+  via the breaker.
 - Daily reboot caps any long-running degradation at 24 h.
 - Heartbeat failures now show up in admin telemetry instead of
   vanishing, so silent decay is observable.
@@ -78,6 +100,11 @@ HTTP 500s used to look like success and never trip the counter.
   worst-case loop time today, but adding one more retry to the
   upload path could push us back over. New retries require a
   matching watchdog audit.
+- The breaker only watches the upload path. A module that
+  successfully uploads (cached imagery, or a cooperative-but-broken
+  network) but fails every heartbeat will not auto-restart on its
+  own; the silence watcher would catch it eventually via the
+  heartbeat-row gap.
 
 **Forbidden**:
 
@@ -85,4 +112,9 @@ HTTP 500s used to look like success and never trip the counter.
   Every error path either retries with a bounded counter or calls
   `ESP.restart()`.
 - Don't lower `TASK_WDT_TIMEOUT_S` back to 30 without re-running
-  the worst-case capture-plus-heartbeat scenario.
+  the worst-case capture-plus-heartbeat scenario (commit `ea7dc73`
+  is the last one that audited it).
+- Don't move the `daily_reboot` NVS flag out of the `boot`
+  namespace without updating both the writer
+  (`ESP32-CAM.ino:306`) and the reader (`ESP32-CAM.ino:186`)
+  in the same commit.

@@ -1,8 +1,12 @@
-# ADR-006: ESP firmware uses bee-species names as version identifiers
+# ADR-006: ESP firmware version — bee-name convention (currently divergent)
 
 ## Status
 
-Accepted.
+**Accepted (partial — see Tech debt).** The bee-name convention is the
+agreed direction. The implementation currently maintains **three
+uncoordinated sources of truth** for the same logical "firmware version"
+field. Unification is tracked in
+[`docs/11-risks-and-technical-debt/README.md`](../11-risks-and-technical-debt/README.md).
 
 ## Context
 
@@ -22,22 +26,46 @@ ordering between minor and patch carried no real meaning for an
 embedded artifact that we ship as a single binary per release.
 
 PR 17 introduced a naming convention based on bee species
-(`bumblebee` → `honeybee` → `mason` → `carpenter`, …). The current
-version is recorded in `ESP32-CAM/VERSION` (a single-line file)
-and exposed at runtime as `FIRMWARE_VERSION` in `esp_init.h`,
-which the heartbeat payload sends as `fw_version` and the
-dashboard renders verbatim.
+(`bumblebee` → `honeybee` → `mason` → `carpenter`, …) but added the
+new identifier piecemeal as features landed, leaving older identifiers
+in place. The result, as of `upstream/main` HEAD `a3675de`, is that
+three different files each carry a different "firmware version" string
+and each is read by a different consumer.
 
 ## Decision
 
 Firmware versions are bee-species names, in roughly order of
-introduction. Each release commit updates two files:
+introduction. Each release should bump **all three** of the
+identifiers below to the same name, until the unification work
+collapses them to one source.
 
-- `ESP32-CAM/VERSION` — the single source of truth (one word, lowercase).
-- `ESP32-CAM/esp_init.h` — `#define FIRMWARE_VERSION "<name>"`.
+### Currently divergent (as of `upstream/main` HEAD `a3675de`)
 
-The `ESP32-CAM/build.sh` helper reads `VERSION` to tag the built
-artifact.
+| File / location | Macro / value | Read by | Surfaces as |
+|---|---|---|---|
+| `ESP32-CAM/VERSION` | `carpenter` | `ESP32-CAM/build.sh:29` | The `version` field in `homepage/public/firmware.json` (the OTA manifest the wizard reads). |
+| `ESP32-CAM/esp_init.h:8` | `#define FIRMWARE_VERSION "1.0.0"` | `ESP32-CAM/logbuf.cpp:86` and `ESP32-CAM/ESP32-CAM.ino:55` | The telemetry sidecar `fw` field on every image upload, and the boot log line. |
+| `ESP32-CAM/client.cpp:232` | `#define FW_VERSION "honeybee"` | `ESP32-CAM/client.cpp:258` | The `fw_version` form field in the hourly heartbeat body to `POST /heartbeat` (the column `module_heartbeats.fw_version`, surfaced as `Module.latestHeartbeat.fwVersion`). |
+
+So a single deployed `carpenter` device today reports:
+
+- `firmware.json` says `version: carpenter`,
+- the upload sidecar says `"fw": "1.0.0"`,
+- the heartbeat row says `fw_version: honeybee`.
+
+### Desired end-state
+
+A single source of truth — `ESP32-CAM/VERSION` — feeding both macros
+via a `platformio.ini` `build_flags` injection:
+
+```ini
+build_flags =
+    -DFIRMWARE_VERSION=\"$(shell cat ESP32-CAM/VERSION)\"
+```
+
+`FW_VERSION` in `client.cpp` then deletes its `#ifndef` block and uses
+`FIRMWARE_VERSION` directly. `build.sh` continues to read `VERSION`
+for the manifest. Three readers, one writer.
 
 The semver scheme is retained for the **server-side** stack
 (`v1.0.0` and onwards in `CHANGELOG.md`) — only the embedded
@@ -47,22 +75,28 @@ firmware uses bee names.
 
 **Positive**:
 
-- Field reports become unambiguous: "module on `mason`, last
-  heartbeat 4h ago" reads cleaner than "module on 1.2.3".
+- Field reports become unambiguous (once unified): "module on `mason`,
+  last heartbeat 4h ago" reads cleaner than "module on 1.2.3".
 - The named release becomes a forcing function — choosing the next
   bee makes you think about whether this batch of changes is a
   coherent release.
 
 **Negative**:
 
+- **Today the three sources disagree.** Anyone reading the dashboard,
+  the manifest, or the boot log will see a different name. Fix the
+  three-source mess (see Tech debt) before the next field deployment
+  or you will spend a debugging session figuring out which "version"
+  is real.
 - No automatic ordering. We rely on commit history to know that
   `mason` is older than `carpenter`. Documented in
   `CHANGELOG.md` per release.
 - Pool of names is finite. When we run out of carpenter bees, the
   next ADR will pick a new pool.
 
-**Forbidden**:
+**Forbidden** (only the rules with scar tissue):
 
 - Don't reuse a bee name. Once shipped, it points at exactly one
   firmware build forever.
-- Don't introduce a parallel semver for firmware. One scheme.
+- Don't bump only one of the three current identifiers. Either bump
+  all three to the same value or fix the unification first.

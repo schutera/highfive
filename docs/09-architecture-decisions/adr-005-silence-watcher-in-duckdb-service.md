@@ -16,11 +16,14 @@ message when the module phones home again
 The watcher needs three things:
 
 1. **Liveness state for every module.** It computes the freshest of
-   `module_configs.updated_at`, latest image upload timestamp, and
-   latest heartbeat timestamp.
+   `module_configs.updated_at`, last API call, and the latest row in
+   `module_heartbeats` (`silence_watcher.py:42-65`).
 2. **A place to record "we already alerted on this silence so don't
-   re-fire for 6 hours"** — a row per module in
-   `module_silence_alerts`.
+   re-fire for `REALERT_INTERVAL_S` seconds"** — done with a single
+   nullable `last_silence_alert_at TIMESTAMP` column on
+   `module_configs` (`duckdb-service/db/schema.py:86`). Set on alert
+   (`silence_watcher.py:73`), cleared on recovery (`silence_watcher.py:83`).
+   No separate alerts table.
 3. **A periodic trigger.** It runs as a background thread inside
    `duckdb-service`'s Flask process.
 
@@ -37,23 +40,30 @@ a deployment unit, and a new failure mode for negligible benefit.
 
 The watcher is a function (`check_silence`) inside
 `duckdb-service/services/silence_watcher.py`, scheduled by a
-threading loop started in `duckdb-service/app.py`. It reads
-liveness directly from the local DB and writes alert state to the
-same DB. Discord is reached via the same `services/discord.py`
-helper the rest of the service already uses.
+threading loop started in `duckdb-service/app.py`. It reads liveness
+directly from the local DB and writes alert-suppression state
+(`module_configs.last_silence_alert_at`) to the same DB. Discord is
+reached via the same `services/discord.py` helper the rest of the
+service already uses.
 
 Tunables (`SILENCE_THRESHOLD_S`, `REALERT_INTERVAL_S`) live as
-module-level constants in `silence_watcher.py`.
+module-level constants in `silence_watcher.py:14-18`.
+
+The schema change is additive: `db/schema.py:84-87` runs an
+`ALTER TABLE module_configs ADD COLUMN last_silence_alert_at TIMESTAMP`
+guarded by the migration helper, so existing DBs upgrade in place
+without a separate table or join.
 
 ## Consequences
 
 **Positive**:
 
 - One process, one DB writer, one source of liveness truth.
-- Alert state lives next to the data it's about — no cross-service
-  consistency to worry about.
+- Alert state lives **on the row it's about** (not a join, not a
+  second table) — no cross-table consistency to worry about.
 - Failure mode is simple: if `duckdb-service` is down, alerts pause;
-  when it comes back, the watcher re-fires for anything still silent.
+  when it comes back, the watcher re-fires for anything still silent
+  (the `REALERT_INTERVAL_S` window will have elapsed).
 
 **Negative**:
 
@@ -63,9 +73,16 @@ module-level constants in `silence_watcher.py`.
   per-image tables.
 - Discord webhook URL is read from env on each call; if the env is
   missing the watcher silently degrades to logging only.
+- Co-locating alert state on `module_configs` means a future
+  multi-channel alerter (Slack + Discord + email) would either need
+  a column per channel or a separate table after all. Deferred until
+  a second channel actually exists.
 
 **Forbidden**:
 
-- Don't introduce a second writer for `module_silence_alerts`.
-  Anything that mutates that table goes through
-  `silence_watcher.py`.
+- Don't introduce a second writer for `module_configs.last_silence_alert_at`.
+  Anything that mutates that column goes through `silence_watcher.py`.
+- Don't read or write `module_configs.last_silence_alert_at` from
+  the backend or image-service — it is internal alert-state plumbing,
+  not public liveness data. Use `lastSeenAt` / `latestHeartbeat` for
+  liveness on the wire.

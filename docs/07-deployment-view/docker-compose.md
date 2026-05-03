@@ -1,16 +1,22 @@
-# Deployment Guide
+# Deployment Guide (development)
 
-This guide describes how to deploy the server-side components of the
-HiveHive system using Docker.
+This guide describes how to run the server-side components of the
+HighFive system on a developer laptop using Docker Compose.
+
+For production, see [production-deployment.md](production-deployment.md)
+(Docker Compose with `docker-compose.prod.yml` + host-Nginx for the API
+subdomain, frontend container handles its own 80/443) or
+[production-runbook.md](production-runbook.md) (Nginx + PM2 bare-metal).
 
 The system consists of four services:
 
-- **backend** - Next.js API backend
-- **homepage** - Next.js frontend application
-- **image-service** - image classification service
-- **duckdb-service** - database service
+- **backend** — Node 20 + Express + TypeScript API
+- **homepage** — React 19 + Vite + TypeScript frontend
+- **image-service** — Python 3.11 + Flask image ingestion / classification
+- **duckdb-service** — Python 3.11 + Flask database service (sole writer of `app.duckdb`)
 
-All services are orchestrated using **Docker Compose**.
+All services are orchestrated using **Docker Compose** on the shared
+bridge network `net`.
 
 <br>
 
@@ -72,14 +78,22 @@ Docker will build and start all services defined in the
 
 After startup the services are available on the following ports:
 
-| Service                | Port   | Description                  |
-| ---------------------- | ------ | ---------------------------- |
-| Homepage               | `5173` | Web frontend                 |
-| Backend API            | `3002` | Next.js backend              |
-| Image Service          | `8000` | Image ingestion and analysis |
-| DuckDB Service         | `8002` | Database API                 |
+| Service                | Port   | Description                              |
+| ---------------------- | ------ | ---------------------------------------- |
+| Homepage               | `5173` | React + Vite frontend                    |
+| Backend API            | `3002` | Express + TS backend                     |
+| Image Service          | `8000` | Image ingestion and analysis             |
+| DuckDB Service         | `8002` | Database API                             |
 
 The web-interface itself is reachable under: http://localhost:5173
+
+> **Backend port — must be 3002.** `backend/src/server.ts` reads the
+> `PORT` env var (default `3001`, a legacy production value). The dev
+> compose stack maps host `3002 → container 3002` and the homepage API
+> client targets `:3002`, so the backend service in `docker-compose.yml`
+> sets `PORT=3002` explicitly. If you remove that line the dashboard
+> can't reach the backend (host port stays unbound). See lessons
+> register in [`CLAUDE.md`](../../CLAUDE.md) for the original incident.
 
 ## 6. Persistent Storage
 

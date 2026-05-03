@@ -1,8 +1,23 @@
-# HighFive Production Deployment Guide
+# Production Runbook (Nginx + PM2)
+
+> ⚠️ **This runbook is incomplete and deploys a partial stack.**
+> Only the Node backend (PM2) and the static frontend (Nginx-served)
+> are covered. The upload pipeline (`image-service` + `duckdb-service`,
+> both Python/Flask) is **not** described here, and the backend is
+> not configured to reach them. Following this guide as-shipped gives
+> you a dashboard that loads but cannot ingest images. Tracked as a
+> follow-up issue (see chapter 11 for the cross-link). Use this
+> runbook only for partial-stack experiments until that issue lands.
 
 ## Overview
 
-This guide covers deploying HighFive to production at `highfive.schutera.com`.
+This runbook covers deploying HighFive to production at
+`highfive.schutera.com` using Nginx as the public-facing reverse proxy
+and PM2 to supervise the Node backend on bare metal — no Docker.
+
+For a Docker-Compose-based production deploy, see
+[production-deployment.md](production-deployment.md). For dev-laptop
+setup, see [docker-compose.md](docker-compose.md).
 
 ## Prerequisites
 
@@ -28,7 +43,7 @@ sudo chown $USER:$USER /var/www/highfive
 cd /var/www/highfive
 
 # Clone the production branch
-git clone -b production https://github.com/your-username/highfive.git .
+git clone -b production https://github.com/schutera/highfive.git .
 ```
 
 ### 2. Install Dependencies

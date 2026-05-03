@@ -192,13 +192,6 @@ Connect the module via USB, open **http://\<hivehive-server\>/web-installer** in
 
 ---
 
-## Design notes
-
-The ESP32 firmware is written in C++17 using the Arduino framework and built with PlatformIO. After initial configuration the device operates fully automatically:
-
-- Connects to the configured Wi-Fi network on boot
-- Registers itself as a new module if not already known to the server
-- Captures images at the configured interval and uploads them to the image service
-- Includes a task watchdog (30 s), a Wi-Fi reconnect watchdog (reboot after 5 consecutive failures), and a daily reboot for long-term stability
-
-See [esp-reliability.md](esp-reliability.md) for the full reliability and telemetry design.
+For the firmware design, file layout, and runtime behaviour see
+[../05-building-block-view/esp32cam.md](../05-building-block-view/esp32cam.md)
+and [../06-runtime-view/esp-reliability.md](../06-runtime-view/esp-reliability.md).

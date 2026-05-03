@@ -20,7 +20,7 @@ A Hive module contains multiple nesting areas and **three nesting tubes per bee 
 - Resin Bee
 
 <div align="center">
-  <img src="doc_images/hivemodule.jpeg" height="50%">
+  <img src="../_images/hivemodule.jpeg" height="50%">
 </div>
 
 _Figure 1: Example of a Hive module equipped with ESP32-camera. (Mark Schutera, 2026)_
@@ -65,11 +65,20 @@ The central entry point. Called by Hive modules whenever a new image is captured
    sidecar is written next to it if `logs` is present
 3. Stub classification generates dummy results (4 bee types x 3 nests each)
 4. Results are forwarded to `duckdb-service /add_progress_for_module`
-5. Module battery level, `image_count`, and `first_online` are updated
-   via `POST /modules/<mac>/heartbeat` on `duckdb-service`. First-upload
-   detection uses `GET /modules/<mac>/progress_count`. All DuckDB
-   persistence flows through HTTP — `image-service` does not open its
-   own DuckDB connection.
+5. Module `battery_level`, `image_count`, and `first_online` are
+   updated via the **post-upload aggregate** at
+   `POST /modules/<mac>/heartbeat` on `duckdb-service`
+   (`image-service/services/duckdb.py:53` →
+   `duckdb-service/routes/modules.py:266`). First-upload detection
+   uses `GET /modules/<mac>/progress_count`. All DuckDB persistence
+   flows through HTTP — `image-service` does not open its own DuckDB
+   connection.
+
+   `image-service` does **not** call `POST /heartbeat` (the telemetry
+   channel). That endpoint is fired by firmware directly; the two
+   endpoints share a name and a verb but do different things. See
+   [duckdb-service.md](duckdb-service.md) and the
+   [glossary](../12-glossary/README.md).
 
 ### Classification Result Format
 

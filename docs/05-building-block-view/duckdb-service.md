@@ -164,20 +164,65 @@ This endpoint is used by the AI model to save classification results.
 - Missing nests are automatically generated
 - Progress values are saved for the current date
 
-### POST /modules/<module_id>/heartbeat
+### POST /modules/<module_id>/heartbeat — post-upload aggregate
 
-Called by `image-service` on every accepted upload. Body:
-`{"battery": <int>}` → returns `{"ok": true}`.
+Called by `image-service` after every accepted upload
+(`image-service/services/duckdb.py:53`). Implementation in
+`duckdb-service/routes/modules.py:266`.
 
-- Updates `battery_level` on `module_configs`
-- Sets `first_online` to today if it has not been set yet
-- Increments `image_count`
+Body: `{"battery": <int 0-100>}` → returns `{"ok": true}`.
+
+Side effects (single `UPDATE` on `module_configs`, see
+`routes/modules.py:285-296`):
+
+- Sets `battery_level` to the supplied value.
+- Sets `first_online` to today's date (overwrites — this is the
+  documented `first_online` ambiguity, see [glossary](../12-glossary/README.md#flagged-ambiguities)).
+- Increments `image_count` by 1.
+
+Does **not** insert into `module_heartbeats` and does **not** touch
+the telemetry-heartbeat path. Despite the shared name, the two
+endpoints are wholly separate.
+
+### POST /heartbeat — telemetry heartbeat
+
+Called by ESP32-CAM firmware directly, hourly
+(`ESP32-CAM/client.cpp:260`). Implementation in
+`duckdb-service/routes/heartbeats.py:17`.
+
+Body (form-encoded): `mac`, `battery`, `rssi`, `uptime_ms`,
+`free_heap`, `fw_version` → returns `{"ok": true}`.
+
+Side effect: a single `INSERT` into `module_heartbeats`
+(`routes/heartbeats.py:45-52`). The handler does **not** update
+`module_configs` — liveness derivation in the backend reads
+`module_configs.updated_at`, the latest `module_heartbeats.received_at`,
+and the latest `image_uploads.uploaded_at` separately and takes the
+freshest (`backend/src/database.ts:174-184`). The most recent
+`module_heartbeats` row is materialised on the wire as
+`Module.latestHeartbeat`
+(shape: [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md))
+per [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
+
+> ⚠️ **Endpoint naming hazard.** Two endpoints share the word
+> "heartbeat" but do different things and write different tables.
+> See the [glossary](../12-glossary/README.md) entries
+> "Heartbeat (telemetry)" and "Heartbeat (post-upload aggregate)".
+> Don't add a third heartbeat endpoint without renaming.
 
 ### GET /modules/<module_id>/progress_count
 
 Returns `{"count": <int>}` — the number of `daily_progress` rows
 associated with the given module. Used by `image-service` to detect
 first-upload events without opening a direct DuckDB connection.
+
+## Internal services (no HTTP surface)
+
+| Module                                  | Role                                                                                          |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `services/silence_watcher.py`           | Periodic Discord alert when a module goes silent for >3 h, recovery message on return — see [ADR-005](../09-architecture-decisions/adr-005-silence-watcher-in-duckdb-service.md) |
+| `services/backup.py`                    | Periodic snapshot of `app.duckdb` to a sibling backup file under `/data`                      |
+| `services/discord.py`                   | Thin webhook wrapper used by the silence watcher and the AI-classification flow               |
 
 ## References:
 

@@ -1,6 +1,6 @@
 # HiveHive Troubleshooting Guide
 
-Symptom-based guide covering the most common issues during initial hardware setup and ongoing operation. For the full hardware setup walkthrough see [esp-deployment.md](esp-deployment.md).
+Symptom-based guide covering the most common issues during initial hardware setup and ongoing operation. For the full hardware setup walkthrough see [07-deployment-view/esp-flashing.md](07-deployment-view/esp-flashing.md).
 
 ---
 
@@ -48,6 +48,22 @@ The IO0 pin must be grounded **before** the reset signal is sent.
 4. Start the upload within a few seconds.
 
 If it still hangs, check the USB cable (some cables are charge-only) and the COM port selection.
+
+### Setup wizard step 2 says "/firmware.bin not found" / 404
+
+The wizard pins firmware to a local `homepage/public/firmware.bin`
+file (commit `f7300b9`). That file is **not** checked in — it lands
+there only after `ESP32-CAM/build.sh` runs:
+
+```bash
+cd ESP32-CAM
+./build.sh                # writes homepage/public/firmware.bin + firmware.json
+```
+
+`build.sh:33-37` writes the manifest and binary together. Without that
+build step, step 2 of the wizard 404s on the OTA URL. If you've never
+flashed firmware on this checkout, run `build.sh` first; on shared
+checkouts, regenerate after every firmware change.
 
 ### PlatformIO not found / "No module named platformio"
 

@@ -8,7 +8,7 @@
 // homepage; that file remains the source of truth for the wire contract,
 // and these declarations are cut-and-pasted from the original
 // `backend/src/types.ts`. Field-name drift (e.g. `progess`/`hateched`)
-// is called out in `UBIQUITOUS_LANGUAGE.md`.
+// is called out in `docs/12-glossary/README.md`.
 
 // ---- ModuleId branded type ----
 //

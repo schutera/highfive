@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Conventions and orientation for the **HiveHive** (a.k.a. `highfive`) bee-monitoring monorepo. Deeper context lives in [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md); this file does not duplicate them.
+Orientation for the **HiveHive** (a.k.a. `highfive`) bee-monitoring monorepo. Deeper context lives in the arc42 docs at [`docs/`](docs/) and in [`CONTRIBUTING.md`](CONTRIBUTING.md); this file does not duplicate them.
 
 ## Project at a glance
 
@@ -16,7 +16,7 @@ HiveHive monitors wild-bee nesting activity. ESP32-CAM modules upload images to 
 | `duckdb-service` | Python 3.11 + Flask + DuckDB    | `8002:8000`    | `duckdb-service/` |
 | `ESP32-CAM`      | C++17 + Arduino + PlatformIO    | n/a (edge)     | `ESP32-CAM/`      |
 
-Internal calls use Docker service names (e.g. `http://duckdb-service:8000`), **not** `localhost`. The DuckDB file lives in the named volume `duckdb_data`, mounted at `/data` in both `image-service` and `duckdb-service`.
+Internal calls use Docker service names (e.g. `http://duckdb-service:8000`), **not** `localhost`. The DuckDB file lives in the named volume `duckdb_data`, mounted at `/data` in both `image-service` and `duckdb-service`. Detailed map and per-service files: [`docs/05-building-block-view/`](docs/05-building-block-view/README.md).
 
 ## Run the dev stack
 
@@ -43,8 +43,6 @@ cd homepage && npm install && npm run dev      # :5173
 
 ## Run the tests
 
-Repo-wide wrappers:
-
 ```bash
 make help
 make test               # = make test-esp-native test-e2e
@@ -64,85 +62,70 @@ cd ESP32-CAM      && pio test -e native                       # Unity host tests
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware
 ```
 
-## Where things live
+Full testing strategy: [`docs/10-quality-requirements/`](docs/10-quality-requirements/README.md). CI gate manifest: [`docs/10-quality-requirements/ci-gates.md`](docs/10-quality-requirements/ci-gates.md).
 
-| Area                               | Path                                                           |
-| ---------------------------------- | -------------------------------------------------------------- |
-| Shared TS contracts                | `contracts/src/index.ts` (npm workspace `@highfive/contracts`) |
-| Backend Express entry              | `backend/src/server.ts`                                        |
-| Backend route handlers             | `backend/src/app.ts` (+ `auth.ts`, `duckdbClient.ts`)          |
-| Backend tests                      | `backend/tests/*.test.ts`                                      |
-| Homepage pages / components        | `homepage/src/pages/`, `homepage/src/components/`              |
-| Homepage tests                     | `homepage/src/__tests__/*.test.tsx`                            |
-| Homepage API client                | `homepage/src/services/`                                       |
-| Image service Flask app            | `image-service/app.py`                                         |
-| Image service routes / services    | `image-service/routes/`, `image-service/services/`             |
-| Image service tests                | `image-service/tests/test_*.py`                                |
-| DuckDB service Flask app           | `duckdb-service/app.py`                                        |
-| DuckDB schema / models             | `duckdb-service/db/`, `duckdb-service/models/`                 |
-| DuckDB service tests               | `duckdb-service/tests/test_*.py`                               |
-| ESP32-CAM firmware entry           | `ESP32-CAM/ESP32-CAM.ino`                                      |
-| ESP32-CAM pure C++ (host-testable) | `ESP32-CAM/lib/{url,ring_buffer,telemetry}/`                   |
-| ESP32-CAM Unity host tests         | `ESP32-CAM/test/test_native_*/`                                |
-| End-to-end pipeline test           | `tests/e2e/test_upload_pipeline.py`                            |
-| E2E isolated compose stack         | `tests/e2e/docker-compose.test.yml` (ports +1000)              |
-| Mock ESP driver                    | `tools/mock_esp.py`                                            |
-| Compose stack                      | `docker-compose.yml`                                           |
-| CAD / laser DXFs                   | `assets/`                                                      |
-| Docs (deep dives)                  | `documentation/`                                               |
+## Documentation map (arc42)
 
-## ESP32-CAM hardware notes
+The `docs/` folder follows arc42. Use this table to find the chapter relevant to your task — and to know **which chapter to update when you finish a change**.
 
-Quick reference for anyone working on or debugging the edge modules:
+| Chapter | Topic | Consider when… |
+|---------|-------|----------------|
+| [01 Introduction & Goals](docs/01-introduction-and-goals/README.md) | Vision, goals, personas, scope | Scoping a new feature; framing a tradeoff |
+| [02 Constraints](docs/02-constraints/README.md) | Tech stack, hardware limits, conventions, what NOT to commit | Adding a dependency or platform; choosing a tool |
+| [03 Context & Scope](docs/03-context-and-scope/README.md) | External actors and systems, in-scope vs out-of-scope | Integrating a third-party API; adding a new actor |
+| [04 Solution Strategy](docs/04-solution-strategy/README.md) | High-level pipeline shape + ADR pointers | Cross-service architectural change |
+| [05 Building Block View](docs/05-building-block-view/README.md) | Service map, topology, where-things-live, per-service detail | Touching one service; refactor; "where is X?" |
+| [06 Runtime View](docs/06-runtime-view/README.md) | Image upload flow, dashboard read flow, ESP reliability | Changing request/response behaviour or sequence |
+| [07 Deployment View](docs/07-deployment-view/README.md) | Docker Compose stack, ESP firmware flashing | Deploy / infra / firmware-flashing change |
+| [08 Crosscutting](docs/08-crosscutting-concepts/README.md) | Auth, API contracts, hardware notes | Cross-service concern; setup gotcha |
+| [09 ADRs](docs/09-architecture-decisions/README.md) | Recorded design decisions | New dependency / pattern shift / non-obvious tradeoff |
+| [10 Quality](docs/10-quality-requirements/README.md) | Testing pyramid, CI gates | Adding a test layer or CI job |
+| [11 Risks & Tech Debt](docs/11-risks-and-technical-debt/README.md) | Known issues, hardcoded secrets, **lessons learned** | Hit a gotcha → log it here |
+| [12 Glossary](docs/12-glossary/README.md) | Domain terms (Module, Nest, Cell, MAC, …) and aliases-to-avoid | Naming a new concept; resolving a "what's the canonical name" question |
 
-- **Access point name / password**: `ESP32-Access-Point` / `esp-12345` (defined in `ESP32-CAM/host.cpp` lines 9–10). Old documentation incorrectly called it `HiveHive-Access-Point`.
-- **Config form browser**: the form at `http://192.168.4.1` requires **Chrome or Firefox**. Brave and some mobile browsers silently fail to submit the session token, causing the form to reload blank after Save.
-- **2.4 GHz only**: the ESP32 does not support 5 GHz Wi-Fi.
-- **LAN IP for URLs**: when configuring a module, the Init/Upload base URLs must use the host machine's **LAN IP** (not `localhost`) and the ESP32 must be on the same network as the server.
-- **Windows Firewall**: ports **8000** and **8002** need inbound TCP allow rules so LAN devices (ESP32 modules) can reach the services. See [`documentation/troubleshooting.md`](documentation/troubleshooting.md) for the PowerShell commands.
-- **Onboarding skill**: invoke `/esp32-onboarding` to step through a guided hardware setup session.
+Operational refs (outside arc42 chapters):
 
-## Conventions worth knowing
+- [`docs/api-reference.md`](docs/api-reference.md) — HTTP API reference
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — symptom-based fixes
+- [`docs/roadmap.md`](docs/roadmap.md) — pointer to issues / milestones
 
-- **Test layout**: backend tests in `backend/tests/`, homepage tests in `homepage/src/__tests__/`, Python service tests in `<service>/tests/` next to source. ESP host tests in `ESP32-CAM/test/test_native_*/`.
-- **DB invariant**: `duckdb-service` is the **only** writer of `app.duckdb`. `image-service` does not open a DuckDB connection — it goes through HTTP (`/add_progress_for_module`, `/modules/<mac>/heartbeat`, `/modules/<mac>/progress_count`).
-- **Auth**: frontend → backend uses `X-API-Key`. Admin-only endpoints (telemetry log proxy) require a second `X-Admin-Key` header, also checked against `HIGHFIVE_API_KEY`. Admin UI is gated by `?admin=1` and stored in `sessionStorage['hf_admin']`.
-- **ESP host-testability rule**: pure C++ helpers go under `ESP32-CAM/lib/<name>/` so `pio test -e native` can compile them without the Arduino core.
-- **Field-name drift**: the `progess`/`hateched` typos were fixed in `778c9b1`, but `modul_id` is still live on the wire between `image-service` and `duckdb-service`. When touching DB/API field names, grep for both spellings before changing things — see `UBIQUITOUS_LANGUAGE.md`.
-- **Conventional Commits**: first line `<type>: <imperative summary>` ≤ ~72 chars. Allowed types: `feat`, `fix`, `refactor`, `chore`, `test`, `ci`, `docs`. Body explains _why_, not _what_.
-- **Code style**: TS for backend + homepage (ES modules). Python 3.11 + Flask for services with separate `requirements.txt` and `requirements-dev.txt`. C++17 for ESP firmware via PlatformIO `esp32cam` env.
-- **Don't commit** `.env`, secrets, or large binaries. CAD files (`.FCStd`, `.dxf`) under `assets/` are intentional.
+## Updating documentation (mandatory)
 
-## CI gates
+Every PR that changes behaviour, adds a feature, or fixes a non-obvious bug must leave the docs better than found. After completing your change, run through this lookup and update the named target(s):
 
-`.github/workflows/tests.yml` runs seven parallel jobs on PRs to `main` and pushes to `main`. All must stay green:
+| Change type | Update target |
+|-------------|---------------|
+| New service or major component | [`docs/05-building-block-view/`](docs/05-building-block-view/README.md) (add a per-service file + link from the index) |
+| New API endpoint or wire-shape change | [`docs/api-reference.md`](docs/api-reference.md) **and** [`docs/08-crosscutting-concepts/api-contracts.md`](docs/08-crosscutting-concepts/api-contracts.md) |
+| Behaviour change in upload / heartbeat / classification flow | [`docs/06-runtime-view/image-upload-flow.md`](docs/06-runtime-view/image-upload-flow.md) |
+| Dev Docker Compose change | [`docs/07-deployment-view/docker-compose.md`](docs/07-deployment-view/docker-compose.md) |
+| Production deployment change | [`docs/07-deployment-view/production-deployment.md`](docs/07-deployment-view/production-deployment.md) (Docker) **or** [`docs/07-deployment-view/production-runbook.md`](docs/07-deployment-view/production-runbook.md) (PM2) |
+| ESP firmware change affecting onboarding | [`docs/07-deployment-view/esp-flashing.md`](docs/07-deployment-view/esp-flashing.md) and (if a gotcha) [`docs/troubleshooting.md`](docs/troubleshooting.md) |
+| New CI job or test layer | [`docs/10-quality-requirements/ci-gates.md`](docs/10-quality-requirements/ci-gates.md) |
+| New design decision (dependency, pattern, trade-off) | [`docs/09-architecture-decisions/`](docs/09-architecture-decisions/README.md) — write a new `adr-NNN-*.md` and add it to the index |
+| New domain term, alias to avoid, or naming clarification | [`docs/12-glossary/README.md`](docs/12-glossary/README.md) |
+| **Lesson from a bug or incident** | [`docs/11-risks-and-technical-debt/README.md`](docs/11-risks-and-technical-debt/README.md) → "Lessons learned" section. Format: what happened / why / how to avoid next time. |
+| New gotcha during setup or config | [`docs/troubleshooting.md`](docs/troubleshooting.md) (symptom + fix) |
+| Auth, API key, or secret-handling change | [`docs/08-crosscutting-concepts/auth.md`](docs/08-crosscutting-concepts/auth.md) |
+| Hardware setup quirk (browser, Wi-Fi, firewall) | [`docs/08-crosscutting-concepts/hardware-notes.md`](docs/08-crosscutting-concepts/hardware-notes.md) |
 
-| Job             | What it runs                                             |
-| --------------- | -------------------------------------------------------- |
-| `esp-native`    | `pio test -e native` in `ESP32-CAM/`                     |
-| `esp-firmware`  | `pio run -e esp32cam` in `ESP32-CAM/` (cross-compile)    |
-| `backend-unit`  | `npm test` (vitest + supertest) in `backend/`            |
-| `duckdb-unit`   | `pytest tests/ -q` in `duckdb-service/`                  |
-| `image-unit`    | `pytest tests/ -q` in `image-service/`                   |
-| `homepage-unit` | `npm test` (vitest + jsdom) in `homepage/`               |
-| `e2e-pipeline`  | `pytest tests/e2e/ -v` (boots full compose, ports +1000) |
+If unsure, default to [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md) — it is the catch-all for anything you don't want the next person to have to relearn.
 
-Concurrency cancels superseded runs on the same ref. The workflow also runs on pushes to `chore/test-harness`.
+## Critical rules (do NOT violate)
 
-## What NOT to do
+These are the most-violated rules from past incidents. Full list in [`docs/02-constraints/`](docs/02-constraints/README.md). Lessons from individual incidents live in [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md).
 
-- **Never force-push to `main`.** A previous discarded production attempt was force-pushed off `main` and broke ESP firmware in the field. Treat `main` as append-only.
-- **Never bypass hooks** (`--no-verify`, `--no-gpg-sign`). Fix the hook failure instead.
-- **Never `--amend`** a commit when a pre-commit hook fails — the commit didn't happen, so amend would clobber the _previous_ commit. Re-stage and create a new commit.
-- **Don't open a DuckDB connection from `image-service`.** That breaks the "duckdb-service owns the DB" invariant (Phase 4). All persistence goes via HTTP.
-- **Don't hardcode `localhost`** in inter-service URLs — use the Docker service name.
-- **Don't move pure C++ logic out of `ESP32-CAM/lib/`** unless you also drop its unit tests; logic outside `lib/` cannot be tested by the `native` env.
-- **Don't add a separate admin-only env var.** `HIGHFIVE_API_KEY` is reused for the admin gate (see commit `a094792`); don't reintroduce a parallel secret.
-- **Don't ship the dev API key (`hf_dev_key_2026`) as a production fallback.** Override `HIGHFIVE_API_KEY` for any non-local deploy.
+- **Never force-push to `main`.** A discarded production attempt once broke ESP firmware in the field this way.
+- **Never bypass hooks** (`--no-verify`, `--no-gpg-sign`). Fix the hook failure.
+- **Never `--amend`** after a pre-commit hook failure — the commit did not happen; amend would clobber the _previous_ commit. Stage and create a new commit.
+- **Never open a DuckDB connection from `image-service`.** See [ADR-001](docs/09-architecture-decisions/adr-001-duckdb-as-sole-writer.md).
+- **Never hardcode `localhost`** in inter-service URLs — use the Docker service name.
+- **Never ship the dev API key (`hf_dev_key_2026`)** as a production fallback. Override `HIGHFIVE_API_KEY`.
+- **Never remove `PORT=3002` from the backend service in `docker-compose.yml`** — `server.ts` defaults to the legacy `3001`, which leaves the host port unbound and silently breaks the dashboard. Fixed in commit `ea7dc73` (PR-17 review critical), see [chapter 11](docs/11-risks-and-technical-debt/README.md).
+- **Never lower `TASK_WDT_TIMEOUT_S` in firmware below 60 s** without re-running the worst-case `captureAndUpload` + heartbeat scenario. Bumped from 30 s in commit `ea7dc73` (PR-17 review critical), see [ADR-007](docs/09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md).
+- **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` (`ESP32-CAM/client.cpp:283`) so admin telemetry surfaces failures. Fixed in commit `ea7dc73` (PR-17 review critical).
+- **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. and cite line numbers — commit messages summarise intent, not what shipped. Lesson from this PR's review (see [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned").
 
 ## Branch model
 
-- Default branch: `main`. PRs target `main`. CI must be green to merge.
-- Branch off `main` with a typed prefix matching the commit type:
-  - `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, `refactor/<slug>`, `docs/<slug>`, `test/<slug>`, `ci/<slug>`
-- Prefer **new commits** over `--amend`. Prefer staging files by name over `git add -A` (avoids accidentally committing `.env` / large binaries).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed prefix (`feat/`, `fix/`, `docs/`, `refactor/`, `chore/`, `test/`, `ci/`); first commit line `<type>: <imperative summary>` ≤ ~72 chars; PRs require all CI green.

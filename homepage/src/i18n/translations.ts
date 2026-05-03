@@ -24,6 +24,7 @@ const translations = {
         'We believe that wild bees are an underestimated bio marker for the health of our environment. Our mission is to make this information accessible and actionable for everyone.',
       viewDashboard: 'View Dashboard',
       howItWorks: 'How It Works',
+      joinWaitlist: 'Join the Waitlist',
       getStartedTitle: 'Get Started in 3 Steps',
       step1Title: 'Get Your Hive Module',
       step1Text:
@@ -97,6 +98,7 @@ const translations = {
         'Pre-cut, laser-engraved wooden nesting structure. Ready to assemble \u2014 just add the electronics.',
       orderCta: 'Order Now',
       comingSoon: 'Coming Soon',
+      joinWaitlistCta: 'Join the Waitlist',
       diyTitle: 'Laser It Yourself',
       diyText:
         'Download the FreeCAD design file and cut the parts on your own laser cutter or at a local makerspace.',
@@ -163,6 +165,24 @@ const translations = {
       doubleSidedTapeDetail: 'To fix the solar panel to the module',
       smallScrewdriver: 'Small Screwdriver',
       smallScrewdriverDetail: 'Phillips head for tightening terminal blocks and mounting screws',
+    },
+
+    // ---- Waitlist ----
+    waitlist: {
+      pageTitle: 'Waitlist',
+      heroTitle: 'Join the Hive Module Waitlist',
+      heroText:
+        'Pre-cut wooden Hive Modules are coming soon. Drop your name and email and we’ll let you know the moment they’re ready to ship.',
+      nameLabel: 'Name',
+      namePlaceholder: 'Your name',
+      emailLabel: 'Email',
+      emailPlaceholder: 'you@example.com',
+      submit: 'Join the Waitlist',
+      submitting: 'Sending…',
+      successTitle: 'You’re on the list!',
+      successText: 'Thanks for signing up. We’ll be in touch as soon as Hive Modules are available.',
+      errorGeneric: 'Something went wrong. Please try again.',
+      privacy: 'We’ll only use your email to notify you about Hive Module availability.',
     },
 
     // ---- Assembly Guide ----
@@ -403,6 +423,7 @@ const translations = {
         'Wir glauben, dass Wildbienen ein untersch\u00E4tzter Biomarker f\u00FCr die Gesundheit unserer Umwelt sind. Unsere Mission ist es, diese Informationen f\u00FCr alle zug\u00E4nglich und nutzbar zu machen.',
       viewDashboard: 'Zum Dashboard',
       howItWorks: 'So funktioniert\u2019s',
+      joinWaitlist: 'Auf die Warteliste',
       getStartedTitle: 'In 3 Schritten starten',
       step1Title: 'Hive-Modul besorgen',
       step1Text:
@@ -477,6 +498,7 @@ const translations = {
         'Vorgeschnittene, lasergravierte Niststruktur aus Holz. Sofort montagebereit \u2014 nur die Elektronik fehlt noch.',
       orderCta: 'Jetzt bestellen',
       comingSoon: 'Bald verf\u00FCgbar',
+      joinWaitlistCta: 'Auf die Warteliste',
       diyTitle: 'Selbst lasern',
       diyText:
         'Lade die FreeCAD-Designdatei herunter und schneide die Teile auf deinem eigenen Lasercutter oder im lokalen Makerspace.',
@@ -546,6 +568,24 @@ const translations = {
       smallScrewdriver: 'Kleiner Schraubendreher',
       smallScrewdriverDetail:
         'Kreuzschlitz zum Festziehen von Klemmenbl\u00F6cken und Befestigungsschrauben',
+    },
+
+    // ---- Waitlist ----
+    waitlist: {
+      pageTitle: 'Warteliste',
+      heroTitle: 'Auf die Warteliste f\u00FCrs Hive-Modul',
+      heroText:
+        'Vorgeschnittene Hive-Module aus Holz sind bald verf\u00FCgbar. Trag deinen Namen und deine E-Mail ein und wir melden uns, sobald es losgeht.',
+      nameLabel: 'Name',
+      namePlaceholder: 'Dein Name',
+      emailLabel: 'E-Mail',
+      emailPlaceholder: 'du@beispiel.de',
+      submit: 'Auf die Warteliste',
+      submitting: 'Wird gesendet\u2026',
+      successTitle: 'Du bist auf der Liste!',
+      successText: 'Danke f\u00FCr deine Anmeldung. Wir melden uns, sobald die Hive-Module verf\u00FCgbar sind.',
+      errorGeneric: 'Etwas ist schiefgelaufen. Bitte versuche es erneut.',
+      privacy: 'Wir verwenden deine E-Mail nur, um dich \u00FCber die Verf\u00FCgbarkeit zu informieren.',
     },
 
     // ---- Assembly Guide ----

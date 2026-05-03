@@ -11,6 +11,7 @@ const SetupWizard = lazy(() => import('./pages/SetupWizard'));
 const HiveModule = lazy(() => import('./pages/HiveModule'));
 const AssemblyGuide = lazy(() => import('./pages/AssemblyGuide'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
+const WaitlistPage = lazy(() => import('./pages/WaitlistPage'));
 
 /**
  * Branded fallback shown while a lazy route is loading. Intentionally
@@ -48,6 +49,7 @@ function App() {
               <Route path="/hive-module" element={<HiveModule />} />
               <Route path="/assembly" element={<AssemblyGuide />} />
               <Route path="/admin" element={<AdminPage />} />
+              <Route path="/waitlist" element={<WaitlistPage />} />
               {/* Redirect old routes */}
               <Route path="/web-installer" element={<Navigate to="/setup" replace />} />
               <Route path="/setup-guide" element={<Navigate to="/setup" replace />} />

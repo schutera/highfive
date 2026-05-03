@@ -6,6 +6,7 @@ import { apiKeyAuth, getApiKey } from './auth';
 import { DUCKDB_URL } from './duckdbClient';
 
 const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://image-service:4444';
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL ?? '';
 
 export const app = express();
 
@@ -40,6 +41,48 @@ app.get('/api/images/:filename', async (req, res) => {
     res.send(buffer);
   } catch (error) {
     res.status(502).json({ error: 'Failed to fetch image from image service' });
+  }
+});
+
+// Public waitlist signup — forwards to Discord webhook
+app.post('/api/waitlist', async (req, res) => {
+  try {
+    const { name, email } = req.body ?? {};
+    const cleanName = typeof name === 'string' ? name.trim() : '';
+    const cleanEmail = typeof email === 'string' ? email.trim() : '';
+
+    if (!cleanName || cleanName.length > 200) {
+      res.status(400).json({ error: 'Invalid name' });
+      return;
+    }
+    if (!cleanEmail || cleanEmail.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      res.status(400).json({ error: 'Invalid email' });
+      return;
+    }
+
+    if (!DISCORD_WEBHOOK_URL) {
+      console.warn('Waitlist signup received but DISCORD_WEBHOOK_URL is not set');
+      res.status(503).json({ error: 'Waitlist temporarily unavailable' });
+      return;
+    }
+
+    const content = `🐝 **New Hive Module waitlist signup**\n**Name:** ${cleanName}\n**Email:** ${cleanEmail}`;
+    const discordRes = await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+
+    if (!discordRes.ok) {
+      console.error('Discord webhook failed:', discordRes.status, await discordRes.text());
+      res.status(502).json({ error: 'Failed to register signup' });
+      return;
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Waitlist signup error:', err);
+    res.status(500).json({ error: 'Failed to register signup' });
   }
 });
 

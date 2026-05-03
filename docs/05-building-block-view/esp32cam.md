@@ -19,12 +19,16 @@ After initial configuration the device operates fully automatically:
 - Registers itself as a new module if not already known to the server
 - Captures images at the configured interval and uploads them to
   `image-service` via multipart `POST /upload`
-- Sends an hourly heartbeat to `duckdb-service`
-  (`POST /modules/<mac>/heartbeat`) carrying battery, RSSI,
-  uptime, free heap, and `fw_version`. The wire shape is
+- Sends an hourly **telemetry heartbeat** to `duckdb-service` at
+  `POST /heartbeat` (firmware-direct; `client.cpp:260`,
+  `routes/heartbeats.py:17`) carrying mac, battery, RSSI,
+  uptime_ms, free_heap, fw_version. The wire shape is
   [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md)
   in `@highfive/contracts` —
   [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
+  This is **not** the same endpoint as `POST /modules/<mac>/heartbeat`
+  (the post-upload aggregate, fired by `image-service` after every
+  upload). See the [glossary](../12-glossary/README.md) entries.
 - Attaches a JSON `logs` field with firmware version, uptime, free
   heap, RSSI, last reset reason, last HTTP codes, and the last ~2 KB
   of the on-device circular log buffer

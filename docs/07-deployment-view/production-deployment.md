@@ -1,6 +1,12 @@
-# HighFive Production Deployment Guide
+# Production Deployment (Docker Compose + Nginx)
 
-Deploy HighFive from the `production` branch on your server.
+Deploy HighFive to production from the `production` branch using
+`docker-compose.production.yml`, with Nginx as the public reverse
+proxy and Let's Encrypt for TLS.
+
+For a non-Docker production option (Nginx + PM2 on bare metal),
+see [production-runbook.md](production-runbook.md). For dev-laptop
+setup, see [docker-compose.md](docker-compose.md).
 
 ## Prerequisites
 

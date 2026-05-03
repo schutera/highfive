@@ -1,8 +1,14 @@
-# HighFive Production Deployment Guide
+# Production Runbook (Nginx + PM2)
 
 ## Overview
 
-This guide covers deploying HighFive to production at `highfive.schutera.com`.
+This runbook covers deploying HighFive to production at
+`highfive.schutera.com` using Nginx as the public-facing reverse proxy
+and PM2 to supervise the Node backend on bare metal — no Docker.
+
+For a Docker-Compose-based production deploy, see
+[production-deployment.md](production-deployment.md). For dev-laptop
+setup, see [docker-compose.md](docker-compose.md).
 
 ## Prerequisites
 

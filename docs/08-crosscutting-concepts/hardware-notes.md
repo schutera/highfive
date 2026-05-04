@@ -8,11 +8,11 @@ For symptom-based diagnosis, see
 
 ## Access point
 
-| Setting | Value |
-|---------|-------|
-| SSID    | `ESP32-Access-Point` |
-| Password | `esp-12345` |
-| Source  | `ESP32-CAM/host.cpp` lines 9–10 |
+| Setting  | Value                           |
+| -------- | ------------------------------- |
+| SSID     | `ESP32-Access-Point`            |
+| Password | `esp-12345`                     |
+| Source   | `ESP32-CAM/host.cpp` lines 9–10 |
 
 Old documentation (now removed) called it `HiveHive-Access-Point`. It
 never had that name in the code.
@@ -57,7 +57,7 @@ New-NetFirewallRule -DisplayName "HiveHive duckdb-service (8002)" -Direction Inb
 
 ## Factory reset
 
-Hold the **IO0** button for **7 seconds** while the board is powered.
+Hold the **IO0** button for **5 seconds** while the board is powered.
 The configuration is cleared and the `ESP32-Access-Point` reopens.
 Do not press RST during the hold — that enters flash mode instead.
 

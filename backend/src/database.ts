@@ -119,7 +119,7 @@ export class ModuleReadModel {
       heartbeatsResult.status === 'fulfilled' ? heartbeatsResult.value : { summary: {} }
     ) as ApiHeartbeatSummaryResponse;
 
-    // ---- 1) Progress normalisieren ----
+    // ---- 1) Normalize progress ----
     const progressByNest = new Map<string, DailyProgress[]>();
     progressData.progress.forEach((p: any) => {
       const normalized: DailyProgress = {
@@ -135,7 +135,7 @@ export class ModuleReadModel {
       progressByNest.set(p.nest_id, arr);
     });
 
-    // ---- 2) Nests bauen ----
+    // ---- 2) Build nests ----
     // Brand `module_id` at the boundary: parseModuleId throws on a malformed
     // upstream value, which is the right signal — duckdb-service drift should
     // surface, not be silently swallowed. Mirrors homepage `services/api.ts`.
@@ -153,7 +153,7 @@ export class ModuleReadModel {
       nestsByModule.set(moduleId, arr);
     });
 
-    // ---- 3) Module bauen ----
+    // ---- 3) Build modules ----
     const heartbeatSummary = heartbeatsData.summary || {};
     const now = new Date();
     return modulesData.modules.map((m) => {

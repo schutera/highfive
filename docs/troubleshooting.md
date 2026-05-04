@@ -10,12 +10,12 @@ Symptom-based guide covering the most common issues during initial hardware setu
 
 **Normal behaviour.** The backend and Flask services have no root route. Use the health endpoints instead:
 
-| Service | Health check URL | Expected |
-|---------|-----------------|----------|
-| backend | `http://localhost:3002/api/health` | `{"status":"ok"}` |
-| image-service | `http://localhost:8000/health` | `ok` |
-| duckdb-service | `http://localhost:8002/health` | `ok` |
-| homepage | `http://localhost:5173` | Dashboard loads |
+| Service        | Health check URL                   | Expected          |
+| -------------- | ---------------------------------- | ----------------- |
+| backend        | `http://localhost:3002/api/health` | `{"status":"ok"}` |
+| image-service  | `http://localhost:8000/health`     | `ok`              |
+| duckdb-service | `http://localhost:8002/health`     | `ok`              |
+| homepage       | `http://localhost:5173`            | Dashboard loads   |
 
 ### A service fails to start or exits immediately
 
@@ -103,6 +103,7 @@ The access point name in the firmware is `ESP32-Access-Point` with password `esp
 ### Board crashes and reboots every ~44 seconds in AP mode (firmware before fix)
 
 **Symptoms:**
+
 - Serial log shows `task_wdt: Task watchdog got triggered` and `abort()` followed by `Rebooting...`
 - `config.json not found, using defaults` appears on every boot despite having saved the config
 - `boot_count` in the serial log climbs rapidly
@@ -161,11 +162,15 @@ open('esp_log.txt', 'wb').write(buf)
 MAC: 08:3a:f2:6e:69:b0
 ```
 
-Also look in the serial log for lines like `WIFI CONNECTED` or WiFi error codes.
+Also look at the serial log: a join failure now prints the SSID and the resolved `WL_*` status code (e.g. `WL_NO_SSID_AVAIL` for a typo, `WL_CONNECT_FAILED` for a bad password) alongside the running fail counter.
+
+### LED is rapid-blinking after WiFi config — what now?
+
+Rapid blink (~5 Hz) means the most recent WiFi join timed out. The board reboots after a 3-second hold and tries again. After **three consecutive failures (~90 s)** the firmware automatically drops back to AP-config mode and the `ESP32-Access-Point` SSID returns. No manual factory-reset hold needed for a mistyped password. Watch the LED transition to the AP heartbeat (two short pulses every 1.6 s) to confirm.
 
 ### Factory reset to re-enter configuration
 
-Hold the **IO0** button for **7 seconds** while the board is powered. The configuration is cleared and the `ESP32-Access-Point` reopens. Do not press RST during the hold.
+For an immediate manual reset (not waiting for the 3-failure auto-fallback), hold the **IO0** button for **5 seconds** while the board is powered. The configuration is cleared and the `ESP32-Access-Point` reopens. Do not press RST during the hold.
 
 ---
 

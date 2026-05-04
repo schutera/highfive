@@ -175,7 +175,7 @@ const translations = {
       photoStep: 'Photo: Step {n}',
       tips: 'Tips',
       factoryReset:
-        'If you ever need to reconfigure your module, press and hold the left button on the ESP32-CAM for 10+ seconds. It will restart and reopen the WiFi configuration portal.',
+        'If you ever need to reconfigure your module, press and hold the left button on the ESP32-CAM for 5 seconds while powered. It will restart and reopen the WiFi configuration portal.',
       factoryResetLabel: 'Factory Reset:',
       ctaTitle: 'Module assembled?',
       ctaText: 'Now flash the firmware and connect your module to the server.',
@@ -352,6 +352,7 @@ const translations = {
       waitingText:
         'Your module is restarting and connecting to the server. This usually takes about 30 seconds.',
       checking: 'Checking for your module',
+      checkingAttempt: 'Checking backend… {attempt}/{total}',
       starting: 'Starting...',
       goBackConfig: 'Go back to configuration',
       wifiReminder:
@@ -368,7 +369,7 @@ const translations = {
           "If you can still see 'HiveHive-Access-Point' in your WiFi list, the module hasn't connected to your home network yet. Reconnect and verify the WiFi settings.",
         resetTitle: 'Factory Reset',
         resetText:
-          'Hold the left button on the ESP32-CAM for 10+ seconds until it restarts. This resets all settings and re-opens the configuration portal.',
+          'Hold the left button on the ESP32-CAM for 5 seconds until it restarts. This resets all settings and re-opens the configuration portal.',
       },
     },
 
@@ -558,7 +559,7 @@ const translations = {
       photoStep: 'Foto: Schritt {n}',
       tips: 'Tipps',
       factoryReset:
-        'Wenn du dein Modul neu konfigurieren musst, halte den linken Knopf der ESP32-CAM 10+ Sekunden gedr\u00FCckt. Es startet neu und \u00F6ffnet das WLAN-Konfigurationsportal erneut.',
+        'Wenn du dein Modul neu konfigurieren musst, halte den linken Knopf der ESP32-CAM bei laufendem Betrieb 5 Sekunden gedr\u00FCckt. Es startet neu und \u00F6ffnet das WLAN-Konfigurationsportal erneut.',
       factoryResetLabel: 'Werkseinstellungen:',
       ctaTitle: 'Modul zusammengebaut?',
       ctaText: 'Jetzt die Firmware flashen und dein Modul mit dem Server verbinden.',
@@ -736,6 +737,7 @@ const translations = {
       waitingText:
         'Dein Modul startet neu und verbindet sich mit dem Server. Das dauert normalerweise ca. 30 Sekunden.',
       checking: 'Suche nach deinem Modul',
+      checkingAttempt: 'Pr\u00FCfe Backend\u2026 {attempt}/{total}',
       starting: 'Starte...',
       goBackConfig: 'Zur\u00FCck zur Konfiguration',
       wifiReminder:
@@ -752,7 +754,7 @@ const translations = {
           "Wenn du 'HiveHive-Access-Point' noch in deiner WLAN-Liste siehst, hat sich das Modul noch nicht mit deinem Heimnetzwerk verbunden. Verbinde dich erneut und \u00FCberpr\u00FCfe die WLAN-Einstellungen.",
         resetTitle: 'Werkseinstellungen',
         resetText:
-          'Halte den linken Knopf der ESP32-CAM 10+ Sekunden gedr\u00FCckt, bis sie neu startet. Dies setzt alle Einstellungen zur\u00FCck und \u00F6ffnet das Konfigurationsportal erneut.',
+          'Halte den linken Knopf der ESP32-CAM 5 Sekunden gedr\u00FCckt, bis sie neu startet. Dies setzt alle Einstellungen zur\u00FCck und \u00F6ffnet das Konfigurationsportal erneut.',
       },
     },
 

@@ -32,6 +32,8 @@ services:
 
   homepage:
     build:
+      # Same workspace-root context trick as backend above: contracts/ is a
+      # sibling workspace and the root lockfile is needed for npm install.
       context: .
       dockerfile: homepage/Dockerfile.dev
     ports:

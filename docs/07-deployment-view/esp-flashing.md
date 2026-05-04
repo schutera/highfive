@@ -14,16 +14,17 @@ docker compose up --build   # from the repo root
 
 Check all four services are healthy (substitute your machine's LAN IP):
 
-| Check | Expected response |
-|-------|-------------------|
-| `http://localhost:5173` | Dashboard loads |
+| Check                             | Expected response |
+| --------------------------------- | ----------------- |
+| `http://localhost:5173`           | Dashboard loads   |
 | `http://<LAN-IP>:3002/api/health` | `{"status":"ok"}` |
-| `http://<LAN-IP>:8000/health` | `ok` |
-| `http://<LAN-IP>:8002/health` | `ok` |
+| `http://<LAN-IP>:8000/health`     | `ok`              |
+| `http://<LAN-IP>:8002/health`     | `ok`              |
 
 > **Find your LAN IP:** `ipconfig` on Windows (look for the WLAN or Ethernet adapter), `ip addr` on Linux/Mac. Use this IP — not `localhost` — when configuring the module, because the ESP32 is a separate device on the network.
 
 > **Windows Firewall:** ports 8000 and 8002 must accept inbound TCP connections from LAN devices. If modules register on the network but never appear on the dashboard, run this once in an **admin** PowerShell:
+>
 > ```powershell
 > New-NetFirewallRule -DisplayName "HiveHive image-service" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Any
 > New-NetFirewallRule -DisplayName "HiveHive duckdb-service" -Direction Inbound -Protocol TCP -LocalPort 8002 -Action Allow -Profile Any
@@ -48,6 +49,7 @@ pip install platformio
 ```
 
 If you have multiple Python versions on the same machine and `python -m platformio` fails, call the interpreter explicitly:
+
 ```bash
 # Windows example — find yours with: where python
 & "C:\Users\<you>\AppData\Local\Programs\Python\Python311\python.exe" -m platformio ...
@@ -72,7 +74,7 @@ Find the port: **Device Manager → Ports → USB-SERIAL CH340 (COMx)** on Windo
 
 ### Boot normally after flashing
 
-Press **RST** once (without IO0). The module boots, opens the configuration access point, and the LED flashes.
+Press **RST** once (without IO0). The module boots, opens the configuration access point, and the LED begins the AP heartbeat pattern (two short pulses every ~1.6 s). See [the LED legend in chapter 06](../06-runtime-view/esp-reliability.md#led-legend) for what each pattern means during onboarding.
 
 ---
 
@@ -80,10 +82,10 @@ Press **RST** once (without IO0). The module boots, opens the configuration acce
 
 ### 1. Connect to the module's access point
 
-| Setting | Value |
-|---------|-------|
+| Setting       | Value                |
+| ------------- | -------------------- |
 | Wi-Fi network | `ESP32-Access-Point` |
-| Password | `esp-12345` |
+| Password      | `esp-12345`          |
 
 > **Browser:** use **Chrome or Firefox**. Brave and some other mobile browsers silently fail to submit the configuration form due to session-token handling — the form will appear to reload blank after you click Save.
 
@@ -93,15 +95,15 @@ Navigate to **http://192.168.4.1**
 
 ### 3. Fill in the configuration form
 
-| Field | Value |
-|-------|-------|
-| Module Name | Any label, e.g. `hive-01` |
-| Wi-Fi SSID | Your 2.4 GHz network name (case-sensitive — copy-paste, don't retype) |
-| Wi-Fi Password | Your network password |
-| Initialization Base URL | `http://<LAN-IP>:8002` |
-| Initialization Endpoint | `/new_module` |
-| Upload Base URL | `http://<LAN-IP>:8000` |
-| Upload Endpoint | `/upload` |
+| Field                   | Value                                                                 |
+| ----------------------- | --------------------------------------------------------------------- |
+| Module Name             | Any label, e.g. `hive-01`                                             |
+| Wi-Fi SSID              | Your 2.4 GHz network name (case-sensitive — copy-paste, don't retype) |
+| Wi-Fi Password          | Your network password                                                 |
+| Initialization Base URL | `http://<LAN-IP>:8002`                                                |
+| Initialization Endpoint | `/new_module`                                                         |
+| Upload Base URL         | `http://<LAN-IP>:8000`                                                |
+| Upload Endpoint         | `/upload`                                                             |
 
 > **2.4 GHz only.** The ESP32 does not support 5 GHz. If your router shows a single SSID for both bands (band steering), the ESP32 should be assigned to 2.4 GHz automatically — but if it fails to connect, check your router's band-steering settings.
 
@@ -167,7 +169,7 @@ Then open `esp_log.txt` to read the boot log.
 
 To clear the saved configuration and re-enter setup mode:
 
-- Press and hold the **IO0** button for **7 seconds** while the module is powered.
+- Press and hold the **IO0** button for **5 seconds** while the module is powered.
 - The module resets its configuration and reopens the `ESP32-Access-Point`.
 - Repeat the initial setup process.
 

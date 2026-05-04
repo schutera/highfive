@@ -43,7 +43,7 @@ exactly that kind of shape.
 
 The shape lives in `contracts/src/index.ts` as `HeartbeatSnapshot`
 (`receivedAt`, `battery`, `rssi`, `uptimeMs`, `freeHeap`, `fwVersion`),
-plus `latestHeartbeat?: HeartbeatSnapshot | null` on `Module`. Both
+plus `latestHeartbeat: HeartbeatSnapshot | null` on `Module` (always present, null when the module has never sent a heartbeat). Both
 `backend` and `homepage` import it from `@highfive/contracts`.
 `duckdb-service` does **not** import it (it's Python and lives upstream
 of the type boundary), but the JSON keys backend reads from

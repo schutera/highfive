@@ -157,7 +157,7 @@ def get_module_logs(mac: str):
 
 @app.get("/images")
 def list_images():
-    """List all uploaded images, proxied from duckdb-service."""
+    """List all uploaded images, optionally filtered by ?module_id=, proxied from duckdb-service."""
     module_id = request.args.get("module_id")
     try:
         resp = http_requests.get(
@@ -172,7 +172,7 @@ def list_images():
 
 @app.delete("/images/<path:filename>")
 def delete_image(filename):
-    """Delete an image file and its DB record."""
+    """Delete an image file and its DB record (best-effort: file is deleted even if the DB delete fails)."""
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     try:
         resp = http_requests.delete(

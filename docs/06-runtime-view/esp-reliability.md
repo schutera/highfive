@@ -54,20 +54,21 @@ hangs, any other deadlock.
 
 ### 3. Consecutive-failure circuit breaker (new in PR 17)
 
-`captureAndUpload` keeps a `static uint8_t consecutiveFailures` counter
-([`ESP32-CAM/ESP32-CAM.ino:222`](../../ESP32-CAM/ESP32-CAM.ino)) of
-consecutive **upload-path** failures of any kind — camera NULL,
-network start-error, send-failure, HTTP non-2xx. The counter resets
-to 0 on a successful upload (line 275) and increments on any other
-outcome (line 277). At >= 5 it runs `delay(1000); ESP.restart()`
-**immediately** from inside the upload routine (lines 281-283).
+`captureAndUpload` in [`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino)
+keeps a `static uint8_t consecutiveFailures` counter of consecutive
+**upload-path** failures of any kind — camera NULL, network
+start-error, send-failure, HTTP non-2xx. The counter resets to 0 on a
+successful upload and increments on any other outcome. At >= 5 it
+runs `delay(1000); ESP.restart()` **immediately** from inside the
+upload routine.
 
 A separate behaviour, often confused with the breaker: a single failed
 first-capture-on-boot returns `false` from `captureAndUpload`, the
 caller proceeds, and the next `loop()` iteration (~30 s later) tries
 again. That **retry** is deferred; the **restart** is not. The
-distinction is described in the comment block at
-[`ESP32-CAM.ino:218-221`](../../ESP32-CAM/ESP32-CAM.ino).
+distinction is described in the comment block at the top of
+`captureAndUpload` itself — read the function rather than this doc
+if a future change tempts you to reorder it.
 
 `sendHeartbeat` was hardened in PR-17 review (commit `ea7dc73`):
 it parses the HTTP status line and returns 0 only on 2xx, and on any
@@ -82,12 +83,13 @@ for the full rationale.
 ### 4. Daily reboot (with capture-skip)
 
 After 24 hours of uptime the module restarts itself. Before
-`ESP.restart()`, the path sets NVS namespace `"boot"` key
-`daily_reboot=true` ([`ESP32-CAM.ino:306`](../../ESP32-CAM/ESP32-CAM.ino)).
-On boot, `setup()` reads and clears the flag at
-[`ESP32-CAM.ino:186-190`](../../ESP32-CAM/ESP32-CAM.ino); when set,
-it **skips** the first `captureAndUpload` so the daily reboot doesn't
-double the daily image cost.
+`ESP.restart()`, the daily-reboot path in `loop()` sets NVS
+namespace `"boot"` key `daily_reboot=true`. On boot, `setup()` reads
+and clears the same flag (in the same `Preferences` block) and, when
+set, **skips** the first `captureAndUpload` so the daily reboot
+doesn't double the daily image cost. Both sites live in
+[`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino) — grep for
+`daily_reboot`.
 
 Clears heap fragmentation, stale TCP state, anything else that
 degrades over time.
@@ -109,6 +111,45 @@ from sensor lock-ups that previously required a power cycle.
 
 Together these ensure no failure mode can leave the device stuck
 indefinitely.
+
+### 7. WiFi-fail AP fallback
+
+[ESP32-CAM/esp_init.cpp](../../ESP32-CAM/esp_init.cpp) — `getWifiFailCount` /
+`setWifiFailCount`. The threshold and the NVS key/namespace are
+defined in [`ESP32-CAM/esp_init.h`](../../ESP32-CAM/esp_init.h)
+alongside the helpers (`WIFI_FAIL_AP_FALLBACK_THRESH = 3`, NVS key
+`"wifi_fails"` in namespace `"config"`).
+
+When a STA-mode WiFi.begin times out (the 30-second wall in section 6),
+the firmware bumps an NVS-backed counter before rebooting. On each
+subsequent boot, when the device is already configured, the counter is
+read at the top of `setup()` — inside the `else` of the
+`isESPConfigured()` check, before `loadConfig` and `setupWifiConnection`
+([`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino)). If it has
+reached the threshold, the firmware clears the configured flag, resets
+the counter, and reboots into the captive portal. A successful WiFi
+join clears the counter, so a single transient outage doesn't drop the
+user back into configuration.
+
+Three failures × ~30 s ≈ 90 s before the portal returns. Designed for
+the most common onboarding mistake (mistyped WiFi password) without
+forcing the user through a 5-second CONFIG-button hold.
+
+### LED legend
+
+The on-board LED (GPIO 4) is driven by
+[`lib/led_state/`](../../ESP32-CAM/lib/led_state/) — a host-testable
+pure helper that maps `(mode, millis())` to on/off.
+[`led.cpp`](../../ESP32-CAM/led.cpp) is the Arduino-side wrapper.
+
+| Pattern                                  | Meaning                                            |
+| ---------------------------------------- | -------------------------------------------------- |
+| Off                                      | Boot pre-init or full shutdown                     |
+| Two short pulses every 1.6 s (heartbeat) | AP captive portal up at `192.168.4.1`              |
+| Slow blink (1 Hz, 50% duty)              | STA WiFi connection in progress                    |
+| Solid on                                 | WiFi connected, idle between captures              |
+| Single 50 ms flash per second            | Capture/upload in flight                           |
+| Rapid blink (5 Hz)                       | WiFi join just timed out (held ~3 s before reboot) |
 
 ---
 
@@ -132,17 +173,17 @@ The ESP piggybacks a JSON telemetry payload onto every image upload as an additi
 }
 ```
 
-| Field | Source | Meaning |
-|---|---|---|
-| `fw` | `FIRMWARE_VERSION` macro in `esp_init.h` (currently `"1.0.0"`) | Firmware version string. ⚠️ Distinct from the `fw_version` field in the heartbeat body, which uses the `FW_VERSION` macro in `client.cpp` (`"honeybee"`), and from `ESP32-CAM/VERSION` (`"carpenter"`) consumed by `build.sh`. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md) for the unification status. |
-| `uptime_s` | `millis()/1000` | Seconds since last boot |
-| `last_reset_reason` | `esp_reset_reason()` | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc. |
-| `free_heap` | `ESP.getFreeHeap()` | Current free heap in bytes |
-| `min_free_heap` | `ESP.getMinFreeHeap()` | Low-water mark over this boot session |
-| `rssi` | `WiFi.RSSI()` | WiFi signal strength in dBm |
-| `wifi_reconnects` | logbuf counter | Count of `reconnectWifi()` fires since boot |
-| `last_http_codes` | logbuf ring | Last 8 HTTP status codes from `postImage()` |
-| `log` | logbuf ring | Last ~2 KB of `logf()` output, oldest→newest |
+| Field               | Source                                                         | Meaning                                                                                                                                                                                                                                                                                                                                        |
+| ------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fw`                | `FIRMWARE_VERSION` macro in `esp_init.h` (currently `"1.0.0"`) | Firmware version string. ⚠️ Distinct from the `fw_version` field in the heartbeat body, which uses the `FW_VERSION` macro in `client.cpp` (`"honeybee"`), and from `ESP32-CAM/VERSION` (`"carpenter"`) consumed by `build.sh`. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md) for the unification status. |
+| `uptime_s`          | `millis()/1000`                                                | Seconds since last boot                                                                                                                                                                                                                                                                                                                        |
+| `last_reset_reason` | `esp_reset_reason()`                                           | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc.                                                                                                                                                                                                                                                                                               |
+| `free_heap`         | `ESP.getFreeHeap()`                                            | Current free heap in bytes                                                                                                                                                                                                                                                                                                                     |
+| `min_free_heap`     | `ESP.getMinFreeHeap()`                                         | Low-water mark over this boot session                                                                                                                                                                                                                                                                                                          |
+| `rssi`              | `WiFi.RSSI()`                                                  | WiFi signal strength in dBm                                                                                                                                                                                                                                                                                                                    |
+| `wifi_reconnects`   | logbuf counter                                                 | Count of `reconnectWifi()` fires since boot                                                                                                                                                                                                                                                                                                    |
+| `last_http_codes`   | logbuf ring                                                    | Last 8 HTTP status codes from `postImage()`                                                                                                                                                                                                                                                                                                    |
+| `log`               | logbuf ring                                                    | Last ~2 KB of `logf()` output, oldest→newest                                                                                                                                                                                                                                                                                                   |
 
 ### Circular log buffer
 
@@ -190,7 +231,7 @@ Each `.log.json` is the raw telemetry payload plus three fields added by the ima
 }
 ```
 
-If the ESP ever sends non-JSON, the sidecar still gets written as `{"raw": "...", "parse_error": true, "_mac": ..., ...}` so the admin view can always show *something*.
+If the ESP ever sends non-JSON, the sidecar still gets written as `{"raw": "...", "parse_error": true, "_mac": ..., ...}` so the admin view can always show _something_.
 
 ---
 
@@ -209,7 +250,7 @@ Reading the telemetry is a good first stop whenever a module looks unhealthy: a 
 
 ### Admin key (backend gate)
 
-On top of the `?admin=1` UI flag, the `GET /api/modules/:id/logs` endpoint requires an `X-Admin-Key` header matching the existing `HIGHFIVE_API_KEY`. This is the same key used by all `/api` routes, but regular dashboard pages send it automatically (via the bundled `VITE_API_KEY`). The admin endpoint demands it be provided *explicitly* as `X-Admin-Key` — casual visitors who just open the dashboard will never trigger that header.
+On top of the `?admin=1` UI flag, the `GET /api/modules/:id/logs` endpoint requires an `X-Admin-Key` header matching the existing `HIGHFIVE_API_KEY`. This is the same key used by all `/api` routes, but regular dashboard pages send it automatically (via the bundled `VITE_API_KEY`). The admin endpoint demands it be provided _explicitly_ as `X-Admin-Key` — casual visitors who just open the dashboard will never trigger that header.
 
 **Frontend UX:** the admin key is **not** sent automatically. The first
 time a user opens the Telemetry section in a tab, the page renders an

@@ -10,13 +10,12 @@ future contributors must know about. Two sub-registers below:
 Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
 Highlights worth knowing about even if you're not assigned:
 
-| # | Title (short) | Why it matters |
-|---|---------------|----------------|
-| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp:362` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection. |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware | Risk of silent truncation on telemetry growth. |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded | Should be configurable via the AP form. |
-| [#21](https://github.com/schutera/highfive/issues/21) | Wi-Fi join feedback in AP form | Currently no UI signal that join failed; users only see a blank reload. |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
+| #                                                     | Title (short)                                                 | Why it matters                                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp:362` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.               |
+| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                     | Risk of silent truncation on telemetry growth.                                                                               |
+| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                 | Should be configurable via the AP form.                                                                                      |
+| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                   | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
 
 ## Field-name drift
 
@@ -38,6 +37,11 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   — intentional for local dev. **Must** be overridden via
   `HIGHFIVE_API_KEY` for any non-local deploy. See
   [02-constraints](../02-constraints/README.md).
+- **WiFi password printed plaintext to Serial** at
+  `ESP32-CAM/esp_init.cpp:252` (top of `setupWifiConnection`).
+  Convenient during development; ships to anyone with USB access to
+  the board. File a follow-up to either redact it or gate it behind a
+  `DEBUG_WIFI` build flag.
 
 ## Operational trade-offs (intentional, not debt)
 
@@ -56,11 +60,11 @@ As of `upstream/main` HEAD `a3675de`, three different files each carry
 a different "firmware version" string and each is read by a different
 consumer:
 
-| File / location | Current value | Read by | Consumer |
-|---|---|---|---|
-| `ESP32-CAM/VERSION` | `carpenter` | `ESP32-CAM/build.sh:29` | OTA manifest `homepage/public/firmware.json` `version` field |
-| `ESP32-CAM/esp_init.h:8` | `1.0.0` | `ESP32-CAM/logbuf.cpp:86`, `ESP32-CAM/ESP32-CAM.ino:55` | Telemetry sidecar `fw` field on every upload + boot log |
-| `ESP32-CAM/client.cpp:232` | `honeybee` | `ESP32-CAM/client.cpp:258` | Heartbeat body `fw_version` field → `module_heartbeats.fw_version` → `Module.latestHeartbeat.fwVersion` |
+| File / location            | Current value | Read by                                                 | Consumer                                                                                                |
+| -------------------------- | ------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `ESP32-CAM/VERSION`        | `carpenter`   | `ESP32-CAM/build.sh:29`                                 | OTA manifest `homepage/public/firmware.json` `version` field                                            |
+| `ESP32-CAM/esp_init.h:8`   | `1.0.0`       | `ESP32-CAM/logbuf.cpp:86`, `ESP32-CAM/ESP32-CAM.ino:55` | Telemetry sidecar `fw` field on every upload + boot log                                                 |
+| `ESP32-CAM/client.cpp:232` | `honeybee`    | `ESP32-CAM/client.cpp:258`                              | Heartbeat body `fw_version` field → `module_heartbeats.fw_version` → `Module.latestHeartbeat.fwVersion` |
 
 So a single `carpenter` device today reports three different versions
 on three different surfaces. ADR-006 documents the desired bee-name
@@ -223,3 +227,43 @@ key or the name of a DB column, the cited file must contain that
 value or column. If a reviewer can't `git grep` your claim and find
 it in code, it's not documentation, it's storytelling. The rule is
 captured in the [CLAUDE.md never-violate list](../../CLAUDE.md).
+
+### Re-occurrence: doc-line-citation drift in `feat/onboarding-feedback`
+
+**What happened.** The PR closing #21/#34/#35 added ~30 lines of new
+boot/setup code to `ESP32-CAM/ESP32-CAM.ino` and `esp_init.cpp`,
+silently shifting every later line in those files. Multiple `path:line`
+references in `docs/06-runtime-view/esp-reliability.md`,
+`docs/09-architecture-decisions/adr-007-...md`, the chapter-11 hardcoded-
+secrets entry, and four user-facing wizard translation strings became
+stale. The first review-pass fix substituted one wrong line number
+(`esp_init.cpp:233`) for another (`:249`); the actual location of the
+plaintext WiFi password log is `:252`. Same failure mode as the prior
+"PR 27 first-pass" entry, repeated in the next PR.
+
+**Why it happened.** The structural rule "cite file:line" was followed
+to the letter, but line numbers drift on every line-changing edit.
+There was no compensating discipline — no `git grep -n` sweep before
+push, no pre-commit hook, no CI gate that re-verifies cited lines.
+Adding code to a hot file therefore guarantees doc-citation drift
+unless the author manually re-runs every citation by hand.
+
+**How to avoid it next time.**
+
+- Prefer **file + symbol/function name** over `file:line` when the
+  symbol is grep-able. `captureAndUpload` in `ESP32-CAM.ino` does not
+  drift; `ESP32-CAM.ino:222` does.
+- Keep `file:line` only when the citation is anchored to a specific
+  inline behaviour (no enclosing named symbol). Even then, mention the
+  enclosing function so a reader can recover by grep.
+- Before opening a PR that modifies a hot file, run
+  `git grep -nE '<filename>:[0-9]+' docs/` and verify each hit against
+  the current source. Open issue: bake this into a CI gate.
+- Also sweep i18n/localization strings (`homepage/src/i18n/`) — the
+  user-facing wizard had four strings telling onboarders to hold the
+  reset button "10+ seconds" while the docs and firmware said 5 s.
+  Two parallel description-of-the-system sources, only one updated.
+- Pre-existing line-citation drift (Maps API key in chapter 3 / 11,
+  glossary references to `client.cpp:232/258`, ADR-006 line numbers,
+  api-reference / api-contracts heartbeat lines) was flagged in this
+  review and not fixed in this PR. File a follow-up sweep.

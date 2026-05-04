@@ -2,6 +2,7 @@
 #include "esp_init.h"
 #include "host.h"
 #include "client.h"
+#include "led.h"
 #include "logbuf.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
@@ -18,6 +19,8 @@
 // the worst case. 60 s gives a safety margin while still rebooting on
 // genuine deadlocks within ~1 minute.
 #define TASK_WDT_TIMEOUT_S    60
+// WIFI_FAIL_AP_FALLBACK_THRESH lives in esp_init.h alongside the NVS
+// fail-counter helpers it gates on.
 
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
@@ -47,6 +50,10 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println();
   delay(200);
+
+  // Bring the on-board LED up early so every subsequent state change
+  // (AP mode, WiFi connecting, failure) is reflected to the user.
+  ledInit();
 
   // Telemetry: ring buffer + boot marker with reset reason
   logbufInit();
@@ -96,9 +103,22 @@ void setup() {
 
   if (!isESPConfigured()) {
     Serial.println("-- ESP not yet configured. Opening ESP access point...");
+    ledSetMode(hf::LedMode::ApMode);
     setupAccessPoint();
   } else {
-    Serial.println("-- ESP already configured. To reconfigure, hold CONFIG button (GPIO0) while pressing RESET. Keep holding for 5 seconds until you see the reset message.");
+    // Auto-fallback: if previous boots have repeatedly failed to join the
+    // saved network, clear the configured flag so the next boot re-opens
+    // the captive portal. Faster recovery than the 5-second reset hold.
+    uint8_t wifiFails = getWifiFailCount();
+    if (wifiFails >= WIFI_FAIL_AP_FALLBACK_THRESH) {
+      Serial.printf("-- %u consecutive WiFi join failures — re-entering AP mode\n",
+                    (unsigned)wifiFails);
+      setWifiFailCount(0);
+      setESPConfigured(false);
+      delay(500);
+      ESP.restart();
+    }
+    Serial.println("-- ESP already configured. To reconfigure: hold the CONFIG button (GPIO0), tap RESET to reboot, and keep holding CONFIG for 5 seconds until you see the reset message.");
   }
 
   Serial.println("[ESP] INITIALIZING ESP");
@@ -205,6 +225,12 @@ bool captureAndUpload() {
   Serial.println("");
   Serial.printf("-- Trying to capture and post image number %d\n", counter++);
 
+  // Single-flash LED pattern while the upload is in flight — gives a
+  // visible "yes, the board is working" signal between long sleep
+  // intervals. Reverts to solid-on (Connected) at the bottom of the
+  // function regardless of outcome.
+  ledSetMode(hf::LedMode::Uploading);
+
   int httpCode = -1;
   for (int attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) {
@@ -283,6 +309,11 @@ bool captureAndUpload() {
     }
   }
 
+  // Revert to the steady "Connected" pattern. Even on upload failure,
+  // WiFi itself is still up (a non-2xx is an application failure, and
+  // the circuit breaker above handles repeated failures by rebooting).
+  ledSetMode(hf::LedMode::Connected);
+
   Serial.printf("-- Finished capturing and posting image %d\n", counter);
   return uploadOk;
 }
@@ -291,6 +322,7 @@ void loop() {
   // Feed the task watchdog. If the loop hangs for >TASK_WDT_TIMEOUT_S,
   // the watchdog fires and reboots the device.
   esp_task_wdt_reset();
+  ledTick();
 
   // NOTE: GPIO0 config button check moved to setup() — it cannot be read
   // reliably here because the camera XCLK drives GPIO0 after init.

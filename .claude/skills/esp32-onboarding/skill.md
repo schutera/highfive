@@ -19,6 +19,7 @@ docker compose logs --tail=5   # confirms services are running
 ```
 
 Then check health endpoints. First find the host's LAN IP (not localhost — the ESP32 is a separate device):
+
 - Windows: `ipconfig` → WLAN or Ethernet adapter
 - Linux/Mac: `ip addr`
 
@@ -31,6 +32,7 @@ http://<LAN-IP>:8002/health      → ok
 If a service is down: `docker compose up --build`. Confirm `.env` exists at the repo root with `DEBUG=true` and `DUCKDB_SERVICE_URL=http://duckdb-service:8000`.
 
 **Windows only:** ports 8000 and 8002 need inbound firewall rules. If services are healthy but modules never appear, add them now (admin PowerShell):
+
 ```powershell
 New-NetFirewallRule -DisplayName "HiveHive image-service" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Any
 New-NetFirewallRule -DisplayName "HiveHive duckdb-service" -Direction Inbound -Protocol TCP -LocalPort 8002 -Action Allow -Profile Any
@@ -51,20 +53,24 @@ Ask the user to describe or photograph the board.
 ## Phase 3 — Flash firmware
 
 Install PlatformIO if needed:
+
 ```bash
 pip install platformio
 ```
 
 Find the COM port:
+
 - Windows: Device Manager → Ports → "USB-SERIAL CH340 (COMx)"
 - Linux/Mac: `/dev/ttyUSB0` or `/dev/cu.usbserial-*`
 
 Enter flash mode (ESP32-CAM-MB):
+
 1. Hold **IO0** (BOOT) button
 2. Press and release **RST** while holding IO0
 3. Release IO0
 
 Flash:
+
 ```bash
 cd ESP32-CAM
 pio run -e esp32cam --target upload --upload-port <port>
@@ -73,6 +79,7 @@ pio run -e esp32cam --target upload --upload-port <port>
 After success: press **RST** once (no IO0) to boot normally. The LED should start flashing.
 
 **Multiple Python versions (Windows):** if `python -m platformio` fails, call with the explicit path:
+
 ```bash
 & "C:\Users\<you>\AppData\Local\Programs\Python\Python311\python.exe" -m platformio run -e esp32cam --target upload --upload-port COM9
 ```
@@ -98,6 +105,7 @@ open('esp_log.txt', 'wb').write(buf)
 ```
 
 Check `esp_log.txt`. A healthy unconfigured board shows:
+
 ```
 -- ESP not yet configured. Opening ESP access point...
 ---- AccessPoint IP: 192.168.4.1
@@ -115,26 +123,27 @@ Check `esp_log.txt`. A healthy unconfigured board shows:
 2. Open **http://192.168.4.1**
 3. Fill in the form:
 
-| Field | Value |
-|-------|-------|
-| Module Name | Any label, e.g. `hive-01` |
-| Wi-Fi SSID | Your **2.4 GHz** network name — copy-paste, don't retype (case-sensitive) |
-| Wi-Fi Password | Your network password |
-| Initialization Base URL | `http://<LAN-IP>:8002` |
-| Initialization Endpoint | `/new_module` |
-| Upload Base URL | `http://<LAN-IP>:8000` |
-| Upload Endpoint | `/upload` |
+| Field                   | Value                                                                     |
+| ----------------------- | ------------------------------------------------------------------------- |
+| Module Name             | Any label, e.g. `hive-01`                                                 |
+| Wi-Fi SSID              | Your **2.4 GHz** network name — copy-paste, don't retype (case-sensitive) |
+| Wi-Fi Password          | Your network password                                                     |
+| Initialization Base URL | `http://<LAN-IP>:8002`                                                    |
+| Initialization Endpoint | `/new_module`                                                             |
+| Upload Base URL         | `http://<LAN-IP>:8000`                                                    |
+| Upload Endpoint         | `/upload`                                                                 |
 
 4. Click **Save Configuration** — you should see "Configuration saved successfully."
 
 The board reboots and connects to your Wi-Fi. The access point disappears.
 
 **Key constraints:**
+
 - ESP32 is **2.4 GHz only** — router must have a 2.4 GHz band available
 - The ESP32 and the server must be on the **same LAN** — not one on a phone hotspot and the other on the home router
 - Use the server's **LAN IP**, not `localhost`
 
-**Factory reset** (to redo config): hold **IO0** for 7 seconds while powered → board clears config and reopens the access point.
+**Factory reset** (to redo config): hold **IO0** for 5 seconds while powered → board clears config and reopens the access point.
 
 ---
 
@@ -166,11 +175,11 @@ The new module should appear with its name, battery level, location, and status 
 
 ## Quick reference — known gotchas
 
-| Issue | Fix |
-|-------|-----|
-| AP called "HiveHive-Access-Point" in old docs | Actual name is `ESP32-Access-Point`, pw `esp-12345` |
-| Form saves blank after Submit | Use Chrome or Firefox, not Brave |
-| Board crashes every ~44 s in AP mode | Outdated firmware — reflash from current repo |
-| Module on network but not registering | Check Windows Firewall (ports 8000, 8002) |
-| Module never joins Wi-Fi | 2.4 GHz only; case-sensitive SSID; same network as server |
-| `python -m platformio` not found | Multiple Python versions — use explicit path |
+| Issue                                         | Fix                                                       |
+| --------------------------------------------- | --------------------------------------------------------- |
+| AP called "HiveHive-Access-Point" in old docs | Actual name is `ESP32-Access-Point`, pw `esp-12345`       |
+| Form saves blank after Submit                 | Use Chrome or Firefox, not Brave                          |
+| Board crashes every ~44 s in AP mode          | Outdated firmware — reflash from current repo             |
+| Module on network but not registering         | Check Windows Firewall (ports 8000, 8002)                 |
+| Module never joins Wi-Fi                      | 2.4 GHz only; case-sensitive SSID; same network as server |
+| `python -m platformio` not found              | Multiple Python versions — use explicit path              |

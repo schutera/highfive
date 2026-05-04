@@ -25,6 +25,9 @@ export default function Step5Verify({
   const navigate = useNavigate();
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
   const [checkingBackend, setCheckingBackend] = useState(false);
+  const [healthAttempt, setHealthAttempt] = useState<{ current: number; total: number } | null>(
+    null,
+  );
 
   // Auto-redirect to dashboard with module selected after detection
   useEffect(() => {
@@ -48,19 +51,22 @@ export default function Step5Verify({
     const MAX_ATTEMPTS = 8;
     const DELAY_MS = 2000;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      setHealthAttempt({ current: attempt, total: MAX_ATTEMPTS });
       try {
         await api.healthCheck();
+        setHealthAttempt(null);
         setBackendReachable(true);
         setCheckingBackend(false);
         startVerification();
         return;
-      } catch {
-        console.log(`[Step5] backend healthcheck ${attempt}/${MAX_ATTEMPTS} failed`);
+      } catch (err) {
+        console.warn(`[Step5] backend healthcheck ${attempt}/${MAX_ATTEMPTS} failed`, err);
         if (attempt < MAX_ATTEMPTS) {
           await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
         }
       }
     }
+    setHealthAttempt(null);
     setBackendReachable(false);
     setCheckingBackend(false);
   };
@@ -300,7 +306,14 @@ export default function Step5Verify({
 
       <div className="flex items-center gap-2 text-hf-sm text-hf-fg-mute mb-4">
         <div className="w-2 h-2 rounded-full bg-hf-honey-400 animate-pulse" aria-hidden="true" />
-        {pollingActive ? t('step5.checking') : t('step5.starting')}
+        {healthAttempt
+          ? t('step5.checkingAttempt', {
+              attempt: healthAttempt.current,
+              total: healthAttempt.total,
+            })
+          : pollingActive
+            ? t('step5.checking')
+            : t('step5.starting')}
       </div>
 
       <aside

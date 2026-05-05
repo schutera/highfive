@@ -2,37 +2,37 @@
 
 namespace hf {
 
-bool ledOnAt(LedMode mode, uint32_t now_ms) {
+bool ledOnAt(LedMode mode, uint32_t elapsed_ms) {
     switch (mode) {
         case LedMode::Off:
+        case LedMode::ApMode:
+        case LedMode::Connecting:
+        case LedMode::Connected:
+            // Steady-state modes are silent. The flash LED is too bright
+            // for ambient signalling — see led_state.h's contract.
             return false;
 
-        case LedMode::Connected:
-            return true;
-
-        case LedMode::Connecting: {
-            // 1 Hz, 50% duty: on for [0,500), off for [500,1000).
-            return (now_ms % 1000u) < 500u;
-        }
-
         case LedMode::Failed: {
-            // 5 Hz: on for [0,100), off for [100,200).
-            return (now_ms % 200u) < 100u;
-        }
-
-        case LedMode::ApMode: {
-            // Heartbeat: 60 ms on, 100 ms off, 60 ms on, then idle for the
-            // rest of a 1600 ms period. Visually distinct from a regular
-            // blink so the user can tell "captive portal up" from
-            // "connecting".
-            const uint32_t t = now_ms % 1600u;
-            return (t < 60u) || (t >= 160u && t < 220u);
+            // Three 50 ms pulses with 150 ms gaps, then off forever.
+            // Total signal length ~450 ms.
+            //   [0,    50)  on
+            //   [50,  200)  off
+            //   [200, 250)  on
+            //   [250, 400)  off
+            //   [400, 450)  on
+            //   [450, ...)  off
+            if (elapsed_ms < 50) return true;
+            if (elapsed_ms < 200) return false;
+            if (elapsed_ms < 250) return true;
+            if (elapsed_ms < 400) return false;
+            if (elapsed_ms < 450) return true;
+            return false;
         }
 
         case LedMode::Uploading: {
-            // 50 ms flash at the top of every 1000 ms period. Visible but
-            // unobtrusive; one count per upload attempt.
-            return (now_ms % 1000u) < 50u;
+            // Single 50 ms pulse on mode entry, then off. Confirms a
+            // capture-and-upload is in progress without strobing.
+            return elapsed_ms < 50;
         }
     }
     return false;

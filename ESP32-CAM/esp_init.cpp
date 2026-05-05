@@ -271,11 +271,12 @@ void setupWifiConnection(wifi_configuration_t *wifi_config) {
       Serial.printf("\n------ WiFi connection timed out after 30s "
                     "(SSID=%s, status=%s, fails=%u). Restarting...\n",
                     wifi_config->SSID, hf::wifiStatusName(WiFi.status()), fails);
-      // Hold the rapid-blink "Failed" pattern for ~3 s so the user has
-      // a chance to see it before the reboot. Watchdog (60 s) is fed
-      // each iteration; total worst case here is 33 s.
+      // Fire the "Failed" three-pulse pattern (~450 ms total) and hold
+      // for ~1 s so the user reliably sees it before the reboot. Pattern
+      // auto-completes; the LED is silent for the remainder of the hold.
+      // Watchdog (60 s) is fed each iteration.
       ledSetMode(hf::LedMode::Failed);
-      for (int i = 0; i < 30; ++i) {
+      for (int i = 0; i < 10; ++i) {
         ledTick();
         esp_task_wdt_reset();
         delay(100);

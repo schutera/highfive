@@ -137,19 +137,24 @@ forcing the user through a 5-second CONFIG-button hold.
 
 ### LED legend
 
-The on-board LED (GPIO 4) is driven by
-[`lib/led_state/`](../../ESP32-CAM/lib/led_state/) — a host-testable
-pure helper that maps `(mode, millis())` to on/off.
-[`led.cpp`](../../ESP32-CAM/led.cpp) is the Arduino-side wrapper.
+The on-board LED (GPIO 4) is the **camera flash** — bright enough to
+light a small room. The pattern logic in
+[`lib/led_state/`](../../ESP32-CAM/lib/led_state/) is therefore
+deliberately minimal: every pattern fires briefly and then stays
+silent. Steady-state modes (powered, connected, captive-portal-up,
+trying-to-join) emit no LED at all. The Arduino-side wrapper lives in
+[`led.cpp`](../../ESP32-CAM/led.cpp).
 
-| Pattern                                  | Meaning                                            |
-| ---------------------------------------- | -------------------------------------------------- |
-| Off                                      | Boot pre-init or full shutdown                     |
-| Two short pulses every 1.6 s (heartbeat) | AP captive portal up at `192.168.4.1`              |
-| Slow blink (1 Hz, 50% duty)              | STA WiFi connection in progress                    |
-| Solid on                                 | WiFi connected, idle between captures              |
-| Single 50 ms flash per second            | Capture/upload in flight                           |
-| Rapid blink (5 Hz)                       | WiFi join just timed out (held ~3 s before reboot) |
+| Pattern                                      | Meaning                                                                                       |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Off (default)                                | Anything that isn't an active failure or an upload — including AP mode, Connecting, Connected |
+| Three 50 ms pulses (~450 ms total), then off | WiFi join timed out (~1 s LED hold before reboot)                                             |
+| Single 50 ms pulse, then off                 | Capture+upload starting (one pulse per capture)                                               |
+
+If you need to confirm the board is alive in steady state, use the
+phone WiFi list (AP mode), the serial monitor, or the dashboard
+(connected). The LED is a signal channel for failures and uploads,
+not a presence indicator.
 
 ---
 

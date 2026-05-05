@@ -164,9 +164,11 @@ MAC: 08:3a:f2:6e:69:b0
 
 Also look at the serial log: a join failure now prints the SSID and the resolved `WL_*` status code (e.g. `WL_NO_SSID_AVAIL` for a typo, `WL_CONNECT_FAILED` for a bad password) alongside the running fail counter.
 
-### LED is rapid-blinking after WiFi config — what now?
+### LED flashed three times after WiFi config — what now?
 
-Rapid blink (~5 Hz) means the most recent WiFi join timed out. The board reboots after a 3-second hold and tries again. After **three consecutive failures (~90 s)** the firmware automatically drops back to AP-config mode and the `ESP32-Access-Point` SSID returns. No manual factory-reset hold needed for a mistyped password. Watch the LED transition to the AP heartbeat (two short pulses every 1.6 s) to confirm.
+Three quick pulses (~450 ms total) means the most recent WiFi join timed out. The board reboots after a 1-second hold and tries again. After **three consecutive failures (~90 s)** the firmware automatically drops back to AP-config mode and the `ESP32-Access-Point` SSID returns on your phone's WiFi list. No manual factory-reset hold needed for a mistyped password.
+
+Note: the LED stays silent in AP mode — the on-board LED is the camera flash, so steady-state signalling would be obnoxious. Use the phone's WiFi list to confirm the captive portal is back, not the LED.
 
 ### Factory reset to re-enter configuration
 

@@ -172,7 +172,21 @@ def list_images():
 
 @app.delete("/images/<path:filename>")
 def delete_image(filename):
-    """Delete an image file and its DB record (best-effort: file is deleted even if the DB delete fails)."""
+    """Delete an image's DB record then its on-disk file.
+
+    DB-side outcomes:
+      * 404 from duckdb-service → return 404; the file is NOT deleted.
+      * Connection error / timeout (raised exception) → log a warning,
+        fall through and delete the file anyway (orphans the file
+        rather than the row).
+      * Any other response, including 5xx → fall through and delete
+        the file. No warning is logged in the 5xx case; the on-disk
+        file is removed silently while the DB row stays.
+      * 2xx → fall through and delete the file.
+
+    Atomicity gaps are tracked in #30; this docstring describes the
+    behaviour as it ships today, not the behaviour we want.
+    """
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     try:
         resp = http_requests.delete(

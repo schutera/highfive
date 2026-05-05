@@ -20,8 +20,9 @@ After initial configuration the device operates fully automatically:
 - Captures images at the configured interval and uploads them to
   `image-service` via multipart `POST /upload`
 - Sends an hourly **telemetry heartbeat** to `duckdb-service` at
-  `POST /heartbeat` (firmware-direct; `client.cpp:260`,
-  `routes/heartbeats.py:17`) carrying mac, battery, RSSI,
+  `POST /heartbeat` (firmware-direct; `sendHeartbeat` in
+  `client.cpp`, `heartbeat` route in `routes/heartbeats.py`)
+  carrying mac, battery, RSSI,
   uptime_ms, free_heap, fw_version. The wire shape is
   [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md)
   in `@highfive/contracts` —

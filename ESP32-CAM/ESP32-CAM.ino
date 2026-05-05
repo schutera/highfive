@@ -19,6 +19,14 @@
 // the worst case. 60 s gives a safety margin while still rebooting on
 // genuine deadlocks within ~1 minute.
 #define TASK_WDT_TIMEOUT_S    60
+// Factory-reset hold (CONFIG button held at boot for this long clears
+// `configured` in NVS and reboots into the captive portal). The Serial
+// prints below derive their second-count from FACTORY_RESET_HOLD_MS so
+// firmware logs can't drift. User-facing wizard strings, troubleshooting
+// docs, and onboarding skill copy still hardcode "5 seconds" — keep
+// them in lockstep with this macro by hand or via `make check-citations`.
+#define FACTORY_RESET_HOLD_MS    5000UL
+#define FACTORY_RESET_SETTLE_MS  500UL
 // WIFI_FAIL_AP_FALLBACK_THRESH lives in esp_init.h alongside the NVS
 // fail-counter helpers it gates on.
 
@@ -70,16 +78,17 @@ void setup() {
 
   strlcpy(esp_config.CONFIG_FILE, CONFIG_FILE_PATH, sizeof(esp_config.CONFIG_FILE));
 
-  // Check for config reset: hold GPIO0 LOW for 5 seconds at boot
-  // Must happen before camera init claims GPIO0 for XCLK
+  // Check for config reset: hold GPIO0 LOW for FACTORY_RESET_HOLD_MS at boot.
+  // Must happen before camera init claims GPIO0 for XCLK.
   if (digitalRead(CONFIG_BUTTON) == LOW) {
-    Serial.println("CONFIG button held at boot - hold for 5s to reset...");
+    Serial.printf("CONFIG button held at boot - hold for %lus to reset...\n",
+                  FACTORY_RESET_HOLD_MS / 1000UL);
     unsigned long start = millis();
     while (digitalRead(CONFIG_BUTTON) == LOW) {
-      if (millis() - start > 5000) {
+      if (millis() - start > FACTORY_RESET_HOLD_MS) {
         Serial.println("Long press detected - resetting config");
         setESPConfigured(false);
-        delay(500);
+        delay(FACTORY_RESET_SETTLE_MS);
         ESP.restart();
       }
       delay(50);
@@ -115,10 +124,11 @@ void setup() {
                     (unsigned)wifiFails);
       setWifiFailCount(0);
       setESPConfigured(false);
-      delay(500);
+      delay(FACTORY_RESET_SETTLE_MS);
       ESP.restart();
     }
-    Serial.println("-- ESP already configured. To reconfigure: hold the CONFIG button (GPIO0), tap RESET to reboot, and keep holding CONFIG for 5 seconds until you see the reset message.");
+    Serial.printf("-- ESP already configured. To reconfigure: hold the CONFIG button (GPIO0), tap RESET to reboot, and keep holding CONFIG for %lu seconds until you see the reset message.\n",
+                  FACTORY_RESET_HOLD_MS / 1000UL);
   }
 
   Serial.println("[ESP] INITIALIZING ESP");

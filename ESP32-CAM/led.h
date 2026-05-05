@@ -11,6 +11,11 @@
 // blocking wait that we want to keep the LED alive through, e.g. the
 // 30 s WiFi-connect window in setupWifiConnection()).
 
+// Single source of truth for the on-board flash LED GPIO. Camera pin
+// definitions in esp_init.cpp used to carry their own duplicate macro;
+// this header is now the only declaration.
+#define LED_PIN 4
+
 void ledInit();
 void ledSetMode(hf::LedMode mode);
 void ledTick();

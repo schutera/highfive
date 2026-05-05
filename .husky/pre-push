@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# Verify that path:line citations in docs/ and CLAUDE.md still point at
+# the content the doc claims they do. Catches the line-number drift
+# documented in docs/11-risks-and-technical-debt/ ("Drift sweep is not
+# a substitute for a CI check"). Exits non-zero on missing files or
+# past-EOF citations; warns (without failing) on blank-line landings
+# so legitimate "quoted past mistake" examples in lessons-learned don't
+# block the push.
+bash scripts/check-doc-citations.sh

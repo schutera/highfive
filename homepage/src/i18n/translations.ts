@@ -331,7 +331,7 @@ const translations = {
         'Your module saved its settings and is restarting. Now switch back to your home WiFi.',
       reconnectWifiLabel: 'Switch your WiFi now:',
       reconnectStep1: 'Open your WiFi settings',
-      reconnectStep2: 'Disconnect from HiveHive-Access-Point',
+      reconnectStep2: 'Disconnect from ESP32-Access-Point',
       reconnectStep3: 'Connect to your home WiFi network',
       reconnectBtn: "I'm on my home WiFi",
     },
@@ -356,7 +356,7 @@ const translations = {
       starting: 'Starting...',
       goBackConfig: 'Go back to configuration',
       wifiReminder:
-        'Make sure your device is connected to your home WiFi, not the HiveHive-Access-Point.',
+        'Make sure your device is connected to your home WiFi, not the ESP32-Access-Point.',
       troubleshoot: {
         powerTitle: 'Is the module powered on?',
         powerText:
@@ -366,7 +366,7 @@ const translations = {
           "Check your router's connected devices list. If the module isn't there, reconfigure it \u2014 the WiFi credentials may be incorrect.",
         apTitle: 'Is the access point still visible?',
         apText:
-          "If you can still see 'HiveHive-Access-Point' in your WiFi list, the module hasn't connected to your home network yet. Reconnect and verify the WiFi settings.",
+          "If you can still see 'ESP32-Access-Point' in your WiFi list, the module hasn't connected to your home network yet. Reconnect and verify the WiFi settings.",
         resetTitle: 'Factory Reset',
         resetText:
           'Hold the left button on the ESP32-CAM for 5 seconds until it restarts. This resets all settings and re-opens the configuration portal.',
@@ -715,7 +715,7 @@ const translations = {
         'Dein Modul hat die Einstellungen gespeichert und startet neu. Wechsle jetzt zur\u00FCck zu deinem Heim-WLAN.',
       reconnectWifiLabel: 'WLAN jetzt wechseln:',
       reconnectStep1: '\u00D6ffne deine WLAN-Einstellungen',
-      reconnectStep2: 'Trenne die Verbindung zum HiveHive-Access-Point',
+      reconnectStep2: 'Trenne die Verbindung zum ESP32-Access-Point',
       reconnectStep3: 'Verbinde dich mit deinem Heim-WLAN',
       reconnectBtn: 'Ich bin in meinem Heim-WLAN',
     },
@@ -741,7 +741,7 @@ const translations = {
       starting: 'Starte...',
       goBackConfig: 'Zur\u00FCck zur Konfiguration',
       wifiReminder:
-        'Stelle sicher, dass dein Ger\u00E4t mit deinem Heim-WLAN verbunden ist, nicht mit dem HiveHive-Access-Point.',
+        'Stelle sicher, dass dein Ger\u00E4t mit deinem Heim-WLAN verbunden ist, nicht mit dem ESP32-Access-Point.',
       troubleshoot: {
         powerTitle: 'Ist das Modul eingeschaltet?',
         powerText:
@@ -751,7 +751,7 @@ const translations = {
           'Pr\u00FCfe die Liste der verbundenen Ger\u00E4te deines Routers. Wenn das Modul nicht aufgelistet ist, konfiguriere es neu \u2014 die WLAN-Zugangsdaten sind m\u00F6glicherweise falsch.',
         apTitle: 'Ist der Access Point noch sichtbar?',
         apText:
-          "Wenn du 'HiveHive-Access-Point' noch in deiner WLAN-Liste siehst, hat sich das Modul noch nicht mit deinem Heimnetzwerk verbunden. Verbinde dich erneut und \u00FCberpr\u00FCfe die WLAN-Einstellungen.",
+          "Wenn du 'ESP32-Access-Point' noch in deiner WLAN-Liste siehst, hat sich das Modul noch nicht mit deinem Heimnetzwerk verbunden. Verbinde dich erneut und \u00FCberpr\u00FCfe die WLAN-Einstellungen.",
         resetTitle: 'Werkseinstellungen',
         resetText:
           'Halte den linken Knopf der ESP32-CAM 5 Sekunden gedr\u00FCckt, bis sie neu startet. Dies setzt alle Einstellungen zur\u00FCck und \u00F6ffnet das Konfigurationsportal erneut.',

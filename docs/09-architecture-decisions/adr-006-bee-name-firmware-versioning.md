@@ -41,11 +41,11 @@ collapses them to one source.
 
 ### Currently divergent (as of `upstream/main` HEAD `a3675de`)
 
-| File / location | Macro / value | Read by | Surfaces as |
-|---|---|---|---|
-| `ESP32-CAM/VERSION` | `carpenter` | `ESP32-CAM/build.sh:29` | The `version` field in `homepage/public/firmware.json` (the OTA manifest the wizard reads). |
-| `ESP32-CAM/esp_init.h:8` | `#define FIRMWARE_VERSION "1.0.0"` | `ESP32-CAM/logbuf.cpp:86` and `ESP32-CAM/ESP32-CAM.ino:55` | The telemetry sidecar `fw` field on every image upload, and the boot log line. |
-| `ESP32-CAM/client.cpp:232` | `#define FW_VERSION "honeybee"` | `ESP32-CAM/client.cpp:258` | The `fw_version` form field in the hourly heartbeat body to `POST /heartbeat` (the column `module_heartbeats.fw_version`, surfaced as `Module.latestHeartbeat.fwVersion`). |
+| File / location        | Macro / value                                                | Read by                                                                                     | Surfaces as                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ESP32-CAM/VERSION`    | `carpenter`                                                  | `ESP32-CAM/build.sh`                                                                        | The `version` field in `homepage/public/firmware.json` (the OTA manifest the wizard reads).                                                                                |
+| `ESP32-CAM/esp_init.h` | `#define FIRMWARE_VERSION "1.0.0"`                           | `ESP32-CAM/logbuf.cpp` (`logBootMarker`) and `ESP32-CAM/ESP32-CAM.ino` (`setup()` boot log) | The telemetry sidecar `fw` field on every image upload, and the boot log line.                                                                                             |
+| `ESP32-CAM/client.cpp` | `#define FW_VERSION "honeybee"` (just above `sendHeartbeat`) | `ESP32-CAM/client.cpp` (`sendHeartbeat`'s body string)                                      | The `fw_version` form field in the hourly heartbeat body to `POST /heartbeat` (the column `module_heartbeats.fw_version`, surfaced as `Module.latestHeartbeat.fwVersion`). |
 
 So a single deployed `carpenter` device today reports:
 

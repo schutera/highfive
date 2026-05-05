@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help test test-esp test-esp-native test-e2e test-e2e-deps
+.PHONY: help test test-esp test-esp-native test-e2e test-e2e-deps check-citations
 
 help:
 	@echo "HiveHive — available make targets"
@@ -14,6 +14,7 @@ help:
 	@echo "  make test-esp-native    Alias for test-esp"
 	@echo "  make test-e2e           Run end-to-end pipeline test (boots docker compose)"
 	@echo "  make test-e2e-deps      Install Python deps for the e2e test"
+	@echo "  make check-citations    Verify path:line citations in docs/ + CLAUDE.md still resolve"
 	@echo ""
 	@echo "Prerequisites:"
 	@echo "  test-esp*   →   pip install platformio   (provides 'pio')"
@@ -36,3 +37,7 @@ test-e2e-deps:
 test-e2e:
 	@echo ">>> pytest tests/e2e/ -v"
 	python -m pytest tests/e2e/ -v
+
+check-citations:
+	@echo ">>> bash scripts/check-doc-citations.sh"
+	@bash scripts/check-doc-citations.sh

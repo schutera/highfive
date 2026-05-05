@@ -123,12 +123,12 @@ These are the most-violated rules from past incidents. Full list in [`docs/02-co
 - **Never ship the dev API key (`hf_dev_key_2026`)** as a production fallback. Override `HIGHFIVE_API_KEY`.
 - **Never remove `PORT=3002` from the backend service in `docker-compose.yml`** — `server.ts` defaults to the legacy `3001`, which leaves the host port unbound and silently breaks the dashboard. Fixed in commit `ea7dc73` (PR-17 review critical), see [chapter 11](docs/11-risks-and-technical-debt/README.md).
 - **Never lower `TASK_WDT_TIMEOUT_S` in firmware below 60 s** without re-running the worst-case `captureAndUpload` + heartbeat scenario. Bumped from 30 s in commit `ea7dc73` (PR-17 review critical), see [ADR-007](docs/09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md).
-- **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` (`ESP32-CAM/client.cpp:283`) so admin telemetry surfaces failures. Fixed in commit `ea7dc73` (PR-17 review critical).
-- **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. and cite line numbers — commit messages summarise intent, not what shipped. Lesson from this PR's review (see [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned").
+- **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` (in `ESP32-CAM/client.cpp`'s `sendHeartbeat`) so admin telemetry surfaces failures. Fixed in commit `ea7dc73` (PR-17 review critical).
+- **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. — commit messages summarise intent, not what shipped. Prefer `path's <symbol>` or `path::symbol` over `path:line`; the latter drift silently. Run `make check-citations` before invoking the reviewer. Lesson recorded in [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned".
 
 ## Standard end-of-implementation gate
 
-Every non-trivial change — feature work, bug fix, doc restructure, refactor — runs through the [`senior-reviewer`](.claude/agents/senior-reviewer.md) subagent before it leaves the working tree. Invoke it via the Agent tool with `subagent_type: senior-reviewer`. It is harsh on purpose: a senior-staff-engineer persona that reads the actual diff, cites file:line for every claim, and ranks issues P0/P1/P2.
+Every non-trivial change — feature work, bug fix, doc restructure, refactor — runs through the [`senior-reviewer`](.claude/agents/senior-reviewer.md) subagent before it leaves the working tree. Invoke it via the Agent tool with `subagent_type: senior-reviewer`. It is harsh on purpose: a senior-staff-engineer persona that reads the actual diff, anchors every concrete claim to a path (preferring `` path's `symbol` `` over `path:line`), and ranks issues P0/P1/P2.
 
 When to run it:
 
@@ -139,6 +139,7 @@ When to run it:
 How to run it:
 
 - Default scope is `git diff $(git merge-base HEAD main)..HEAD`. Tell the agent which branch, PR, or file set to focus on if not the obvious one.
+- **Run `make check-citations` first** and inspect the report. The script flags any `path:line` citation in `docs/` or `CLAUDE.md` that points at a missing file, past-EOF line, or blank line. Humans inspect the OK rows for "drifted but still in valid territory" cases (e.g. citation now lands on a closing brace). Also fires automatically on `git push` via `.husky/pre-push`.
 - Address every P0 before pushing for review. P1s should be fixed or have an explicit "out of scope, tracked in issue #N" justification. P2s are nits and may be deferred.
 - Treat its findings as input, not as a verdict. If it claims something is wrong, verify against the code yourself — but do not dismiss without checking.
 

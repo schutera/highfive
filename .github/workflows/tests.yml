@@ -1,6 +1,6 @@
 # CI test workflow.
 #
-# Seven parallel jobs:
+# Eight parallel jobs:
 #
 #   esp-native      → host-side Unity tests for the pure C++ helpers
 #                     under ESP32-CAM/lib/. Fast (~1 min cold).
@@ -20,6 +20,10 @@
 #                     outbound HTTP and duckdb.connect are mocked).
 #
 #   homepage-unit   → vitest + jsdom smoke tests for the React homepage.
+#
+#   doc-citations   → walks `path:line` references in docs/ and CLAUDE.md
+#                     and verifies each one resolves to a non-blank line
+#                     of the current source. Fast (<10 s).
 #
 #   e2e-pipeline    → boots the four-service docker compose, drives it
 #                     with the Python mock ESP, asserts the upload chain
@@ -193,6 +197,22 @@ jobs:
 
       - name: Run tests
         run: npm test --workspace homepage
+
+  doc-citations:
+    name: Doc-citation drift gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run check-doc-citations.sh
+        # Walks every `path:line` citation in docs/ + CLAUDE.md, reads
+        # the cited line in the current source, and fails on missing
+        # files / past-EOF citations / basename-ambiguous citations.
+        # See docs/11-risks-and-technical-debt/ "Drift sweep is not a
+        # substitute for a CI check".
+        run: bash scripts/check-doc-citations.sh
 
   e2e-pipeline:
     name: End-to-end pipeline test

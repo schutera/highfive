@@ -186,9 +186,9 @@ endpoints are wholly separate.
 
 ### POST /heartbeat — telemetry heartbeat
 
-Called by ESP32-CAM firmware directly, hourly
-(`ESP32-CAM/client.cpp:260`). Implementation in
-`duckdb-service/routes/heartbeats.py:17`.
+Called by ESP32-CAM firmware directly, hourly (`sendHeartbeat` in
+`ESP32-CAM/client.cpp`). Implementation in
+`duckdb-service/routes/heartbeats.py` (`heartbeat` route).
 
 Body (form-encoded): `mac`, `battery`, `rssi`, `uptime_ms`,
 `free_heap`, `fw_version` → returns `{"ok": true}`.
@@ -218,11 +218,11 @@ first-upload events without opening a direct DuckDB connection.
 
 ## Internal services (no HTTP surface)
 
-| Module                                  | Role                                                                                          |
-| --------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `services/silence_watcher.py`           | Periodic Discord alert when a module goes silent for >3 h, recovery message on return — see [ADR-005](../09-architecture-decisions/adr-005-silence-watcher-in-duckdb-service.md) |
-| `services/backup.py`                    | Periodic snapshot of `app.duckdb` to a sibling backup file under `/data`                      |
-| `services/discord.py`                   | Thin webhook wrapper used by the silence watcher and the AI-classification flow               |
+| Module                        | Role                                                                                                                                                                             |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `services/silence_watcher.py` | Periodic Discord alert when a module goes silent for >3 h, recovery message on return — see [ADR-005](../09-architecture-decisions/adr-005-silence-watcher-in-duckdb-service.md) |
+| `services/backup.py`          | Periodic snapshot of `app.duckdb` to a sibling backup file under `/data`                                                                                                         |
+| `services/discord.py`         | Thin webhook wrapper used by the silence watcher and the AI-classification flow                                                                                                  |
 
 ## References:
 

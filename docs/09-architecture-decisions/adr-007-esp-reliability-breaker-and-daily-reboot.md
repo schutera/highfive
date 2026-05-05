@@ -72,7 +72,7 @@ consecutiveFailures` local to `captureAndUpload` in
 review (`ea7dc73`): it now parses the HTTP status line and
 returns 0 only on 2xx, and on any non-2xx (or WiFi-down /
 connect-fail) it writes to the logbuf ring via
-`logbufNoteHttpCode` (`ESP32-CAM/client.cpp:283`). That gives
+`logbufNoteHttpCode` (inside `sendHeartbeat` in `ESP32-CAM/client.cpp`). That gives
 admin telemetry a record of heartbeat failures. Important: the
 heartbeat status code is **not** wired to the breaker counter —
 the breaker only counts upload-path failures from

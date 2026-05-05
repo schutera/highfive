@@ -43,8 +43,9 @@ sequenceDiagram
 > The hourly `POST /heartbeat` fired directly by firmware is the
 > **telemetry heartbeat** — body
 > `mac/battery/rssi/uptime_ms/free_heap/fw_version`, inserts a row
-> into `module_heartbeats` (`duckdb-service/routes/heartbeats.py:17`,
-> `ESP32-CAM/client.cpp:260`). It is the source of `latestHeartbeat`
+> into `module_heartbeats` (`heartbeat` route in
+> `duckdb-service/routes/heartbeats.py`; `sendHeartbeat` in
+> `ESP32-CAM/client.cpp`). It is the source of `latestHeartbeat`
 > /`HeartbeatSnapshot` ([ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md)).
 >
 > See the glossary entries "Heartbeat (telemetry)" and

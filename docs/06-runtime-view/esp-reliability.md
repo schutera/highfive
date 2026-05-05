@@ -73,7 +73,7 @@ if a future change tempts you to reorder it.
 `sendHeartbeat` was hardened in PR-17 review (commit `ea7dc73`):
 it parses the HTTP status line and returns 0 only on 2xx, and on any
 non-2xx (or WiFi-down / connect-fail) it writes to the logbuf ring via
-`logbufNoteHttpCode` ([`ESP32-CAM/client.cpp:283`](../../ESP32-CAM/client.cpp)).
+`logbufNoteHttpCode` (inside `sendHeartbeat` in [`ESP32-CAM/client.cpp`](../../ESP32-CAM/client.cpp)).
 That gives admin telemetry a record of heartbeat failures. The
 heartbeat status code is **not** wired to `consecutiveFailures` — the
 breaker only counts upload failures. See

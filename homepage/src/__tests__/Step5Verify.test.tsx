@@ -74,26 +74,68 @@ describe('Step5Verify retry visibility', () => {
     expect(screen.queryByText(/\d\/8/)).not.toBeInTheDocument();
   });
 
-  it('logs failed attempts with console.warn (one per failure, none on success)', async () => {
+  it('logs exactly one console.warn per failed attempt (and none on the eventual success)', async () => {
+    // Three failures then success — three warns expected, in order. Mocking
+    // a sequence longer than one rejection is what lets the test detect a
+    // "two warns per single failure" regression.
     healthCheck
-      .mockRejectedValueOnce(new Error('boom'))
+      .mockRejectedValueOnce(new Error('boom-1'))
+      .mockRejectedValueOnce(new Error('boom-2'))
+      .mockRejectedValueOnce(new Error('boom-3'))
       .mockResolvedValueOnce({ status: 'ok', timestamp: '' });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     renderWizardStep();
 
-    // Drain the 2 s retry delay so the success path also runs. The
-    // failure→success sequence is what proves we don't double-warn on
-    // recovery, and that warn fires exactly once per actual failure.
+    // Drain three 2 s retry delays so all three rejections + the success
+    // resolution fire.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(6000);
     });
 
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenNthCalledWith(
+      1,
       expect.stringContaining('[Step5] backend healthcheck 1/8 failed'),
       expect.any(Error),
     );
+    expect(warn).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('[Step5] backend healthcheck 2/8 failed'),
+      expect.any(Error),
+    );
+    expect(warn).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('[Step5] backend healthcheck 3/8 failed'),
+      expect.any(Error),
+    );
     warn.mockRestore();
+  });
+
+  it('renders the unreachable-screen alert when all 8 attempts fail', async () => {
+    // The branch the silent-retry feature exists for. Eight rejections,
+    // no success: the spinner gives way to the red unreachable screen
+    // (role=alert) and verification is NOT started.
+    for (let i = 0; i < 8; i++) {
+      healthCheck.mockRejectedValueOnce(new Error(`fail-${i + 1}`));
+    }
+    const startVerification = vi.fn();
+
+    renderWizardStep(startVerification);
+
+    // Drain all eight attempts × 2 s retry delay (~14 s). Add a small
+    // buffer to flush any trailing microtasks.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8 * 2000 + 100);
+    });
+
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(/Backend Server Not Reachable/i)).toBeInTheDocument();
+    expect(startVerification).not.toHaveBeenCalled();
+    // Two-sided: pin the attempt count too. If anyone bumps MAX_ATTEMPTS
+    // past 8 without updating this test, the 9th call would see the
+    // vitest auto-mock (returns undefined → component treats as success)
+    // and the unreachable branch would silently stop being exercised.
+    expect(healthCheck).toHaveBeenCalledTimes(8);
   });
 });

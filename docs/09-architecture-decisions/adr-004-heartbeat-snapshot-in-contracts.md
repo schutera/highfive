@@ -9,9 +9,10 @@ Accepted.
 PR 17 added a per-module **telemetry heartbeat** channel. The ESP32-CAM
 fires the POST itself, hourly, with `mac`, `battery`, `rssi`, `uptime_ms`,
 `free_heap`, `fw_version`. The route that receives it is
-`POST /heartbeat` on `duckdb-service` (`duckdb-service/routes/heartbeats.py:17`),
-called by the firmware in `ESP32-CAM/client.cpp:260` (path is hardcoded —
-see the comment block at `client.cpp:226-230`). Each call inserts a row
+`POST /heartbeat` on `duckdb-service` (the `heartbeat` route in
+`duckdb-service/routes/heartbeats.py`), called by the firmware's
+`sendHeartbeat` in `ESP32-CAM/client.cpp` (path is hardcoded — see the
+comment block at the top of `sendHeartbeat`). Each call inserts a row
 into the `module_heartbeats` table (schema in
 `duckdb-service/db/schema.py`). The backend exposes the most recent row
 as `Module.latestHeartbeat` so the dashboard can show liveness without

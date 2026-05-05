@@ -2,11 +2,8 @@
 
 #include <Arduino.h>
 
-// On-board flash LED. esp_init.cpp owns the camera pinouts; we duplicate
-// the GPIO number here rather than expose a header purely for one int.
-// Drift would manifest as a stuck-off LED in the field — caught by the
-// first manual onboarding run.
-#define LED_PIN 4
+// LED_PIN is owned by led.h — single source of truth for the on-board
+// flash LED GPIO. esp_init.cpp's camera-pin block no longer redeclares it.
 
 static hf::LedMode g_mode = hf::LedMode::Off;
 static bool g_lastWritten = false;

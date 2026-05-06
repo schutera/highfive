@@ -13,7 +13,11 @@ from pathlib import Path
 Import("env")  # noqa: F821 — provided by PlatformIO at script-eval time
 
 version_file = Path(env["PROJECT_DIR"]) / "VERSION"  # noqa: F821
-version = version_file.read_text().strip() if version_file.exists() else "dev"
+version = (
+    version_file.read_text(encoding="utf-8").strip()
+    if version_file.exists()
+    else "dev-unset"
+)
 
 env.Append(  # noqa: F821
     CPPDEFINES=[("FIRMWARE_VERSION", env.StringifyMacro(version))]  # noqa: F821

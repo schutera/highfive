@@ -116,7 +116,7 @@ or wrong, `502` if the image-service is unreachable.
 ```json
 [
   {
-    "fw": "1.0.0",
+    "fw": "carpenter",
     "uptime_s": 72145,
     "last_reset_reason": "TASK_WDT",
     "free_heap": 124352,
@@ -124,7 +124,7 @@ or wrong, `502` if the image-service is unreachable.
     "rssi": -67,
     "wifi_reconnects": 2,
     "last_http_codes": [200, 200, 500, 200, 200],
-    "log": "[BOOT] fw=1.0.0 ...",
+    "log": "[BOOT] fw=carpenter ...",
     "_mac": "12345678901234",
     "_received_at": "2026-04-11T14:32:17",
     "_image": "esp_capture_20260411_143217.jpg"

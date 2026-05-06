@@ -8,7 +8,7 @@ FQBN="esp32:esp32:esp32cam"
 # Read once and reuse below: the same value is injected into the firmware
 # binary as -DFIRMWARE_VERSION and written into the homepage manifest, so
 # boot log + telemetry + heartbeat + OTA manifest all agree.
-VERSION="$(cat "${SKETCH_DIR}/VERSION" 2>/dev/null || echo dev)"
+VERSION="$(cat "${SKETCH_DIR}/VERSION" 2>/dev/null || echo dev-unset)"
 
 echo "Compiling ESP32-CAM firmware..."
 echo "  FQBN:    ${FQBN}"
@@ -22,6 +22,20 @@ arduino-cli compile \
   --output-dir "${BUILD_DIR}" \
   --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"\\\"${VERSION}\\\"\"" \
   "${SKETCH_DIR}"
+
+# Verify the macro landed as a C string literal (not as a token, and
+# not as a doubly-quoted "\"name\"" thanks to a quoting-arms-race fail).
+# The merged binary should contain VERSION exactly once near the
+# strings table; the literal escaped form must NOT appear.
+if grep -aFq "\"${VERSION}\"" "${BUILD_DIR}/ESP32-CAM.ino.bin"; then
+  echo "ERROR: firmware contains literal \\\"${VERSION}\\\" — quote-escaping doubled" >&2
+  exit 1
+fi
+if ! grep -aFq "${VERSION}" "${BUILD_DIR}/ESP32-CAM.ino.bin"; then
+  echo "ERROR: firmware does not contain ${VERSION} — FIRMWARE_VERSION was not injected" >&2
+  exit 1
+fi
+echo "Verified: FIRMWARE_VERSION=${VERSION} is in the binary as a plain string."
 
 echo ""
 echo "Build artifacts:"

@@ -1,4 +1,4 @@
-# ADR-006: ESP firmware version — bee-name convention (currently divergent)
+# ADR-006: ESP firmware version — bee-name convention
 
 ## Status
 

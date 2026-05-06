@@ -235,9 +235,6 @@ int postImage(esp_config_t *esp_config) {
 // registration endpoint (`/new_module`, which uses JSON), but heartbeat
 // is a sibling on the same host:port — only the path differs. We use
 // INIT_URL purely as the carrier of host+port and discard its path.
-#ifndef FW_VERSION
-#define FW_VERSION "honeybee"
-#endif
 int sendHeartbeat(esp_config_t *esp_config) {
   if (WiFi.status() != WL_CONNECTED) {
     logf("[heartbeat] WiFi not connected — skipping");
@@ -262,7 +259,7 @@ int sendHeartbeat(esp_config_t *esp_config) {
               + "&rssi=" + String(WiFi.RSSI())
               + "&uptime_ms=" + String(millis())
               + "&free_heap=" + String(ESP.getFreeHeap())
-              + "&fw_version=" + String(FW_VERSION);
+              + "&fw_version=" + String(FIRMWARE_VERSION);
 
   hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
                + "Host: " + String(url.host.c_str()) + ":" + String((unsigned)url.port) + "\r\n"

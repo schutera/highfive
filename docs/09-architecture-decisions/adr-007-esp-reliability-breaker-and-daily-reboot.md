@@ -48,16 +48,7 @@ The three mechanisms live in `ESP32-CAM/ESP32-CAM.ino` and the
   rules) because the worst-case loop iteration
   (`captureAndUpload` 3× retry + heartbeat) could exceed 30 s
   and silently reboot mid-upload.
-- Consecutive-failure breaker tracked in a `static uint8_t
-consecutiveFailures` local to `captureAndUpload` in
-  [`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino).
-  Incremented on any non-2xx outcome, reset to 0 on success. At
-  > = 5 it runs `delay(1000); ESP.restart()` immediately. The
-  > comment block at the top of `captureAndUpload` describes a
-  > **separate** behaviour: a single failed first-capture-on-boot
-  > returns `false`, the caller proceeds, and the next `loop()`
-  > iteration (~30 s later) tries again. That retry path eventually
-  > feeds the breaker; it does not defer the restart itself.
+- Consecutive-failure breaker tracked in a `static uint8_t consecutiveFailures` local to `captureAndUpload` in [`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino). Incremented on any non-2xx outcome, reset to 0 on success. On the fifth consecutive failure it runs `delay(1000); ESP.restart()` immediately. The comment block at the top of `captureAndUpload` describes a **separate** behaviour: a single failed first-capture-on-boot returns `false`, the caller proceeds, and the next `loop()` iteration (~30 s later) tries again. That retry path eventually feeds the breaker; it does not defer the restart itself.
 - Daily-reboot wake flagged in NVS namespace `"boot"` key
   `daily_reboot`; written by the daily-trigger path in `loop()`
   (`putBool("daily_reboot", true)`), then read + cleared at boot in

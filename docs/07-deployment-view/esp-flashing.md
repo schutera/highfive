@@ -74,7 +74,7 @@ Find the port: **Device Manager → Ports → USB-SERIAL CH340 (COMx)** on Windo
 
 ### Boot normally after flashing
 
-Press **RST** once (without IO0). The module boots, opens the configuration access point, and the LED begins the AP heartbeat pattern (two short pulses every ~1.6 s). See [the LED legend in chapter 06](../06-runtime-view/esp-reliability.md#led-legend) for what each pattern means during onboarding.
+Press **RST** once (without IO0). The module boots and opens the configuration access point — verify by opening your phone's WiFi list and looking for `ESP32-Access-Point`. The on-board LED stays silent in AP mode (the LED is the camera-flash GPIO; steady-state signalling would be obnoxious). See [the LED legend in chapter 06](../06-runtime-view/esp-reliability.md#led-legend) for the brief failure / upload pulses the LED does emit during normal operation.
 
 ---
 

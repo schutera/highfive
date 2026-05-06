@@ -289,6 +289,17 @@ itself but the next round of fixes shipped with eight fresh stale
   `HiveHive-Access-Point` SSID drift both lived in
   `homepage/src/i18n/translations.ts`, not in `docs/`. The lesson
   is "user-facing strings are a documentation surface."
+- **Prose claims about device behaviour drift just like citations.**
+  The LED redesign in this same PR made AP / Connecting / Connected
+  modes silent in `lib/led_state/led_state.cpp`'s `ledOnAt`, but four
+  unrelated surfaces still told the user to expect blinking — Step 5
+  troubleshoot copy (EN + DE), `esp-flashing.md`'s "AP heartbeat
+  pattern" line, and the `esp32-onboarding` skill's "LED should start
+  flashing" line. None used `path:line`, so the citation gate could
+  not catch them. When changing observable device behaviour (LED
+  pattern, audible signal, boot sequence, captive-portal text), grep
+  the whole repo (`docs/`, `homepage/src/i18n/`, `.claude/skills/`)
+  for prose making the old promise.
 
 **Out-of-scope follow-up: pre-existing drift not fixed in this PR.**
 The Maps API key citations in chapters 3/5/11 and any future drift

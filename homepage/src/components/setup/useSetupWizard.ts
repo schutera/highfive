@@ -69,10 +69,14 @@ export function useSetupWizard() {
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
   const knownModuleSnapshotRef = useRef<Map<string, string | undefined>>(new Map());
-  // Set synchronously the moment startVerification is entered so a concurrent
-  // Strict-Mode-double invocation bails before re-fetching the snapshot.
-  // pollingIntervalRef alone isn't enough — both calls await before assigning
-  // it, leaving a window where both pass the guard.
+  // React 18 Strict Mode runs every effect twice in dev (intentional, to
+  // surface effects that don't survive remount). Both runs of Step5Verify's
+  // `useEffect(() => checkBackendAndStart(), [])` race through the
+  // healthcheck and call startVerification concurrently. Set this ref
+  // synchronously the moment startVerification is entered so the second
+  // invocation bails before re-fetching the snapshot. pollingIntervalRef
+  // alone isn't enough — both calls await before assigning it, leaving a
+  // window where both pass that guard.
   const startInflightRef = useRef(false);
 
   // Load firmware info, detect LAN IP, and snapshot modules on mount.

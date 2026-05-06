@@ -76,7 +76,7 @@ cd ESP32-CAM
 pio run -e esp32cam --target upload --upload-port <port>
 ```
 
-After success: press **RST** once (no IO0) to boot normally. The LED should start flashing.
+After success: press **RST** once (no IO0) to boot normally. Watch the serial monitor for the boot banner — the LED stays silent in AP mode and during steady-state operation (it's the camera-flash GPIO; constant signalling would be obnoxious). Brief LED pulses appear only on WiFi-join failure (3×) or per image upload (1×).
 
 **Multiple Python versions (Windows):** if `python -m platformio` fails, call with the explicit path:
 

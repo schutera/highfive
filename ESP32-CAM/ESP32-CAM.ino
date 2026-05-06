@@ -235,10 +235,9 @@ bool captureAndUpload() {
   Serial.println("");
   Serial.printf("-- Trying to capture and post image number %d\n", counter++);
 
-  // Single-flash LED pattern while the upload is in flight — gives a
-  // visible "yes, the board is working" signal between long sleep
-  // intervals. Reverts to solid-on (Connected) at the bottom of the
-  // function regardless of outcome.
+  // Single 50 ms pulse on entry so the operator can see the board is
+  // alive between long sleep intervals. Connected is silent; without
+  // this pulse the board would emit no visible signal whatsoever.
   ledSetMode(hf::LedMode::Uploading);
 
   int httpCode = -1;
@@ -319,9 +318,9 @@ bool captureAndUpload() {
     }
   }
 
-  // Revert to the steady "Connected" pattern. Even on upload failure,
-  // WiFi itself is still up (a non-2xx is an application failure, and
-  // the circuit breaker above handles repeated failures by rebooting).
+  // Back to the silent Connected steady-state. Even on upload failure
+  // WiFi itself is still up (a non-2xx is an application failure; the
+  // circuit breaker above handles repeated failures by rebooting).
   ledSetMode(hf::LedMode::Connected);
 
   Serial.printf("-- Finished capturing and posting image %d\n", counter);

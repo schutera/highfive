@@ -82,9 +82,8 @@ anything in this neighbourhood.
 
 `POST /add_progress_for_module` carries `modul_id` (typo, missing
 "e"). Everywhere else (DB column, route param, DTO) the canonical
-name is `module_id`. Verified in
-`duckdb-service/models/progress.py:6` and
-`duckdb-service/routes/progress.py`.
+name is `module_id`. Verified in `duckdb-service/models/progress.py`'s
+`ClassificationOutput` and `duckdb-service/routes/progress.py`.
 
 **Why it exists**: original misspelling, kept on the wire to avoid
 breaking image-service ↔ duckdb-service in lockstep.

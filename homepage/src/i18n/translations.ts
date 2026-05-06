@@ -360,7 +360,7 @@ const translations = {
       troubleshoot: {
         powerTitle: 'Is the module powered on?',
         powerText:
-          'Make sure the ESP32-CAM has power (USB or battery) and the LED blinks on startup.',
+          'Make sure the ESP32-CAM has power (USB or battery). The on-board LED stays silent during normal operation and only pulses briefly when an image is uploaded — no LED activity does NOT mean the module is dead.',
         wifiTitle: 'Did it connect to your WiFi?',
         wifiText:
           "Check your router's connected devices list. If the module isn't there, reconfigure it \u2014 the WiFi credentials may be incorrect.",
@@ -745,7 +745,7 @@ const translations = {
       troubleshoot: {
         powerTitle: 'Ist das Modul eingeschaltet?',
         powerText:
-          'Stelle sicher, dass die ESP32-CAM Strom hat (USB oder Akku) und die LED beim Start blinkt.',
+          'Stelle sicher, dass die ESP32-CAM mit Strom versorgt ist (USB oder Akku). Die LED bleibt im Normalbetrieb aus und pulsiert nur kurz beim Bild-Upload — eine dunkle LED bedeutet NICHT, dass das Modul defekt ist.',
         wifiTitle: 'Hat es sich mit deinem WLAN verbunden?',
         wifiText:
           'Pr\u00FCfe die Liste der verbundenen Ger\u00E4te deines Routers. Wenn das Modul nicht aufgelistet ist, konfiguriere es neu \u2014 die WLAN-Zugangsdaten sind m\u00F6glicherweise falsch.',

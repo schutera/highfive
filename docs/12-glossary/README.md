@@ -124,7 +124,8 @@ and flags the synonyms, typos, and overloads that have caused bugs.
   on `POST /add_progress_for_module`) carries the field `modul_id`.
   Everywhere else (DB column, route param, DTO) the canonical name is
   `module_id`. Still live on the wire as of 2026-04-25; verified in
-  `duckdb-service/models/progress.py:6` and `duckdb-service/routes/progress.py`.
+  `duckdb-service/models/progress.py`'s `ClassificationOutput` and
+  `duckdb-service/routes/progress.py`.
   **Recommendation:** keep on the wire for now to avoid breaking
   image-service, but rename to `module_id` next time the contract
   changes; add a Pydantic alias during transition.

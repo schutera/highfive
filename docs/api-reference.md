@@ -162,11 +162,11 @@ POST /upload
 Content-Type: multipart/form-data
 ```
 
-| Field     | Type | Required | Description                                                        |
-| --------- | ---- | -------- | ------------------------------------------------------------------ |
-| `image`   | File | Yes      | Captured JPEG                                                      |
-| `mac`     | Text | Yes      | Module identifier                                                  |
-| `battery` | Text | Yes      | Integer 0–100                                                      |
+| Field     | Type | Required | Description                                                                        |
+| --------- | ---- | -------- | ---------------------------------------------------------------------------------- |
+| `image`   | File | Yes      | Captured JPEG                                                                      |
+| `mac`     | Text | Yes      | Module identifier                                                                  |
+| `battery` | Text | Yes      | Integer 0–100                                                                      |
 | `logs`    | Text | No       | JSON telemetry payload (see [esp-reliability](06-runtime-view/esp-reliability.md)) |
 
 If `logs` is present and parseable, it is written to
@@ -332,24 +332,24 @@ Content-Type: application/x-www-form-urlencoded
 
 Form fields:
 
-| Field        | Type   | Notes                                                    |
-|--------------|--------|----------------------------------------------------------|
-| `mac`        | string | canonical 12-char hex MAC (or `esp_id` alias)            |
-| `battery`    | int    | optional                                                 |
-| `rssi`       | int    | optional, dBm                                            |
-| `uptime_ms`  | int    | optional, since last boot                                |
-| `free_heap`  | int    | optional, bytes                                          |
-| `fw_version` | string | optional, ≤40 chars (currently a bee-name; see ADR-006)  |
+| Field        | Type   | Notes                                                   |
+| ------------ | ------ | ------------------------------------------------------- |
+| `mac`        | string | canonical 12-char hex MAC (or `esp_id` alias)           |
+| `battery`    | int    | optional                                                |
+| `rssi`       | int    | optional, dBm                                           |
+| `uptime_ms`  | int    | optional, since last boot                               |
+| `free_heap`  | int    | optional, bytes                                         |
+| `fw_version` | string | optional, ≤40 chars (currently a bee-name; see ADR-006) |
 
 Returns `{ "ok": true }`, `200`. Missing `mac` returns
 `{ "error": "missing mac" }`, `400`.
 
 Side effect: a single `INSERT` into `module_heartbeats`. The handler
 does **not** update `module_configs`. Implementation in
-`duckdb-service/routes/heartbeats.py:17-55`.
+the `heartbeat` route of `duckdb-service/routes/heartbeats.py`.
 
-This is the **telemetry heartbeat** fired hourly by firmware
-(`ESP32-CAM/client.cpp:260`). It is distinct from the post-upload
+This is the **telemetry heartbeat** fired hourly by firmware's
+`sendHeartbeat` in `ESP32-CAM/client.cpp`. It is distinct from the post-upload
 aggregate at `POST /modules/<id>/heartbeat` below — same word, different
 endpoint, different body, different table. See
 [../12-glossary/README.md](../12-glossary/README.md) "Heartbeat (telemetry)"
@@ -366,15 +366,16 @@ Content-Type: application/json
 { "battery": 87 }
 ```
 
-| Field     | Type | Notes                                |
-|-----------|------|--------------------------------------|
-| `battery` | int  | required, 0-100                      |
+| Field     | Type | Notes           |
+| --------- | ---- | --------------- |
+| `battery` | int  | required, 0-100 |
 
 Returns `{ "ok": true }`, `200`. Missing/invalid `battery` returns
 `{ "error": "battery must be an int in [0, 100]" }`, `400`. Unknown
 module returns `{ "error": "Module not found" }`, `404`.
 
 Side effect (single `UPDATE` on `module_configs`):
+
 - `battery_level` ← supplied value
 - `first_online` ← today's date (overwritten — see glossary
   "Flagged ambiguities")

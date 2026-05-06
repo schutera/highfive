@@ -10,13 +10,12 @@ future contributors must know about. Two sub-registers below:
 Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
 Highlights worth knowing about even if you're not assigned:
 
-| # | Title (short) | Why it matters |
-|---|---------------|----------------|
-| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp:362` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection. |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware | Risk of silent truncation on telemetry growth. |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded | Should be configurable via the AP form. |
-| [#21](https://github.com/schutera/highfive/issues/21) | Wi-Fi join feedback in AP form | Currently no UI signal that join failed; users only see a blank reload. |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
+| #                                                     | Title (short)                                                 | Why it matters                                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp:362` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.               |
+| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                     | Risk of silent truncation on telemetry growth.                                                                               |
+| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                 | Should be configurable via the AP form.                                                                                      |
+| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                   | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
 
 ## Field-name drift
 
@@ -38,6 +37,12 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   — intentional for local dev. **Must** be overridden via
   `HIGHFIVE_API_KEY` for any non-local deploy. See
   [02-constraints](../02-constraints/README.md).
+- **WiFi password printed plaintext to Serial** — was unconditionally
+  logged at the top of `setupWifiConnection` in `ESP32-CAM/esp_init.cpp`.
+  Now gated behind `-DDEBUG_WIFI` and redacted by default (issue #41,
+  fixed in `feat/onboarding-feedback`). Don't reintroduce the
+  unconditional print — anyone with USB access used to walk away with
+  the password in 5 s.
 
 ## Operational trade-offs (intentional, not debt)
 
@@ -56,11 +61,11 @@ As of `upstream/main` HEAD `a3675de`, three different files each carry
 a different "firmware version" string and each is read by a different
 consumer:
 
-| File / location | Current value | Read by | Consumer |
-|---|---|---|---|
-| `ESP32-CAM/VERSION` | `carpenter` | `ESP32-CAM/build.sh:29` | OTA manifest `homepage/public/firmware.json` `version` field |
-| `ESP32-CAM/esp_init.h:8` | `1.0.0` | `ESP32-CAM/logbuf.cpp:86`, `ESP32-CAM/ESP32-CAM.ino:55` | Telemetry sidecar `fw` field on every upload + boot log |
-| `ESP32-CAM/client.cpp:232` | `honeybee` | `ESP32-CAM/client.cpp:258` | Heartbeat body `fw_version` field → `module_heartbeats.fw_version` → `Module.latestHeartbeat.fwVersion` |
+| File / location                                                   | Current value | Read by                                                                          | Consumer                                                                                                |
+| ----------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `ESP32-CAM/VERSION`                                               | `carpenter`   | `ESP32-CAM/build.sh`                                                             | OTA manifest `homepage/public/firmware.json` `version` field                                            |
+| `ESP32-CAM/esp_init.h` (`FIRMWARE_VERSION`)                       | `1.0.0`       | `logBootMarker` in `ESP32-CAM/logbuf.cpp`; boot log in `ESP32-CAM/ESP32-CAM.ino` | Telemetry sidecar `fw` field on every upload + boot log                                                 |
+| `ESP32-CAM/client.cpp` (`FW_VERSION`, just above `sendHeartbeat`) | `honeybee`    | `sendHeartbeat`'s body string in `ESP32-CAM/client.cpp`                          | Heartbeat body `fw_version` field → `module_heartbeats.fw_version` → `Module.latestHeartbeat.fwVersion` |
 
 So a single `carpenter` device today reports three different versions
 on three different surfaces. ADR-006 documents the desired bee-name
@@ -77,10 +82,11 @@ build_flags =
     -DFIRMWARE_VERSION=\"$(shell cat ESP32-CAM/VERSION)\"
 ```
 
-Delete the `#ifndef`/`#define` guards in `esp_init.h:7-8` and
-`client.cpp:231-232`. Replace `String(FW_VERSION)` in `client.cpp:258`
-with `String(FIRMWARE_VERSION)`. `build.sh` continues reading
-`VERSION` directly. One writer, three readers, no drift.
+Delete the `#ifndef`/`#define` guards for `FIRMWARE_VERSION` in
+`esp_init.h` and for `FW_VERSION` in `client.cpp` (just above
+`sendHeartbeat`). Replace `String(FW_VERSION)` in `sendHeartbeat`'s
+body string with `String(FIRMWARE_VERSION)`. `build.sh` continues
+reading `VERSION` directly. One writer, three readers, no drift.
 
 **Why it's not fixed in this PR.** PR 27 is documentation-only — the
 plan is to land the doc-honest description first and let the firmware
@@ -169,9 +175,9 @@ environment in `docker-compose.yml`.
 firmware then carried on as if the heartbeat had landed; the silence
 watcher couldn't tell the difference between a truly healthy module
 and one that was repeatedly failing to register. Fix: parse the
-status code from the first response line (`ESP32-CAM/client.cpp:283`)
-and return non-zero on non-2xx; route the failure through
-`logbufNoteHttpCode` so admin telemetry shows it.
+status code from the first response line (in `sendHeartbeat`,
+`ESP32-CAM/client.cpp`) and return non-zero on non-2xx; route the
+failure through `logbufNoteHttpCode` so admin telemetry shows it.
 
 **3. Task watchdog cadence on a knife-edge (commit `ea7dc73`).**
 `TASK_WDT_TIMEOUT_S = 30` with a 30 s `delay()` at the end of
@@ -223,3 +229,80 @@ key or the name of a DB column, the cited file must contain that
 value or column. If a reviewer can't `git grep` your claim and find
 it in code, it's not documentation, it's storytelling. The rule is
 captured in the [CLAUDE.md never-violate list](../../CLAUDE.md).
+
+### Drift sweep is not a substitute for a CI check
+
+**What happened.** The PR closing #21/#34/#35 added ~30 lines of new
+boot/setup code to `ESP32-CAM/ESP32-CAM.ino` and `esp_init.cpp`,
+silently shifting every later line in those files. Multiple `path:line`
+references in `docs/06-runtime-view/esp-reliability.md`,
+`docs/09-architecture-decisions/adr-007-...md`, ADR-004, ADR-006, the
+chapter-11 hardcoded-secrets entry, the chapter-11 firmware-version
+table, the glossary, the api-reference, and four user-facing wizard
+translation strings (plus the Step 3 wizard SSID hardcode) became
+stale. Two consecutive senior-reviewer rounds caught new drift even
+after the author wrote a "How to avoid it next time" lesson — the
+manual sweep itself was the failure mode. The author also substituted
+one wrong line citation (`esp_init.cpp:233`) for another (`:249`),
+landed at a third (`:252`), and was still wrong — the `LED_GPIO_NUM`
+removal a few minutes later shifted the file by another line, leaving
+the citation pointing at `Serial.printf("PW length: …")` instead of
+the plaintext-password log it was supposed to flag. The fourth round
+of review caught it. By the time the citation was correct in the
+moment, line numbers had moved again.
+
+**Why it happened.** The original structural rule was "cite file:line
+for every claim." That rule produces correct citations on the day
+they're written, then guarantees stale citations the next time anyone
+edits the cited file. Manual `git grep` sweeps before push are easy
+to miss; humans re-grep for the patterns the previous review named,
+not the patterns the current review will name. The lesson recorded
+itself but the next round of fixes shipped with eight fresh stale
+`client.cpp:NNN` citations the lesson would have caught.
+
+**How it's avoided now.**
+
+- **Citation form.** Prefer `path's <symbol>` or `path::symbol`
+  (e.g. `client.cpp's sendHeartbeat`) over `path:line`. Symbols don't
+  drift on line shifts; line numbers do. The senior-reviewer agent
+  prompt at `.claude/agents/senior-reviewer.md` was updated to
+  demand `git grep -n` verification before any `path:line` claim.
+- **Mechanical gate.** `scripts/check-doc-citations.sh` walks every
+  `path:line` reference in `docs/` and `CLAUDE.md`, reads the cited
+  line in the current source, and reports MISSING / PAST_EOF /
+  BLANK_LINE / AMBIGUOUS / OK with a content preview. Wired via:
+  - `make check-citations` for manual runs.
+  - `.husky/pre-push` so every push from a contributor with husky
+    installed is verified.
+  - A `doc-citations` job in `.github/workflows/tests.yml` so the
+    same gate fires on every PR even if the contributor skipped
+    husky. (This is the actual CI check the section's title promises.)
+  - The "Standard end-of-implementation gate" section of CLAUDE.md
+    instructs reviewers to inspect the report alongside the diff.
+- **What the gate catches.** Missing files and past-EOF citations
+  fail the push. Blank-line landings warn (the lessons-learned
+  narrative legitimately quotes old citations as examples of past
+  drift; those land on blanks after source moves on). Humans inspect
+  the OK rows for "drifted to a closing brace / unrelated line"
+  cases — the one drift form the heuristic can't catch.
+- **Sweep i18n alongside docs.** The 7→5 second drift and the
+  `HiveHive-Access-Point` SSID drift both lived in
+  `homepage/src/i18n/translations.ts`, not in `docs/`. The lesson
+  is "user-facing strings are a documentation surface."
+- **Prose claims about device behaviour drift just like citations.**
+  The LED redesign in this same PR made AP / Connecting / Connected
+  modes silent in `lib/led_state/led_state.cpp`'s `ledOnAt`, but four
+  unrelated surfaces still told the user to expect blinking — Step 5
+  troubleshoot copy (EN + DE), `esp-flashing.md`'s "AP heartbeat
+  pattern" line, and the `esp32-onboarding` skill's "LED should start
+  flashing" line. None used `path:line`, so the citation gate could
+  not catch them. When changing observable device behaviour (LED
+  pattern, audible signal, boot sequence, captive-portal text), grep
+  the whole repo (`docs/`, `homepage/src/i18n/`, `.claude/skills/`)
+  for prose making the old promise.
+
+**Out-of-scope follow-up: pre-existing drift not fixed in this PR.**
+The Maps API key citations in chapters 3/5/11 and any future drift
+in files this PR didn't touch will surface in the
+`make check-citations` report next time someone edits those files.
+That's the gate's job now.

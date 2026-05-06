@@ -69,6 +69,15 @@ export function useSetupWizard() {
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
   const knownModuleSnapshotRef = useRef<Map<string, string | undefined>>(new Map());
+  // React 18 Strict Mode runs every effect twice in dev (intentional, to
+  // surface effects that don't survive remount). Both runs of Step5Verify's
+  // `useEffect(() => checkBackendAndStart(), [])` race through the
+  // healthcheck and call startVerification concurrently. Set this ref
+  // synchronously the moment startVerification is entered so the second
+  // invocation bails before re-fetching the snapshot. pollingIntervalRef
+  // alone isn't enough — both calls await before assigning it, leaving a
+  // window where both pass that guard.
+  const startInflightRef = useRef(false);
 
   // Load firmware info, detect LAN IP, and snapshot modules on mount.
   // The module snapshot must be taken NOW (before the user configures the ESP)
@@ -233,10 +242,14 @@ export function useSetupWizard() {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
     }
+    startInflightRef.current = false;
     setState((s) => ({ ...s, pollingActive: false }));
   }, []);
 
   const startVerification = useCallback(async () => {
+    if (startInflightRef.current || pollingIntervalRef.current) return;
+    startInflightRef.current = true;
+
     console.log('[Step5] Starting verification, looking for any new module');
 
     // Use the snapshot taken on wizard mount so we detect any module that
@@ -266,15 +279,14 @@ export function useSetupWizard() {
 
     pollingIntervalRef.current = setInterval(async () => {
       pollCountRef.current++;
-      setState((s) => ({ ...s, pollCount: pollCountRef.current }));
-      console.log(`[Step5] Poll ${pollCountRef.current}/${MAX_POLLS}`);
-
       if (pollCountRef.current > MAX_POLLS) {
         console.warn('[Step5] Max polls reached, timing out');
         stopVerification();
         setState((s) => ({ ...s, verificationTimedOut: true }));
         return;
       }
+      setState((s) => ({ ...s, pollCount: pollCountRef.current }));
+      console.log(`[Step5] Poll ${pollCountRef.current}/${MAX_POLLS}`);
 
       try {
         const modules = await api.getAllModules();

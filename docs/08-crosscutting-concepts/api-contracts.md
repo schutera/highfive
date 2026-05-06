@@ -23,8 +23,9 @@ and let the compile errors guide the rest.
 ## `HeartbeatSnapshot` and the extended `Module`
 
 PR 17 added the **telemetry heartbeat** channel
-(`POST /heartbeat` — `duckdb-service/routes/heartbeats.py:17`,
-fired hourly by firmware at `ESP32-CAM/client.cpp:260`) and
+(`POST /heartbeat` — `heartbeat` route in
+`duckdb-service/routes/heartbeats.py`, fired hourly by firmware's
+`sendHeartbeat` in `ESP32-CAM/client.cpp`) and
 surfaced the most recent snapshot on every `Module`. This is
 **distinct from** the post-upload aggregate at
 `POST /modules/<mac>/heartbeat`
@@ -38,12 +39,12 @@ The wire shape:
 
 ```ts
 export interface HeartbeatSnapshot {
-  receivedAt: string;        // ISO timestamp
+  receivedAt: string; // ISO timestamp
   battery: number | null;
   rssi: number | null;
   uptimeMs: number | null;
   freeHeap: number | null;
-  fwVersion: string | null;  // bee-name string, see ADR-006
+  fwVersion: string | null; // bee-name string, see ADR-006
 }
 ```
 
@@ -59,9 +60,9 @@ fields off the duckdb response and takes the freshest:
 ```ts
 // pseudocode of backend/src/database.ts:174-184
 const candidates = [
-  m.updated_at,                      // module_configs.updated_at
-  m.last_image_at,                   // SELECT MAX(uploaded_at) FROM image_uploads ...
-  m.latestHeartbeat?.receivedAt,     // SELECT MAX(received_at) FROM module_heartbeats ...
+  m.updated_at, // module_configs.updated_at
+  m.last_image_at, // SELECT MAX(uploaded_at) FROM image_uploads ...
+  m.latestHeartbeat?.receivedAt, // SELECT MAX(received_at) FROM module_heartbeats ...
 ].filter(Boolean);
 const lastSeenAt = max(candidates.map(toEpoch));
 ```
@@ -81,9 +82,8 @@ anything in this neighbourhood.
 
 `POST /add_progress_for_module` carries `modul_id` (typo, missing
 "e"). Everywhere else (DB column, route param, DTO) the canonical
-name is `module_id`. Verified in
-`duckdb-service/models/progress.py:6` and
-`duckdb-service/routes/progress.py`.
+name is `module_id`. Verified in `duckdb-service/models/progress.py`'s
+`ClassificationOutput` and `duckdb-service/routes/progress.py`.
 
 **Why it exists**: original misspelling, kept on the wire to avoid
 breaking image-service ↔ duckdb-service in lockstep.

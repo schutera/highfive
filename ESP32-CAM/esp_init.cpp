@@ -1,6 +1,8 @@
 #include "esp_camera.h"
 #include "esp_wifi.h"
 #include "esp_init.h"
+#include "led.h"
+#include "lib/wifi_diag/wifi_diag.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <FS.h>
@@ -8,6 +10,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
+#include <esp_task_wdt.h>
 
 
 /* 
@@ -33,9 +36,7 @@
 #define VSYNC_GPIO_NUM 25
 #define HREF_GPIO_NUM  23
 #define PCLK_GPIO_NUM  22
-
-/* 4 for flash led or 33 for normal led */
-#define LED_GPIO_NUM   4
+// On-board flash LED pin (`LED_PIN`) lives in `led.h` — single source of truth.
 #else
 #error "Pins not set for camera model"
 #endif
@@ -69,6 +70,22 @@ bool isESPConfigured() {
 void setESPConfigured(bool value) {
     preferences.begin("config", false);
     preferences.putBool("configured", value);
+    preferences.end();
+}
+
+// NVS namespace "config", key "wifi_fails" (uint8). Renaming either side
+// of this contract silently resets the counter and disables the AP-fallback
+// — keep them in lockstep with esp_init.h's WIFI_FAIL_AP_FALLBACK_THRESH.
+uint8_t getWifiFailCount() {
+    preferences.begin("config", true);  // read-only
+    uint8_t count = preferences.getUChar("wifi_fails", 0);
+    preferences.end();
+    return count;
+}
+
+void setWifiFailCount(uint8_t value) {
+    preferences.begin("config", false);
+    preferences.putUChar("wifi_fails", value);
     preferences.end();
 }
 
@@ -183,7 +200,7 @@ void initEspPinout() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  pinMode(LED_GPIO_NUM, OUTPUT);
+  // LED pin (GPIO 4) is owned by ledInit() — already called from setup().
 }
 
 /* -------------------------------- */
@@ -230,7 +247,16 @@ static void onWifiEvent(WiFiEvent_t event) {
 
 void setupWifiConnection(wifi_configuration_t *wifi_config) {
 
+  // Anyone with USB access (5 s with a serial monitor) used to walk away with
+  // the WiFi password — the live-review demo of feat/onboarding-feedback put
+  // it in chat transcripts. Redacted by default; rebuild with -DDEBUG_WIFI
+  // when copy-paste corruption is the suspect.
+#ifdef DEBUG_WIFI
   Serial.printf("connect to SSID: %s with pw: %s\n", wifi_config->SSID, wifi_config->PASSWORD);
+#else
+  Serial.printf("connect to SSID: %s (pw redacted; build with -DDEBUG_WIFI to log)\n",
+                wifi_config->SSID);
+#endif
   Serial.printf("SSID length: %d\n", strlen(wifi_config->SSID));
   Serial.printf("PW length: %d\n", strlen(wifi_config->PASSWORD));
 
@@ -245,16 +271,38 @@ void setupWifiConnection(wifi_configuration_t *wifi_config) {
   WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
   //WiFi.begin("Vodafone-CAKE", "tYsjat-gakke8-kephaw");
   Serial.printf("---- connecting to %s\n", wifi_config->SSID);
+  ledSetMode(hf::LedMode::Connecting);
   unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
     if (millis() - wifiStart > 30000) {
-      Serial.println("\n------ WiFi connection timed out after 30s. Restarting...");
+      uint8_t fails = getWifiFailCount() + 1;
+      setWifiFailCount(fails);
+      Serial.printf("\n------ WiFi connection timed out after 30s "
+                    "(SSID=%s, status=%s, fails=%u). Restarting...\n",
+                    wifi_config->SSID, hf::wifiStatusName(WiFi.status()), fails);
+      // Fire the "Failed" three-pulse pattern (~450 ms total) and hold
+      // for ~1 s so the user reliably sees it before the reboot. Pattern
+      // auto-completes; the LED is silent for the remainder of the hold.
+      // Watchdog (60 s) is fed each iteration.
+      ledSetMode(hf::LedMode::Failed);
+      for (int i = 0; i < 10; ++i) {
+        ledTick();
+        esp_task_wdt_reset();
+        delay(100);
+      }
       ESP.restart();
     }
+    ledTick();
+    esp_task_wdt_reset();
     delay(500);
     Serial.print(".");
   }
   Serial.printf("\n---- Connected. IP: %s\n", WiFi.localIP().toString().c_str());
+  // Successful join clears the AP-fallback counter and parks the LED on
+  // the steady "Connected" pattern; uploads will overlay their own
+  // single-flash on top of this.
+  if (getWifiFailCount() != 0) setWifiFailCount(0);
+  ledSetMode(hf::LedMode::Connected);
 
   setupTime();
 }

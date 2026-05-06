@@ -47,6 +47,23 @@ typedef struct {
 
 bool isESPConfigured();
 void setESPConfigured(bool value);
+
+/* Persisted counter of consecutive WiFi-join timeouts. Cleared on a
+   successful join; bumped from setupWifiConnection() each time the 30 s
+   begin() loop times out. Used at boot to decide whether to drop back
+   into AP-config mode without forcing the user through a 5-second
+   factory-reset hold.
+
+   Storage: NVS namespace "config", key "wifi_fails" (uint8). */
+uint8_t getWifiFailCount();
+void setWifiFailCount(uint8_t value);
+
+/* Boot-time consecutive-fail threshold at which the firmware re-opens
+   the captive portal automatically. Three failed boots × ~30 s ≈ 90 s
+   before the AP returns. Read by setup() in ESP32-CAM.ino. */
+#ifndef WIFI_FAIL_AP_FALLBACK_THRESH
+#define WIFI_FAIL_AP_FALLBACK_THRESH 3
+#endif
 String generateModuleName();
 bool loadConfig(esp_config_t *esp_config);
 void initEspPinout();

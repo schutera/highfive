@@ -5,6 +5,7 @@
 #include <esp_task_wdt.h>
 #include "esp_init.h"   // setESPConfigured
 #include "form_query.h" // hf::urlDecode, hf::getParam (host-testable)
+#include "led.h"        // ledTick during the AP server loop
 #include <string>
 
 const char *HOST_SSID = "ESP32-Access-Point";
@@ -348,6 +349,7 @@ void runAccessPoint() {
 
   while (server_running) {
     esp_task_wdt_reset();
+    ledTick();
     WiFiClient client = server.available();
     if (client) {
       Serial.println("\n------ CLIENT CONNECTED ------");

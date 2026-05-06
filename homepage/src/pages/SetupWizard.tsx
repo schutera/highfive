@@ -6,7 +6,7 @@ import Step4Configure from '../components/setup/Step4Configure';
 import Step5Verify from '../components/setup/Step5Verify';
 import SiteHeader from '../components/SiteHeader';
 import { useSetupWizard } from '../components/setup/useSetupWizard';
-import { useTranslation } from '../i18n/LanguageContext';
+import { useTranslation, useTranslationRaw } from '../i18n/LanguageContext';
 
 const STEP_ICONS = [
   <svg
@@ -76,10 +76,11 @@ export default function SetupWizard() {
   const { state, goNext, goBack, goToStep, markFlashComplete, markConfigDone, startVerification } =
     useSetupWizard();
 
-  const stepLabels = t('setup.stepLabels') as unknown as string[];
-  const steps = (
-    Array.isArray(stepLabels) ? stepLabels : ['Connect', 'Flash', 'WiFi', 'Configure', 'Verify']
-  ).map((label, i) => ({ label, icon: STEP_ICONS[i] }));
+  // t() collapses non-string values to the path key (LanguageContext:55), so
+  // the array-valued setup.stepLabels can't go through it. Pull the raw tree.
+  const raw = useTranslationRaw();
+  const stepLabels = raw.setup.stepLabels;
+  const steps = stepLabels.map((label, i) => ({ label, icon: STEP_ICONS[i] }));
 
   const animationClass =
     state.direction === 'forward' ? 'animate-slide-in-right' : 'animate-slide-in-left';

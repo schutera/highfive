@@ -8,7 +8,10 @@ interface Step3WiFiProps {
   onSkip: () => void;
 }
 
-const AP_SSID = 'HiveHive-Access-Point';
+// Must match `HOST_SSID` in `ESP32-CAM/host.cpp` (the captive-portal SSID
+// the firmware actually advertises). Drift between this and the firmware
+// would tell users to look for a network that doesn't exist.
+const AP_SSID = 'ESP32-Access-Point';
 
 export default function Step3WiFi({ onNext, onBack, onSkip }: Step3WiFiProps) {
   const { t } = useTranslation();

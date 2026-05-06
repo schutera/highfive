@@ -157,7 +157,7 @@ def get_module_logs(mac: str):
 
 @app.get("/images")
 def list_images():
-    """List all uploaded images, proxied from duckdb-service."""
+    """List all uploaded images, optionally filtered by ?module_id=, proxied from duckdb-service."""
     module_id = request.args.get("module_id")
     try:
         resp = http_requests.get(
@@ -172,7 +172,21 @@ def list_images():
 
 @app.delete("/images/<path:filename>")
 def delete_image(filename):
-    """Delete an image file and its DB record."""
+    """Delete an image's DB record then its on-disk file.
+
+    DB-side outcomes:
+      * 404 from duckdb-service → return 404; the file is NOT deleted.
+      * Connection error / timeout (raised exception) → log a warning,
+        fall through and delete the file anyway (orphans the file
+        rather than the row).
+      * Any other response, including 5xx → fall through and delete
+        the file. No warning is logged in the 5xx case; the on-disk
+        file is removed silently while the DB row stays.
+      * 2xx → fall through and delete the file.
+
+    Atomicity gaps are tracked in #30; this docstring describes the
+    behaviour as it ships today, not the behaviour we want.
+    """
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     try:
         resp = http_requests.delete(

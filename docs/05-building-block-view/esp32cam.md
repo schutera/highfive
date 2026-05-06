@@ -20,8 +20,9 @@ After initial configuration the device operates fully automatically:
 - Captures images at the configured interval and uploads them to
   `image-service` via multipart `POST /upload`
 - Sends an hourly **telemetry heartbeat** to `duckdb-service` at
-  `POST /heartbeat` (firmware-direct; `client.cpp:260`,
-  `routes/heartbeats.py:17`) carrying mac, battery, RSSI,
+  `POST /heartbeat` (firmware-direct; `sendHeartbeat` in
+  `client.cpp`, `heartbeat` route in `routes/heartbeats.py`)
+  carrying mac, battery, RSSI,
   uptime_ms, free_heap, fw_version. The wire shape is
   [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md)
   in `@highfive/contracts` —
@@ -39,21 +40,21 @@ After initial configuration the device operates fully automatically:
 
 ## File layout
 
-| Path                                | Role                                  |
-| ----------------------------------- | ------------------------------------- |
-| `ESP32-CAM/ESP32-CAM.ino`           | Arduino entry point                   |
-| `ESP32-CAM/host.cpp`                | Access-point + config form (lines 9–10 hold AP credentials) |
-| `ESP32-CAM/client.cpp`              | Wi-Fi join, upload loop, heartbeat sender |
-| `ESP32-CAM/esp_init.{cpp,h}`        | NVS-backed configuration; `FIRMWARE_VERSION` macro |
-| `ESP32-CAM/logbuf.cpp`              | On-device circular log buffer (consumes `lib/ring_buffer/`) |
-| `ESP32-CAM/VERSION`                 | Single-line bee-species version (see [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)) |
-| `ESP32-CAM/build.sh`                | Reads `VERSION` to tag built artifacts |
-| `ESP32-CAM/lib/url/`                | Pure C++ URL helpers (host-testable)  |
-| `ESP32-CAM/lib/ring_buffer/`        | Pure C++ ring buffer (host-testable)  |
-| `ESP32-CAM/lib/telemetry/`          | Pure C++ telemetry JSON builder (host-testable) |
-| `ESP32-CAM/lib/form_query/`         | Pure C++ URL-form parser (host-testable) |
-| `ESP32-CAM/test/test_native_*/`     | Unity host tests (38 tests)           |
-| `ESP32-CAM/platformio.ini`          | `esp32cam` (firmware) and `native` (host tests) envs |
+| Path                            | Role                                                                                                                  |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `ESP32-CAM/ESP32-CAM.ino`       | Arduino entry point                                                                                                   |
+| `ESP32-CAM/host.cpp`            | Access-point + config form (lines 9–10 hold AP credentials)                                                           |
+| `ESP32-CAM/client.cpp`          | Wi-Fi join, upload loop, heartbeat sender                                                                             |
+| `ESP32-CAM/esp_init.{cpp,h}`    | NVS-backed configuration; `FIRMWARE_VERSION` macro                                                                    |
+| `ESP32-CAM/logbuf.cpp`          | On-device circular log buffer (consumes `lib/ring_buffer/`)                                                           |
+| `ESP32-CAM/VERSION`             | Single-line bee-species version (see [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)) |
+| `ESP32-CAM/build.sh`            | Reads `VERSION` to tag built artifacts                                                                                |
+| `ESP32-CAM/lib/url/`            | Pure C++ URL helpers (host-testable)                                                                                  |
+| `ESP32-CAM/lib/ring_buffer/`    | Pure C++ ring buffer (host-testable)                                                                                  |
+| `ESP32-CAM/lib/telemetry/`      | Pure C++ telemetry JSON builder (host-testable)                                                                       |
+| `ESP32-CAM/lib/form_query/`     | Pure C++ URL-form parser (host-testable)                                                                              |
+| `ESP32-CAM/test/test_native_*/` | Unity host tests (38 tests)                                                                                           |
+| `ESP32-CAM/platformio.ini`      | `esp32cam` (firmware) and `native` (host tests) envs                                                                  |
 
 The host-testable split is documented in
 [ADR-002](../09-architecture-decisions/adr-002-esp-host-testable-lib.md).
@@ -64,7 +65,7 @@ The first boot opens an access point named `ESP32-Access-Point`
 (password `esp-12345`), serves a config form at
 `http://192.168.4.1`, and persists the user's input to NVS. On
 subsequent boots the device reads NVS and goes straight to the upload
-loop. Holding `IO0` for 7 seconds factory-resets and reopens the AP.
+loop. Holding `IO0` for 5 seconds factory-resets and reopens the AP.
 
 See [esp-flashing.md](../07-deployment-view/esp-flashing.md) for the
 full setup walkthrough.

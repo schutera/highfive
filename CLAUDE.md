@@ -68,20 +68,20 @@ Full testing strategy: [`docs/10-quality-requirements/`](docs/10-quality-require
 
 The `docs/` folder follows arc42. Use this table to find the chapter relevant to your task — and to know **which chapter to update when you finish a change**.
 
-| Chapter | Topic | Consider when… |
-|---------|-------|----------------|
-| [01 Introduction & Goals](docs/01-introduction-and-goals/README.md) | Vision, goals, personas, scope | Scoping a new feature; framing a tradeoff |
-| [02 Constraints](docs/02-constraints/README.md) | Tech stack, hardware limits, conventions, what NOT to commit | Adding a dependency or platform; choosing a tool |
-| [03 Context & Scope](docs/03-context-and-scope/README.md) | External actors and systems, in-scope vs out-of-scope | Integrating a third-party API; adding a new actor |
-| [04 Solution Strategy](docs/04-solution-strategy/README.md) | High-level pipeline shape + ADR pointers | Cross-service architectural change |
-| [05 Building Block View](docs/05-building-block-view/README.md) | Service map, topology, where-things-live, per-service detail | Touching one service; refactor; "where is X?" |
-| [06 Runtime View](docs/06-runtime-view/README.md) | Image upload flow, dashboard read flow, ESP reliability | Changing request/response behaviour or sequence |
-| [07 Deployment View](docs/07-deployment-view/README.md) | Docker Compose stack, ESP firmware flashing | Deploy / infra / firmware-flashing change |
-| [08 Crosscutting](docs/08-crosscutting-concepts/README.md) | Auth, API contracts, hardware notes | Cross-service concern; setup gotcha |
-| [09 ADRs](docs/09-architecture-decisions/README.md) | Recorded design decisions | New dependency / pattern shift / non-obvious tradeoff |
-| [10 Quality](docs/10-quality-requirements/README.md) | Testing pyramid, CI gates | Adding a test layer or CI job |
-| [11 Risks & Tech Debt](docs/11-risks-and-technical-debt/README.md) | Known issues, hardcoded secrets, **lessons learned** | Hit a gotcha → log it here |
-| [12 Glossary](docs/12-glossary/README.md) | Domain terms (Module, Nest, Cell, MAC, …) and aliases-to-avoid | Naming a new concept; resolving a "what's the canonical name" question |
+| Chapter                                                             | Topic                                                          | Consider when…                                                         |
+| ------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [01 Introduction & Goals](docs/01-introduction-and-goals/README.md) | Vision, goals, personas, scope                                 | Scoping a new feature; framing a tradeoff                              |
+| [02 Constraints](docs/02-constraints/README.md)                     | Tech stack, hardware limits, conventions, what NOT to commit   | Adding a dependency or platform; choosing a tool                       |
+| [03 Context & Scope](docs/03-context-and-scope/README.md)           | External actors and systems, in-scope vs out-of-scope          | Integrating a third-party API; adding a new actor                      |
+| [04 Solution Strategy](docs/04-solution-strategy/README.md)         | High-level pipeline shape + ADR pointers                       | Cross-service architectural change                                     |
+| [05 Building Block View](docs/05-building-block-view/README.md)     | Service map, topology, where-things-live, per-service detail   | Touching one service; refactor; "where is X?"                          |
+| [06 Runtime View](docs/06-runtime-view/README.md)                   | Image upload flow, dashboard read flow, ESP reliability        | Changing request/response behaviour or sequence                        |
+| [07 Deployment View](docs/07-deployment-view/README.md)             | Docker Compose stack, ESP firmware flashing                    | Deploy / infra / firmware-flashing change                              |
+| [08 Crosscutting](docs/08-crosscutting-concepts/README.md)          | Auth, API contracts, hardware notes                            | Cross-service concern; setup gotcha                                    |
+| [09 ADRs](docs/09-architecture-decisions/README.md)                 | Recorded design decisions                                      | New dependency / pattern shift / non-obvious tradeoff                  |
+| [10 Quality](docs/10-quality-requirements/README.md)                | Testing pyramid, CI gates                                      | Adding a test layer or CI job                                          |
+| [11 Risks & Tech Debt](docs/11-risks-and-technical-debt/README.md)  | Known issues, hardcoded secrets, **lessons learned**           | Hit a gotcha → log it here                                             |
+| [12 Glossary](docs/12-glossary/README.md)                           | Domain terms (Module, Nest, Cell, MAC, …) and aliases-to-avoid | Naming a new concept; resolving a "what's the canonical name" question |
 
 Operational refs (outside arc42 chapters):
 
@@ -93,21 +93,21 @@ Operational refs (outside arc42 chapters):
 
 Every PR that changes behaviour, adds a feature, or fixes a non-obvious bug must leave the docs better than found. After completing your change, run through this lookup and update the named target(s):
 
-| Change type | Update target |
-|-------------|---------------|
-| New service or major component | [`docs/05-building-block-view/`](docs/05-building-block-view/README.md) (add a per-service file + link from the index) |
-| New API endpoint or wire-shape change | [`docs/api-reference.md`](docs/api-reference.md) **and** [`docs/08-crosscutting-concepts/api-contracts.md`](docs/08-crosscutting-concepts/api-contracts.md) |
-| Behaviour change in upload / heartbeat / classification flow | [`docs/06-runtime-view/image-upload-flow.md`](docs/06-runtime-view/image-upload-flow.md) |
-| Dev Docker Compose change | [`docs/07-deployment-view/docker-compose.md`](docs/07-deployment-view/docker-compose.md) |
-| Production deployment change | [`docs/07-deployment-view/production-deployment.md`](docs/07-deployment-view/production-deployment.md) (Docker) **or** [`docs/07-deployment-view/production-runbook.md`](docs/07-deployment-view/production-runbook.md) (PM2) |
-| ESP firmware change affecting onboarding | [`docs/07-deployment-view/esp-flashing.md`](docs/07-deployment-view/esp-flashing.md) and (if a gotcha) [`docs/troubleshooting.md`](docs/troubleshooting.md) |
-| New CI job or test layer | [`docs/10-quality-requirements/ci-gates.md`](docs/10-quality-requirements/ci-gates.md) |
-| New design decision (dependency, pattern, trade-off) | [`docs/09-architecture-decisions/`](docs/09-architecture-decisions/README.md) — write a new `adr-NNN-*.md` and add it to the index |
-| New domain term, alias to avoid, or naming clarification | [`docs/12-glossary/README.md`](docs/12-glossary/README.md) |
-| **Lesson from a bug or incident** | [`docs/11-risks-and-technical-debt/README.md`](docs/11-risks-and-technical-debt/README.md) → "Lessons learned" section. Format: what happened / why / how to avoid next time. |
-| New gotcha during setup or config | [`docs/troubleshooting.md`](docs/troubleshooting.md) (symptom + fix) |
-| Auth, API key, or secret-handling change | [`docs/08-crosscutting-concepts/auth.md`](docs/08-crosscutting-concepts/auth.md) |
-| Hardware setup quirk (browser, Wi-Fi, firewall) | [`docs/08-crosscutting-concepts/hardware-notes.md`](docs/08-crosscutting-concepts/hardware-notes.md) |
+| Change type                                                  | Update target                                                                                                                                                                                                                 |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New service or major component                               | [`docs/05-building-block-view/`](docs/05-building-block-view/README.md) (add a per-service file + link from the index)                                                                                                        |
+| New API endpoint or wire-shape change                        | [`docs/api-reference.md`](docs/api-reference.md) **and** [`docs/08-crosscutting-concepts/api-contracts.md`](docs/08-crosscutting-concepts/api-contracts.md)                                                                   |
+| Behaviour change in upload / heartbeat / classification flow | [`docs/06-runtime-view/image-upload-flow.md`](docs/06-runtime-view/image-upload-flow.md)                                                                                                                                      |
+| Dev Docker Compose change                                    | [`docs/07-deployment-view/docker-compose.md`](docs/07-deployment-view/docker-compose.md)                                                                                                                                      |
+| Production deployment change                                 | [`docs/07-deployment-view/production-deployment.md`](docs/07-deployment-view/production-deployment.md) (Docker) **or** [`docs/07-deployment-view/production-runbook.md`](docs/07-deployment-view/production-runbook.md) (PM2) |
+| ESP firmware change affecting onboarding                     | [`docs/07-deployment-view/esp-flashing.md`](docs/07-deployment-view/esp-flashing.md) and (if a gotcha) [`docs/troubleshooting.md`](docs/troubleshooting.md)                                                                   |
+| New CI job or test layer                                     | [`docs/10-quality-requirements/ci-gates.md`](docs/10-quality-requirements/ci-gates.md)                                                                                                                                        |
+| New design decision (dependency, pattern, trade-off)         | [`docs/09-architecture-decisions/`](docs/09-architecture-decisions/README.md) — write a new `adr-NNN-*.md` and add it to the index                                                                                            |
+| New domain term, alias to avoid, or naming clarification     | [`docs/12-glossary/README.md`](docs/12-glossary/README.md)                                                                                                                                                                    |
+| **Lesson from a bug or incident**                            | [`docs/11-risks-and-technical-debt/README.md`](docs/11-risks-and-technical-debt/README.md) → "Lessons learned" section. Format: what happened / why / how to avoid next time.                                                 |
+| New gotcha during setup or config                            | [`docs/troubleshooting.md`](docs/troubleshooting.md) (symptom + fix)                                                                                                                                                          |
+| Auth, API key, or secret-handling change                     | [`docs/08-crosscutting-concepts/auth.md`](docs/08-crosscutting-concepts/auth.md)                                                                                                                                              |
+| Hardware setup quirk (browser, Wi-Fi, firewall)              | [`docs/08-crosscutting-concepts/hardware-notes.md`](docs/08-crosscutting-concepts/hardware-notes.md)                                                                                                                          |
 
 If unsure, default to [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md) — it is the catch-all for anything you don't want the next person to have to relearn.
 
@@ -123,8 +123,25 @@ These are the most-violated rules from past incidents. Full list in [`docs/02-co
 - **Never ship the dev API key (`hf_dev_key_2026`)** as a production fallback. Override `HIGHFIVE_API_KEY`.
 - **Never remove `PORT=3002` from the backend service in `docker-compose.yml`** — `server.ts` defaults to the legacy `3001`, which leaves the host port unbound and silently breaks the dashboard. Fixed in commit `ea7dc73` (PR-17 review critical), see [chapter 11](docs/11-risks-and-technical-debt/README.md).
 - **Never lower `TASK_WDT_TIMEOUT_S` in firmware below 60 s** without re-running the worst-case `captureAndUpload` + heartbeat scenario. Bumped from 30 s in commit `ea7dc73` (PR-17 review critical), see [ADR-007](docs/09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md).
-- **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` (`ESP32-CAM/client.cpp:283`) so admin telemetry surfaces failures. Fixed in commit `ea7dc73` (PR-17 review critical).
-- **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. and cite line numbers — commit messages summarise intent, not what shipped. Lesson from this PR's review (see [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned").
+- **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` (in `ESP32-CAM/client.cpp`'s `sendHeartbeat`) so admin telemetry surfaces failures. Fixed in commit `ea7dc73` (PR-17 review critical).
+- **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. — commit messages summarise intent, not what shipped. Prefer `path's <symbol>` or `path::symbol` over `path:line`; the latter drift silently. Run `make check-citations` before invoking the reviewer. Lesson recorded in [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned".
+
+## Standard end-of-implementation gate
+
+Every non-trivial change — feature work, bug fix, doc restructure, refactor — runs through the [`senior-reviewer`](.claude/agents/senior-reviewer.md) subagent before it leaves the working tree. Invoke it via the Agent tool with `subagent_type: senior-reviewer`. It is harsh on purpose: a senior-staff-engineer persona that reads the actual diff, anchors every concrete claim to a path (preferring `` path's `symbol` `` over `path:line`), and ranks issues P0/P1/P2.
+
+When to run it:
+
+1. After tests pass and you believe the change is done.
+2. After fixing a previous round of review feedback (run again — re-reviews are independent, baseline credit is not given).
+3. Before opening a PR.
+
+How to run it:
+
+- Default scope is `git diff $(git merge-base HEAD main)..HEAD`. Tell the agent which branch, PR, or file set to focus on if not the obvious one.
+- **Run `make check-citations` first** and inspect the report. The script flags any `path:line` citation in `docs/` or `CLAUDE.md` that points at a missing file, past-EOF line, or blank line. Humans inspect the OK rows for "drifted but still in valid territory" cases (e.g. citation now lands on a closing brace). Also fires automatically on `git push` via `.husky/pre-push`.
+- Address every P0 before pushing for review. P1s should be fixed or have an explicit "out of scope, tracked in issue #N" justification. P2s are nits and may be deferred.
+- Treat its findings as input, not as a verdict. If it claims something is wrong, verify against the code yourself — but do not dismiss without checking.
 
 ## Branch model
 

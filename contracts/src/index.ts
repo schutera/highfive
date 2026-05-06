@@ -5,10 +5,9 @@
 // instead of a silent field mismatch on the wire.
 //
 // The shapes here mirror what `backend/src/database.ts` returns to the
-// homepage; that file remains the source of truth for the wire contract,
-// and these declarations are cut-and-pasted from the original
-// `backend/src/types.ts`. Field-name drift (e.g. `progess`/`hateched`)
-// is called out in `docs/12-glossary/README.md`.
+// homepage; that file remains the source of truth for the wire contract.
+// Field-name drift (e.g. `progess`/`hatched`) is called out in
+// `docs/12-glossary/README.md`.
 
 // ---- ModuleId branded type ----
 //
@@ -68,8 +67,8 @@ export interface Module {
   updatedAt?: string; // ISO timestamp — set on every registration/UPSERT
   // Liveness — derived from max(updatedAt, lastApiCall, latestHeartbeat.receivedAt).
   // If null, the module has never phoned home.
-  lastSeenAt?: string | null;
-  latestHeartbeat?: HeartbeatSnapshot | null;
+  lastSeenAt: string | null;
+  latestHeartbeat: HeartbeatSnapshot | null;
 }
 
 export interface NestData {

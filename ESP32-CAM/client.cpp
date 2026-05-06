@@ -1,5 +1,6 @@
 #include "esp_camera.h"
 #include "client.h"
+#include "led.h"
 #include "logbuf.h"
 #include "module_id.h"
 #include "url.h"
@@ -10,6 +11,7 @@
 #include <WiFiClient.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <esp_task_wdt.h>
 
 static WiFiClient client;
 
@@ -68,7 +70,7 @@ void printResponse(String response) {
 }
 
 /*
-  POST image + mac + battery to the Flask /upload endpoint
+  POST image + mac + battery + telemetry logs to the Flask /upload endpoint
 */
 int postImage(esp_config_t *esp_config) {
   unsigned long __t_all_start = millis();
@@ -170,6 +172,11 @@ int postImage(esp_config_t *esp_config) {
       return -3;
     }
     sent += chunk;
+    // Keep the LED's Uploading flash visible during long writes and feed
+    // the watchdog — a slow uploader can otherwise eat tens of seconds
+    // here without yielding either.
+    ledTick();
+    esp_task_wdt_reset();
   }
   size_t tailSent = client.write((uint8_t*)tail.c_str(), tail.length());
   if (tailSent != tail.length()) {
@@ -221,13 +228,13 @@ int postImage(esp_config_t *esp_config) {
 }
 
 
-// Hourly liveness ping — small form-encoded POST to duckdb-service with
+// Hourly liveness ping — form-encoded POST to duckdb-service with
 // battery / rssi / uptime / free-heap. Fails quietly; never restarts.
 //
 // Path is intentionally hardcoded `/heartbeat`: INIT_URL points at the
-// registration endpoint (`/new_module`), but heartbeat is a sibling on
-// the same host:port — only the path differs. We use INIT_URL purely
-// as the carrier of host+port and discard its path.
+// registration endpoint (`/new_module`, which uses JSON), but heartbeat
+// is a sibling on the same host:port — only the path differs. We use
+// INIT_URL purely as the carrier of host+port and discard its path.
 #ifndef FW_VERSION
 #define FW_VERSION "honeybee"
 #endif

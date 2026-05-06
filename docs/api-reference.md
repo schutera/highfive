@@ -332,17 +332,25 @@ Content-Type: application/x-www-form-urlencoded
 
 Form fields:
 
-| Field        | Type   | Notes                                                   |
-| ------------ | ------ | ------------------------------------------------------- |
-| `mac`        | string | canonical 12-char hex MAC (or `esp_id` alias)           |
-| `battery`    | int    | optional                                                |
-| `rssi`       | int    | optional, dBm                                           |
-| `uptime_ms`  | int    | optional, since last boot                               |
-| `free_heap`  | int    | optional, bytes                                         |
-| `fw_version` | string | optional, ≤40 chars (currently a bee-name; see ADR-006) |
+| Field        | Type   | Notes                                                                                                                  |
+| ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `mac`        | string | accepted in canonical 12-hex form, colon-separated, or dash-separated; canonicalised on the server (or `esp_id` alias) |
+| `battery`    | int    | optional                                                                                                               |
+| `rssi`       | int    | optional, dBm                                                                                                          |
+| `uptime_ms`  | int    | optional, since last boot                                                                                              |
+| `free_heap`  | int    | optional, bytes                                                                                                        |
+| `fw_version` | string | optional, ≤40 chars (a bee-name from `ESP32-CAM/VERSION`; see ADR-006)                                                 |
+
+The `mac` field is canonicalised to lowercase 12-hex via
+`ModuleId.model_validate(...)` before the `INSERT`, mirroring the
+`/upload` seam in `image-service/app.py`. Two clients sending
+`AA:BB:CC:DD:EE:FF` and `aabbccddeeff` therefore land on the same
+`module_id` PK rather than silently creating parallel rows.
 
 Returns `{ "ok": true }`, `200`. Missing `mac` returns
-`{ "error": "missing mac" }`, `400`.
+`{ "error": "missing mac" }`, `400`. A `mac` value that does not
+reduce to `[0-9a-f]{12}` returns `{ "error": "invalid mac format" }`,
+`400`.
 
 Side effect: a single `INSERT` into `module_heartbeats`. The handler
 does **not** update `module_configs`. Implementation in

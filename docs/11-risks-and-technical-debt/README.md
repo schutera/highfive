@@ -53,47 +53,6 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   The data-flow contract is what MaskRCNN will fill — replacing the
   classifier doesn't change the persistence layer.
 
-## Active tech debt
-
-### Firmware version: three uncoordinated sources of truth
-
-As of `upstream/main` HEAD `a3675de`, three different files each carry
-a different "firmware version" string and each is read by a different
-consumer:
-
-| File / location                                                   | Current value | Read by                                                                          | Consumer                                                                                                |
-| ----------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `ESP32-CAM/VERSION`                                               | `carpenter`   | `ESP32-CAM/build.sh`                                                             | OTA manifest `homepage/public/firmware.json` `version` field                                            |
-| `ESP32-CAM/esp_init.h` (`FIRMWARE_VERSION`)                       | `1.0.0`       | `logBootMarker` in `ESP32-CAM/logbuf.cpp`; boot log in `ESP32-CAM/ESP32-CAM.ino` | Telemetry sidecar `fw` field on every upload + boot log                                                 |
-| `ESP32-CAM/client.cpp` (`FW_VERSION`, just above `sendHeartbeat`) | `honeybee`    | `sendHeartbeat`'s body string in `ESP32-CAM/client.cpp`                          | Heartbeat body `fw_version` field → `module_heartbeats.fw_version` → `Module.latestHeartbeat.fwVersion` |
-
-So a single `carpenter` device today reports three different versions
-on three different surfaces. ADR-006 documents the desired bee-name
-convention but is currently flagged "Accepted (partial)" because the
-implementation hasn't caught up.
-
-**Proposed fix (next firmware PR):** make `ESP32-CAM/VERSION` the sole
-source. Inject it via `platformio.ini`:
-
-```ini
-[env:esp32cam]
-build_flags =
-    ${env.build_flags}
-    -DFIRMWARE_VERSION=\"$(shell cat ESP32-CAM/VERSION)\"
-```
-
-Delete the `#ifndef`/`#define` guards for `FIRMWARE_VERSION` in
-`esp_init.h` and for `FW_VERSION` in `client.cpp` (just above
-`sendHeartbeat`). Replace `String(FW_VERSION)` in `sendHeartbeat`'s
-body string with `String(FIRMWARE_VERSION)`. `build.sh` continues
-reading `VERSION` directly. One writer, three readers, no drift.
-
-**Why it's not fixed in this PR.** PR 27 is documentation-only — the
-plan is to land the doc-honest description first and let the firmware
-unification be a small, focused next PR (ideally before the next field
-deployment, or you will spend a debugging session figuring out which
-"version" is real).
-
 ## Lessons learned
 
 This section grows over time. Each entry is a problem we paid for —
@@ -306,3 +265,35 @@ The Maps API key citations in chapters 3/5/11 and any future drift
 in files this PR didn't touch will surface in the
 `make check-citations` report next time someone edits those files.
 That's the gate's job now.
+
+### Use-after-return on `esp_camera_fb_return` warm-up logging (issue #36)
+
+**What happened.** Both warm-up loops in `ESP32-CAM/ESP32-CAM.ino`
+(`setup()`'s sensor warm-up and the post-recovery loop) printed
+`fb->len` _after_ calling `esp_camera_fb_return(fb)`. The driver may
+reuse the buffer immediately, so the printed byte count was undefined
+behaviour — it happened to look right because the buffer was usually
+not yet reused, but a future driver/PSRAM pressure regime could print
+zero, garbage, or trip a panic on a freed pointer.
+
+**Why it happened.** The natural reading order ("get → log → release")
+got reordered to "get → release → log" during a refactor that pulled
+the release out of the success branch's tail. The log line and the
+release sat next to each other so the order looked symmetric; the bug
+hides in plain sight unless you remember `esp_camera_fb_return` is a
+free.
+
+**How to avoid it next time.** When releasing any pointer-bearing
+resource (camera frame buffer, malloc, smart-pointer reset), capture
+any value you still need into a local _before_ the release call. The
+fix in the same lines is the canonical pattern:
+
+```cpp
+size_t fb_len = fb->len;
+esp_camera_fb_return(fb);
+Serial.printf("...%u bytes\n", (unsigned)fb_len);
+```
+
+Code review prompt: when you see a `Serial.printf` or `log` reading a
+field through a pointer, look up to see whether that pointer was
+released earlier in the same scope.

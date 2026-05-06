@@ -72,6 +72,24 @@ pio run -e esp32cam --target upload --upload-port <port>
 
 Find the port: **Device Manager → Ports → USB-SERIAL CH340 (COMx)** on Windows; `/dev/ttyUSB0` or `/dev/cu.usbserial-*` on Linux/Mac.
 
+> **Firmware version on the wire.** `ESP32-CAM/VERSION` is the single
+> source of truth for the bee-name release identifier. Both build paths
+> inject it as `-DFIRMWARE_VERSION="<value>"`:
+>
+> - `pio run -e esp32cam` reads it via `ESP32-CAM/extra_scripts.py`.
+> - `bash ESP32-CAM/build.sh` (the arduino-cli release path used to
+>   produce `homepage/public/firmware.bin` + `firmware.json`) reads it
+>   via `--build-property`.
+>
+> If you compile the sketch directly in Arduino IDE without going
+> through either path, the macro falls back to the literal string
+> `dev-unset`, which then surfaces in the boot log, the telemetry
+> sidecar `fw` field, and the `module_heartbeats.fw_version` column.
+> A flashed device reporting `dev-unset` is your signal that this binary
+> didn't go through the release pipeline — re-flash from `build.sh` or
+> `pio run` for a real release. See
+> [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md).
+
 ### Boot normally after flashing
 
 Press **RST** once (without IO0). The module boots and opens the configuration access point — verify by opening your phone's WiFi list and looking for `ESP32-Access-Point`. The on-board LED stays silent in AP mode (the LED is the camera-flash GPIO; steady-state signalling would be obnoxious). See [the LED legend in chapter 06](../06-runtime-view/esp-reliability.md#led-legend) for the brief failure / upload pulses the LED does emit during normal operation.

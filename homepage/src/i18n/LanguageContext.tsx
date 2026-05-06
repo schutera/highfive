@@ -52,6 +52,9 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       if (value === undefined) {
         value = resolve(translations.en, path);
       }
+      // Non-string leaves (e.g. array-valued setup.stepLabels) collapse to
+      // the path key — t() can't return arrays. Use useTranslationRaw() for
+      // those and pluck the field directly.
       if (typeof value !== 'string') return path;
       if (!params) return value;
       return value.replace(/\{(\w+)\}/g, (_, key) =>

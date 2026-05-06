@@ -237,6 +237,14 @@ export function useSetupWizard() {
   }, []);
 
   const startVerification = useCallback(async () => {
+    // React 18 Strict Mode runs effects twice in dev; without this guard, two
+    // setInterval handles race for pollingIntervalRef and the first one is
+    // orphaned (it keeps incrementing pollCount past MAX_POLLS forever).
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
     console.log('[Step5] Starting verification, looking for any new module');
 
     // Use the snapshot taken on wizard mount so we detect any module that

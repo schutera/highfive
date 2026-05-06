@@ -247,7 +247,16 @@ static void onWifiEvent(WiFiEvent_t event) {
 
 void setupWifiConnection(wifi_configuration_t *wifi_config) {
 
+  // Anyone with USB access (5 s with a serial monitor) used to walk away with
+  // the WiFi password — the live-review demo of feat/onboarding-feedback put
+  // it in chat transcripts. Redacted by default; rebuild with -DDEBUG_WIFI
+  // when copy-paste corruption is the suspect.
+#ifdef DEBUG_WIFI
   Serial.printf("connect to SSID: %s with pw: %s\n", wifi_config->SSID, wifi_config->PASSWORD);
+#else
+  Serial.printf("connect to SSID: %s (pw redacted; build with -DDEBUG_WIFI to log)\n",
+                wifi_config->SSID);
+#endif
   Serial.printf("SSID length: %d\n", strlen(wifi_config->SSID));
   Serial.printf("PW length: %d\n", strlen(wifi_config->PASSWORD));
 

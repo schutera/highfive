@@ -37,12 +37,12 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   — intentional for local dev. **Must** be overridden via
   `HIGHFIVE_API_KEY` for any non-local deploy. See
   [02-constraints](../02-constraints/README.md).
-- **WiFi password printed plaintext to Serial** — the
-  `Serial.printf("connect to SSID: %s with pw: %s\n", …, password)`
-  call at the top of `setupWifiConnection` in `ESP32-CAM/esp_init.cpp`.
-  Convenient during development; ships to anyone with USB access to
-  the board. File a follow-up to either redact it or gate it behind a
-  `DEBUG_WIFI` build flag.
+- **WiFi password printed plaintext to Serial** — was unconditionally
+  logged at the top of `setupWifiConnection` in `ESP32-CAM/esp_init.cpp`.
+  Now gated behind `-DDEBUG_WIFI` and redacted by default (issue #41,
+  fixed in `feat/onboarding-feedback`). Don't reintroduce the
+  unconditional print — anyone with USB access used to walk away with
+  the password in 5 s.
 
 ## Operational trade-offs (intentional, not debt)
 

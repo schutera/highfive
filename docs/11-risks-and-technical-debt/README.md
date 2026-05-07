@@ -575,11 +575,16 @@ state.
 **What happened.** The firmware shipped with a documented factory-reset
 procedure ("hold IO0 for 5 seconds while powering on") at
 `ESP32-CAM/ESP32-CAM.ino`'s `setup()` (formerly the `digitalRead(CONFIG_BUTTON)
-== LOW` block), advertised across the firmware Serial output, four
-arc42 chapters, the `esp32-onboarding` skill, the homepage building-
-block doc, and four user-facing i18n strings (English + German on
-both the assembly guide and the wizard troubleshoot panel). The
-procedure was physically impossible on AI
+== LOW` block), advertised across the firmware boot-time Serial
+output, six doc files (`docs/troubleshooting.md`,
+`docs/05-building-block-view/esp32cam.md`,
+`docs/05-building-block-view/homepage.md`,
+`docs/07-deployment-view/esp-flashing.md`,
+`docs/08-crosscutting-concepts/hardware-notes.md`, and
+`.claude/skills/esp32-onboarding/skill.md`), and four user-facing
+i18n strings (English + German on both the assembly guide and the
+wizard troubleshoot panel). The procedure was physically impossible
+on AI
 Thinker ESP32-CAM-MB: the ROM samples GPIO0 the moment EN/RST
 releases, so holding it LOW enters UART download mode (visible as
 garbled 74880-baud output, "waiting for download") instead of running
@@ -600,17 +605,22 @@ broken.
 fix targeted the firmware code and the five `docs/` sites named in the
 issue, but missed the four production i18n strings in
 `homepage/src/i18n/translations.ts`'s `assembly.factoryReset` and
-`wizard.troubleshoot.resetText` blocks, plus a related table row in
-`docs/05-building-block-view/homepage.md`. Senior-reviewer caught it.
+`step5.troubleshoot.resetText` blocks (English + German), plus a
+related table row in `docs/05-building-block-view/homepage.md`. Senior-reviewer caught it.
 This is the same failure mode the "Drift sweep is not a substitute
 for a CI check" lesson 30 lines above warned about — and the warning
 was sitting one screen-scroll away while the PR was being written.
 The general lesson: prose warnings about cross-surface drift do not
-durably hold; they only hold the day they're written. A mechanical
-gate (e.g. a `grep` rule that fails the build when
-`IO0`/`GPIO0`/`hold.*5.*second` appears in a user-facing surface)
-is the only durable form. Tracked as a candidate addition to
-`make check-citations` in a follow-up.
+durably hold; they only hold the day they're written. The mechanical
+guard ships with this same PR rather than as a follow-up:
+`scripts/check-stale-reset-prose.sh` (wired into
+`make check-stale-reset-prose` and the `pre-push` hook) fails the
+build if `hold.*IO0.*[0-9]+.*second`, `hold.*left.button.*ESP32-CAM`,
+or related calque-grammar reappears anywhere under `homepage/`,
+`docs/`, `.claude/skills/`, or `ESP32-CAM/`. Plus a vitest assertion in
+`homepage/src/__tests__/i18n.test.ts` pins the four user-facing keys
+(`en.assembly.factoryReset`, `en.step5.troubleshoot.resetText`, and
+their German twins) against the regex regression class.
 
 **Lesson.** When the ESP32 datasheet calls a pin a "strap pin", any
 user-visible behaviour assigned to it must work _despite_ the strap
@@ -621,12 +631,9 @@ firmware runs, the pin's level may have nothing to do with the
 operator's intent. For this codebase: factory-reset moved to the
 captive portal (`POST /factory_reset` endpoint in
 `ESP32-CAM/host.cpp`'s `runAccessPoint`), and the legacy IO0-hold
-procedure is removed from `ESP32-CAM/ESP32-CAM.ino`, the
-running-board Serial advice, and all five doc sites
-(`docs/troubleshooting.md`,
-`docs/05-building-block-view/esp32cam.md`,
-`docs/07-deployment-view/esp-flashing.md`,
-`docs/08-crosscutting-concepts/hardware-notes.md`,
-`.claude/skills/esp32-onboarding/skill.md`). Future "hold this button
+procedure is removed from `ESP32-CAM/ESP32-CAM.ino`, the boot-time
+Serial advice, all six doc files listed above, and the four
+homepage i18n strings. The `check-stale-reset-prose.sh` gate exists
+to keep it removed. Future "hold this button
 at boot" features must use a non-strap GPIO (e.g. GPIO13 or GPIO14
 on the ESP32-CAM, both broken out and both safe at strap time).

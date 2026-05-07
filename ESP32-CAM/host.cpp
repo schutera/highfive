@@ -560,19 +560,26 @@ void runAccessPoint() {
                 } else {
                   Serial.println("[host] Factory reset requested via captive portal");
                   // Tiny inline response page; the restart cuts the socket within ms.
-                  // The meta-refresh nudges the user back to the AP root once the
-                  // module has rebooted, so the success page doesn't sit as a dead
-                  // artifact after the AP disappears under it.
+                  // The 60 s meta-refresh is a best-effort nudge — meta-refresh has
+                  // no event hook for "SSID has come back", just a fixed timer, and
+                  // an iOS/Android SSID switch round-trip can be 30+ s. If the user
+                  // is still off-network when the timer fires, the page errors and
+                  // the copy below tells them to reload manually. Better than
+                  // pretending the browser knows when the AP is back.
                   client.println("HTTP/1.1 200 OK");
                   client.println("Content-type:text/html");
                   client.println("Connection: close");
                   client.println();
                   client.println("<!doctype html><html><head>");
-                  client.println("<meta http-equiv=\"refresh\" content=\"15; url=http://192.168.4.1/\">");
+                  client.println("<meta http-equiv=\"refresh\" content=\"60; url=http://192.168.4.1/\">");
                   client.println("</head><body>");
                   client.println("<h1>Factory reset</h1>");
-                  client.println("<p>The module is rebooting and will reopen the WiFi access point in a moment. Reconnect to <code>ESP32-Access-Point</code> and this page will refresh automatically once you're back.</p>");
+                  client.println("<p>The module is rebooting and will reopen the WiFi access point in a moment. Reconnect your phone to <code>ESP32-Access-Point</code>, then either wait up to 60 seconds for this page to refresh on its own, or reload it manually.</p>");
                   client.println("</body></html>");
+                  // WiFiClient::flush() on Arduino-ESP32 is best-effort — it
+                  // doesn't guarantee bytes have actually left the radio. The
+                  // 500 ms FACTORY_RESET_SETTLE_MS below is what gives the TCP
+                  // stack a fighting chance to drain before ESP.restart().
                   client.flush();
 
                   setESPConfigured(false);

@@ -175,7 +175,7 @@ const translations = {
       photoStep: 'Photo: Step {n}',
       tips: 'Tips',
       factoryReset:
-        "To reconfigure your module: open http://192.168.4.1 (the module reopens this portal automatically after three failed WiFi joins) and submit the 'Factory reset (advanced)' section at the bottom of the form. With a serial cable: pio run -t erase && pio run -t upload.",
+        "To reconfigure your module: open http://192.168.4.1 (the module reopens this portal automatically after three failed WiFi joins), expand 'Factory reset (advanced)' at the bottom of the form, tick the confirmation checkbox, and submit. With a serial cable: cd ESP32-CAM && pio run -t erase && pio run -t upload.",
       factoryResetLabel: 'Factory Reset:',
       ctaTitle: 'Module assembled?',
       ctaText: 'Now flash the firmware and connect your module to the server.',
@@ -559,7 +559,7 @@ const translations = {
       photoStep: 'Foto: Schritt {n}',
       tips: 'Tipps',
       factoryReset:
-        "Zum Neukonfigurieren deines Moduls: \u00F6ffne http://192.168.4.1 (das Modul \u00F6ffnet diesen Zugangspunkt nach drei fehlgeschlagenen WLAN-Verbindungsversuchen automatisch erneut) und sende den Bereich 'Factory reset (advanced)' unten im Formular ab. Mit einem seriellen Kabel: pio run -t erase && pio run -t upload.",
+        "Zum Neukonfigurieren deines Moduls: \u00F6ffne http://192.168.4.1 (das Modul \u00F6ffnet diesen Zugangspunkt nach drei fehlgeschlagenen WLAN-Verbindungsversuchen automatisch erneut), klappe 'Factory reset (advanced)' unten im Formular auf, aktiviere die Best\u00E4tigungs-Checkbox und sende ab. Mit einem seriellen Kabel: cd ESP32-CAM && pio run -t erase && pio run -t upload.",
       factoryResetLabel: 'Werkseinstellungen:',
       ctaTitle: 'Modul zusammengebaut?',
       ctaText: 'Jetzt die Firmware flashen und dein Modul mit dem Server verbinden.',

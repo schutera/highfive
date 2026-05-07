@@ -214,7 +214,7 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   "  let valid=true;"
   "  const fields=document.querySelectorAll('input, select');"
   "  fields.forEach(f=>{"
-  "    if(f.dataset.optional==='1'){"
+  "    if(f.dataset.keepCurrentOnEmpty==='1' && f.value===''){"
   "      f.classList.remove('error-field');"
   "      return;"
   "    }"
@@ -272,13 +272,17 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<div class=\"field\">");
   client.println("<label>WiFi Password</label>");
   // Never echo the saved password back into the form: the captive portal is
-  // served over an open AP, so any client on the SSID can View Source. See #46.
-  // First-boot vs. reconfigure: only hint at "keep current" when one is saved,
-  // and tag the input data-optional so validateForm permits empty submission
-  // (the /save handler treats empty as "keep current").
+  // served over a WPA2 AP whose PSK (HOST_PASSWORD at the top of this file)
+  // is hardcoded in source, so anyone who has read the codebase, the wiki,
+  // or guessed the default can join and View Source. See #46.
+  // First-boot vs. reconfigure: only hint at "keep current" when one is
+  // saved, and tag the input data-keep-current-on-empty so validateForm
+  // permits empty submission. The /save handler mirrors the contract by
+  // assigning cfg_password only when getParam("password") is non-empty;
+  // if a future field also adopts this attribute, mirror it server-side.
   String pwHint     = (cfg_password.length() > 0) ? "(leave blank to keep current password)" : "WiFi password";
-  String pwOptional = (cfg_password.length() > 0) ? " data-optional=\"1\"" : "";
-  client.println("<input type=\"password\" name=\"password\"" + pwOptional + " value=\"\" placeholder=\"" + pwHint + "\">");
+  String pwKeepAttr = (cfg_password.length() > 0) ? " data-keep-current-on-empty=\"1\"" : "";
+  client.println("<input type=\"password\" name=\"password\"" + pwKeepAttr + " value=\"\" placeholder=\"" + pwHint + "\">");
   client.println("</div>");
 
   client.println("<div class=\"row\">");
@@ -432,7 +436,16 @@ void runAccessPoint() {
                     cfg_ssid        = getParam(query, "ssid");
                     // Empty submission means "keep current password" (#46): the
                     // form no longer pre-fills the field, so a user editing only
-                    // the SSID would otherwise wipe their saved credential.
+                    // the SSID would otherwise wipe their saved credential. The
+                    // client-side validator skips this field when the input is
+                    // tagged data-keep-current-on-empty (see sendConfigForm);
+                    // the server-side conditional below is the authoritative
+                    // half of the contract. Test-debt: this branch is inside
+                    // runAccessPoint and is not reachable from the native
+                    // unity tests; PR-47 verified it end-to-end on hardware
+                    // (View Source → blank submit → WiFi rejoin) but a
+                    // regression that re-introduces unconditional assignment
+                    // would only surface in hardware testing today.
                     String submittedPw = getParam(query, "password");
                     if (submittedPw.length() > 0) {
                       cfg_password = submittedPw;

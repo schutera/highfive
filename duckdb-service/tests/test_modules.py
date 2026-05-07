@@ -60,8 +60,15 @@ def test_new_module_invalid_mac_returns_400(client):
     assert "error" in resp.get_json()
 
 
-def test_new_module_rejects_raw_uint64_decimal(client):
-    # Issue #39: firmware previously stringified the eFuse uint64 as decimal.
+def test_new_module_rejects_uint64_decimal_str_too_long(client):
+    # Issue #39 regression: firmware previously called String(uint64) on the
+    # eFuse MAC, which produces a 15–20 digit decimal that exceeds the 12-char
+    # canonical ModuleId regex `^[0-9a-f]{12}$`. This test pins the LENGTH
+    # rejection at the validator boundary — the chosen sample (15 digits)
+    # would also pass [0-9a-f] character-wise, which makes it a faithful
+    # reproduction of what the buggy firmware actually posted. A hypothetical
+    # 12-digit decimal MAC would still pass the regex (digits are valid
+    # hex); that is intentional in the canonical contract, not a bug here.
     resp = client.post("/new_module", json=_valid_payload(esp_id="193966879422984"))
     assert resp.status_code == 400
     assert "error" in resp.get_json()

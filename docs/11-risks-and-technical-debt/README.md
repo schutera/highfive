@@ -344,24 +344,29 @@ DOWNLOAD_BOOT`, and finger-roll attempts (release RESET, then quickly
 press BOOT) triggered an `ets_main.c 371 flash read err, 1000` boot
 loop that required a full re-flash to recover.
 
-**Why it happened.** GPIO0 is also the strapping pin the ESP32 ROM
+**Why it happened.** GPIO0 is the boot strap pin the ESP32 ROM
 bootloader samples at the rising edge of EN to choose between
-`SPI_FAST_FLASH_BOOT` and `DOWNLOAD_BOOT`. The firmware-side
-`digitalRead(CONFIG_BUTTON)` check happens ~200–300 ms later, but by
-then the strap has already routed the chip into the ROM bootloader.
-The flash-read-error variant is more speculative — plausibly bus
-contention between the camera's XCLK on GPIO0 and the SPI flash mux
-during the brief window where GPIO0 is held LOW around the strap.
+`SPI_FAST_FLASH_BOOT` and `DOWNLOAD_BOOT`. If GPIO0 is LOW at that
+moment, the chip enters the ROM bootloader and waits on UART for
+esptool — app code does not run at all, so the firmware-side
+`digitalRead(CONFIG_BUTTON)` check has no opportunity to win the
+race; there is no race. The `flash read err, 1000` variant has an
+**unproven mechanism** — possibly a power glitch or partial-erase
+residue from prior DOWNLOAD_BOOT entries; we did not isolate it
+during PR-47 testing and should not invent one. What is reproducible
+is the failure, not the cause.
 
 **How to avoid it next time.** Don't trust a documented "hold a strap
 pin to enter app-side mode" sequence on hardware where that pin is
-also the boot strap — the boot ROM always wins. Two working
-alternatives proven in PR-47 hardware testing: the WiFi-fail
-auto-fallback at `ESP32-CAM.ino`'s `setup` (3 consecutive failed joins
-→ `setESPConfigured(false)` → AP), and a future option to wire CONFIG
-to a non-strap GPIO. The on-device hint string and the
+also the boot strap — the boot ROM always wins, by construction. The
+working trigger today is the WiFi-fail auto-fallback at
+`ESP32-CAM.ino`'s `setup` (3 consecutive failed joins →
+`setESPConfigured(false)` → AP). PR-47 also replaced the misleading
 `-- ESP already configured. To reconfigure: hold the CONFIG button…`
-print should be updated or removed; tracked as a follow-up.
+print with one that advertises the auto-fallback path; the broader
+fix (wire CONFIG to a non-strap GPIO, or remove the long-press path
+entirely) is tracked at
+[issue #56](https://github.com/schutera/highfive/issues/56).
 
 ### `auth.md` "open AP" claim — captive portal is WPA2-protected
 

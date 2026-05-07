@@ -46,12 +46,21 @@ describe('GET /api/modules', () => {
         imageCount: 12,
       },
     ];
-    mocks.listModules.mockResolvedValue(fakeModules);
+    mocks.listModules.mockResolvedValue({ modules: fakeModules, heartbeatsFailed: false });
 
     const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
     expect(res.status).toBe(200);
     expect(res.body).toEqual(fakeModules);
+    expect(res.headers['x-highfive-data-incomplete']).toBeUndefined();
     expect(mocks.listModules).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets X-Highfive-Data-Incomplete=heartbeats when the read model flags partial data', async () => {
+    mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: true });
+
+    const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
+    expect(res.status).toBe(200);
+    expect(res.headers['x-highfive-data-incomplete']).toBe('heartbeats');
   });
 });
 
@@ -69,16 +78,17 @@ describe('GET /api/modules/:id', () => {
       imageCount: 0,
       nests: [],
     };
-    mocks.getModuleDetail.mockResolvedValue(fakeModule);
+    mocks.getModuleDetail.mockResolvedValue({ detail: fakeModule, heartbeatsFailed: false });
 
     const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
     expect(res.status).toBe(200);
     expect(res.body).toEqual(fakeModule);
+    expect(res.headers['x-highfive-data-incomplete']).toBeUndefined();
     expect(mocks.getModuleDetail).toHaveBeenCalledWith(VALID_ID);
   });
 
   it('returns 404 for an unknown id', async () => {
-    mocks.getModuleDetail.mockResolvedValue(null);
+    mocks.getModuleDetail.mockResolvedValue({ detail: null, heartbeatsFailed: false });
 
     const res = await request(app).get('/api/modules/000000000001').set('X-API-Key', KEY);
     expect(res.status).toBe(404);

@@ -26,7 +26,9 @@ function isAdminMode(): boolean {
 }
 
 interface ModulePanelProps {
-  module: { id: string; name: string; status: 'online' | 'offline' };
+  // 'unknown' surfaces when the heartbeat fetch failed and there is no
+  // alternate liveness signal — see backend/src/database.ts and #31.
+  module: { id: string; name: string; status: 'online' | 'offline' | 'unknown' };
   onClose: () => void;
   onError: (error: string) => void;
 }
@@ -151,6 +153,17 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   }
 
   const isOnline = moduleDetail.status === 'online';
+  const isUnknown = moduleDetail.status === 'unknown';
+  const statusLabel = isOnline
+    ? t('common.online')
+    : isUnknown
+      ? t('common.unknown')
+      : t('common.offline');
+  const statusBgClass = isOnline
+    ? 'bg-hf-success/90'
+    : isUnknown
+      ? 'bg-hf-fg-mute/50'
+      : 'bg-hf-fg-mute/80';
   const locale = lang === 'de' ? 'de-DE' : 'en-US';
   const formattedTime = moduleDetail.lastApiCall
     ? new Date(moduleDetail.lastApiCall).toLocaleString(locale, {
@@ -219,13 +232,15 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
 
           <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
             <div
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-hf-xs font-semibold ${isOnline ? 'bg-hf-success/90' : 'bg-hf-fg-mute/80'}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-hf-xs font-semibold ${statusBgClass}`}
             >
               <span
-                className={`w-1.5 h-1.5 rounded-full bg-white ${isOnline ? 'animate-pulse' : 'opacity-70'}`}
+                className={`w-1.5 h-1.5 rounded-full bg-white ${
+                  isOnline ? 'animate-pulse' : isUnknown ? 'opacity-50' : 'opacity-70'
+                }`}
                 aria-hidden="true"
               />
-              {isOnline ? t('common.online') : t('common.offline')}
+              {statusLabel}
             </div>
 
             <div className="inline-flex items-center gap-1.5 bg-white/20 rounded-full px-3 py-1 text-hf-xs font-semibold">

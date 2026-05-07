@@ -54,7 +54,10 @@ app.use('/api', apiKeyAuth);
 
 app.get('/api/modules', async (req, res) => {
   try {
-    const modules = await db.listModules();
+    const { modules, heartbeatsFailed } = await db.listModules();
+    if (heartbeatsFailed) {
+      res.setHeader('X-Highfive-Data-Incomplete', 'heartbeats');
+    }
     res.json(modules);
   } catch (error) {
     console.error('[GET /api/modules]', { error: String(error) });
@@ -69,9 +72,12 @@ app.get('/api/modules/:id', async (req, res) => {
     return;
   }
   try {
-    const module = await db.getModuleDetail(id);
-    if (module) {
-      res.json(module);
+    const { detail, heartbeatsFailed } = await db.getModuleDetail(id);
+    if (detail) {
+      if (heartbeatsFailed) {
+        res.setHeader('X-Highfive-Data-Incomplete', 'heartbeats');
+      }
+      res.json(detail);
     } else {
       res.status(404).json({ error: 'Module not found' });
     }

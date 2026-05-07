@@ -6,6 +6,9 @@ const translations = {
       next: 'Next',
       online: 'Online',
       offline: 'Offline',
+      unknown: 'Unknown',
+      heartbeatDataIncomplete:
+        'Heartbeat data unavailable — some module statuses may be incomplete. Refresh in a moment.',
       loading: 'Loading...',
       error: 'Error',
       tryAgain: 'Try Again',
@@ -386,6 +389,9 @@ const translations = {
       next: 'Weiter',
       online: 'Online',
       offline: 'Offline',
+      unknown: 'Unbekannt',
+      heartbeatDataIncomplete:
+        'Heartbeat-Daten nicht verfügbar — einige Modul-Status können unvollständig sein. Bitte gleich neu laden.',
       loading: 'Laden...',
       error: 'Fehler',
       tryAgain: 'Erneut versuchen',

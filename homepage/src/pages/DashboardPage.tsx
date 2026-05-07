@@ -15,6 +15,10 @@ export default function DashboardPage() {
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Mirrors the X-Highfive-Data-Incomplete response header (#31). When true,
+  // some module statuses may be 'unknown' instead of accurate, and we show
+  // a banner explaining the degradation.
+  const [heartbeatsIncomplete, setHeartbeatsIncomplete] = useState(false);
   const [mobileListExpanded, setMobileListExpanded] = useState(false);
 
   useEffect(() => {
@@ -25,8 +29,9 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      const data = await api.getAllModules();
+      const { modules: data, dataIncomplete } = await api.getAllModulesWithMeta();
       setModules(data);
+      setHeartbeatsIncomplete(dataIncomplete.heartbeats);
 
       // Auto-select module passed from setup wizard
       const navState = location.state as { selectModuleId?: string } | null;
@@ -85,6 +90,19 @@ export default function DashboardPage() {
   return (
     <div className="h-[100dvh] flex flex-col bg-hf-bg overflow-hidden">
       <SiteHeader title={t('dashboard.title')} right={statusPill} />
+
+      {/* Heartbeat-data-incomplete banner (#31). Shown when the backend
+          flagged the heartbeats endpoint as unreachable on the last fetch
+          — some module statuses may be 'unknown' rather than accurate. */}
+      {!loading && !error && heartbeatsIncomplete && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="px-4 py-2 text-hf-xs md:text-hf-sm border-b border-hf-honey-300 bg-hf-honey-50 text-hf-honey-900"
+        >
+          {t('common.heartbeatDataIncomplete')}
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">

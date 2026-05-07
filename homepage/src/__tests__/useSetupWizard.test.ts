@@ -22,6 +22,8 @@ import { useSetupWizard } from '../components/setup/useSetupWizard';
 // a trailing-error counter.
 
 describe('useSetupWizard.startVerification — mid-poll classification (#44)', () => {
+  let originalFetch: typeof fetch;
+
   beforeEach(() => {
     getAllModules.mockReset();
     healthCheck.mockReset();
@@ -29,13 +31,17 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
     vi.useFakeTimers();
     // The hook's mount effects also fetch /firmware.json and
     // /__dev-api/lan-ip — stub those so the test isn't coupled to
-    // their implementations.
+    // their implementations. Stash the original so afterEach can
+    // restore it and the next test in this file (or next file run
+    // in the same worker) doesn't inherit the override.
+    originalFetch = globalThis.fetch;
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response(null, { status: 404 })) as typeof fetch;
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     vi.useRealTimers();
   });
 
@@ -49,9 +55,14 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
   }
 
   it('classifies as backend-unreachable when all 24 polls fail', async () => {
-    // Mount snapshot fetch: empty success.
+    // Mount snapshot resolves empty; every subsequent call (including
+    // startVerification's fallback snapshot, which fires because the
+    // mount snapshot was empty, plus all 24 poll-loop fetches)
+    // rejects. The shared-default rejection is intentional — leaving
+    // the queue exhausted would let undefined leak through to
+    // modules.find() which would TypeError but only after resetting
+    // the counter, masking what the test claims to pin.
     getAllModules.mockResolvedValueOnce([]);
-    // Poll loop: every fetch rejects.
     getAllModules.mockRejectedValue(new Error('fetch failed'));
 
     const { result } = renderHook(() => useSetupWizard());
@@ -75,7 +86,15 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
   });
 
   it('classifies as timeout when a late poll succeeds (resetting the trailing-error counter)', async () => {
-    getAllModules.mockResolvedValueOnce([]); // mount snapshot
+    // Mount with a non-empty snapshot so startVerification skips its
+    // fallback fetch — without this, the fallback would silently
+    // consume one of the rejection mocks below and the trailing-error
+    // count at MAX_POLLS would land on 1 instead of the intended 0,
+    // making the test pass for the wrong reason if the threshold ever
+    // changes. Same pattern as the third case below.
+    getAllModules.mockResolvedValueOnce([
+      { id: 'pre-existing-aabbccddeeff', name: 'Pre-existing', updatedAt: '2024-01-01' },
+    ]);
     // First 23 poll attempts fail.
     for (let i = 0; i < 23; i++) {
       getAllModules.mockRejectedValueOnce(new Error('fetch failed'));
@@ -84,6 +103,8 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
     // matching module appeared. Counter resets to 0; classification
     // should be the orange timeout, not the red unreachable.
     getAllModules.mockResolvedValueOnce([]);
+    // Belt-and-braces default for any extra calls.
+    getAllModules.mockRejectedValue(new Error('fetch failed (default)'));
 
     const { result } = renderHook(() => useSetupWizard());
     await act(async () => {

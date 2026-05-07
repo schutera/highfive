@@ -150,8 +150,14 @@ export async function flashEsp(
 
 /**
  * ESP32 application image header magic byte (esp_image_format.h
- * `ESP_IMAGE_HEADER_MAGIC`). Both single-app and merged-with-bootloader
- * binaries start with this byte.
+ * `ESP_IMAGE_HEADER_MAGIC`). The bootloader, every app slot, and
+ * the merged single-blob produced by `esptool.py merge_bin` all
+ * begin with 0xE9. Other artefacts in a multi-part flash layout
+ * have different magics — partition tables start with 0xAA 0x50.
+ * The current Step2Flash manifest is a single merged part at
+ * offset 0, so 0xE9 is the right gate; if anyone splits the
+ * manifest into bootloader + partitions + app, this validator
+ * needs to learn the per-offset allow-list.
  */
 export const ESP_IMAGE_MAGIC = 0xe9;
 

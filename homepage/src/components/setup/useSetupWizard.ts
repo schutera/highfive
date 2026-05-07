@@ -257,6 +257,10 @@ export function useSetupWizard() {
       pollingIntervalRef.current = null;
     }
     startInflightRef.current = false;
+    // Co-locate the reset with the other cleanup so the next
+    // startVerification can't inherit a stale trailing-error count
+    // through a code path that bypasses its own initialisation block.
+    consecutivePollErrorsRef.current = 0;
     setState((s) => ({ ...s, pollingActive: false }));
   }, []);
 
@@ -296,6 +300,13 @@ export function useSetupWizard() {
     pollingIntervalRef.current = setInterval(async () => {
       pollCountRef.current++;
       if (pollCountRef.current > MAX_POLLS) {
+        // Trailing-only heuristic: we look at the run of failures
+        // immediately before the timeout, not the whole window. A flaky
+        // backend that recovered for the last few polls classifies as
+        // timeout, not unreachable — fine, because the user can in fact
+        // reach the dashboard now even if their module didn't appear.
+        // The other direction (backend up early, dies for the final
+        // ~25s) is the one #44 wanted to fix and the threshold catches.
         const trailingErrors = consecutivePollErrorsRef.current;
         const backendDownAtEnd = trailingErrors >= POLL_BACKEND_DOWN_TAIL;
         console.warn(

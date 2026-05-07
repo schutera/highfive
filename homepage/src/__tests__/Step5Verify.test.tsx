@@ -119,16 +119,27 @@ describe('Step5Verify retry visibility', () => {
     warn.mockRestore();
   });
 
-  it('also renders the unreachable-screen when the poll loop reports backend-down (issue #44)', () => {
+  it('also renders the unreachable-screen when the poll loop reports backend-down (issue #44)', async () => {
     // The pre-poll healthcheck succeeded, the poll loop ran for 2 minutes,
     // the trailing run of failures crossed the threshold, and the wizard
     // hook set verificationBackendUnreachable=true. Show the same red
     // "Backend Server Not Reachable" branch as a failed initial healthcheck
     // — not the orange "check the module" troubleshooting screen, which
     // would point the user at completely the wrong remediation.
+    //
+    // The local healthcheck must succeed first: the new gate in
+    // Step5Verify suppresses the parent flag while backendReachable is
+    // still null (avoiding a red flash on remount). Without the
+    // healthcheck mock + microtask drain below, the assertion would
+    // race the still-pending `checkBackendAndStart` and could flake.
     healthCheck.mockResolvedValueOnce({ status: 'ok', timestamp: '' });
 
     renderWizardStep(() => {}, { verificationBackendUnreachable: true });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(/Backend Server Not Reachable/i)).toBeInTheDocument();

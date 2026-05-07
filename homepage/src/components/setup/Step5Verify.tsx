@@ -163,7 +163,13 @@ export default function Step5Verify({
   //   1. checkBackendAndStart's initial 8-attempt healthcheck never succeeded.
   //   2. Poll loop ran out the clock with the trailing run of failures long
   //      enough to indicate the backend (not the ESP) is at fault (#44).
-  if (backendReachable === false || verificationBackendUnreachable) {
+  // Gate the parent flag on `backendReachable !== null` so a remount of
+  // Step 5 (e.g. user back-navigates and returns) doesn't flash the red
+  // screen before the fresh local healthcheck has fired.
+  if (
+    backendReachable === false ||
+    (backendReachable !== null && verificationBackendUnreachable)
+  ) {
     return (
       <section
         className="flex flex-col items-center text-center"

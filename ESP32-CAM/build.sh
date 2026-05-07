@@ -68,6 +68,12 @@ echo "Verified: FIRMWARE_VERSION=${VERSION} is in the binary as a plain string."
 # some AI Thinker units and bricks others.
 ESP32_CORE_VERSION="${ESP32_CORE_VERSION:-2.0.17}"
 ARDUINO_DATA_DIR="${ARDUINO_DATA_DIR:-$HOME/.arduino15}"
+# boot_app0 is core-version-pinned (lives under the core install dir).
+# esptool_py is shipped as a separate tool by arduino-cli; only one
+# version is installed per core, but if the user has multiple cores
+# installed there could be multiple esptool_py versions. We pick the
+# highest by sort -V; merge_bin's CLI is stable across the 4.x line so
+# this is safe.
 ESPTOOL_DIR="$(find "${ARDUINO_DATA_DIR}/packages/esp32/tools/esptool_py" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V -r | head -1)"
 ESPTOOL="${ESPTOOL_DIR}/esptool.py"
 BOOT_APP0="${ARDUINO_DATA_DIR}/packages/esp32/hardware/esp32/${ESP32_CORE_VERSION}/tools/partitions/boot_app0.bin"

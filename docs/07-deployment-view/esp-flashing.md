@@ -111,7 +111,8 @@ export PATH="$HOME/.local/bin:$PATH"
 # ESP32 board core — pin to 2.0.17. The 3.x core changed the
 # esp_task_wdt_init signature and won't compile against this firmware.
 # (If you already use arduino-cli for non-HiveHive work, drop --overwrite
-# and the `core update-index` will append to your existing config.)
+# so `config init` doesn't clobber your existing arduino-cli.yaml; the
+# `config add` line below appends to it either way.)
 arduino-cli config init --overwrite
 arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 arduino-cli core update-index

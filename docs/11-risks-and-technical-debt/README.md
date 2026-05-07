@@ -287,7 +287,7 @@ the link.
 codebase still had a flat layout, then survived the `lib/` refactor
 because nobody re-ran `bash build.sh` end-to-end after that refactor.
 PIO compiled fine, so the mismatch was invisible. The post-compile
-guard added in this same PR caught a different `build.sh` bug
+guard added earlier in PR #55 caught a different `build.sh` bug
 (quote-escaping doubled), but only after we got past the linker.
 Manual end-to-end testing on a real ESP32-CAM was what surfaced this.
 

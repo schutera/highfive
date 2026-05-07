@@ -53,6 +53,21 @@ export interface HeartbeatSnapshot {
 deliberate decision —
 [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
 
+## `Module.status` is three-valued
+
+`Module.status` is `'online' | 'offline' | 'unknown'`. The `'unknown'`
+value (added 2026-05-07, issue #31) covers the case where the duckdb
+`/heartbeats_summary` fetch failed AND the module has no other liveness
+signal — without heartbeats most modules would silently flip to
+`'offline'` and the dashboard would mislead the on-call. The header
+`X-Highfive-Data-Incomplete: heartbeats` accompanies any response whose
+status values were affected by the missing heartbeats.
+
+The header was chosen over a body-shape change so old clients keep
+deserialising the response body unchanged; only the per-module
+`status` value differs. Consumers that care about UX degradation read
+the header; consumers that only need the array continue working.
+
 `Module.lastSeenAt` is **derived** in the backend, not stored. The
 formula at `backend/src/database.ts:174-184` reads three wire
 fields off the duckdb response and takes the freshest:

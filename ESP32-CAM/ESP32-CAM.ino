@@ -136,9 +136,9 @@ void setup() {
     // working trigger today is the WiFi-fail auto-fallback above: if the
     // saved credentials stop working for WIFI_FAIL_AP_FALLBACK_THRESH boots
     // in a row, the device clears `configured` and re-opens the captive
-    // portal automatically. The line-83 GPIO0 long-press path is retained
-    // for boards where it does work (and as last-resort recovery), but is
-    // no longer advertised in the user-facing print.
+    // portal automatically. The GPIO0 long-press check earlier in this
+    // setup() is retained for boards where it does work (and as last-resort
+    // recovery), but is no longer advertised in the user-facing print.
     Serial.printf("-- ESP already configured. To reconfigure: temporarily "
                   "change your WiFi credentials so the device fails to join %u "
                   "times in a row; it will auto-fall-back to the captive "

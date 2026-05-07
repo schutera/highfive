@@ -172,9 +172,11 @@ Note: the LED stays silent in AP mode — the on-board LED is the camera flash, 
 
 ### Re-open the configuration portal
 
-The supported trigger is the WiFi-fail auto-fallback described above: temporarily change your WiFi credentials (or take the SSID offline) so the module cannot join. After **three consecutive failed joins (~90 s total)** the firmware clears `configured` in NVS and the `ESP32-Access-Point` reopens. The saved password in SPIFFS is preserved across this fallback — only the `configured` flag flips.
+**Recommended:** re-flash the firmware via USB with new settings — see [docs/07-deployment-view/esp-flashing.md](07-deployment-view/esp-flashing.md). This is the cleanest path if the device is on your bench.
 
-The historical "hold IO0 for 5 seconds while powered" trigger is **unreliable on standard ESP32-CAM hardware** because GPIO0 is also the boot strap pin: holding it LOW around RESET routes the chip into ROM `DOWNLOAD_BOOT` (no app code runs), and finger-roll attempts have produced reproducible flash-read-error boot loops requiring a full re-flash. Tracked in [issue #56](https://github.com/schutera/highfive/issues/56). Prefer the WiFi-fail path; the IO0 long-press code is retained in firmware as last-resort recovery only.
+**No USB access?** Use the WiFi-fail auto-fallback: temporarily change your WiFi credentials (or take the SSID offline) so the module cannot join. After **three consecutive failed joins (~2 minutes)** the firmware clears `configured` in NVS and the `ESP32-Access-Point` reopens. The saved password in SPIFFS is preserved across this fallback — only the `configured` flag flips. Note: this temporarily disconnects every device on the SSID, so it's an awkward path for shared LANs.
+
+The historical "hold IO0 for 5 seconds while powered" trigger is **unreliable on standard ESP32-CAM hardware** because GPIO0 is also the boot strap pin: holding it LOW around RESET routes the chip into ROM `DOWNLOAD_BOOT` (no app code runs), and finger-roll attempts have produced reproducible flash-read-error boot loops requiring a full re-flash. Tracked in [issue #56](https://github.com/schutera/highfive/issues/56). The IO0 long-press code is retained in firmware as last-resort recovery but not advertised here.
 
 ---
 

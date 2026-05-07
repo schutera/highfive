@@ -175,8 +175,8 @@ const translations = {
       photoStep: 'Photo: Step {n}',
       tips: 'Tips',
       factoryReset:
-        'If you need to reconfigure your module, temporarily change your WiFi password (or take the network offline). After three failed connection attempts (~90 seconds), the module automatically reopens the WiFi configuration portal.',
-      factoryResetLabel: 'Factory Reset:',
+        'If you need to reconfigure your module: re-flash the firmware via USB with new settings (recommended — see the Firmware Update section in the deployment docs). If USB access is impractical, you can also temporarily change your WiFi password so the module fails to join — after three failed attempts (~2 minutes), the configuration portal reopens automatically.',
+      factoryResetLabel: 'Reconfigure:',
       ctaTitle: 'Module assembled?',
       ctaText: 'Now flash the firmware and connect your module to the server.',
       ctaCta: 'Start Setup Wizard',
@@ -369,7 +369,7 @@ const translations = {
           "If you can still see 'ESP32-Access-Point' in your WiFi list, the module hasn't connected to your home network yet. Reconnect and verify the WiFi settings.",
         resetTitle: 'Re-open the configuration portal',
         resetText:
-          'Temporarily change your WiFi credentials so the module cannot join. After three failed attempts (~90 seconds), the portal reopens automatically and the access point reappears.',
+          'Re-flash the firmware via USB with new credentials (recommended). If USB is unavailable, temporarily change your WiFi credentials so the module cannot join — after three failed attempts (~2 minutes), the portal reopens automatically.',
       },
     },
 
@@ -559,8 +559,8 @@ const translations = {
       photoStep: 'Foto: Schritt {n}',
       tips: 'Tipps',
       factoryReset:
-        'Wenn du dein Modul neu konfigurieren musst, \u00E4ndere vor\u00FCbergehend dein WLAN-Passwort (oder schalte das Netzwerk ab). Nach drei fehlgeschlagenen Verbindungsversuchen (~90 Sekunden) \u00F6ffnet das Modul automatisch wieder das WLAN-Konfigurationsportal.',
-      factoryResetLabel: 'Werkseinstellungen:',
+        'Wenn du dein Modul neu konfigurieren musst: Flash die Firmware mit neuen Einstellungen per USB neu (empfohlen \u2014 siehe Firmware-Update-Anleitung in der Deployment-Doku). Wenn USB-Zugang nicht m\u00F6glich ist, kannst du auch vor\u00FCbergehend dein WLAN-Passwort \u00E4ndern, sodass sich das Modul nicht verbinden kann \u2014 nach drei fehlgeschlagenen Versuchen (~2 Minuten) \u00F6ffnet sich das Konfigurationsportal automatisch wieder.',
+      factoryResetLabel: 'Neu konfigurieren:',
       ctaTitle: 'Modul zusammengebaut?',
       ctaText: 'Jetzt die Firmware flashen und dein Modul mit dem Server verbinden.',
       ctaCta: 'Setup-Assistent starten',
@@ -754,7 +754,7 @@ const translations = {
           "Wenn du 'ESP32-Access-Point' noch in deiner WLAN-Liste siehst, hat sich das Modul noch nicht mit deinem Heimnetzwerk verbunden. Verbinde dich erneut und \u00FCberpr\u00FCfe die WLAN-Einstellungen.",
         resetTitle: 'Konfigurationsportal erneut \u00F6ffnen',
         resetText:
-          '\u00C4ndere vor\u00FCbergehend deine WLAN-Zugangsdaten, sodass sich das Modul nicht mehr verbinden kann. Nach drei fehlgeschlagenen Versuchen (~90 Sekunden) \u00F6ffnet sich das Portal automatisch wieder und der Access Point erscheint erneut.',
+          'Flash die Firmware mit neuen Zugangsdaten per USB neu (empfohlen). Wenn USB nicht verf\u00FCgbar ist, \u00E4ndere vor\u00FCbergehend deine WLAN-Zugangsdaten, sodass sich das Modul nicht mehr verbinden kann \u2014 nach drei fehlgeschlagenen Versuchen (~2 Minuten) \u00F6ffnet sich das Portal automatisch wieder.',
       },
     },
 

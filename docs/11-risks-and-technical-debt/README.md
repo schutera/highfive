@@ -10,13 +10,14 @@ future contributors must know about. Two sub-registers below:
 Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
 Highlights worth knowing about even if you're not assigned:
 
-| #                                                     | Title (short)                                                                | Why it matters                                                                                                                                                                          |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.                                                                          |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                          |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                 |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                            |
-| [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today. |
+| #                                                     | Title (short)                                                                | Why it matters                                                                                                                                                                              |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.                                                                              |
+| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                              |
+| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                     |
+| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
+| [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
+| [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper             | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
 
 ## Field-name drift
 
@@ -372,7 +373,7 @@ entirely) is tracked at
 ### Captive-portal JS validator and `/save` handler are two halves of one contract (issue #46)
 
 **What happened.** The original PR-47 fix for issue #46 changed
-`host.cpp's sendConfigForm` to render the password input with
+`ESP32-CAM/host.cpp`'s `sendConfigForm` to render the password input with
 `value=""` and updated `/save` to preserve `cfg_password` on empty
 submission. Both halves were correct in isolation. But the existing
 `validateForm` JS rejected every visible field with empty content,
@@ -397,8 +398,13 @@ exercise the empty-submission path manually before declaring the
 fix done — the JS validator does not know about field-level
 "optional" semantics by default. The current keep-current contract
 is encoded in the `data-keep-current-on-empty` HTML attribute and
-its mirroring `if (submitted.length() > 0)` server-side check; both
-must move together.
+its mirroring server-side check (`submitted.trim();
+if (submitted.length() > 0) cfg_X = submitted;`); both must move
+together. Extraction of the server-side half into a host-testable
+helper is tracked at
+[issue #57](https://github.com/schutera/highfive/issues/57); land
+that before adding a second keep-current field, or this lesson is
+paid for again.
 
 ### `auth.md` "open AP" claim — captive portal is WPA2-protected
 

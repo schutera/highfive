@@ -111,8 +111,10 @@ up. If a future field needs the same "blank means keep current"
 semantics (an API key, an OAuth token), copying just the HTML
 attribute is not enough — the `/save` handler at
 `ESP32-CAM/host.cpp`'s `runAccessPoint` must also gain a matching
-`if (submitted.length() > 0) cfg_X = submitted;` branch, or the empty
-submission will silently wipe the saved value. Module name and the
+`submitted.trim(); if (submitted.length() > 0) cfg_X = submitted;`
+branch (the trim guards against whitespace-only submissions from
+non-browser clients), or the empty submission will silently wipe the
+saved value. Module name and the
 init/upload URL fields are not secrets and use the conventional
 pre-fill pattern; do not add `data-keep-current-on-empty` to them
 without first wiring the server-side mirror.

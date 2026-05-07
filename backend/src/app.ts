@@ -39,6 +39,10 @@ app.get('/api/images/:filename', async (req, res) => {
     const buffer = Buffer.from(await response.arrayBuffer());
     res.send(buffer);
   } catch (error) {
+    console.error('[GET /api/images/:filename]', {
+      filename: req.params.filename,
+      error: String(error),
+    });
     res.status(502).json({ error: 'Failed to fetch image from image service' });
   }
 });
@@ -53,6 +57,7 @@ app.get('/api/modules', async (req, res) => {
     const modules = await db.listModules();
     res.json(modules);
   } catch (error) {
+    console.error('[GET /api/modules]', { error: String(error) });
     res.status(500).json({ error: 'Failed to fetch modules' });
   }
 });
@@ -71,6 +76,7 @@ app.get('/api/modules/:id', async (req, res) => {
       res.status(404).json({ error: 'Module not found' });
     }
   } catch (error) {
+    console.error('[GET /api/modules/:id]', { id, error: String(error) });
     res.status(500).json({ error: 'Failed to fetch module details' });
   }
 });
@@ -87,6 +93,10 @@ app.get('/api/images', async (req, res) => {
     const data = await response.json();
     res.json(data);
   } catch (error) {
+    console.error('[GET /api/images]', {
+      moduleId: req.query.module_id,
+      error: String(error),
+    });
     res.status(502).json({ error: 'Failed to fetch images from image service' });
   }
 });
@@ -102,6 +112,10 @@ app.delete('/api/images/:filename', async (req, res) => {
     const data = await response.json();
     res.status(response.status).json(data);
   } catch (error) {
+    console.error('[DELETE /api/images/:filename]', {
+      filename: req.params.filename,
+      error: String(error),
+    });
     res.status(502).json({ error: 'Failed to delete image' });
   }
 });
@@ -119,6 +133,7 @@ app.delete('/api/modules/:id', async (req, res) => {
     const data = await response.json();
     res.status(response.status).json(data);
   } catch (error) {
+    console.error('[DELETE /api/modules/:id]', { id, error: String(error) });
     res.status(502).json({ error: 'Failed to delete module' });
   }
 });
@@ -147,6 +162,7 @@ app.get('/api/modules/:id/logs', async (req, res) => {
     const payload = await upstream.json();
     res.json(payload);
   } catch (error) {
+    console.error('[GET /api/modules/:id/logs]', { id, error: String(error) });
     res.status(502).json({ error: 'image-service unreachable' });
   }
 });

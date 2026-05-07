@@ -21,8 +21,11 @@ An earlier firmware revision ran for 8–10 days and then went silent in the fie
 
 ## Reliability layers
 
-The firmware has six independent safety nets, each handling a
-different failure mode.
+The firmware has eight independent safety nets, each handling a
+different failure mode. Nets 1–6 were the original architecture
+(v1.0.0 + PR 17); net 7 (WiFi-fail AP fallback) was added in
+`feat/onboarding-feedback`; net 8 (cross-reboot stage breadcrumb)
+landed in `feat/esp-wdt-stage-breadcrumb` for issue #42.
 
 ### 1. WiFi watchdog
 

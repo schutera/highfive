@@ -774,19 +774,11 @@ npm run build`. The unit test surface and the wire-shape surface
    the fields actually render. Without that pin, the same drift
    recurs the next refactor.
 
-**How to avoid next time.** Three concrete additions to the
-mandatory-update lookup in `CLAUDE.md` (suggested follow-up; not in
-this PR's scope to land):
-
-- "If a doc claims the admin UI renders a field, before pushing run
-  `docker compose up`, hit the relevant view, and confirm the field
-  actually renders. `npm test && npm run build` is necessary, not
-  sufficient."
-- "Wire-shape changes at the backend↔homepage boundary go through
-  `contracts/src/index.ts`. A service-local `interface` declaration
-  for a wire shape is a smell — it means the type isn't pinned across
-  the boundary."
-- "Component tests for any view that renders wire-shape data must
-  mount the component with a realistic fixture (not a mock object
-  with whatever shape the test author guessed at) — the fixture
-  shape is itself the contract under test."
+**How to avoid next time.** Three concrete rules landed in
+[`CLAUDE.md`'s "Verifying UI claims, wire shapes, and component-test
+fixtures"](../../CLAUDE.md#verifying-ui-claims-wire-shapes-and-component-test-fixtures)
+section in the same PR — UI-claim verification, contracts-package
+discipline, and realistic component-test fixtures. The rules earned
+their own slot in the project orientation rather than living only as
+post-mortem prose so the next contributor sees them before writing
+the bug, not after.

@@ -127,6 +127,11 @@ export interface TelemetryPayload {
   rssi?: number;
   wifi_reconnects?: number;
   last_http_codes?: number[];
+  // Last ~2 KB of `logf()` output from the firmware ring buffer, oldest
+  // → newest. Cap is `LOGBUF_SIZE` in `ESP32-CAM/logbuf.h`. May contain
+  // embedded control chars and (rarely) embedded NULs; the firmware
+  // emits them via the JSON `\u00xx` escape so the string is always a
+  // valid JSON string. UI consumers should render in a `<pre>` block.
   log?: string;
 }
 

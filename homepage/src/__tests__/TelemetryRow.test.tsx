@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { TelemetryEntry } from '@highfive/contracts';
 
 import { TelemetryRow } from '../components/ModulePanel';
+import { api } from '../services/api';
 
 // Pins the envelope-aware rendering of TelemetryRow against the actual
 // wire shape that image-service/services/sidecar.py emits. Before this
@@ -69,10 +70,16 @@ describe('TelemetryRow envelope rendering', () => {
       payload: {},
     };
     render(<TelemetryRow entry={sparse} />);
-    // The reset row falls back to "—"; before the envelope fix this
-    // was happening for every entry, silently.
-    const resetCells = screen.getAllByText('—');
-    expect(resetCells.length).toBeGreaterThanOrEqual(3);
+    // Pin the specific cells that fall back, not just the count, so a
+    // future regression where one cell starts rendering "undefined"
+    // (or one of the four cells stops rendering) shows up as a test
+    // failure rather than an unchanged dash count.
+    const labelToCell = (label: string) =>
+      screen.getByText(label).parentElement?.textContent?.trim();
+    expect(labelToCell('uptime')).toBe('uptime —');
+    expect(labelToCell('heap')).toBe('heap —');
+    expect(labelToCell('rssi')).toBe('rssi —');
+    expect(labelToCell('reset')).toBe('reset —');
   });
 
   it('tolerates a missing payload object (defensive — bad sidecar)', () => {
@@ -82,5 +89,56 @@ describe('TelemetryRow envelope rendering', () => {
       image: 'esp_capture.jpg',
     } as unknown as TelemetryEntry;
     expect(() => render(<TelemetryRow entry={broken} />)).not.toThrow();
+  });
+});
+
+// Wire-shape round-trip: mocks `fetch` with the exact JSON shape that
+// image-service/app.py's `get_module_logs` returns (the result of
+// `LogSidecarEnvelope.model_dump()`), feeds it through the production
+// code path `api.getModuleLogs(id, limit)`, and renders the result via
+// TelemetryRow. This is the contract test the chapter-11 lesson named:
+// it catches a future flatten-the-envelope-in-getModuleLogs refactor
+// that the structural-only TelemetryEntry type would miss (every field
+// is `string | undefined`, so a level-mismatch is not a TS compile
+// error — see `docs/11-risks-and-technical-debt/README.md` "Telemetry
+// sidecar envelope drift").
+describe('TelemetryRow wire-shape round-trip via api.getModuleLogs', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('renders correctly when fed the actual image-service response shape', async () => {
+    const wireShape = [
+      {
+        mac: 'aabbccddeeff',
+        received_at: '2026-05-07T12:00:00',
+        image: 'esp_capture_20260507_120000.jpg',
+        payload: {
+          fw: '1.0.0',
+          uptime_s: 60,
+          last_reset_reason: 'TASK_WDT',
+          last_stage_before_reboot: 'setup:getGeolocation',
+          free_heap: 100000,
+          rssi: -55,
+          last_http_codes: [200, 200],
+          log: '[BOOT] reset_reason=7\n',
+        },
+      },
+    ];
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(wireShape), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const logs = await api.getModuleLogs('aabbccddeeff', 1);
+    expect(logs).toHaveLength(1);
+    render(<TelemetryRow entry={logs[0]} />);
+    // Top-level metadata renders.
+    expect(screen.getByText('2026-05-07T12:00:00')).toBeInTheDocument();
+    // Nested payload fields render — the level the round-1 fix got wrong.
+    expect(screen.getByText(/TASK_WDT/)).toBeInTheDocument();
+    expect(screen.getByText(/setup:getGeolocation/)).toBeInTheDocument();
+    expect(screen.getByText(/-55 dBm/)).toBeInTheDocument();
   });
 });

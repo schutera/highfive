@@ -157,19 +157,35 @@ that ends in a watchdog reboot is a software reset, so the breadcrumb
 makes it across; a fresh power cycle clears the slot so the next session
 starts clean.
 
-Every long-running call (network I/O, NTP poll, SPIFFS `loadConfig`,
-camera init) in `setup()`, `loop()`, `client.cpp`'s `postImage` and
-`sendHeartbeat`, and `esp_init.cpp`'s `getGeolocation` /
-`initNewModuleOnServer` / `setupTime` calls `breadcrumbSet("section:name")`
-on entry. There is one slot — last writer wins — so the breadcrumb
-always names the most-recently-entered section. On clean exit from
-`setup()` the slot is cleared (`breadcrumbClear`); `loop()` continually
-overwrites it across sleep / heartbeat / capture, so a clean boot leaves
-the breadcrumb pointing at `loop:sleep` (harmless — the slot is set
+The instrumented call sites (canonical list — keep in sync with the
+firmware grep `breadcrumbSet`):
+
+| Site                                                                                                     | Where set                                                          |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `setup:spiffs_mount`                                                                                     | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `SPIFFS.begin(true)`    |
+| `setup:loadConfig`                                                                                       | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `loadConfig`            |
+| `setup:setupWifiConnection`                                                                              | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `setupWifiConnection`   |
+| `setup:getGeolocation`                                                                                   | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `getGeolocation`        |
+| `setup:initNewModuleOnServer`                                                                            | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `initNewModuleOnServer` |
+| `setup:initEspCamera`                                                                                    | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `initEspCamera`         |
+| `setupTime:ntp_poll`                                                                                     | `ESP32-CAM/esp_init.cpp`'s `setupTime` before the NTP poll loop    |
+| `getGeolocation:wifi_scan` / `:http_post` / `:get_string`                                                | `ESP32-CAM/esp_init.cpp`'s `getGeolocation` per section            |
+| `initNewModuleOnServer:http_post` / `:get_string`                                                        | `ESP32-CAM/esp_init.cpp`'s `initNewModuleOnServer` per section     |
+| `loop:sendHeartbeat` / `:captureAndUpload:first` / `:captureAndUpload:noon` / `:sleep`                   | `ESP32-CAM/ESP32-CAM.ino`'s `loop`                                 |
+| `postImage:connect` / `:write_headers` / `:write_body` / `:read_status` / `:read_headers` / `:read_body` | `ESP32-CAM/client.cpp`'s `postImage` per section                   |
+| `sendHeartbeat:connect` / `:write` / `:read_status`                                                      | `ESP32-CAM/client.cpp`'s `sendHeartbeat` per section               |
+
+There is one RTC slot — last writer wins — so the breadcrumb always
+names the most-recently-entered section. On clean exit from `setup()`
+the slot is cleared (`breadcrumbClear`); `loop()` continually overwrites
+it across sleep / heartbeat / capture, so a clean boot leaves the
+breadcrumb pointing at `loop:sleep` (harmless — the slot is set
 immediately before the per-iteration `esp_task_wdt_reset()` and the
 cooperative-yield `delay(30000)`; `delay()` yields to FreeRTOS and the
-60 s WDT timeout is double the 30 s sleep, so a hang inside the delay is
-impossible in practice).
+60 s WDT timeout is double the 30 s sleep, so a hang inside the delay
+is not observed in practice. The task watchdog is per-task so a same-
+task ISR storm or priority inversion could in principle still fire it;
+none has been reported).
 
 On the **next** boot, `setup()` calls `breadcrumbReadAndClear` early
 (before camera init). When that returns true, the recovered stage name

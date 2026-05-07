@@ -45,6 +45,12 @@ void setup() {
   // initialised yet (the in-RAM ring doesn't exist), so buffer the
   // recovered value into a local and emit the [BOOT] log line a few
   // statements down once logbufInit() has run.
+  //
+  // Sequencing constraint: do NOT introduce blocking calls between
+  // this read and the first breadcrumbSet below. The clobber window
+  // currently contains pinMode (microsecond-scale) and is acceptable.
+  // A WDT firing in that window means the previous boot's value is
+  // lost — minor diagnostic miss but acceptable.
   char recoveredCrumb[64] = {0};
   bool hadRecoveredCrumb =
       hf::breadcrumbReadAndClear(recoveredCrumb, sizeof(recoveredCrumb));
@@ -84,7 +90,11 @@ void setup() {
   // long-running call was active when the watchdog fired in the field.
   // POR clears RTC slow memory, so first-boot-after-power-on always
   // returns false. Magic-guarded; 1-in-4-billion false-positive on POR.
-  if (hadRecoveredCrumb) {
+  // Gate on non-empty: the breadcrumb-set(nullptr) defensive path can
+  // produce hadRecoveredCrumb=true with an empty string; logging
+  // "[BOOT] last_stage_before_reboot=" with nothing after `=` is just
+  // confusing noise, not useful diagnostic.
+  if (hadRecoveredCrumb && recoveredCrumb[0] != '\0') {
     logf("[BOOT] last_stage_before_reboot=%s", recoveredCrumb);
     noteLastStageBeforeReboot(recoveredCrumb);
   }

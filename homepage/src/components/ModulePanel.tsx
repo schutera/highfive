@@ -462,6 +462,10 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
 // (silently, since all telemetry fields are optional) until #42
 // surfaced it. Keep the destructure explicit so the next reader can
 // see the structure.
+//
+// Copy is hardcoded English — admin-only diagnostic surface, not
+// translated. Other surfaces in this file go through the i18n hook;
+// this one deliberately doesn't.
 export function TelemetryRow({ entry }: { entry: TelemetryEntry }) {
   const t = entry.payload ?? {};
   const uptime = typeof t.uptime_s === 'number' ? formatUptime(t.uptime_s) : '—';

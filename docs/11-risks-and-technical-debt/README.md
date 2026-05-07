@@ -16,8 +16,68 @@ Highlights worth knowing about even if you're not assigned:
 | [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                              |
 | [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                     |
 | [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
+| [#42](https://github.com/schutera/highfive/issues/42) | Recurring task-watchdog reboots (`reset_reason=7`)                           | ESP reboots every other boot under STA mode. Telemetry-first instrumentation landed (RTC_NOINIT stage breadcrumb) — see "Active investigation" below; surgical fix waits on a few days of field data identifying the culprit. |
 | [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
 | [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper             | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
+
+## Active investigation: #42 task-watchdog reboots
+
+**Symptom**: every other boot on AI Thinker ESP32-CAM-MB reports
+`reset_reason=7` (TASK_WDT) in normal STA-mode operation; reproducible
+immediately after `pio run -t erase && pio run -t upload`. Suspects
+per the issue: `getGeolocation` (Google Geolocation API), `initNewModuleOnServer`
+(duckdb-service `/new_module`), `postImage`'s body-read loop, or
+`sendHeartbeat`. None of the four currently calls `esp_task_wdt_reset()`
+mid-call, and the first two use the legacy `HTTPClient` `begin/POST/getString`
+pattern with no explicit `setTimeout()`.
+
+**Why this lives in "Active investigation" rather than "Lessons learned"**:
+the lesson hasn't been earned yet — we don't know what's hanging, only
+that something is. The lesson registers the **diagnosis approach** to
+prove out, not the root cause, which is still unknown by design.
+
+**What the telemetry-first PR shipped** (branch
+`feat/esp-wdt-stage-breadcrumb`, commit message
+`feat(esp): add RTC_NOINIT stage-breadcrumb library + native tests`):
+
+- New library `ESP32-CAM/lib/breadcrumb/` — a 64-byte stage name in
+  RTC slow memory via `RTC_NOINIT_ATTR`. RTC slow memory survives
+  software resets (TASK_WDT, panic, `ESP.restart()`) but is wiped on
+  power-on. NVS would have served the same shape but the loop()-side
+  breadcrumbs update every ~30 s — ~3,000 NVS writes/day exhausts flash
+  endurance over months. RTC slow memory is RAM, not flash.
+- Each long-running call in `setup()` / `loop()` / `client.cpp` /
+  `esp_init.cpp` calls `breadcrumbSet("section:name")` on entry. Single
+  slot, last writer wins.
+- On boot, `setup()` reads + clears the slot. If a breadcrumb survived
+  (i.e. the previous boot ended in a software reset) it's surfaced via
+  the new optional `last_stage_before_reboot` field on the telemetry
+  sidecar JSON. Admin Telemetry view renders it next to `last_reset_reason`.
+- The sidecar field is **omitted** when no breadcrumb survived, keeping
+  the pre-#42 wire shape byte-for-byte intact for clean boots.
+
+Mechanism documented in
+[`docs/06-runtime-view/esp-reliability.md`](../06-runtime-view/esp-reliability.md#8-stage-breadcrumb-cross-reboot-diagnostic)
+"safety net 8".
+
+**What the follow-up PR will do** (after a few days of field data):
+
+- Identify the offending stage from the trended `last_stage_before_reboot`
+  values across the fleet.
+- At that exact section, add a targeted `esp_task_wdt_reset()` and/or
+  explicit `setTimeout()` so the call can't block past the 60 s budget
+  undetected.
+- Keep the breadcrumb library in place — it's general-purpose
+  diagnostic infrastructure now, not single-issue scaffolding.
+- Close #42 when the fix is verified by a deployment cycle showing
+  `reset_reason=7` no longer fires in normal operation.
+
+**Why a CI gate isn't the right shape here**: the bug is observable
+only on real hardware in real network conditions (slow Google response,
+concurrent WiFi traffic). A unit test of the breadcrumb library alone
+doesn't catch a regression of the actual hang. The native tests in
+`test_native_breadcrumb/` cover the library's invariants; the field
+verification cycle proves the diagnostic + fix.
 
 ## Field-name drift
 

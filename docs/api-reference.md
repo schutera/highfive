@@ -136,6 +136,7 @@ or wrong, `502` if the image-service is unreachable.
     "fw": "carpenter",
     "uptime_s": 72145,
     "last_reset_reason": "TASK_WDT",
+    "last_stage_before_reboot": "setup:getGeolocation",
     "free_heap": 124352,
     "min_free_heap": 98211,
     "rssi": -67,
@@ -148,6 +149,15 @@ or wrong, `502` if the image-service is unreachable.
   }
 ]
 ```
+
+`last_stage_before_reboot` is **optional**. The firmware emits it only
+when the previous boot's RTC_NOINIT breadcrumb survived (i.e. the
+previous boot ended in a software reset — TASK_WDT, panic, ESP.restart —
+rather than a clean exit or a power-on). Sidecars produced by firmware
+that pre-dates the field continue to validate as a strict subset of the
+post-#42 schema; admin UI consumers should treat the field as missing
+when absent, not error. Diagnostic mechanism for issue #42 — see
+[06-runtime-view/esp-reliability.md "Stage breadcrumb"](06-runtime-view/esp-reliability.md#8-stage-breadcrumb-cross-reboot-diagnostic).
 
 The telemetry section in the dashboard is hidden unless the URL has
 `?admin=1`; see [06-runtime-view/esp-reliability.md](06-runtime-view/esp-reliability.md) for the

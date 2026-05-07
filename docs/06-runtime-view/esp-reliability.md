@@ -135,6 +135,61 @@ Three failures × ~30 s ≈ 90 s before the portal returns. Designed for
 the most common onboarding mistake (mistyped WiFi password) without
 forcing the user through a 5-second CONFIG-button hold.
 
+### 8. Stage breadcrumb (cross-reboot diagnostic)
+
+[`ESP32-CAM/lib/breadcrumb/breadcrumb.cpp`](../../ESP32-CAM/lib/breadcrumb/breadcrumb.cpp)
+— `breadcrumbSet` / `breadcrumbReadAndClear`.
+
+The other safety nets above describe what the firmware does **when**
+something goes wrong. The stage breadcrumb describes how we find out
+**what** went wrong — specifically when safety net 2 (the task watchdog)
+fires in the field and the in-RAM `logbuf` is wiped on the reboot it
+triggered.
+
+The library writes a 64-byte stage name into RTC slow memory using
+`RTC_NOINIT_ATTR`. RTC slow memory survives software resets — task
+watchdog (`reset_reason=7`), panic, `ESP.restart()` — but is wiped on
+power-on, which is exactly the window we need: a 30-second sleep loop
+that ends in a watchdog reboot is a software reset, so the breadcrumb
+makes it across; a fresh power cycle clears the slot so the next session
+starts clean.
+
+Each long-running call in `setup()`, `loop()`, `client.cpp`'s
+`postImage` and `sendHeartbeat`, and `esp_init.cpp`'s `getGeolocation`
+/ `initNewModuleOnServer` / `setupTime` calls `breadcrumbSet("section:name")`
+on entry. There is one slot — last writer wins — so the breadcrumb
+always names the most-recently-entered section. On clean exit from
+`setup()` the slot is cleared (`breadcrumbClear`); `loop()` continually
+overwrites it across sleep/heartbeat/capture, so a clean boot leaves the
+breadcrumb pointing at `loop:sleep` (harmless — `loop:sleep` ends with
+`esp_task_wdt_reset()` so a hang during the 30 s `delay()` is impossible
+in practice).
+
+On the **next** boot, `setup()` calls `breadcrumbReadAndClear` early
+(before camera init). When that returns true, the recovered stage name
+is logged via `logf("[BOOT] last_stage_before_reboot=%s", crumb)` and
+attached to every subsequent telemetry sidecar JSON via the optional
+`last_stage_before_reboot` field. The admin Telemetry view then surfaces
+the field next to `last_reset_reason` per upload, so a "TASK_WDT in
+`getGeolocation:http_post`" pattern across the fleet is visible without
+a serial cable on every board.
+
+The slot uses a magic guard (`0xCAFEBABE`) so the random RTC contents
+on a true power-on don't masquerade as a valid breadcrumb. False-positive
+odds: 1-in-4-billion per power-on — acceptable for diagnostic data.
+
+NVS would have served the same shape, but the loop()-side breadcrumbs
+update every ~30 s; that's ~3,000 NVS writes/day, exhausting flash
+endurance over months of deployment. RTC slow memory is RAM, not flash —
+zero wear cost.
+
+This is a diagnostic mechanism for issue #42 (recurring `reset_reason=7`
+in normal STA-mode operation). Once the offending blocking call is
+identified from a few days of field telemetry, a follow-up PR will add
+a targeted `setTimeout()` and/or `esp_task_wdt_reset()` at that site
+and the breadcrumb will revert to its dormant role of catching future
+regressions.
+
 ### LED legend
 
 The on-board LED (GPIO 4) is the **camera flash** — bright enough to
@@ -169,26 +224,28 @@ The ESP piggybacks a JSON telemetry payload onto every image upload as an additi
   "fw": "1.0.0",
   "uptime_s": 72145,
   "last_reset_reason": "TASK_WDT",
+  "last_stage_before_reboot": "setup:getGeolocation",
   "free_heap": 124352,
   "min_free_heap": 98211,
   "rssi": -67,
   "wifi_reconnects": 2,
   "last_http_codes": [200, 200, 500, 200, 200],
-  "log": "[BOOT] fw=1.0.0 reset_reason=1 boot_count=3\n[WIFI] disconnected — attempting reconnect\n..."
+  "log": "[BOOT] fw=1.0.0 reset_reason=7 boot_count=3\n[BOOT] last_stage_before_reboot=setup:getGeolocation\n..."
 }
 ```
 
-| Field               | Source                                                                                                                                     | Meaning                                                                                                                                                                                                                                                                                  |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fw`                | `FIRMWARE_VERSION` macro, injected from `ESP32-CAM/VERSION` by both build paths (`build.sh` → arduino-cli; `pio run` → `extra_scripts.py`) | Firmware version string. Same value lands here, in the heartbeat body's `fw_version` field, in the boot log line, and in `homepage/public/firmware.json`. `ESP32-CAM/VERSION` is the single writer. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md). |
-| `uptime_s`          | `millis()/1000`                                                                                                                            | Seconds since last boot                                                                                                                                                                                                                                                                  |
-| `last_reset_reason` | `esp_reset_reason()`                                                                                                                       | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc.                                                                                                                                                                                                                                         |
-| `free_heap`         | `ESP.getFreeHeap()`                                                                                                                        | Current free heap in bytes                                                                                                                                                                                                                                                               |
-| `min_free_heap`     | `ESP.getMinFreeHeap()`                                                                                                                     | Low-water mark over this boot session                                                                                                                                                                                                                                                    |
-| `rssi`              | `WiFi.RSSI()`                                                                                                                              | WiFi signal strength in dBm                                                                                                                                                                                                                                                              |
-| `wifi_reconnects`   | logbuf counter                                                                                                                             | Count of `reconnectWifi()` fires since boot                                                                                                                                                                                                                                              |
-| `last_http_codes`   | logbuf ring                                                                                                                                | Last 8 HTTP status codes from `postImage()`                                                                                                                                                                                                                                              |
-| `log`               | logbuf ring                                                                                                                                | Last ~2 KB of `logf()` output, oldest→newest                                                                                                                                                                                                                                             |
+| Field                      | Source                                                                                                                                     | Meaning                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fw`                       | `FIRMWARE_VERSION` macro, injected from `ESP32-CAM/VERSION` by both build paths (`build.sh` → arduino-cli; `pio run` → `extra_scripts.py`) | Firmware version string. Same value lands here, in the heartbeat body's `fw_version` field, in the boot log line, and in `homepage/public/firmware.json`. `ESP32-CAM/VERSION` is the single writer. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md). |
+| `uptime_s`                 | `millis()/1000`                                                                                                                            | Seconds since last boot                                                                                                                                                                                                                                                                                                                        |
+| `last_reset_reason`        | `esp_reset_reason()`                                                                                                                       | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc.                                                                                                                                                                                                                                                                                               |
+| `last_stage_before_reboot` | RTC_NOINIT breadcrumb recovered at boot                                                                                                    | **Optional.** Names the section of code that was active when the previous boot's reboot fired (e.g. `setup:getGeolocation`, `postImage:read_body`). Field is **omitted** when no breadcrumb survived (clean boot or first boot after power-on); see safety net 8 above for the full mechanism.                                                 |
+| `free_heap`                | `ESP.getFreeHeap()`                                                                                                                        | Current free heap in bytes                                                                                                                                                                                                                                                                                                                     |
+| `min_free_heap`            | `ESP.getMinFreeHeap()`                                                                                                                     | Low-water mark over this boot session                                                                                                                                                                                                                                                                                                          |
+| `rssi`                     | `WiFi.RSSI()`                                                                                                                              | WiFi signal strength in dBm                                                                                                                                                                                                                                                                                                                    |
+| `wifi_reconnects`          | logbuf counter                                                                                                                             | Count of `reconnectWifi()` fires since boot                                                                                                                                                                                                                                                                                                    |
+| `last_http_codes`          | logbuf ring                                                                                                                                | Last 8 HTTP status codes from `postImage()`                                                                                                                                                                                                                                                                                                    |
+| `log`                      | logbuf ring                                                                                                                                | Last ~2 KB of `logf()` output, oldest→newest                                                                                                                                                                                                                                                                                                   |
 
 ### Circular log buffer
 

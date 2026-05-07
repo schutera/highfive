@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type TelemetryEntry } from '../services/api';
-import type { ModuleDetail } from '@highfive/contracts';
+import type { Module, ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
@@ -26,9 +26,11 @@ function isAdminMode(): boolean {
 }
 
 interface ModulePanelProps {
-  // 'unknown' surfaces when the heartbeat fetch failed and there is no
-  // alternate liveness signal — see backend/src/database.ts and #31.
-  module: { id: string; name: string; status: 'online' | 'offline' | 'unknown' };
+  // Pick from the contracts Module so the status union here can't drift
+  // out of sync with the wire shape (#31 reviewer P2). 'unknown' is set
+  // when the heartbeat fetch failed and the module would otherwise have
+  // been classified as 'offline' — see backend/src/database.ts.
+  module: Pick<Module, 'id' | 'name' | 'status'>;
   onClose: () => void;
   onError: (error: string) => void;
 }

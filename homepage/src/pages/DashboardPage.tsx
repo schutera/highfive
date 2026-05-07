@@ -78,7 +78,13 @@ export default function DashboardPage() {
       ) : (
         <span className="inline-flex items-center gap-1.5 text-hf-fg-soft">
           <span className="w-2 h-2 bg-hf-success rounded-full" aria-hidden="true" />
-          <span aria-label={`${onlineCount} of ${modules.length} modules online`}>
+          <span
+            aria-label={
+              heartbeatsIncomplete
+                ? `${onlineCount} of ${modules.length} modules online (some statuses unknown)`
+                : `${onlineCount} of ${modules.length} modules online`
+            }
+          >
             {onlineCount}/{modules.length}
           </span>
           <span className="hidden sm:inline">{t('common.online')}</span>
@@ -275,10 +281,18 @@ export default function DashboardPage() {
                       className="w-2.5 h-2.5 rounded-full flex-shrink-0 ml-2"
                       style={{
                         background:
-                          module.status === 'online' ? 'var(--hf-success)' : 'var(--hf-fg-mute)',
+                          module.status === 'online'
+                            ? 'var(--hf-success)'
+                            : module.status === 'unknown'
+                              ? 'var(--hf-line-soft)'
+                              : 'var(--hf-fg-mute)',
                       }}
                       aria-label={
-                        module.status === 'online' ? t('common.online') : t('common.offline')
+                        module.status === 'online'
+                          ? t('common.online')
+                          : module.status === 'unknown'
+                            ? t('common.unknown')
+                            : t('common.offline')
                       }
                     />
                   </div>
@@ -412,7 +426,9 @@ export default function DashboardPage() {
                             >
                               {m.status === 'online'
                                 ? t('dashboard.statusOnline')
-                                : t('dashboard.statusOffline')}
+                                : m.status === 'unknown'
+                                  ? t('common.unknown')
+                                  : t('dashboard.statusOffline')}
                             </p>
                           </div>
                           <svg

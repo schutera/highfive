@@ -114,7 +114,8 @@ def test_get_modules_returns_json_500_on_query_failure(client, monkeypatch):
     body = resp.get_json()
     assert "error" in body
     assert "synthetic duckdb failure" in body["error"]
-    # Structural fallback so the backend can `data.modules ?? []` without
-    # an extra null-check.
-    assert body["modules"] == []
+    # No silent `modules: []` fallback — a body without a modules key
+    # forces any consumer that ignores the status to TypeError on
+    # data.modules.map rather than render an empty fleet.
+    assert "modules" not in body
 

@@ -123,8 +123,6 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
   });
 
   it("classifies a module with no last_image_at and no updated_at as 'unknown' on heartbeat failure", async () => {
-    // No alternate liveness signal: heartbeat is the only freshness we'd
-    // normally have. With heartbeats unreachable, we honestly don't know.
     mockFetch({
       modules: [
         fakeModule({
@@ -160,10 +158,14 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
     expect(modules[0].status).toBe('online');
   });
 
-  it("classifies a module with stale image and stale updatedAt as 'offline' (not 'unknown') on heartbeat failure", async () => {
-    // Module last imaged 3 h ago + registered 4 h ago — both signals
-    // exist and are stale. We have evidence of staleness, so 'offline'
-    // is honest; reserving 'unknown' for "no signal at all".
+  it("classifies a module with stale image and stale updatedAt as 'unknown' on heartbeat failure (the production case)", async () => {
+    // The case the fix exists for. `updated_at` is set permanently at
+    // registration and is days-to-months stale on every healthy module
+    // — gating 'unknown' on `!m.updated_at` (an earlier draft) made the
+    // 'unknown' branch unreachable for the exact population #31 was for.
+    // The right rule: "would-be-offline AND heartbeats failed →
+    // unknown" — we can't rule out the heartbeat from a minute ago that
+    // would have flipped this to online.
     mockFetch({
       modules: [
         fakeModule({
@@ -178,7 +180,7 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
 
     const { modules } = await db.listModules();
 
-    expect(modules[0].status).toBe('offline');
+    expect(modules[0].status).toBe('unknown');
   });
 
   it('falls back to offline (not unknown) when heartbeats succeed but no signal is fresh', async () => {

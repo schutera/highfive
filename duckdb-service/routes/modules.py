@@ -249,9 +249,14 @@ def get_modules():
     except Exception as e:
         # Without this wrapper Flask serves the default HTML 500 page,
         # which the backend then JSON.parses and throws on, masking the
-        # underlying DB error as a generic upstream 502 (#32).
+        # underlying DB error as a generic upstream 502 (#32). The body
+        # is the error only — no `modules: []` fallback. The backend's
+        # fetchAndAssemble checks `r.ok` first, so it never reads this
+        # body; any other consumer that ignores the status would TypeError
+        # on `data.modules.map`, which is more honest than a silent
+        # empty fleet.
         print(f"[get_modules] {type(e).__name__}: {e}", flush=True)
-        return jsonify(error=str(e), modules=[]), 500
+        return jsonify(error=str(e)), 500
 
 
 @modules_bp.get("/modules/<module_id>/progress_count")

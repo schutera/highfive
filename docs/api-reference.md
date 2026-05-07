@@ -93,11 +93,13 @@ heartbeat) is fresher than 2 h. When the duckdb `/heartbeats_summary`
 fetch fails AND no other liveness signal exists, the module is reported
 as `'unknown'` (gray) rather than misleadingly `'offline'` — see #31.
 
-When the heartbeat fetch failed, the response also carries the header
+When the heartbeat fetch failed, the **listing route** carries the header
 `X-Highfive-Data-Incomplete: heartbeats` so the dashboard can render a
-"data incomplete" banner. Old clients that don't read the header still
-see a structurally valid response; only the per-module `status` value
-may differ.
+"data incomplete" banner. The detail route (`/api/modules/:id`)
+deliberately omits the header — its consumer always lands there from
+the listing and has already seen the degradation signal. Old clients
+that don't read the header still see a structurally valid response;
+only the per-module `status` value may differ.
 
 ## 1.3 Module detail
 

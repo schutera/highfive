@@ -146,4 +146,43 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
       }),
     );
   });
+
+  it('does NOT log on the happy path of GET /api/modules', async () => {
+    // Belt-and-braces: a future refactor that wraps res.json() in a
+    // try/catch with a stray `console.error('[GET /api/modules]', ...)`
+    // would silently leak the catch-block tag (and any payload it
+    // ships) on every successful request. Pin the absence here.
+    mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: false });
+
+    const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
+
+    expect(res.status).toBe(200);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it('does NOT log on the happy path of GET /api/modules/:id', async () => {
+    // Same idea as above for the detail route — guards against an `id`
+    // payload accidentally appearing in stdout on every successful
+    // module-detail open.
+    mocks.getModuleDetail.mockResolvedValue({
+      detail: {
+        id: VALID_ID,
+        name: 'x',
+        location: { lat: 0, lng: 0 },
+        status: 'online',
+        lastApiCall: '',
+        batteryLevel: 0,
+        firstOnline: '',
+        totalHatches: 0,
+        imageCount: 0,
+        nests: [],
+      },
+      heartbeatsFailed: false,
+    });
+
+    const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+
+    expect(res.status).toBe(200);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
 });

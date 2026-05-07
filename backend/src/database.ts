@@ -105,12 +105,24 @@ export class ModuleReadModel {
     items: Array<{ detail: ModuleDetail; totalHatches: number }>;
     heartbeatsFailed: boolean;
   }> {
+    // Reject on non-2xx so the existing `.status === 'rejected'` branches
+    // fire on a duckdb HTTP 500 (or any other non-2xx). Without this,
+    // `r.json()` happily parses the JSON error body, the promise resolves
+    // 'fulfilled', and an upstream 500 on /modules silently renders an
+    // empty fleet (#31 review P0).
+    const fetchJsonOk = async (url: string): Promise<unknown> => {
+      const r = await fetch(url);
+      if (!r.ok) {
+        throw new Error(`upstream ${url} responded ${r.status}`);
+      }
+      return r.json();
+    };
     const [modulesResult, nestsResult, progressResult, heartbeatsResult] = await Promise.allSettled(
       [
-        fetch(`${DUCKDB_URL}/modules`).then((r) => r.json()),
-        fetch(`${DUCKDB_URL}/nests`).then((r) => r.json()),
-        fetch(`${DUCKDB_URL}/progress`).then((r) => r.json()),
-        fetch(`${DUCKDB_URL}/heartbeats_summary`).then((r) => r.json()),
+        fetchJsonOk(`${DUCKDB_URL}/modules`),
+        fetchJsonOk(`${DUCKDB_URL}/nests`),
+        fetchJsonOk(`${DUCKDB_URL}/progress`),
+        fetchJsonOk(`${DUCKDB_URL}/heartbeats_summary`),
       ],
     );
 
@@ -210,14 +222,20 @@ export class ModuleReadModel {
       // Status classification (#31). When the heartbeat fetch failed we
       // can't compute liveness from the freshest signal — most modules
       // heartbeat every 60 s but only image on motion, so a missing
-      // heartbeats summary deletes their dominant freshness signal. If
-      // there's also no recent image and no recent registration, we
-      // honestly don't know — surface 'unknown' (gray) rather than
+      // heartbeats summary deletes their dominant freshness signal. Any
+      // module that would have been 'offline' might actually be online
+      // — we just couldn't ask. Surface 'unknown' (gray) rather than
       // misleading the user with red 'offline'.
+      //
+      // Note: an earlier draft gated this on `!m.updated_at`, but
+      // `updated_at` is set permanently at module registration and never
+      // refreshes — so the 'unknown' branch was unreachable for the
+      // exact population the fix was for. Switched to gating on the
+      // would-be-offline outcome itself.
       let status: 'online' | 'offline' | 'unknown';
       if (isOnline) {
         status = 'online';
-      } else if (heartbeatsFailed && !m.last_image_at && !m.updated_at) {
+      } else if (heartbeatsFailed) {
         status = 'unknown';
       } else {
         status = 'offline';

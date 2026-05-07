@@ -9,11 +9,18 @@ const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://image-service
 
 export const app = express();
 
-// Middleware - Configure CORS for production
+// Middleware - Configure CORS for production. The `exposedHeaders` field
+// is load-bearing: production runs `highfive.schutera.com` ↔
+// `api.highfive.schutera.com` (cross-origin), and dev is `:5173 → :3002`
+// (also cross-origin), so the browser only lets `fetch().headers.get(...)`
+// read response headers that are explicitly listed here. Without
+// `X-Highfive-Data-Incomplete` exposed, the dashboard's
+// "heartbeat data unavailable" banner (#31) never fires.
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production' ? 'https://highfive.schutera.com' : '*',
   credentials: true,
   optionsSuccessStatus: 200,
+  exposedHeaders: ['X-Highfive-Data-Incomplete'],
 };
 
 app.use(cors(corsOptions));
@@ -72,11 +79,14 @@ app.get('/api/modules/:id', async (req, res) => {
     return;
   }
   try {
-    const { detail, heartbeatsFailed } = await db.getModuleDetail(id);
+    // The detail route deliberately does NOT emit
+    // X-Highfive-Data-Incomplete — the dashboard banner is rendered by
+    // the listing call (DashboardPage.tsx), and the detail panel is
+    // always opened from the listing, so the user has already seen the
+    // degradation signal. Avoids API/UI drift where one route surfaces
+    // the header but the consumer doesn't read it.
+    const { detail } = await db.getModuleDetail(id);
     if (detail) {
-      if (heartbeatsFailed) {
-        res.setHeader('X-Highfive-Data-Incomplete', 'heartbeats');
-      }
       res.json(detail);
     } else {
       res.status(404).json({ error: 'Module not found' });

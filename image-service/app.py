@@ -178,10 +178,10 @@ def delete_image(filename):
       * 2xx from duckdb → row gone, remove the file, return 200.
       * 404 from duckdb → row already gone; remove the file if still
         present (idempotent cleanup) and return 404.
-      * 5xx (or any other non-2xx) from duckdb → leave the file in
-        place and forward the upstream status. A retry by the caller
-        sees a consistent file+row pair instead of an orphaned row
-        pointing at a deleted file.
+      * Any other non-2xx from duckdb (3xx redirect, 4xx other than
+        404, 5xx) → leave the file in place and forward the upstream
+        status. A retry by the caller sees a consistent file+row pair
+        instead of an orphaned row pointing at a deleted file.
       * Network/timeout exception → 502, file untouched.
     """
     file_path = os.path.join(UPLOAD_FOLDER, filename)

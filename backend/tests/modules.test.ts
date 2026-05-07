@@ -62,6 +62,21 @@ describe('GET /api/modules', () => {
     expect(res.status).toBe(200);
     expect(res.headers['x-highfive-data-incomplete']).toBe('heartbeats');
   });
+
+  it('exposes X-Highfive-Data-Incomplete via CORS so cross-origin fetch can read it', async () => {
+    // Production is split across highfive.schutera.com ↔
+    // api.highfive.schutera.com, dev is :5173 → :3002 — every real
+    // deployment is cross-origin. Without exposedHeaders the browser
+    // strips the header from response.headers.get() and the dashboard
+    // banner is dead.
+    const res = await request(app)
+      .options('/api/modules')
+      .set('Origin', 'http://localhost:5173')
+      .set('Access-Control-Request-Method', 'GET');
+    expect(res.headers['access-control-expose-headers']).toContain(
+      'X-Highfive-Data-Incomplete',
+    );
+  });
 });
 
 describe('GET /api/modules/:id', () => {
@@ -85,6 +100,31 @@ describe('GET /api/modules/:id', () => {
     expect(res.body).toEqual(fakeModule);
     expect(res.headers['x-highfive-data-incomplete']).toBeUndefined();
     expect(mocks.getModuleDetail).toHaveBeenCalledWith(VALID_ID);
+  });
+
+  it('does NOT emit X-Highfive-Data-Incomplete on the detail route even when heartbeatsFailed', async () => {
+    // Banner-rendering happens at the listing level — the detail panel
+    // is always opened from the listing, so the user has already seen
+    // the degradation signal. Pin this so future drift can't sneak in.
+    mocks.getModuleDetail.mockResolvedValue({
+      detail: {
+        id: VALID_ID,
+        name: 'x',
+        location: { lat: 0, lng: 0 },
+        status: 'unknown',
+        lastApiCall: '',
+        batteryLevel: 0,
+        firstOnline: '',
+        totalHatches: 0,
+        imageCount: 0,
+        nests: [],
+      },
+      heartbeatsFailed: true,
+    });
+
+    const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    expect(res.status).toBe(200);
+    expect(res.headers['x-highfive-data-incomplete']).toBeUndefined();
   });
 
   it('returns 404 for an unknown id', async () => {

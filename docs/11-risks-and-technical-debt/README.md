@@ -569,3 +569,45 @@ state.
   shipping a broken artifact. If the artifact is broken, either fix
   it in the same PR or remove it from the docs index — don't ship a
   half-working file with a self-deprecating note.
+
+### GPIO0 is a strap pin — never put a "hold this button at boot" UX behind it (fixed in #40)
+
+**What happened.** The firmware shipped with a documented factory-reset
+procedure ("hold IO0 for 5 seconds while powering on") at
+`ESP32-CAM/ESP32-CAM.ino`'s `setup()` (formerly the `digitalRead(CONFIG_BUTTON)
+== LOW` block), advertised in five doc sites and the running board's
+own Serial output. The procedure was physically impossible on AI
+Thinker ESP32-CAM-MB: the ROM samples GPIO0 the moment EN/RST
+releases, so holding it LOW enters UART download mode (visible as
+garbled 74880-baud output, "waiting for download") instead of running
+user firmware. The reset code path was unreachable in practice. Issue
+#40 surfaced it during a manual onboarding test of
+`feat/onboarding-feedback`.
+
+**Why it shipped.** The host-native unit tests covered the helper
+macros but didn't model strap behaviour, and the manual smoke-test
+that _would_ have caught it was run on benches where GPIO0 was pulled
+HIGH at boot by external circuitry — not on the bare AI Thinker
+reference module the deployment docs target. The Serial.printf at the
+top of `setup()` _told_ users to hold IO0, so when nothing happened on
+real hardware the user assumed the procedure was finicky rather than
+broken.
+
+**Lesson.** When the ESP32 datasheet calls a pin a "strap pin", any
+user-visible behaviour assigned to it must work _despite_ the strap
+behaviour, not assume the strap is benign. Strap pins on the standard
+ESP32 (GPIO0, GPIO2, GPIO12, GPIO15) are sampled at the EN-release
+edge and their level there determines boot mode — by the time
+firmware runs, the pin's level may have nothing to do with the
+operator's intent. For this codebase: factory-reset moved to the
+captive portal (`POST /factory_reset` endpoint in
+`ESP32-CAM/host.cpp`'s `runAccessPoint`), and the legacy IO0-hold
+procedure is removed from `ESP32-CAM/ESP32-CAM.ino`, the
+running-board Serial advice, and all five doc sites
+(`docs/troubleshooting.md`,
+`docs/05-building-block-view/esp32cam.md`,
+`docs/07-deployment-view/esp-flashing.md`,
+`docs/08-crosscutting-concepts/hardware-notes.md`,
+`.claude/skills/esp32-onboarding/skill.md`). Future "hold this button
+at boot" features must use a non-strap GPIO (e.g. GPIO13 or GPIO14
+on the ESP32-CAM, both broken out and both safe at strap time).

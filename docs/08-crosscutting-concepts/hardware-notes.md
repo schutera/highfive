@@ -57,9 +57,17 @@ New-NetFirewallRule -DisplayName "HiveHive duckdb-service (8002)" -Direction Inb
 
 ## Factory reset
 
-Hold the **IO0** button for **5 seconds** while the board is powered.
-The configuration is cleared and the `ESP32-Access-Point` reopens.
-Do not press RST during the hold — that enters flash mode instead.
+Use the captive portal at <http://192.168.4.1> ("Factory reset
+(advanced)" → confirm → submit) when the module is in AP mode. From
+STA mode, either cause three consecutive failed WiFi joins (the
+firmware auto-falls back to AP after that) or use `pio run -t erase`
+over a serial cable.
+
+> The IO0-hold procedure listed in older revisions was unreachable on
+> AI Thinker ESP32-CAM-MB — GPIO0 is a strap pin, holding it LOW at
+> boot enters UART download mode rather than running the firmware
+> reset code. Removed in #40; see chapter 11 "Lessons learned" for the
+> post-mortem.
 
 ## Onboarding skill
 

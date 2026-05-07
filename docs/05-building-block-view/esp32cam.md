@@ -65,7 +65,11 @@ The first boot opens an access point named `ESP32-Access-Point`
 (password `esp-12345`), serves a config form at
 `http://192.168.4.1`, and persists the user's input to NVS. On
 subsequent boots the device reads NVS and goes straight to the upload
-loop. Holding `IO0` for 5 seconds factory-resets and reopens the AP.
+loop. Factory reset is exposed via the captive portal at
+`http://192.168.4.1` (collapsed "Factory reset (advanced)" section),
+which calls `POST /factory_reset` and reboots into AP mode. For
+STA-locked boards without auto-AP-fallback, use `pio run -t erase`
+over the serial cable.
 
 See [esp-flashing.md](../07-deployment-view/esp-flashing.md) for the
 full setup walkthrough.

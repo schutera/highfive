@@ -101,6 +101,35 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Setup wizard shipped two silent-success bugs (issues #43, #44)
+
+**What happened.** Two failure modes in the setup wizard were
+mis-classified as success or non-actionable: (a) when
+`homepage/public/firmware.bin` was missing, Vite's SPA fallback served
+`index.html` with HTTP 200, the wizard handed the HTML payload to
+`esptool-js`, `writeFlash` silently no-op'd on garbage bytes, and
+Step 2 flashed green in <1 s while the chip kept its old firmware;
+(b) when the backend died during the 2-minute Step 5 poll window,
+all 24 polls failed, the wizard set a single `verificationTimedOut`
+flag, and the UI showed the orange "check the module" troubleshooting
+screen — pointing the user at completely the wrong remediation.
+
+**Why it happened.** Both bugs share the same shape: a fetch result
+was fed to a side-effecting consumer (`writeFlash`, the
+verification-classifier `setState`) without validating the response
+shape beyond `response.ok`. Status code alone doesn't distinguish
+"served firmware" from "served HTML fallback", and "all polls failed"
+doesn't distinguish "ESP didn't show up" from "backend went silent".
+
+**How to avoid it next time.** When a fetch result drives a
+side-effecting consumer, validate the *shape* of the response, not
+just the status. For binary payloads: assert the `Content-Type` and
+the magic byte before handing the bytes downstream. For polling
+loops: track the failure category (network vs. semantic-empty), not
+just success/fail, so the final state can route to the correct
+remediation branch. Both fixes shipped in PR-B
+(`fix/wizard-flash-and-poll-classification`).
+
 ### ESP watchdog crashed every ~44 s in AP mode (fixed dfd454b)
 
 **What happened.** First-time ESP32-CAM setup was impossible — the

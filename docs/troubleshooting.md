@@ -49,21 +49,51 @@ The IO0 pin must be grounded **before** the reset signal is sent.
 
 If it still hangs, check the USB cable (some cables are charge-only) and the COM port selection.
 
-### Setup wizard step 2 says "/firmware.bin not found" / 404
+### Setup wizard step 2 finishes in <1s with "Firmware installiert" but the board still runs old firmware
 
-The wizard pins firmware to a local `homepage/public/firmware.bin`
-file (commit `f7300b9`). That file is **not** checked in — it lands
-there only after `ESP32-CAM/build.sh` runs:
+**Symptom:** Step 2 flashes green almost immediately (instead of the
+expected ~20 s), the board reboots, and you discover after the fact
+that the new firmware never landed.
+
+**Cause:** `homepage/public/firmware.bin` is missing or stale. Vite's
+SPA dev fallback serves `index.html` with HTTP 200 + `text/html` for
+any unknown path, so the wizard's `fetch('/firmware.bin')` succeeds
+on what is in fact an HTML page. Issue #43.
+
+**Fix:** the wizard now validates the response shape — `Content-Type`
+must not be HTML, and the first byte must be `0xE9` (the ESP32 image
+magic byte). If either check fails, Step 2 surfaces a clear error
+pointing at this fix. Build the firmware:
 
 ```bash
-cd ESP32-CAM
-./build.sh                # writes homepage/public/firmware.bin + firmware.json
+make firmware              # wraps ESP32-CAM/build.sh
+# or directly:
+cd ESP32-CAM && ./build.sh # writes homepage/public/firmware.bin + firmware.json
 ```
 
-`build.sh:33-37` writes the manifest and binary together. Without that
-build step, step 2 of the wizard 404s on the OTA URL. If you've never
-flashed firmware on this checkout, run `build.sh` first; on shared
-checkouts, regenerate after every firmware change.
+`ESP32-CAM/build.sh's` final block writes the manifest and binary
+together. The file is not checked in; on shared checkouts, regenerate
+after every firmware change.
+
+### Setup wizard step 5 shows "Backend Server Not Reachable" mid-poll
+
+**Symptom:** the wizard passed the initial healthcheck on Step 5 and
+started polling, but the red "Backend Server Not Reachable" branch
+appears (instead of the orange "Module Not Detected Yet" timeout
+screen) before any module shows up.
+
+**Cause:** the backend went silent during the 2-minute poll window —
+`docker compose stop backend`, an OOM kill, or a network hiccup
+between the homepage and `:3002`. Issue #44 used to mis-classify this
+as a timeout and direct users to factory-reset the ESP, which would
+fix nothing. The wizard now tracks consecutive trailing poll failures
+and flips to the unreachable branch when ≥5 of the last polls
+network-failed.
+
+**Fix:** restart the backend (`docker compose up -d backend`), then
+click **Check Again** on the wizard. The pre-poll healthcheck retries
+8× before failing, so the wizard recovers on its own once the backend
+is healthy.
 
 ### PlatformIO not found / "No module named platformio"
 

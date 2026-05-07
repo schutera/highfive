@@ -22,6 +22,10 @@ export interface WizardState {
   pollCount: number;
   detectedModule: Module | null;
   verificationTimedOut: boolean;
+  // Set instead of verificationTimedOut when MAX_POLLS expires AND the
+  // trailing run of poll failures is long enough to indicate the backend
+  // (not the ESP) is the problem. See issue #44.
+  verificationBackendUnreachable: boolean;
 }
 
 const INIT_BASE_URL = import.meta.env.VITE_INIT_BASE_URL || 'http://localhost:8000';
@@ -36,6 +40,11 @@ export const SERVER_CONFIG = {
 
 const MAX_POLLS = 24; // 2 minutes at 5s intervals
 const POLL_INTERVAL = 5000;
+// If the trailing run of consecutive poll errors is at least this long when
+// MAX_POLLS expires (~25s of uninterrupted backend silence at the end of
+// the window), classify the timeout as "backend unreachable" rather than
+// "module didn't show up". See issue #44.
+const POLL_BACKEND_DOWN_TAIL = 5;
 
 /**
  * Replace "localhost" or "127.0.0.1" in a URL with the given LAN IP.
@@ -63,11 +72,16 @@ export function useSetupWizard() {
     pollCount: 0,
     detectedModule: null,
     verificationTimedOut: false,
+    verificationBackendUnreachable: false,
   });
 
   const lanIpRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
+  // Trailing-run counter for poll catches. Reset to 0 on any successful
+  // 200 OK (even with empty modules) so an early-window blip doesn't
+  // poison the late-window classification (#44).
+  const consecutivePollErrorsRef = useRef(0);
   const knownModuleSnapshotRef = useRef<Map<string, string | undefined>>(new Map());
   // React 18 Strict Mode runs every effect twice in dev (intentional, to
   // surface effects that don't survive remount). Both runs of Step5Verify's
@@ -273,16 +287,28 @@ export function useSetupWizard() {
       pollingActive: true,
       pollCount: 0,
       verificationTimedOut: false,
+      verificationBackendUnreachable: false,
       detectedModule: null,
     }));
     pollCountRef.current = 0;
+    consecutivePollErrorsRef.current = 0;
 
     pollingIntervalRef.current = setInterval(async () => {
       pollCountRef.current++;
       if (pollCountRef.current > MAX_POLLS) {
-        console.warn('[Step5] Max polls reached, timing out');
+        const trailingErrors = consecutivePollErrorsRef.current;
+        const backendDownAtEnd = trailingErrors >= POLL_BACKEND_DOWN_TAIL;
+        console.warn(
+          `[Step5] Max polls reached, classifying as ${
+            backendDownAtEnd ? 'backend-unreachable' : 'timeout'
+          } (consecutive errors=${trailingErrors})`,
+        );
         stopVerification();
-        setState((s) => ({ ...s, verificationTimedOut: true }));
+        setState((s) => ({
+          ...s,
+          verificationTimedOut: !backendDownAtEnd,
+          verificationBackendUnreachable: backendDownAtEnd,
+        }));
         return;
       }
       setState((s) => ({ ...s, pollCount: pollCountRef.current }));
@@ -290,6 +316,10 @@ export function useSetupWizard() {
 
       try {
         const modules = await api.getAllModules();
+        // Any 200 OK — even an empty array — means the backend is alive.
+        // Reset the trailing-error counter so a late-window outage gets
+        // classified correctly (#44).
+        consecutivePollErrorsRef.current = 0;
         // 5-minute recency fallback: covers the case where the user reloaded
         // the wizard *after* the ESP had already phoned home — the snapshot
         // then captured the module in its updated state, so the snapshot
@@ -315,6 +345,7 @@ export function useSetupWizard() {
           setState((s) => ({ ...s, detectedModule }));
         }
       } catch (err) {
+        consecutivePollErrorsRef.current++;
         console.error('[Step5] Poll error:', err);
       }
     }, POLL_INTERVAL);

@@ -6,15 +6,23 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: highfive-backend
+    # 127.0.0.1 bind: backend is reachable only via host-Nginx terminator,
+    # never directly from the public internet. See
+    # docs/07-deployment-view/production-deployment.md.
     ports:
-      - '3001:3001'
+      - '127.0.0.1:3001:3001'
     environment:
       - NODE_ENV=production
       - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:?HIGHFIVE_API_KEY must be set in .env.production (see .env.production.example)}
       - PORT=3001
+      - DUCKDB_SERVICE_URL=http://duckdb-service:8000
+      - IMAGE_SERVICE_URL=http://image-service:4444
     restart: unless-stopped
     networks:
       - highfive-network
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
 
   frontend:
     build:
@@ -24,14 +32,72 @@ services:
         - VITE_API_URL=https://api.highfive.schutera.com
         - VITE_API_KEY=${VITE_API_KEY:?VITE_API_KEY must be set in .env.production (see .env.production.example)}
     container_name: highfive-frontend
+    # 127.0.0.1 bind: frontend is reachable only via host-Nginx terminator
+    # on :443. The previous '80:80' direct bind plus dead '443:443' mapping
+    # was Topology A (HTTP-only) - now superseded by host-Nginx + TLS.
     ports:
-      - '80:80'
-      - '443:443'
+      - '127.0.0.1:8081:80'
     restart: unless-stopped
     networks:
       - highfive-network
     depends_on:
       - backend
+
+  image-service:
+    build:
+      context: ./image-service
+      dockerfile: Dockerfile
+    container_name: highfive-image-service
+    # 0.0.0.0 bind by design: ESP32-CAM firmware uploads images directly
+    # to this service over plain HTTP. Until a TLS terminator for ESP
+    # uploads is designed, this stays exposed. Tracked as a known gap in
+    # docs/07-deployment-view/production-deployment.md "Known gaps".
+    ports:
+      - '8000:4444'
+    environment:
+      - DUCKDB_PATH=/data/app.duckdb
+      - DUCKDB_SERVICE_URL=http://duckdb-service:8000
+    volumes:
+      - duckdb_data:/data
+    restart: unless-stopped
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
+    networks:
+      - highfive-network
+
+  duckdb-service:
+    build:
+      context: ./duckdb-service
+      dockerfile: Dockerfile
+    container_name: highfive-duckdb-service
+    # No host port: DuckDB is internal-only. Reached from backend and
+    # image-service over the highfive-network bridge. ADR-001 (DuckDB
+    # as sole writer) - the public surface is via the backend API.
+    expose:
+      - '8000'
+    environment:
+      - SEED_DATA=false
+    volumes:
+      - duckdb_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - highfive-network
+
+volumes:
+  duckdb_data:
 
 networks:
   highfive-network:

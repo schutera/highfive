@@ -30,16 +30,22 @@ arduino-cli compile \
   --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\"" \
   "${SKETCH_DIR}"
 
-# Verify the macro landed as a C string literal (not as a token, and
-# not as a doubly-quoted "\"name\"" thanks to a quoting-arms-race fail).
-# The merged binary should contain VERSION exactly once near the
-# strings table; the literal escaped form must NOT appear. Caveat:
-# if VERSION ever takes a value that coincides with a quoted byte
-# sequence already present in vendored library .rodata, the absent-
-# literal check would false-positive. Bee-name pool is safe today;
-# revisit if the naming convention ever changes.
+# Post-compile guard. The contract: FIRMWARE_VERSION must land in the
+# binary as a plain C string of the bee name (e.g. the bytes "carpenter"),
+# NOT as a string whose content is itself wrapped in literal quote bytes
+# (e.g. the bytes "\"carpenter\""). The latter happens whenever the
+# --build-property quoting picks up an extra layer — for example a
+# refactor that re-introduces shell-style escaping (\" or \\\")
+# assuming arduino-cli does shell-quote stripping. It does not; it
+# passes property values verbatim into argv. The 1-layer form below
+# (\"${VERSION}\") is the correct level for arduino-cli.
+#
+# Caveat: if VERSION ever takes a value that coincides with a quoted
+# byte sequence already present in vendored library .rodata, the
+# absent-literal check would false-positive. Bee-name pool is safe
+# today; revisit if the naming convention changes.
 if grep -aFq "\"${VERSION}\"" "${BUILD_DIR}/ESP32-CAM.ino.bin"; then
-  echo "ERROR: firmware contains literal \\\"${VERSION}\\\" — quote-escaping doubled" >&2
+  echo "ERROR: firmware contains literal \\\"${VERSION}\\\" — FIRMWARE_VERSION over-escaped (extra layer of quote bytes in the C string content)" >&2
   exit 1
 fi
 if ! grep -aFq "${VERSION}" "${BUILD_DIR}/ESP32-CAM.ino.bin"; then
@@ -54,17 +60,38 @@ echo "Verified: FIRMWARE_VERSION=${VERSION} is in the binary as a plain string."
 # Stitch them ourselves via esptool merge_bin, plus the boot_app0.bin from
 # the ESP32 core (the OTA selector). Standard ESP32 (Wrover-class) layout:
 # 0x1000 bootloader / 0x8000 partitions / 0xe000 boot_app0 / 0x10000 app.
+#
+# We pin to esp32:esp32@2.0.17 (the version esp-flashing.md tells
+# contributors to install) so a later/older core appearing on the box
+# doesn't silently get used. If the pinned tools are missing, fail loudly
+# rather than guess: a wrong-core merge produces a binary that boots on
+# some AI Thinker units and bricks others.
+ESP32_CORE_VERSION="${ESP32_CORE_VERSION:-2.0.17}"
 ARDUINO_DATA_DIR="${ARDUINO_DATA_DIR:-$HOME/.arduino15}"
-ESPTOOL="$(find "${ARDUINO_DATA_DIR}/packages/esp32/tools/esptool_py" -name esptool.py 2>/dev/null | head -1)"
-BOOT_APP0="$(find "${ARDUINO_DATA_DIR}/packages/esp32/hardware/esp32" -name boot_app0.bin 2>/dev/null | head -1)"
-if [ -z "${ESPTOOL}" ] || [ -z "${BOOT_APP0}" ]; then
-  echo "ERROR: could not locate esptool.py or boot_app0.bin under ${ARDUINO_DATA_DIR}." >&2
-  echo "       Run: arduino-cli core install esp32:esp32@2.0.17" >&2
+ESPTOOL_DIR="$(find "${ARDUINO_DATA_DIR}/packages/esp32/tools/esptool_py" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V -r | head -1)"
+ESPTOOL="${ESPTOOL_DIR}/esptool.py"
+BOOT_APP0="${ARDUINO_DATA_DIR}/packages/esp32/hardware/esp32/${ESP32_CORE_VERSION}/tools/partitions/boot_app0.bin"
+if [ ! -f "${ESPTOOL}" ] || [ ! -f "${BOOT_APP0}" ]; then
+  echo "ERROR: missing arduino-cli toolchain pieces:" >&2
+  echo "       esptool   ${ESPTOOL} (exists: $([ -f "${ESPTOOL}" ] && echo yes || echo NO))" >&2
+  echo "       boot_app0 ${BOOT_APP0} (exists: $([ -f "${BOOT_APP0}" ] && echo yes || echo NO))" >&2
+  echo "       Run: arduino-cli core install esp32:esp32@${ESP32_CORE_VERSION}" >&2
   exit 1
 fi
+
+# Flash params for the AI Thinker ESP32-CAM. 80m is the trickiest of the
+# three: nominally fine on standard 4MB/dio modules, but a small fraction
+# of older AI Thinker units in the wild ship 40MHz-rated flash and won't
+# boot from an 80MHz image. Override via env vars if you're cutting a
+# release for one of those units. (Proper fix: derive these from the
+# FQBN's boards.txt — left as a follow-up.)
+FLASH_MODE="${FLASH_MODE:-dio}"
+FLASH_FREQ="${FLASH_FREQ:-80m}"
+FLASH_SIZE="${FLASH_SIZE:-4MB}"
+
 python3 "${ESPTOOL}" --chip esp32 merge_bin \
   -o "${BUILD_DIR}/ESP32-CAM.ino.merged.bin" \
-  --flash_mode dio --flash_freq 80m --flash_size 4MB \
+  --flash_mode "${FLASH_MODE}" --flash_freq "${FLASH_FREQ}" --flash_size "${FLASH_SIZE}" \
   0x1000  "${BUILD_DIR}/ESP32-CAM.ino.bootloader.bin" \
   0x8000  "${BUILD_DIR}/ESP32-CAM.ino.partitions.bin" \
   0xe000  "${BOOT_APP0}" \

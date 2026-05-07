@@ -266,6 +266,46 @@ in files this PR didn't touch will surface in the
 `make check-citations` report next time someone edits those files.
 That's the gate's job now.
 
+### `lib/<name>/` includes diverge between PIO and arduino-cli (issue #36, PR #55)
+
+**What happened.** `bash ESP32-CAM/build.sh` (the arduino-cli release
+path) failed to link with `undefined reference to hf::wifiStatusName`
+and `hf::ledOnAt` after a clean checkout on a fresh box. Two source
+files used path-prefixed includes for lib subdirectories
+(`#include "lib/wifi_diag/wifi_diag.h"` in `esp_init.cpp`, and
+`#include "lib/led_state/led_state.h"` in `led.h`); the other six
+consumers used bare-name (`#include "module_id.h"` etc.). Under PIO
+both forms work because `lib_dir = lib` adds every `lib/<name>/`
+subdirectory to the include path AND auto-compiles its `.cpp` files.
+Under arduino-cli with `--libraries ESP32-CAM/lib`, only **bare-name**
+includes trigger the library-discovery → auto-compile → link chain.
+The path-prefixed form resolves the header (so compile succeeds) but
+never registers the library, so its `.cpp` is silently dropped from
+the link.
+
+**Why it happened.** The two outliers were probably written when the
+codebase still had a flat layout, then survived the `lib/` refactor
+because nobody re-ran `bash build.sh` end-to-end after that refactor.
+PIO compiled fine, so the mismatch was invisible. The post-compile
+guard added in this same PR caught a different `build.sh` bug
+(quote-escaping doubled), but only after we got past the linker.
+Manual end-to-end testing on a real ESP32-CAM was what surfaced this.
+
+**How to avoid it next time.**
+
+- When adding a new `ESP32-CAM/lib/<name>/` module, always include its
+  header by **bare name**: `#include "<name>.h"`. Documented in
+  [`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md)
+  ("Adding a new `lib/<name>/` module").
+- Don't trust `pio run` as the sole build verification when changing
+  firmware. PIO and arduino-cli have different library-discovery and
+  define-injection paths; "PIO is happy" doesn't mean `bash build.sh`
+  is. The cheapest CI improvement here would be a job that runs
+  `bash ESP32-CAM/build.sh` on PRs that touch `ESP32-CAM/`.
+- The post-compile guard in `build.sh` covers macro-injection drift,
+  not link-time symbol drift. Linker errors are loud, but they only
+  fire when someone actually runs `build.sh`.
+
 ### Use-after-return on `esp_camera_fb_return` warm-up logging (issue #36)
 
 **What happened.** Both warm-up loops in `ESP32-CAM/ESP32-CAM.ino`

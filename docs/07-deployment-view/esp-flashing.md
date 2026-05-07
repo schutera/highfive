@@ -108,8 +108,10 @@ export PATH="$HOME/.local/bin:$PATH"
 # Windows (PowerShell, then open a new shell so PATH refreshes):
 #   winget install ArduinoSA.CLI
 
-# ESP32 board core — pin to 2.0.x. The 3.x core changed the
+# ESP32 board core — pin to 2.0.17. The 3.x core changed the
 # esp_task_wdt_init signature and won't compile against this firmware.
+# (If you already use arduino-cli for non-HiveHive work, drop --overwrite
+# and the `core update-index` will append to your existing config.)
 arduino-cli config init --overwrite
 arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 arduino-cli core update-index
@@ -139,6 +141,38 @@ arduino-cli `--build-property` quote escaping has drifted; the guard
 exists specifically to catch that failure mode before it ships a
 broken binary. See the inline comments in `build.sh` for the exact
 escaping rules.
+
+#### Flash params (override only if needed)
+
+`build.sh` defaults to `dio / 80m / 4MB` flash params, which match the
+standard AI Thinker ESP32-CAM. A small fraction of older units in the
+wild have 40MHz-rated flash and won't boot from an 80MHz image. If
+you're cutting a release for one of those, override:
+
+```bash
+FLASH_FREQ=40m bash ESP32-CAM/build.sh
+# (or FLASH_MODE=qio / FLASH_SIZE=8MB for non-default boards)
+```
+
+#### Adding a new `lib/<name>/` module
+
+When you add a new host-testable C++ helper under `ESP32-CAM/lib/`,
+**include its header by bare name** from any sketch source that uses
+it:
+
+```cpp
+#include "module_id.h"   // CORRECT — both PIO and arduino-cli auto-compile lib/module_id/
+#include "lib/module_id/module_id.h"   // WRONG — PIO accepts it, arduino-cli compiles
+                                       //   the header but never links the lib's .cpp,
+                                       //   producing silent undefined-reference errors
+                                       //   only at the arduino-cli release step.
+```
+
+This is non-obvious because both styles "work" under `pio run`. The
+divergence is only caught when `bash build.sh` actually runs, which CI
+does not do today. Bisected at non-zero cost in PR #55 for `wifi_diag`
+and `led_state` — see the lessons-learned entry in
+[chapter 11](../11-risks-and-technical-debt/README.md).
 
 ### Boot normally after flashing
 

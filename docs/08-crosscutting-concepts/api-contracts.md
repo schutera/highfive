@@ -61,10 +61,12 @@ value (added 2026-05-07, issue #31) covers the case where the duckdb
 been classified as `'offline'` — we can't rule out that a heartbeat
 from the last few minutes would have flipped it to `'online'`, so we
 admit uncertainty rather than misleading the on-call. The header
-`X-Highfive-Data-Incomplete: heartbeats` accompanies the listing
-response (`/api/modules`) whose status values were affected by the
-missing heartbeats; the detail route deliberately omits the header
-because the user always lands there from the listing.
+`X-Highfive-Data-Incomplete: heartbeats` is set on the listing
+response (`/api/modules`) whenever the heartbeats fetch failed —
+irrespective of whether any module's status actually flipped — so the
+dashboard can surface a data-quality banner. The detail route
+deliberately omits the header because the user always lands there
+from the listing.
 
 The header was chosen over a body-shape change so old clients keep
 deserialising the response body unchanged; only the per-module

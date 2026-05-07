@@ -189,6 +189,11 @@ export default function DashboardPage() {
             className="hidden md:flex w-[360px] lg:w-[400px] shadow-hf-2 overflow-hidden flex-col border-l border-hf-border bg-hf-surface"
             aria-label={t('dashboard.moduleDetails')}
           >
+            {/* Brittle invariant: ModulePanel is always opened from
+                the listing, so a banner-on-listing strategy works for
+                surfacing heartbeats-incomplete state. If a deep-link
+                route to /modules/:id is ever added, ModulePanel itself
+                must surface the 'unknown' degradation hint inline. */}
             <ModulePanel
               module={selectedModule}
               onClose={() => setSelectedModule(null)}
@@ -407,7 +412,11 @@ export default function DashboardPage() {
                               background:
                                 m.status === 'online'
                                   ? 'var(--hf-forest-100)'
-                                  : 'var(--hf-line-soft)',
+                                  : m.status === 'unknown'
+                                    ? 'var(--hf-bg)'
+                                    : 'var(--hf-line-soft)',
+                              outline:
+                                m.status === 'unknown' ? '1px dashed var(--hf-fg-mute)' : 'none',
                             }}
                             aria-hidden="true"
                           >
@@ -421,7 +430,12 @@ export default function DashboardPage() {
                               className="text-hf-xs"
                               style={{
                                 color:
-                                  m.status === 'online' ? 'var(--hf-success)' : 'var(--hf-fg-mute)',
+                                  m.status === 'online'
+                                    ? 'var(--hf-success)'
+                                    : m.status === 'unknown'
+                                      ? 'var(--hf-fg-soft)'
+                                      : 'var(--hf-fg-mute)',
+                                fontStyle: m.status === 'unknown' ? 'italic' : 'normal',
                               }}
                             >
                               {m.status === 'online'

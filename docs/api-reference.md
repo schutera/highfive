@@ -89,12 +89,17 @@ Returns an array of `Module` objects shaped for the dashboard:
 `status` is one of `'online' | 'offline' | 'unknown'` and is computed
 in `backend/src/database.ts's fetchAndAssemble`. A module is `'online'`
 when any liveness signal (last image upload, registration timestamp, or
-heartbeat) is fresher than 2 h. When the duckdb `/heartbeats_summary`
-fetch fails AND no other liveness signal exists, the module is reported
-as `'unknown'` (gray) rather than misleadingly `'offline'` — see #31.
+heartbeat) is fresher than 2 h. A module that would otherwise have been
+classified as `'offline'` is reported as `'unknown'` (gray) instead
+when the duckdb `/heartbeats_summary` fetch failed — we can't rule out
+that a heartbeat from the last few minutes would have flipped it to
+`'online'`, so we admit uncertainty rather than misleading the
+on-call. See #31.
 
-When the heartbeat fetch failed, the **listing route** carries the header
-`X-Highfive-Data-Incomplete: heartbeats` so the dashboard can render a
+The header `X-Highfive-Data-Incomplete: heartbeats` is set on the
+**listing route** whenever the heartbeats fetch failed (irrespective of
+whether any module's status actually flipped — the header surfaces the
+_data quality_, not a per-module flag) so the dashboard can render a
 "data incomplete" banner. The detail route (`/api/modules/:id`)
 deliberately omits the header — its consumer always lands there from
 the listing and has already seen the degradation signal. Old clients

@@ -109,11 +109,15 @@ export class ModuleReadModel {
     // fire on a duckdb HTTP 500 (or any other non-2xx). Without this,
     // `r.json()` happily parses the JSON error body, the promise resolves
     // 'fulfilled', and an upstream 500 on /modules silently renders an
-    // empty fleet (#31 review P0).
+    // empty fleet (#31 review P0). The body is captured (capped at 200
+    // chars so a misbehaving upstream can't fill the log) because
+    // duckdb-service's error handlers put a useful `error` field there
+    // and we lose it otherwise.
     const fetchJsonOk = async (url: string): Promise<unknown> => {
       const r = await fetch(url);
       if (!r.ok) {
-        throw new Error(`upstream ${url} responded ${r.status}`);
+        const body = await r.text().catch(() => '');
+        throw new Error(`upstream ${url} responded ${r.status}: ${body.slice(0, 200)}`);
       }
       return r.json();
     };

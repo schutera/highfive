@@ -55,27 +55,25 @@ describe('GET /api/modules', () => {
     expect(mocks.listModules).toHaveBeenCalledTimes(1);
   });
 
-  it('sets X-Highfive-Data-Incomplete=heartbeats when the read model flags partial data', async () => {
+  it('sets X-Highfive-Data-Incomplete=heartbeats when the read model flags partial data, and exposes it via CORS', async () => {
+    // Two contracts pinned together because they're load-bearing as a
+    // pair: production is split across highfive.schutera.com ↔
+    // api.highfive.schutera.com (and dev is :5173 → :3002), so without
+    // `Access-Control-Expose-Headers` on the GET response the browser
+    // strips the header from `fetch().headers.get(...)` and the
+    // dashboard banner is dead. Asserting on the GET response (not the
+    // OPTIONS preflight) is the phase the browser actually reads when
+    // resolving fetch().headers.get().
     mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: true });
 
-    const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
+    const res = await request(app)
+      .get('/api/modules')
+      .set('X-API-Key', KEY)
+      .set('Origin', 'http://localhost:5173');
+
     expect(res.status).toBe(200);
     expect(res.headers['x-highfive-data-incomplete']).toBe('heartbeats');
-  });
-
-  it('exposes X-Highfive-Data-Incomplete via CORS so cross-origin fetch can read it', async () => {
-    // Production is split across highfive.schutera.com ↔
-    // api.highfive.schutera.com, dev is :5173 → :3002 — every real
-    // deployment is cross-origin. Without exposedHeaders the browser
-    // strips the header from response.headers.get() and the dashboard
-    // banner is dead.
-    const res = await request(app)
-      .options('/api/modules')
-      .set('Origin', 'http://localhost:5173')
-      .set('Access-Control-Request-Method', 'GET');
-    expect(res.headers['access-control-expose-headers']).toContain(
-      'X-Highfive-Data-Incomplete',
-    );
+    expect(res.headers['access-control-expose-headers']).toContain('X-Highfive-Data-Incomplete');
   });
 });
 

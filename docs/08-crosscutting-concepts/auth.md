@@ -72,16 +72,26 @@ keeps onboarding to one secret while preserving the gating semantics.
 ## Captive-portal credential handling
 
 The ESP32-CAM captive portal (`ESP32-CAM/host.cpp`'s `sendConfigForm`)
-is served from an open WiFi AP — there is no PSK, anyone in RF range
-can join. The form is therefore a hostile rendering surface for any
-secret it has previously stored.
+is served from a WiFi AP whose WPA2 PSK is hardcoded in firmware
+(`HOST_PASSWORD` at `host.cpp`'s top-of-file constants, passed into
+the `WiFi.softAP` call in `setupAccessPoint`). The PSK is committed to
+source and reproduced in onboarding docs, so the threat model is
+"anyone with knowledge of the hardcoded PSK" — not an open network,
+but not far from one either: anyone who has read the codebase, the
+wiki, or guessed the default can join. The form is therefore a
+hostile rendering surface for any secret it has previously stored.
 
 - **WiFi password is never echoed back into the form.** The
   `<input type="password">` field renders with `value=""` and a
-  placeholder hint. Submitting the form with the password field
-  blank means "keep the current password"; submitting a non-empty
-  value overwrites it. Fixed in issue #46 — previously the saved
-  credential was visible via View Source.
+  placeholder hint. When a password is already saved, the field is
+  tagged `data-optional="1"` so client-side `validateForm` permits
+  empty submission, and the `/save` handler treats empty as "keep
+  current". Submitting a non-empty value overwrites. Fixed in issue
+  #46 — previously the saved credential was visible via View Source,
+  and an earlier draft of the fix shipped with a client-side
+  validator that blocked the "keep current" path so the placeholder
+  promised a feature unreachable through the UI (caught in PR-47
+  hardware testing — see chapter 11 lessons learned).
 - **`Serial.println` of the saved password was redacted in #41.**
   Earlier versions printed the credential to USB serial during boot.
 

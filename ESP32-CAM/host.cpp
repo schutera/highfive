@@ -214,6 +214,10 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   "  let valid=true;"
   "  const fields=document.querySelectorAll('input, select');"
   "  fields.forEach(f=>{"
+  "    if(f.dataset.optional==='1'){"
+  "      f.classList.remove('error-field');"
+  "      return;"
+  "    }"
   "    if(f.type!=='hidden' && f.value.trim()===''){"
   "      f.classList.add('error-field');"
   "      valid=false;"
@@ -269,9 +273,12 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<label>WiFi Password</label>");
   // Never echo the saved password back into the form: the captive portal is
   // served over an open AP, so any client on the SSID can View Source. See #46.
-  // First-boot vs. reconfigure: only hint at "keep current" when one is saved.
-  String pwHint = (cfg_password.length() > 0) ? "(leave blank to keep current password)" : "WiFi password";
-  client.println("<input type=\"password\" name=\"password\" value=\"\" placeholder=\"" + pwHint + "\">");
+  // First-boot vs. reconfigure: only hint at "keep current" when one is saved,
+  // and tag the input data-optional so validateForm permits empty submission
+  // (the /save handler treats empty as "keep current").
+  String pwHint     = (cfg_password.length() > 0) ? "(leave blank to keep current password)" : "WiFi password";
+  String pwOptional = (cfg_password.length() > 0) ? " data-optional=\"1\"" : "";
+  client.println("<input type=\"password\" name=\"password\"" + pwOptional + " value=\"\" placeholder=\"" + pwHint + "\">");
   client.println("</div>");
 
   client.println("<div class=\"row\">");

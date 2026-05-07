@@ -10,12 +10,12 @@ future contributors must know about. Two sub-registers below:
 Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
 Highlights worth knowing about even if you're not assigned:
 
-| #                                                     | Title (short)                                                 | Why it matters                                                                                                               |
-| ----------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| #                                                     | Title (short)                                                                | Why it matters                                                                                                               |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.               |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                     | Risk of silent truncation on telemetry growth.                                                                               |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                 | Should be configurable via the AP form.                                                                                      |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                   | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
+| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                               |
+| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                      |
+| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
 
 ## Field-name drift
 
@@ -331,3 +331,56 @@ the bug report mentions. For HiveHive specifically: any future
 canonicalisation change goes through `hf::formatModuleId`, and
 `grep -rn 'esp_config->esp_ID' ESP32-CAM/` is the gate — every
 result must either flow through the helper or be a comment/log.
+
+### Captive-portal "hold BOOT, tap RESET" reconfigure trigger lands in DOWNLOAD_BOOT
+
+**What happened.** During PR-47 hardware testing, the documented
+reconfigure trigger printed by `ESP32-CAM.ino`'s `setup` ("hold the
+CONFIG button (GPIO0), tap RESET to reboot, and keep holding CONFIG
+for 5 seconds") never reached the firmware's GPIO0 long-press check.
+Two reproducible failure modes on a CH340-based ESP32-CAM: holding
+GPIO0 LOW during the RESET tap put the chip in `boot:0x3
+DOWNLOAD_BOOT`, and finger-roll attempts (release RESET, then quickly
+press BOOT) triggered an `ets_main.c 371 flash read err, 1000` boot
+loop that required a full re-flash to recover.
+
+**Why it happened.** GPIO0 is also the strapping pin the ESP32 ROM
+bootloader samples at the rising edge of EN to choose between
+`SPI_FAST_FLASH_BOOT` and `DOWNLOAD_BOOT`. The firmware-side
+`digitalRead(CONFIG_BUTTON)` check happens ~200–300 ms later, but by
+then the strap has already routed the chip into the ROM bootloader.
+The flash-read-error variant is more speculative — plausibly bus
+contention between the camera's XCLK on GPIO0 and the SPI flash mux
+during the brief window where GPIO0 is held LOW around the strap.
+
+**How to avoid it next time.** Don't trust a documented "hold a strap
+pin to enter app-side mode" sequence on hardware where that pin is
+also the boot strap — the boot ROM always wins. Two working
+alternatives proven in PR-47 hardware testing: the WiFi-fail
+auto-fallback at `ESP32-CAM.ino`'s `setup` (3 consecutive failed joins
+→ `setESPConfigured(false)` → AP), and a future option to wire CONFIG
+to a non-strap GPIO. The on-device hint string and the
+`-- ESP already configured. To reconfigure: hold the CONFIG button…`
+print should be updated or removed; tracked as a follow-up.
+
+### `auth.md` "open AP" claim — captive portal is WPA2-protected
+
+**What happened.** The "Captive-portal credential handling" section
+added in PR-47 originally claimed the portal "is served from an open
+WiFi AP — there is no PSK, anyone in RF range can join." Hardware
+verification proved the opposite: the AP is WPA2-PSK with
+`HOST_PASSWORD` hardcoded in `host.cpp`. The fix-#46 reasoning ("don't
+echo the password to View Source") still holds, just for a different
+threat model than the doc described. Corrected in the same PR.
+
+**Why it happened.** The threat-model paragraph was drafted from the
+assumed shape of the AP, not the actual `WiFi.softAP(HOST_SSID,
+HOST_PASSWORD, …)` call. Code review and unit tests caught the fix;
+hardware testing (a Windows "enter network password" prompt when
+joining the AP) caught the doc.
+
+**How to avoid it next time.** When writing a threat-model paragraph
+about a WiFi or HTTP surface, grep for the actual API call
+(`WiFi.softAP`, `app.use(...)`, `addRoute`) and read its arguments
+before describing what the surface looks like to the network. Doc
+review needs to inspect the API, not just the surrounding prose.

@@ -68,3 +68,25 @@ keeps onboarding to one secret while preserving the gating semantics.
   deployment); revisit if multi-tenancy is added.
 - All `duckdb-service` routes — assumed to be reachable only from
   inside the Docker `net` bridge. Don't expose this port to LAN.
+
+## Captive-portal credential handling
+
+The ESP32-CAM captive portal (`ESP32-CAM/host.cpp`'s `sendConfigForm`)
+is served from an open WiFi AP — there is no PSK, anyone in RF range
+can join. The form is therefore a hostile rendering surface for any
+secret it has previously stored.
+
+- **WiFi password is never echoed back into the form.** The
+  `<input type="password">` field renders with `value=""` and a
+  placeholder hint. Submitting the form with the password field
+  blank means "keep the current password"; submitting a non-empty
+  value overwrites it. Fixed in issue #46 — previously the saved
+  credential was visible via View Source.
+- **`Serial.println` of the saved password was redacted in #41.**
+  Earlier versions printed the credential to USB serial during boot.
+
+The same threat model applies to anything else the portal stores in
+`config.json` and could conceivably echo back: API keys, tokens,
+upload URLs containing query-string secrets. The pattern to follow:
+render an empty input with a "keep current" hint, only overwrite on
+non-empty submission.

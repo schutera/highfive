@@ -267,7 +267,9 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 
   client.println("<div class=\"field\">");
   client.println("<label>WiFi Password</label>");
-  client.println("<input type=\"password\" name=\"password\" value=\"" + cfg_password + "\">");
+  // Never echo the saved password back into the form: the captive portal is
+  // served over an open AP, so any client on the SSID can View Source. See #46.
+  client.println("<input type=\"password\" name=\"password\" value=\"\" placeholder=\"(leave blank to keep current password)\">");
   client.println("</div>");
 
   client.println("<div class=\"row\">");
@@ -419,7 +421,13 @@ void runAccessPoint() {
                     cfg_module_name = getParam(query, "module_name");
 
                     cfg_ssid        = getParam(query, "ssid");
-                    cfg_password    = getParam(query, "password");
+                    // Empty submission means "keep current password" (#46): the
+                    // form no longer pre-fills the field, so a user editing only
+                    // the SSID would otherwise wipe their saved credential.
+                    String submittedPw = getParam(query, "password");
+                    if (submittedPw.length() > 0) {
+                      cfg_password = submittedPw;
+                    }
 
                     // NEW: split URL fields
                     String uploadBase     = getParam(query, "upload_base");

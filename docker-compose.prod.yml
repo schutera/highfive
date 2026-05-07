@@ -1,10 +1,10 @@
-version: '3.8'
-
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # Repo root context is required so npm workspaces (@highfive/contracts)
+      # resolve. See backend/Dockerfile.
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: highfive-backend
     # 127.0.0.1 bind: backend is reachable only via host-Nginx terminator,
     # never directly from the public internet. See
@@ -26,8 +26,9 @@ services:
 
   frontend:
     build:
-      context: ./homepage
-      dockerfile: Dockerfile
+      # Repo root context for the same reason as backend.
+      context: .
+      dockerfile: homepage/Dockerfile
       args:
         - VITE_API_URL=https://api.highfive.schutera.com
         - VITE_API_KEY=${VITE_API_KEY:?VITE_API_KEY must be set in .env.production (see .env.production.example)}
@@ -46,14 +47,18 @@ services:
   image-service:
     build:
       context: ./image-service
-      dockerfile: Dockerfile
+      # Dockerfile.dev is workspace-free and functionally identical to
+      # what a minimal prod Dockerfile would be (Flask app.py, no live
+      # bind-mounts at runtime). A future hardening pass (gunicorn,
+      # non-root user) gets its own Dockerfile then.
+      dockerfile: Dockerfile.dev
     container_name: highfive-image-service
     # 0.0.0.0 bind by design: ESP32-CAM firmware uploads images directly
-    # to this service over plain HTTP. Until a TLS terminator for ESP
-    # uploads is designed, this stays exposed. Tracked as a known gap in
-    # docs/07-deployment-view/production-deployment.md "Known gaps".
+    # to this service over plain HTTP via the host-Nginx port-80 vhost
+    # (proxies /upload to 127.0.0.1:8000 internally). The 0.0.0.0 host
+    # bind is what makes the loopback proxy possible.
     ports:
-      - '8000:4444'
+      - '127.0.0.1:8000:4444'
     environment:
       - DUCKDB_PATH=/data/app.duckdb
       - DUCKDB_SERVICE_URL=http://duckdb-service:8000
@@ -69,13 +74,20 @@ services:
   duckdb-service:
     build:
       context: ./duckdb-service
-      dockerfile: Dockerfile
+      # Reused from dev compose - see image-service comment above.
+      dockerfile: Dockerfile.dev
     container_name: highfive-duckdb-service
-    # No host port: DuckDB is internal-only. Reached from backend and
-    # image-service over the highfive-network bridge. ADR-001 (DuckDB
-    # as sole writer) - the public surface is via the backend API.
-    expose:
-      - '8000'
+    # 127.0.0.1 bind: host-Nginx proxies /new_module and /heartbeat
+    # (the only two ESP firmware paths that hit duckdb-service directly)
+    # via 127.0.0.1:8002. Production never exposes duckdb-service to the
+    # public internet - ADR-001 (DuckDB as sole writer); the public
+    # surface is the backend API on api.highfive.schutera.com.
+    #
+    # The absence of a public-interface ports entry is what enforces
+    # internal-only - `expose:` alone is purely cosmetic on a user-defined
+    # bridge network.
+    ports:
+      - '127.0.0.1:8002:8000'
     environment:
       - SEED_DATA=false
     volumes:

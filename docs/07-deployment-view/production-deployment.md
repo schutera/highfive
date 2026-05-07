@@ -34,8 +34,12 @@ see [docker-compose.md](docker-compose.md).
                                       via `highfive-network`)
 ```
 
-ESP32-CAM firmware uploads reach `image-service` directly on
-`<server-ip>:8000` over plain HTTP. See "Known gaps" below.
+ESP32-CAM firmware uploads reach `image-service` via the host-Nginx
+port-80 server block at `http://highfive.schutera.com/upload` (proxied
+to `127.0.0.1:8000`). Module registration and heartbeats hit
+`/new_module` and `/heartbeat` on the same port-80 vhost, proxied to
+`duckdb-service` on `127.0.0.1:8002`. All firmware traffic is HTTP-only
+by design — see "Known gaps" for why and the migration path.
 
 ## Prerequisites
 
@@ -133,8 +137,8 @@ $EDITOR .env.production
 chmod 600 .env.production  # operator-managed, never enters git
 ```
 
-`.env.production` is git-ignored (the existing `.env*` rules in the
-repo `.gitignore` cover it). Never commit it.
+`.env.production` is git-ignored (an explicit `.env.production` entry
+lives in the repo `.gitignore`). Never commit it.
 
 ### Step 4: Build Docker Images
 
@@ -166,34 +170,102 @@ gates ensure `image-service` and `backend` only start after
 
 ### Step 6: TLS via host-Nginx
 
-The Compose stack binds frontend on `127.0.0.1:8081` and backend on
-`127.0.0.1:3001` — both reachable only from the server's loopback. A
-host-level Nginx terminates TLS for two subdomains and proxies into
-the loopback ports.
+The Compose stack binds all four services to the server's loopback only.
+A host-level Nginx terminates TLS for two browser subdomains
+(`highfive.schutera.com`, `api.highfive.schutera.com`) and additionally
+proxies the three firmware paths (`/upload`, `/new_module`, `/heartbeat`)
+on plain HTTP because field ESP32-CAM modules ship with
+`http://highfive.schutera.com/upload` baked into `ESP32-CAM/config.json`
+and would otherwise hit a 301 redirect they can't follow. See "Known gaps".
 
-#### a. Get certificates
+Loopback port map for host-Nginx:
+
+| Loopback         | Service          | Used by                                           |
+| ---------------- | ---------------- | ------------------------------------------------- |
+| `127.0.0.1:8081` | `frontend`       | browser via TLS termination                       |
+| `127.0.0.1:3001` | `backend`        | browser via TLS termination                       |
+| `127.0.0.1:8000` | `image-service`  | ESP firmware via HTTP /upload                     |
+| `127.0.0.1:8002` | `duckdb-service` | ESP firmware via HTTP `/new_module`, `/heartbeat` |
+
+#### a. Install Nginx and certbot
 
 ```bash
 sudo apt-get update
 sudo apt-get install nginx certbot python3-certbot-nginx
-
-sudo certbot certonly --nginx \
-    -d highfive.schutera.com \
-    -d api.highfive.schutera.com
 ```
 
-#### b. Configure host-Nginx
+#### b. Get certificates with `certbot --standalone`
+
+`certbot --standalone` runs its own short-lived HTTP server on port 80
+for ACME validation; it doesn't need any Nginx vhost in place. Stop
+Nginx briefly so port 80 is free:
+
+```bash
+sudo systemctl stop nginx
+sudo certbot certonly --standalone \
+    -d highfive.schutera.com \
+    -d api.highfive.schutera.com
+sudo systemctl start nginx
+```
+
+The cert lineage on disk is named after the **first** `-d` argument:
+`/etc/letsencrypt/live/highfive.schutera.com/fullchain.pem`. Both
+subdomains are covered by the same SAN cert; `certbot renew` (cron
+default) handles future renewals — pair it with a `--post-hook
+"systemctl reload nginx"` if you switch to webroot in a follow-up.
+
+#### c. Configure host-Nginx
 
 Create `/etc/nginx/sites-available/highfive`:
 
 ```nginx
-# Frontend - SPA at https://highfive.schutera.com
+# Port 80, highfive.schutera.com - serves ESP firmware traffic on HTTP
+# AND redirects browser traffic to HTTPS. The /upload, /new_module,
+# /heartbeat locations exist because field firmware ships with
+# http://highfive.schutera.com/upload baked in - moving those to HTTPS
+# would require reflashing the fleet (tracked in Known gaps).
 server {
     listen 80;
     server_name highfive.schutera.com;
+
+    location = /upload {
+        proxy_pass http://127.0.0.1:8000/upload;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_request_buffering off;
+        client_max_body_size 10M;
+        proxy_read_timeout 60s;
+    }
+
+    location = /new_module {
+        proxy_pass http://127.0.0.1:8002/new_module;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location = /heartbeat {
+        proxy_pass http://127.0.0.1:8002/heartbeat;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Browser traffic for everything else: redirect to HTTPS.
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+# Port 80, api.highfive.schutera.com - browser-only, always 301 to HTTPS.
+server {
+    listen 80;
+    server_name api.highfive.schutera.com;
     return 301 https://$server_name$request_uri;
 }
 
+# HTTPS frontend at https://highfive.schutera.com
 server {
     listen 443 ssl http2;
     server_name highfive.schutera.com;
@@ -218,13 +290,7 @@ server {
     }
 }
 
-# Backend - API at https://api.highfive.schutera.com
-server {
-    listen 80;
-    server_name api.highfive.schutera.com;
-    return 301 https://$server_name$request_uri;
-}
-
+# HTTPS backend at https://api.highfive.schutera.com
 server {
     listen 443 ssl http2;
     server_name api.highfive.schutera.com;
@@ -244,9 +310,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        # X-Highfive-Data-Incomplete is a CORS-exposed header read by
-        # the dashboard banner - leave proxy_pass_header on default
-        # (passes all). See backend/src/app.ts corsOptions.
     }
 }
 ```
@@ -259,7 +322,9 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-#### c. Smoke-test through TLS
+#### d. Smoke-test
+
+Browser (TLS):
 
 ```bash
 curl -fsS https://api.highfive.schutera.com/api/health
@@ -268,6 +333,20 @@ curl -fsSI https://highfive.schutera.com/ | head -5
 
 Both should return 200. The frontend root serves the SPA; the API
 health check returns `{ "status": "ok", "timestamp": "..." }`.
+
+ESP firmware paths (HTTP):
+
+```bash
+# Sanity-check the upload-path proxy is wired (returns 405 Method Not
+# Allowed because /upload only accepts POST - that's success: it means
+# nginx routed to image-service, not a 301 to HTTPS).
+curl -fsSI http://highfive.schutera.com/upload
+curl -fsSI http://highfive.schutera.com/heartbeat
+```
+
+If either returns `HTTP/1.1 301 Moved Permanently` with a `Location:
+https://...` header, the firmware-proxy `location =` blocks aren't
+matching — check `nginx -t` and the order of server blocks.
 
 ### Step 7: Operational checks
 
@@ -283,21 +362,35 @@ docker compose -f docker-compose.prod.yml exec duckdb-service ls -lah /data
 
 ## Known gaps
 
-These are intentional production gaps tracked separately, not breakage:
+Tracked gaps that this runbook accommodates rather than fixes:
 
-- **ESP32-CAM uploads are HTTP-only.** Firmware uploads reach
-  `image-service` on `<server-ip>:8000` over plain HTTP. Adding TLS
-  termination for ESP uploads requires either a public TLS-terminating
-  proxy in front of `image-service` (with a third subdomain like
-  `images.highfive.schutera.com`) or an MQTT/TLS upload path. Not
-  in scope for this runbook.
-- **`duckdb-service` is internal-only.** No public URL by design — it
-  is reached only by `backend` and `image-service` over the
-  Compose-internal `highfive-network` bridge. Per ADR-001 (DuckDB as
-  sole writer), the public surface is the backend API.
+- **ESP firmware traffic stays on HTTP.** Field modules ship with
+  `http://highfive.schutera.com/upload` and `/new_module` baked into
+  `ESP32-CAM/config.json`. The host-Nginx port-80 server block proxies
+  `/upload`, `/new_module`, and `/heartbeat` to the appropriate
+  internal services on plain HTTP so the existing fleet keeps working
+  without reflashing. Migrating firmware to HTTPS would either require
+  reflashing every deployed module or fronting `image-service` with a
+  third TLS subdomain (e.g. `images.highfive.schutera.com`). Tracked as
+  a follow-up; out of scope for this runbook.
+- **Python services run Flask's dev server.** `image-service` and
+  `duckdb-service` use the same `Dockerfile.dev` in prod that the dev
+  compose uses; both invoke `python app.py` which boots Flask's
+  single-threaded dev server. Acceptable at the current request volume
+  but a known hardening target (gunicorn / waitress, non-root user,
+  separate prod Dockerfile). Tracked as a follow-up.
+- **`duckdb-service` is reachable only on loopback.** No public-internet
+  binding by design — it is reached over the Compose-internal
+  `highfive-network` bridge from peer services, and from host-Nginx via
+  `127.0.0.1:8002` for the two ESP firmware paths. Per ADR-001 (DuckDB
+  as sole writer), the public-internet surface is the backend API. Note
+  that `expose:` in compose is purely cosmetic on a user-defined bridge
+  network — what enforces internal-only is the `127.0.0.1:` prefix on
+  the `ports:` mapping, not `expose:`.
 - **Single shared TLS cert covers both subdomains.** The certbot step
-  issues one cert for `highfive.schutera.com` + `api.highfive.schutera.com`
-  via SAN. Renewal works the same for both.
+  issues one SAN cert for `highfive.schutera.com` + `api.highfive.schutera.com`.
+  The cert lineage on disk uses the first `-d` value as the directory
+  name: `/etc/letsencrypt/live/highfive.schutera.com/`.
 
 ## Troubleshooting
 
@@ -381,8 +474,10 @@ docker compose -f docker-compose.prod.yml --env-file .env.production down -v
 - Frontend: `https://highfive.schutera.com/`
 - API: `https://api.highfive.schutera.com/api/modules`
 - API health: `https://api.highfive.schutera.com/api/health`
-- Image upload (ESP firmware): `http://<server-ip>:8000/upload`
-  (HTTP-only by design — see "Known gaps")
+- ESP firmware (HTTP-only via host-Nginx port-80 vhost — see "Known gaps"):
+  - upload: `http://highfive.schutera.com/upload`
+  - register: `http://highfive.schutera.com/new_module`
+  - heartbeat: `http://highfive.schutera.com/heartbeat`
 
 ## See also
 

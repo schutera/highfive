@@ -326,12 +326,13 @@ runbooks shipped two production hazards:
 
 **Why it happened.** The prod compose was authored as a stripped-down
 dev compose with the upload pipeline excised "for the next iteration"
-and a `${VAR:-default}` fallback dropped in for fail-soft. Both
-shortcuts looked harmless in review because the dev stack worked and
-the runbook carried a banner-marked TODO — but the banners were
-honest about an unsupported state, not a temporary gap. Operators
-following the runbook had no signal that the dashboard would silently
-boot with the dev key.
+and a `${VAR:-default}` fallback dropped in for fail-soft. The
+runbook carried a banner-marked TODO that said "this is incomplete,
+follow the issue" — operators had a signal, but the signal was useless
+because nobody acted on it for several iterations and the artifact
+shipped to production anyway. The actual lesson is that doc banners
+are not a substitute for fixing the runbook; they normalise broken
+state.
 
 **How to avoid it next time.**
 

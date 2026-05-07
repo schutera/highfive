@@ -1,31 +1,52 @@
+# backend/Dockerfile (production)
+#
+# Build context is the repo root (see docker-compose.prod.yml). The
+# image installs the whole npm workspace (contracts + backend + homepage)
+# so the `@highfive/contracts` workspace symlink resolves at build and
+# runtime. The image does NOT bind-mount source - the dist/ is baked in.
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy lockfile + every workspace package.json so `npm ci` can resolve
+# the workspace graph without needing the rest of the source.
+COPY package.json package-lock.json ./
+COPY contracts/package.json ./contracts/package.json
+COPY backend/package.json ./backend/package.json
+COPY homepage/package.json ./homepage/package.json
+
+RUN npm ci
+
+# Contracts source - backend imports its types at compile time.
+COPY contracts ./contracts
+
+# Backend source.
+COPY backend ./backend
+
+WORKDIR /app/backend
+RUN npm run build
+
+# ---- Runtime stage ----
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Re-install with --omit=dev for a slim runtime image. Workspace
+# package.jsons must be present so the contracts symlink resolves.
+COPY package.json package-lock.json ./
+COPY contracts/package.json ./contracts/package.json
+COPY backend/package.json ./backend/package.json
+COPY homepage/package.json ./homepage/package.json
 
-# Install all dependencies (including dev dependencies for build)
-RUN npm install
+RUN npm ci --omit=dev
 
-# Create images directory
-RUN mkdir -p /app/images
+COPY --from=builder /app/contracts ./contracts
+COPY --from=builder /app/backend/dist ./backend/dist
 
-# Copy source code
-COPY src ./src
-COPY tsconfig.json ./
+WORKDIR /app/backend
 
-# Build TypeScript
-RUN npm run build
+ENV NODE_ENV=production
 
-# Remove dev dependencies and source files to reduce image size
-RUN npm prune --production && rm -rf src tsconfig.json
-
-# Expose port
 EXPOSE 3001
 
-# Note: Set HIGHFIVE_API_KEY environment variable when running
-# docker run -e HIGHFIVE_API_KEY=your_secure_key backend-image
-
-# Start server
 CMD ["node", "dist/server.js"]

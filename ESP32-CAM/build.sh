@@ -26,7 +26,8 @@ echo ""
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --output-dir "${BUILD_DIR}" \
-  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"\\\"${VERSION}\\\"\"" \
+  --libraries "${SKETCH_DIR}/lib" \
+  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\"" \
   "${SKETCH_DIR}"
 
 # Verify the macro landed as a C string literal (not as a token, and
@@ -46,6 +47,28 @@ if ! grep -aFq "${VERSION}" "${BUILD_DIR}/ESP32-CAM.ino.bin"; then
   exit 1
 fi
 echo "Verified: FIRMWARE_VERSION=${VERSION} is in the binary as a plain string."
+
+# Build the single merged binary for web flashing. arduino-cli (unlike the
+# old Arduino IDE flow) does NOT produce ESP32-CAM.ino.merged.bin on its
+# own — only the app, bootloader, and partitions as separate .bin files.
+# Stitch them ourselves via esptool merge_bin, plus the boot_app0.bin from
+# the ESP32 core (the OTA selector). Standard ESP32 (Wrover-class) layout:
+# 0x1000 bootloader / 0x8000 partitions / 0xe000 boot_app0 / 0x10000 app.
+ARDUINO_DATA_DIR="${ARDUINO_DATA_DIR:-$HOME/.arduino15}"
+ESPTOOL="$(find "${ARDUINO_DATA_DIR}/packages/esp32/tools/esptool_py" -name esptool.py 2>/dev/null | head -1)"
+BOOT_APP0="$(find "${ARDUINO_DATA_DIR}/packages/esp32/hardware/esp32" -name boot_app0.bin 2>/dev/null | head -1)"
+if [ -z "${ESPTOOL}" ] || [ -z "${BOOT_APP0}" ]; then
+  echo "ERROR: could not locate esptool.py or boot_app0.bin under ${ARDUINO_DATA_DIR}." >&2
+  echo "       Run: arduino-cli core install esp32:esp32@2.0.17" >&2
+  exit 1
+fi
+python3 "${ESPTOOL}" --chip esp32 merge_bin \
+  -o "${BUILD_DIR}/ESP32-CAM.ino.merged.bin" \
+  --flash_mode dio --flash_freq 80m --flash_size 4MB \
+  0x1000  "${BUILD_DIR}/ESP32-CAM.ino.bootloader.bin" \
+  0x8000  "${BUILD_DIR}/ESP32-CAM.ino.partitions.bin" \
+  0xe000  "${BOOT_APP0}" \
+  0x10000 "${BUILD_DIR}/ESP32-CAM.ino.bin"
 
 echo ""
 echo "Build artifacts:"

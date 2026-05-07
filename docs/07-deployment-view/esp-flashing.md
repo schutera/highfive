@@ -90,6 +90,56 @@ Find the port: **Device Manager → Ports → USB-SERIAL CH340 (COMx)** on Windo
 > `pio run` for a real release. See
 > [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md).
 
+### Cutting a release binary (`bash ESP32-CAM/build.sh`)
+
+The `pio run` flow is for development/upload. The `build.sh` flow is for
+producing the merged `homepage/public/firmware.bin` + matching
+`firmware.json` manifest that the OTA wizard serves. Run it when you
+bump `ESP32-CAM/VERSION` and want to publish a new release binary.
+
+`build.sh` invokes `arduino-cli` (not PlatformIO) so it has its own
+toolchain prerequisites. One-time setup on a fresh box:
+
+```bash
+# arduino-cli itself
+# Linux (incl. WSL):
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=$HOME/.local/bin sh
+export PATH="$HOME/.local/bin:$PATH"
+# Windows (PowerShell, then open a new shell so PATH refreshes):
+#   winget install ArduinoSA.CLI
+
+# ESP32 board core — pin to 2.0.x. The 3.x core changed the
+# esp_task_wdt_init signature and won't compile against this firmware.
+arduino-cli config init --overwrite
+arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+arduino-cli core update-index
+arduino-cli core install esp32:esp32@2.0.17
+
+# ArduinoJson (matches platformio.ini's pinned version)
+arduino-cli lib install "ArduinoJson@6.21.5"
+
+# pyserial (esptool's Python dep, not bundled). On Debian/Ubuntu/WSL:
+pip3 install --user pyserial
+# Or via apt: sudo apt install -y python3-serial
+```
+
+Then run the build:
+
+```bash
+bash ESP32-CAM/build.sh
+```
+
+`build.sh` exits non-zero with a clear error if any prereq is missing.
+On success, it prints `Verified: FIRMWARE_VERSION=<bee-name> is in the
+binary as a plain string.` (the post-compile guard) and writes
+`homepage/public/firmware.bin` plus `firmware.json`.
+
+If the post-compile guard fires, the most likely cause is the
+arduino-cli `--build-property` quote escaping has drifted; the guard
+exists specifically to catch that failure mode before it ships a
+broken binary. See the inline comments in `build.sh` for the exact
+escaping rules.
+
 ### Boot normally after flashing
 
 Press **RST** once (without IO0). The module boots and opens the configuration access point — verify by opening your phone's WiFi list and looking for `ESP32-Access-Point`. The on-board LED stays silent in AP mode (the LED is the camera-flash GPIO; steady-state signalling would be obnoxious). See [the LED legend in chapter 06](../06-runtime-view/esp-reliability.md#led-legend) for the brief failure / upload pulses the LED does emit during normal operation.

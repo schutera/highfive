@@ -177,7 +177,7 @@ is logged via `logf("[BOOT] last_stage_before_reboot=%s", crumb)` and
 attached to every subsequent telemetry sidecar JSON via the optional
 `last_stage_before_reboot` field. The admin Telemetry view (admin
 ModulePanel `TelemetryRow` in `homepage/src/components/ModulePanel.tsx`)
-renders the field as a `stage before reboot` row when present, next to
+renders the field as a `stage at previous reboot` row when present, next to
 the `reset` row per upload, so a "TASK_WDT in `getGeolocation:http_post`"
 pattern across the fleet is visible without a serial cable on every
 board.
@@ -285,25 +285,38 @@ flowchart TD
     BE --> HP
 ```
 
-1. ESP uploads an image. The `logs` part is parsed and written to `{image_path}.log.json`.
-2. `GET /modules/<mac>/logs?limit=N` (image-service) globs `*.log.json`, filters by `_mac`, sorts by mtime, returns the newest N entries.
+1. ESP uploads an image. The `logs` part is parsed and wrapped in a typed envelope (`image-service/services/sidecar.py`'s `LogSidecarEnvelope`), then written to `{image_path}.log.json`.
+2. `GET /modules/<mac>/logs?limit=N` (image-service) globs `*.log.json`, filters by `mac`, sorts by mtime, returns the newest N entries — each entry is the envelope shape below.
 3. `GET /api/modules/:id/logs` (backend) proxies the above behind the existing `X-API-Key` middleware so the frontend can use a single origin.
-4. `ModulePanel.tsx` has a collapsible "Telemetry" section that lazy-loads logs when opened.
+4. `ModulePanel.tsx` has a collapsible "Telemetry" section that lazy-loads logs when opened. The `TelemetryRow` component reads service-injected metadata at the top level and the raw ESP telemetry from `entry.payload`.
 
 ### Sidecar file contents
 
-Each `.log.json` is the raw telemetry payload plus three fields added by the image-service:
+Each `.log.json` is a typed envelope: service-injected metadata (`mac`, `received_at`, `image`) at the top level, with the raw ESP telemetry nested under `payload`. Pre-envelope (legacy) sidecars on disk continue to be readable — `LogSidecarEnvelope.from_disk` reshapes them into the same envelope on the way out.
 
 ```json
 {
-  "...telemetry fields...": "...",
-  "_mac": "12345678901234",
-  "_received_at": "2026-04-11T14:32:17",
-  "_image": "esp_capture_20260411_143217.jpg"
+  "mac": "aabbccddeeff",
+  "received_at": "2026-05-07T12:00:00",
+  "image": "esp_capture_20260507_120000.jpg",
+  "payload": {
+    "fw": "1.0.0",
+    "uptime_s": 72145,
+    "last_reset_reason": "TASK_WDT",
+    "last_stage_before_reboot": "setup:getGeolocation",
+    "free_heap": 124352,
+    "min_free_heap": 98211,
+    "rssi": -67,
+    "wifi_reconnects": 2,
+    "last_http_codes": [200, 200, 500, 200, 200],
+    "log": "..."
+  }
 }
 ```
 
-If the ESP ever sends non-JSON, the sidecar still gets written as `{"raw": "...", "parse_error": true, "_mac": ..., ...}` so the admin view can always show _something_.
+If the ESP ever sends non-JSON, the sidecar still gets written with `payload: { "raw": "...", "parse_error": true }` so the admin view can always show _something_.
+
+The TypeScript wire-shape contract for this envelope is `TelemetryEntry` in [`contracts/src/index.ts`](../../contracts/src/index.ts) — shared between `backend` and `homepage` per [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md)'s "any wire-shape that crosses the backend↔homepage boundary lives in the workspace package" rule.
 
 ---
 

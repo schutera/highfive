@@ -40,6 +40,23 @@ unsigned long lastHeartbeatMs = 0;
 void setup() {
   Serial.begin(115200);
 
+  // Read+clear the previous boot's breadcrumb FIRST, before any
+  // breadcrumbSet in this boot can clobber the slot. logbuf isn't
+  // initialised yet (the in-RAM ring doesn't exist), so buffer the
+  // recovered value into a local and emit the [BOOT] log line a few
+  // statements down once logbufInit() has run.
+  char recoveredCrumb[64] = {0};
+  bool hadRecoveredCrumb =
+      hf::breadcrumbReadAndClear(recoveredCrumb, sizeof(recoveredCrumb));
+
+  pinMode(CONFIG_BUTTON, INPUT_PULLUP);
+
+  // Issue #42: SPIFFS.begin(true) auto-formats on a corrupted partition,
+  // which can run for several seconds with no esp_task_wdt_reset. Set
+  // the breadcrumb just before the call so a TASK_WDT here is
+  // identifiable on the next boot — note the read+clear above ran
+  // before this set, preserving the previous boot's last value.
+  hf::breadcrumbSet("setup:spiffs_mount");
   if (!SPIFFS.begin(true)) {
     Serial.println("SPIFFS Mount Failed");
     return;
@@ -59,19 +76,17 @@ void setup() {
   logf("[BOOT] fw=%s reset_reason=%d boot_count=%u free_heap=%u",
        FIRMWARE_VERSION, (int)esp_reset_reason(), boot_count, ESP.getFreeHeap());
 
-  // Recover breadcrumb from the previous boot's RTC_NOINIT slot, if any.
-  // A non-empty value here means the previous boot did not exit setup()
-  // cleanly and the breadcrumb survived a software reset (TASK_WDT,
-  // panic, ESP.restart()). Issue #42 — the only way to identify which
+  // Surface the recovered breadcrumb (read at the very top of setup()
+  // before any breadcrumbSet could overwrite it). A non-empty value
+  // here means the previous boot did not exit setup() cleanly and the
+  // breadcrumb survived a software reset (TASK_WDT, panic,
+  // ESP.restart()). Issue #42 — the only way to identify which
   // long-running call was active when the watchdog fired in the field.
   // POR clears RTC slow memory, so first-boot-after-power-on always
   // returns false. Magic-guarded; 1-in-4-billion false-positive on POR.
-  {
-    char crumb[64];
-    if (hf::breadcrumbReadAndClear(crumb, sizeof(crumb))) {
-      logf("[BOOT] last_stage_before_reboot=%s", crumb);
-      noteLastStageBeforeReboot(crumb);
-    }
+  if (hadRecoveredCrumb) {
+    logf("[BOOT] last_stage_before_reboot=%s", recoveredCrumb);
+    noteLastStageBeforeReboot(recoveredCrumb);
   }
 
   // Task watchdog — if loop() (or AP server) hangs for >TASK_WDT_TIMEOUT_S,

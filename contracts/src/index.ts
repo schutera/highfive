@@ -94,3 +94,45 @@ export interface DailyProgress {
 export interface ModuleDetail extends Module {
   nests: NestData[];
 }
+
+// ---- Telemetry sidecar envelope ----
+//
+// Wire-shape returned by `image-service /modules/<mac>/logs` (proxied
+// unchanged by `backend GET /api/modules/:id/logs`). Each entry is the
+// dump of `image-service/services/sidecar.py`'s `LogSidecarEnvelope`
+// pydantic model. The raw ESP telemetry lives nested inside `payload`;
+// service-injected metadata (mac, received_at, image) lives at the
+// top level. Pre-envelope sidecars are read-compat: image-service's
+// `LogSidecarEnvelope.from_disk` re-shapes them into this same shape
+// before responding.
+//
+// Lives here, not in `homepage/src/services/api.ts`, per ADR-004 —
+// any DTO crossing the backend↔homepage boundary belongs in the
+// shared workspace package so a wire-shape mismatch is a TypeScript
+// compile error, not a silent dashboard `—`.
+
+export interface TelemetryPayload {
+  fw?: string;
+  uptime_s?: number;
+  last_reset_reason?: string;
+  // RTC_NOINIT stage breadcrumb recovered on the next boot after a
+  // software reset (TASK_WDT, panic, ESP.restart). Names which long-
+  // running call was active when the previous run ended. Optional —
+  // omitted by firmware when no breadcrumb survived (clean boot or
+  // first boot after power-on). Diagnostic for issue #42; see
+  // docs/06-runtime-view/esp-reliability.md "8. Stage breadcrumb".
+  last_stage_before_reboot?: string;
+  free_heap?: number;
+  min_free_heap?: number;
+  rssi?: number;
+  wifi_reconnects?: number;
+  last_http_codes?: number[];
+  log?: string;
+}
+
+export interface TelemetryEntry {
+  mac: string;
+  received_at: string; // ISO timestamp, image-service-injected
+  image: string; // filename, image-service-injected
+  payload: TelemetryPayload;
+}

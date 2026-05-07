@@ -133,30 +133,39 @@ or wrong, `502` if the image-service is unreachable.
 ```json
 [
   {
-    "fw": "carpenter",
-    "uptime_s": 72145,
-    "last_reset_reason": "TASK_WDT",
-    "last_stage_before_reboot": "setup:getGeolocation",
-    "free_heap": 124352,
-    "min_free_heap": 98211,
-    "rssi": -67,
-    "wifi_reconnects": 2,
-    "last_http_codes": [200, 200, 500, 200, 200],
-    "log": "[BOOT] fw=carpenter ...",
-    "_mac": "12345678901234",
-    "_received_at": "2026-04-11T14:32:17",
-    "_image": "esp_capture_20260411_143217.jpg"
+    "mac": "aabbccddeeff",
+    "received_at": "2026-05-07T12:00:00",
+    "image": "esp_capture_20260507_120000.jpg",
+    "payload": {
+      "fw": "1.0.0",
+      "uptime_s": 72145,
+      "last_reset_reason": "TASK_WDT",
+      "last_stage_before_reboot": "setup:getGeolocation",
+      "free_heap": 124352,
+      "min_free_heap": 98211,
+      "rssi": -67,
+      "wifi_reconnects": 2,
+      "last_http_codes": [200, 200, 500, 200, 200],
+      "log": "[BOOT] fw=1.0.0 ..."
+    }
   }
 ]
 ```
 
-`last_stage_before_reboot` is **optional**. The firmware emits it only
-when the previous boot's RTC_NOINIT breadcrumb survived (i.e. the
-previous boot ended in a software reset — TASK_WDT, panic, ESP.restart —
-rather than a clean exit or a power-on). Sidecars produced by firmware
-that pre-dates the field continue to validate as a strict subset of the
-post-#42 schema; admin UI consumers should treat the field as missing
-when absent, not error. Diagnostic mechanism for issue #42 — see
+The shape is the typed envelope dumped from `image-service/services/sidecar.py`'s
+`LogSidecarEnvelope`: service-injected metadata at the top level (`mac`,
+`received_at`, `image`), the raw ESP telemetry nested under `payload`.
+Pre-envelope sidecars on disk are read-compat and reshape into the same
+envelope on the way out. The TypeScript contract is `TelemetryEntry` in
+[`contracts/src/index.ts`](../contracts/src/index.ts).
+
+Inside `payload`, `last_stage_before_reboot` is **optional**. The firmware
+emits it only when the previous boot's RTC_NOINIT breadcrumb survived
+(i.e. the previous boot ended in a software reset — TASK_WDT, panic,
+ESP.restart — rather than a clean exit or a power-on). Sidecars produced
+by firmware that pre-dates the field continue to validate; admin UI
+consumers should treat the field as missing when absent, not error.
+Diagnostic mechanism for issue #42 — see
 [06-runtime-view/esp-reliability.md "Stage breadcrumb"](06-runtime-view/esp-reliability.md#8-stage-breadcrumb-cross-reboot-diagnostic).
 
 The telemetry section in the dashboard is hidden unless the URL has

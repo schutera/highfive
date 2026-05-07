@@ -52,12 +52,15 @@ prove out, not the root cause, which is still unknown by design.
   `esp_init.cpp` (network I/O, NTP poll, SPIFFS `loadConfig`, camera
   init) calls `breadcrumbSet("section:name")` on entry. Single slot,
   last writer wins.
-- On boot, `setup()` reads + clears the slot. If a breadcrumb survived
-  (i.e. the previous boot ended in a software reset) it's surfaced via
-  the new optional `last_stage_before_reboot` field on the telemetry
-  sidecar JSON. The admin Telemetry view (`TelemetryRow` in
-  `homepage/src/components/ModulePanel.tsx`) renders it as a "stage
-  before reboot" row next to the existing `reset` row when present.
+- On boot, `setup()` reads + clears the slot **first** (before any
+  in-boot `breadcrumbSet` could clobber it) and buffers the recovered
+  value. After `logbufInit()` runs, the value is logged via
+  `logf("[BOOT] last_stage_before_reboot=%s")` and attached to every
+  subsequent telemetry sidecar JSON via the new optional
+  `last_stage_before_reboot` field on the inner `payload`. The admin
+  Telemetry view (`TelemetryRow` in
+  `homepage/src/components/ModulePanel.tsx`) renders it as a "stage at
+  previous reboot" row next to the existing `reset` row when present.
 - The sidecar field is **omitted** when no breadcrumb survived, keeping
   the pre-#42 wire shape byte-for-byte intact for clean boots.
 
@@ -703,3 +706,87 @@ homepage i18n strings. The `check-stale-reset-prose.sh` gate exists
 to keep it removed. Future "hold this button
 at boot" features must use a non-strap GPIO (e.g. GPIO13 or GPIO14
 on the ESP32-CAM, both broken out and both safe at strap time).
+
+### Telemetry sidecar envelope drift — admin UI silently rendered `—` for every field
+
+**What happened.** PR-42 (the issue-#42 telemetry-first stage-breadcrumb
+PR) shipped an initial round-1 fix to extend the homepage's
+`TelemetryRow` with the new `last_stage_before_reboot` field. The fix
+extended `homepage/src/services/api.ts`'s `TelemetryEntry` interface
+and `homepage/src/components/ModulePanel.tsx`'s `TelemetryRow` JSX,
+ran `npm test && npm run build` (both green), and the round-1
+reviewer's P0 was declared addressed.
+
+The round-2 reviewer caught what no test exercised: the homepage was
+reading a **flat** wire shape (`entry.fw`, `entry.last_reset_reason`,
+`entry._received_at`) but `image-service/services/sidecar.py`'s
+`LogSidecarEnvelope` had been wrapping telemetry inside a typed
+envelope (`{mac, received_at, image, payload: {…}}`) since some prior
+refactor. Every `TelemetryEntry` field on the homepage had been
+`undefined` at runtime — the existing `reset` row had been showing
+`—` for every entry across the dashboard, silently, since that
+envelope refactor. Adding a new optional field next to the existing
+broken ones rendered nothing because the existing ones rendered
+nothing. The fix-up commit message claimed "telemetry surface now
+actually surfaces the field"; in production it did not surface
+anything at all.
+
+**Why it shipped.** Three TypeScript optionals stacked: every
+field is `string | undefined`, every `entry.X || '—'` falls through
+silently when `X` is undefined, and no test exercised the actual wire
+shape end-to-end. The author trusted `npm test && npm run build` as
+proof the fix was real and never opened the dev stack to confirm a
+single sidecar entry rendered. The round-1 P0 was technically a
+typo-class bug — read the wrong level of the JSON — but the lesson
+is meta: the very same PR's chapter-11 contribution
+(`Documentation drifted from code in PR 27 first-pass review`) names
+exactly the failure mode that re-occurred inside the round-1 fix-up.
+
+**Lesson — the lesson PR-42 actually earned, not the one it set out
+to earn.**
+
+1. **TypeScript optionals are not type safety.** A wire-shape mismatch
+   between an emitter and a consumer that's all-`field?: T` falls
+   through to all-`undefined` at runtime. The compile passes; the
+   tests pass; the operator's dashboard shows `—` for every entry.
+   Contract types whose every field is optional don't actually pin
+   anything — they're `unknown` with extra steps.
+
+2. **Run the dev stack before claiming a UI claim is true.** When a
+   PR's docs say "the admin Telemetry view renders the field", the
+   verification step is `docker compose up && curl /api/modules/.../logs &&
+open http://localhost:5173/dashboard?admin=1` — not `npm test &&
+npm run build`. The unit test surface and the wire-shape surface
+   are different surfaces. Both need a check-step.
+
+3. **Wire-shape contracts at service boundaries belong in
+   `contracts/`** (per ADR-004). The fact that `TelemetryEntry`
+   lived in `homepage/src/services/api.ts` rather than
+   `contracts/src/index.ts` is exactly the conditions
+   "Frontend / backend type drift before `@highfive/contracts`"
+   above warns against. The shape was crossing the
+   backend↔homepage boundary; it belonged in the workspace package.
+   Round-2 fix moved it.
+
+4. **Test the wire shape, not just the type.** Round-2 fix added
+   `homepage/src/__tests__/TelemetryRow.test.tsx` mounting
+   `TelemetryRow` with a realistic envelope fixture and asserting
+   the fields actually render. Without that pin, the same drift
+   recurs the next refactor.
+
+**How to avoid next time.** Three concrete additions to the
+mandatory-update lookup in `CLAUDE.md` (suggested follow-up; not in
+this PR's scope to land):
+
+- "If a doc claims the admin UI renders a field, before pushing run
+  `docker compose up`, hit the relevant view, and confirm the field
+  actually renders. `npm test && npm run build` is necessary, not
+  sufficient."
+- "Wire-shape changes at the backend↔homepage boundary go through
+  `contracts/src/index.ts`. A service-local `interface` declaration
+  for a wire shape is a smell — it means the type isn't pinned across
+  the boundary."
+- "Component tests for any view that renders wire-shape data must
+  mount the component with a realistic fixture (not a mock object
+  with whatever shape the test author guessed at) — the fixture
+  shape is itself the contract under test."

@@ -85,8 +85,10 @@ secret it has previously stored.
 - **`Serial.println` of the saved password was redacted in #41.**
   Earlier versions printed the credential to USB serial during boot.
 
-The same threat model applies to anything else the portal stores in
-`config.json` and could conceivably echo back: API keys, tokens,
-upload URLs containing query-string secrets. The pattern to follow:
-render an empty input with a "keep current" hint, only overwrite on
+Today only the WiFi password is rendered with this empty-by-default
+pattern; module name and the init/upload URL fields still pre-fill,
+since they are not secrets in the current threat model. If a future
+config field stores another secret (API key, OAuth token, an upload
+URL whose query string carries credentials), apply the same pattern:
+render with `value=""` and a "keep current" hint; only overwrite on
 non-empty submission.

@@ -301,11 +301,12 @@ itself but the next round of fixes shipped with eight fresh stale
   the whole repo (`docs/`, `homepage/src/i18n/`, `.claude/skills/`)
   for prose making the old promise.
 
-**Out-of-scope follow-up: pre-existing drift not fixed in this PR.**
-The Maps API key citations in chapters 3/5/11 and any future drift
-in files this PR didn't touch will surface in the
-`make check-citations` report next time someone edits those files.
-That's the gate's job now.
+**Resolution.** The Maps API key citations in chapters 3/5/11 were
+left for the next editor to resolve. They surfaced in `make
+check-citations` when the #39 fix added a `#include "module_id.h"`
+to `ESP32-CAM/esp_init.cpp` and shifted the cited lines by one,
+and were converted to the symbol form `esp_init.cpp`'s
+`getGeolocation` in that same commit. The gate worked as intended.
 
 ### Same canonicalisation bug shipped at three call sites (issue #39)
 
@@ -320,9 +321,9 @@ registration with HTTP 400 on every boot, while image upload
 silent-failure mode hid behind a working dashboard.
 
 **Why it happened.** The fix was scoped per call site instead of per
-field. `esp_config->esp_ID` is the unsanitised input; PR-17's grep
-for "send the MAC" found two of the three callers because the third
-lives in a `*_init.cpp` file rather than `client.cpp`.
+field. `esp_config->esp_ID` is the unsanitised input; the third
+caller (in `esp_init.cpp` rather than `client.cpp`) was missed
+during the original PR-17 review pass.
 
 **How to avoid it next time.** When fixing a wire-shape bug on a
 shared field, grep for the **field name**, not for the call sites

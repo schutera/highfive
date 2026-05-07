@@ -269,7 +269,9 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<label>WiFi Password</label>");
   // Never echo the saved password back into the form: the captive portal is
   // served over an open AP, so any client on the SSID can View Source. See #46.
-  client.println("<input type=\"password\" name=\"password\" value=\"\" placeholder=\"(leave blank to keep current password)\">");
+  // First-boot vs. reconfigure: only hint at "keep current" when one is saved.
+  String pwHint = (cfg_password.length() > 0) ? "(leave blank to keep current password)" : "WiFi password";
+  client.println("<input type=\"password\" name=\"password\" value=\"\" placeholder=\"" + pwHint + "\">");
   client.println("</div>");
 
   client.println("<div class=\"row\">");

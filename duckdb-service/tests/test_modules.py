@@ -60,6 +60,13 @@ def test_new_module_invalid_mac_returns_400(client):
     assert "error" in resp.get_json()
 
 
+def test_new_module_rejects_raw_uint64_decimal(client):
+    # Issue #39: firmware previously stringified the eFuse uint64 as decimal.
+    resp = client.post("/new_module", json=_valid_payload(esp_id="193966879422984"))
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
 def test_new_module_battery_above_100_returns_400(client):
     resp = client.post("/new_module", json=_valid_payload(battery_level=150))
     assert resp.status_code == 400

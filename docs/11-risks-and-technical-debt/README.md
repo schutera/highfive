@@ -12,7 +12,7 @@ Highlights worth knowing about even if you're not assigned:
 
 | #                                                     | Title (short)                                                 | Why it matters                                                                                                               |
 | ----------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp:362` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.               |
+| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.               |
 | [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                     | Risk of silent truncation on telemetry growth.                                                                               |
 | [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                 | Should be configurable via the AP form.                                                                                      |
 | [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                   | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
@@ -29,7 +29,7 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 
 ## Hardcoded secrets
 
-- **Google Maps API key** in `ESP32-CAM/esp_init.cpp:362` — see
+- **Google Maps API key** in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` — see
   [issue #18](https://github.com/schutera/highfive/issues/18). The
   key has been committed to git history; rotation is the right fix,
   not just removal.
@@ -306,3 +306,27 @@ The Maps API key citations in chapters 3/5/11 and any future drift
 in files this PR didn't touch will surface in the
 `make check-citations` report next time someone edits those files.
 That's the gate's job now.
+
+### Same canonicalisation bug shipped at three call sites (issue #39)
+
+**What happened.** PR-17 fixed the eFuse-MAC canonicalisation bug at
+the `/upload` and `/heartbeat` seams (`client.cpp's postImage` and
+`sendHeartbeat`) by routing `esp_config->esp_ID` through
+`hf::formatModuleId`. The third call site —
+`esp_init.cpp's initNewModuleOnServer`, which posts to `/new_module`
+— was missed. Boards in the field have been failing module
+registration with HTTP 400 on every boot, while image upload
+(canonicalised) and heartbeat (canonicalised) both succeed. The
+silent-failure mode hid behind a working dashboard.
+
+**Why it happened.** The fix was scoped per call site instead of per
+field. `esp_config->esp_ID` is the unsanitised input; PR-17's grep
+for "send the MAC" found two of the three callers because the third
+lives in a `*_init.cpp` file rather than `client.cpp`.
+
+**How to avoid it next time.** When fixing a wire-shape bug on a
+shared field, grep for the **field name**, not for the call sites
+the bug report mentions. For HiveHive specifically: any future
+canonicalisation change goes through `hf::formatModuleId`, and
+`grep -rn 'esp_config->esp_ID' ESP32-CAM/` is the gate — every
+result must either flow through the helper or be a comment/log.

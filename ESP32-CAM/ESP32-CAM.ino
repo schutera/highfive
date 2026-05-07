@@ -133,9 +133,16 @@ void setup() {
 
   Serial.println("[ESP] INITIALIZING ESP");
 
+  // SPIFFS auto-format on a corrupted partition can run for several
+  // seconds with no esp_task_wdt_reset in the loop, so it deserves its
+  // own crumb even though it's a local FS call rather than a network
+  // call. loadConfig also re-enters SPIFFS.begin internally.
+  hf::breadcrumbSet("setup:loadConfig");
+  unsigned long stageStartMs = millis();
   if (!loadConfig(&esp_config)) {
     Serial.println("-- Failed to configure ESP");
   }
+  logf("[STAGE] loadConfig took=%lums", millis() - stageStartMs);
 
   /*
     WiFi + network operations BEFORE camera init.
@@ -153,14 +160,14 @@ void setup() {
   // line is also useful when WDT *doesn't* fire — surfaces stages
   // creeping toward the 60 s budget.
   hf::breadcrumbSet("setup:setupWifiConnection");
-  unsigned long __t_stage = millis();
+  stageStartMs = millis();
   setupWifiConnection(&esp_config.wifi_config);
-  logf("[STAGE] setupWifiConnection took=%lums", millis() - __t_stage);
+  logf("[STAGE] setupWifiConnection took=%lums", millis() - stageStartMs);
 
   hf::breadcrumbSet("setup:getGeolocation");
-  __t_stage = millis();
+  stageStartMs = millis();
   getGeolocation(&esp_config);
-  logf("[STAGE] getGeolocation took=%lums", millis() - __t_stage);
+  logf("[STAGE] getGeolocation took=%lums", millis() - stageStartMs);
 
   Serial.print("Latitude: ");
   Serial.println(esp_config.geolocation.latitude, 6);
@@ -173,19 +180,19 @@ void setup() {
 
   // ---- Initialize new module on server ---- //
   hf::breadcrumbSet("setup:initNewModuleOnServer");
-  __t_stage = millis();
+  stageStartMs = millis();
   initNewModuleOnServer(&esp_config);
-  logf("[STAGE] initNewModuleOnServer took=%lums", millis() - __t_stage);
+  logf("[STAGE] initNewModuleOnServer took=%lums", millis() - stageStartMs);
 
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
   */
   Serial.println("[ESP] INITIALIZING CAMERA");
   hf::breadcrumbSet("setup:initEspCamera");
-  __t_stage = millis();
+  stageStartMs = millis();
   initEspCamera(esp_config.RESOLUTION);
   configure_camera_sensor(&esp_config);
-  logf("[STAGE] initEspCamera took=%lums", millis() - __t_stage);
+  logf("[STAGE] initEspCamera took=%lums", millis() - stageStartMs);
 
   // Warm up: sensor needs a few frames to auto-expose before producing valid JPEGs
   Serial.println("-- warming up camera sensor");

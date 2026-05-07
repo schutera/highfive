@@ -480,6 +480,12 @@ function TelemetryRow({ entry }: { entry: TelemetryEntry }) {
         <div>
           <span className="text-hf-fg-mute">reset</span> {entry.last_reset_reason || '—'}
         </div>
+        {entry.last_stage_before_reboot && (
+          <div className="col-span-2 font-mono text-hf-fg-soft">
+            <span className="text-hf-fg-mute">stage before reboot</span>{' '}
+            {entry.last_stage_before_reboot}
+          </div>
+        )}
         {typeof entry.wifi_reconnects === 'number' && (
           <div>
             <span className="text-hf-fg-mute">reconnects</span> {entry.wifi_reconnects}

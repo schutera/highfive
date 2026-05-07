@@ -157,34 +157,41 @@ that ends in a watchdog reboot is a software reset, so the breadcrumb
 makes it across; a fresh power cycle clears the slot so the next session
 starts clean.
 
-Each long-running call in `setup()`, `loop()`, `client.cpp`'s
-`postImage` and `sendHeartbeat`, and `esp_init.cpp`'s `getGeolocation`
-/ `initNewModuleOnServer` / `setupTime` calls `breadcrumbSet("section:name")`
+Every long-running call (network I/O, NTP poll, SPIFFS `loadConfig`,
+camera init) in `setup()`, `loop()`, `client.cpp`'s `postImage` and
+`sendHeartbeat`, and `esp_init.cpp`'s `getGeolocation` /
+`initNewModuleOnServer` / `setupTime` calls `breadcrumbSet("section:name")`
 on entry. There is one slot — last writer wins — so the breadcrumb
 always names the most-recently-entered section. On clean exit from
 `setup()` the slot is cleared (`breadcrumbClear`); `loop()` continually
-overwrites it across sleep/heartbeat/capture, so a clean boot leaves the
-breadcrumb pointing at `loop:sleep` (harmless — `loop:sleep` ends with
-`esp_task_wdt_reset()` so a hang during the 30 s `delay()` is impossible
-in practice).
+overwrites it across sleep / heartbeat / capture, so a clean boot leaves
+the breadcrumb pointing at `loop:sleep` (harmless — the slot is set
+immediately before the per-iteration `esp_task_wdt_reset()` and the
+cooperative-yield `delay(30000)`; `delay()` yields to FreeRTOS and the
+60 s WDT timeout is double the 30 s sleep, so a hang inside the delay is
+impossible in practice).
 
 On the **next** boot, `setup()` calls `breadcrumbReadAndClear` early
 (before camera init). When that returns true, the recovered stage name
 is logged via `logf("[BOOT] last_stage_before_reboot=%s", crumb)` and
 attached to every subsequent telemetry sidecar JSON via the optional
-`last_stage_before_reboot` field. The admin Telemetry view then surfaces
-the field next to `last_reset_reason` per upload, so a "TASK_WDT in
-`getGeolocation:http_post`" pattern across the fleet is visible without
-a serial cable on every board.
+`last_stage_before_reboot` field. The admin Telemetry view (admin
+ModulePanel `TelemetryRow` in `homepage/src/components/ModulePanel.tsx`)
+renders the field as a `stage before reboot` row when present, next to
+the `reset` row per upload, so a "TASK_WDT in `getGeolocation:http_post`"
+pattern across the fleet is visible without a serial cable on every
+board.
 
 The slot uses a magic guard (`0xCAFEBABE`) so the random RTC contents
 on a true power-on don't masquerade as a valid breadcrumb. False-positive
 odds: 1-in-4-billion per power-on — acceptable for diagnostic data.
 
 NVS would have served the same shape, but the loop()-side breadcrumbs
-update every ~30 s; that's ~3,000 NVS writes/day, exhausting flash
-endurance over months of deployment. RTC slow memory is RAM, not flash —
-zero wear cost.
+update every ~30 s. NVS uses wear-levelled writes across the partition,
+so the per-sector erase rate is much lower than the logical write rate;
+even so, multi-month deployment with continuous writes adds up enough to
+make the wear-out boundary an unbounded design question. RTC slow memory
+is RAM, not flash — zero wear cost, side-steps the question entirely.
 
 This is a diagnostic mechanism for issue #42 (recurring `reset_reason=7`
 in normal STA-mode operation). Once the offending blocking call is

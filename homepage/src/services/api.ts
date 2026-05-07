@@ -16,6 +16,13 @@ export interface TelemetryEntry {
   fw?: string;
   uptime_s?: number;
   last_reset_reason?: string;
+  // RTC_NOINIT stage breadcrumb recovered on the next boot after a
+  // software reset (TASK_WDT, panic, ESP.restart). Names which long-
+  // running call was active when the previous run ended. Optional —
+  // omitted by firmware when no breadcrumb survived (clean boot or
+  // first boot after power-on). Diagnostic for issue #42; see
+  // docs/06-runtime-view/esp-reliability.md "8. Stage breadcrumb".
+  last_stage_before_reboot?: string;
   free_heap?: number;
   min_free_heap?: number;
   rssi?: number;

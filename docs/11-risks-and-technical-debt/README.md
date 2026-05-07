@@ -44,15 +44,20 @@ prove out, not the root cause, which is still unknown by design.
   RTC slow memory via `RTC_NOINIT_ATTR`. RTC slow memory survives
   software resets (TASK_WDT, panic, `ESP.restart()`) but is wiped on
   power-on. NVS would have served the same shape but the loop()-side
-  breadcrumbs update every ~30 s — ~3,000 NVS writes/day exhausts flash
-  endurance over months. RTC slow memory is RAM, not flash.
+  breadcrumbs update every ~30 s; even with NVS wear-levelling, that
+  rate makes the wear-out boundary an unbounded design question for
+  multi-month deployment. RTC slow memory is RAM, not flash — zero
+  wear cost, side-steps the question entirely.
 - Each long-running call in `setup()` / `loop()` / `client.cpp` /
-  `esp_init.cpp` calls `breadcrumbSet("section:name")` on entry. Single
-  slot, last writer wins.
+  `esp_init.cpp` (network I/O, NTP poll, SPIFFS `loadConfig`, camera
+  init) calls `breadcrumbSet("section:name")` on entry. Single slot,
+  last writer wins.
 - On boot, `setup()` reads + clears the slot. If a breadcrumb survived
   (i.e. the previous boot ended in a software reset) it's surfaced via
   the new optional `last_stage_before_reboot` field on the telemetry
-  sidecar JSON. Admin Telemetry view renders it next to `last_reset_reason`.
+  sidecar JSON. The admin Telemetry view (`TelemetryRow` in
+  `homepage/src/components/ModulePanel.tsx`) renders it as a "stage
+  before reboot" row next to the existing `reset` row when present.
 - The sidecar field is **omitted** when no breadcrumb survived, keeping
   the pre-#42 wire shape byte-for-byte intact for clean boots.
 
@@ -91,7 +96,8 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 
 ## Hardcoded secrets
 
-- **Google Maps API key** in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` — see
+- **Google Maps API key** in `ESP32-CAM/esp_init.cpp`'s `getGeolocation`
+  `apiKey` local in the function body — see
   [issue #18](https://github.com/schutera/highfive/issues/18). The
   key has been committed to git history; rotation is the right fix,
   not just removal.

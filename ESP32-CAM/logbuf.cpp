@@ -5,6 +5,7 @@
 #include "ring_buffer.h"
 #include "telemetry.h"
 
+#include <cstring>
 #include <stdarg.h>
 #include <string>
 #include <WiFi.h>
@@ -22,6 +23,13 @@ static hf::HttpCodeRing s_http_codes(s_http_codes_storage, HTTP_CODES_LEN);
 
 // Monotonic counter for WiFi reconnect attempts.
 static hf::ReconnectCounter s_reconnects;
+
+// Recovered breadcrumb from the RTC_NOINIT slot, if the previous boot
+// did not exit setup() cleanly. Empty string → no breadcrumb survived
+// (clean boot, or first boot after power-on). Set once at setup() time
+// via noteLastStageBeforeReboot; read by buildTelemetryJson on every
+// upload until reboot.
+static char s_last_stage_before_reboot[64] = {0};
 
 static const char *resetReasonStr(esp_reset_reason_t r) {
   switch (r) {
@@ -77,21 +85,32 @@ void logbufNoteWifiReconnect() {
   s_reconnects.increment();
 }
 
+void noteLastStageBeforeReboot(const char *stage) {
+  if (!stage) {
+    s_last_stage_before_reboot[0] = '\0';
+    return;
+  }
+  strncpy(s_last_stage_before_reboot, stage,
+          sizeof(s_last_stage_before_reboot) - 1);
+  s_last_stage_before_reboot[sizeof(s_last_stage_before_reboot) - 1] = '\0';
+}
+
 String buildTelemetryJson() {
   // Gather Arduino-specific inputs here; pass them to the pure host-
   // testable serializer in lib/telemetry. The wire format is pinned by
   // test_image_service_expected_schema_exact and consumed verbatim by
   // image-service's .log.json sidecars.
   hf::TelemetryInputs in;
-  in.fw                = FIRMWARE_VERSION;
-  in.uptime_seconds    = (uint32_t)(millis() / 1000);
-  in.last_reset_reason = resetReasonStr(esp_reset_reason());
-  in.free_heap         = (uint32_t)ESP.getFreeHeap();
-  in.min_free_heap     = (uint32_t)ESP.getMinFreeHeap();
-  in.rssi              = WiFi.isConnected() ? WiFi.RSSI() : 0;
-  in.wifi_reconnects   = s_reconnects.value();
-  in.last_http_codes   = s_http_codes.snapshot();
-  in.log               = s_log.snapshot();
+  in.fw                       = FIRMWARE_VERSION;
+  in.uptime_seconds           = (uint32_t)(millis() / 1000);
+  in.last_reset_reason        = resetReasonStr(esp_reset_reason());
+  in.last_stage_before_reboot = s_last_stage_before_reboot;
+  in.free_heap                = (uint32_t)ESP.getFreeHeap();
+  in.min_free_heap            = (uint32_t)ESP.getMinFreeHeap();
+  in.rssi                     = WiFi.isConnected() ? WiFi.RSSI() : 0;
+  in.wifi_reconnects          = s_reconnects.value();
+  in.last_http_codes          = s_http_codes.snapshot();
+  in.log                      = s_log.snapshot();
 
   std::string json = hf::buildTelemetryJson(in);
   return String(json.c_str());

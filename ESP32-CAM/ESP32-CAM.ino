@@ -4,6 +4,7 @@
 #include "client.h"
 #include "led.h"
 #include "logbuf.h"
+#include "breadcrumb.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
 #include <Preferences.h>
@@ -57,6 +58,21 @@ void setup() {
   uint32_t boot_count = incrementBootCount();
   logf("[BOOT] fw=%s reset_reason=%d boot_count=%u free_heap=%u",
        FIRMWARE_VERSION, (int)esp_reset_reason(), boot_count, ESP.getFreeHeap());
+
+  // Recover breadcrumb from the previous boot's RTC_NOINIT slot, if any.
+  // A non-empty value here means the previous boot did not exit setup()
+  // cleanly and the breadcrumb survived a software reset (TASK_WDT,
+  // panic, ESP.restart()). Issue #42 — the only way to identify which
+  // long-running call was active when the watchdog fired in the field.
+  // POR clears RTC slow memory, so first-boot-after-power-on always
+  // returns false. Magic-guarded; 1-in-4-billion false-positive on POR.
+  {
+    char crumb[64];
+    if (hf::breadcrumbReadAndClear(crumb, sizeof(crumb))) {
+      logf("[BOOT] last_stage_before_reboot=%s", crumb);
+      noteLastStageBeforeReboot(crumb);
+    }
+  }
 
   // Task watchdog — if loop() (or AP server) hangs for >TASK_WDT_TIMEOUT_S,
   // reboot. host.cpp's runAccessPoint() also feeds it; loop() resets at top.
@@ -130,9 +146,21 @@ void setup() {
   initEspPinout();
 
   Serial.printf("[ESP] CONFIGURING WIFI CONNECTION TO %s\n", esp_config.wifi_config.SSID);
+  // Issue #42 instrumentation: a breadcrumb per long-running setup
+  // stage. If the watchdog fires inside one of these, the next boot's
+  // [BOOT] line plus the telemetry sidecar's "last_stage_before_reboot"
+  // field will name the offending stage. The exit-with-duration `logf`
+  // line is also useful when WDT *doesn't* fire — surfaces stages
+  // creeping toward the 60 s budget.
+  hf::breadcrumbSet("setup:setupWifiConnection");
+  unsigned long __t_stage = millis();
   setupWifiConnection(&esp_config.wifi_config);
+  logf("[STAGE] setupWifiConnection took=%lums", millis() - __t_stage);
 
+  hf::breadcrumbSet("setup:getGeolocation");
+  __t_stage = millis();
   getGeolocation(&esp_config);
+  logf("[STAGE] getGeolocation took=%lums", millis() - __t_stage);
 
   Serial.print("Latitude: ");
   Serial.println(esp_config.geolocation.latitude, 6);
@@ -144,14 +172,20 @@ void setup() {
   Serial.println(esp_config.geolocation.accuracy);
 
   // ---- Initialize new module on server ---- //
+  hf::breadcrumbSet("setup:initNewModuleOnServer");
+  __t_stage = millis();
   initNewModuleOnServer(&esp_config);
+  logf("[STAGE] initNewModuleOnServer took=%lums", millis() - __t_stage);
 
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
   */
   Serial.println("[ESP] INITIALIZING CAMERA");
+  hf::breadcrumbSet("setup:initEspCamera");
+  __t_stage = millis();
   initEspCamera(esp_config.RESOLUTION);
   configure_camera_sensor(&esp_config);
+  logf("[STAGE] initEspCamera took=%lums", millis() - __t_stage);
 
   // Warm up: sensor needs a few frames to auto-expose before producing valid JPEGs
   Serial.println("-- warming up camera sensor");
@@ -209,6 +243,11 @@ void setup() {
   }
 
   Serial.println("[ESP] SETUP COMPLETE");
+
+  // Clear the breadcrumb on clean exit from setup(). loop() will set
+  // its own per-iteration breadcrumb. If the WDT fires inside setup()
+  // we never reach this line and the breadcrumb survives the reboot.
+  hf::breadcrumbClear();
 
   Serial.println("");
   Serial.println("---------------------");
@@ -337,6 +376,7 @@ void loop() {
   // Hourly heartbeat so the dashboard knows the module is alive between
   // images. Tiny payload, no camera work, fails-quiet — never restarts.
   if (millis() - lastHeartbeatMs > HEARTBEAT_INTERVAL_MS || lastHeartbeatMs == 0) {
+    hf::breadcrumbSet("loop:sendHeartbeat");
     sendHeartbeat(&esp_config);
     lastHeartbeatMs = millis();
   }
@@ -348,6 +388,7 @@ void loop() {
   // never reached its threshold even with a totally broken camera.
   if (!firstCaptureDone) {
     Serial.println("-- First capture after boot");
+    hf::breadcrumbSet("loop:captureAndUpload:first");
     if (captureAndUpload()) {
       firstCaptureDone = true;
     }
@@ -358,6 +399,7 @@ void loop() {
   if (getLocalTime(&timeinfo, 200)) {
     if (timeinfo.tm_hour == 12 && timeinfo.tm_yday != lastCaptureDay) {
       Serial.println("-- Noon capture");
+      hf::breadcrumbSet("loop:captureAndUpload:noon");
       captureAndUpload();
       lastCaptureDay = timeinfo.tm_yday;
     }
@@ -367,6 +409,9 @@ void loop() {
   // delay starts the timer fresh. Combined with TASK_WDT_TIMEOUT_S=60,
   // this guarantees the next loop iteration's work has at least 30 s
   // of slack before the watchdog can fire.
+  // Set "loop:sleep" so a stuck delay() (impossible in practice but
+  // included for completeness) is identifiable post-reboot.
+  hf::breadcrumbSet("loop:sleep");
   esp_task_wdt_reset();
   delay(30000);  // check every 30 seconds
 }

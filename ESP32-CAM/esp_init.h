@@ -65,8 +65,9 @@ void setESPConfigured(bool value);
 /* Persisted counter of consecutive WiFi-join timeouts. Cleared on a
    successful join; bumped from setupWifiConnection() each time the 30 s
    begin() loop times out. Used at boot to decide whether to drop back
-   into AP-config mode without forcing the user through a 5-second
-   factory-reset hold.
+   into AP-config mode automatically — the user can also trigger the
+   same NVS mutation by hand via the captive portal's POST /factory_reset
+   endpoint once the AP has reopened.
 
    Storage: NVS namespace "config", key "wifi_fails" (uint8). */
 uint8_t getWifiFailCount();

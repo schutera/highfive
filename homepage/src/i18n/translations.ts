@@ -6,9 +6,6 @@ const translations = {
       next: 'Next',
       online: 'Online',
       offline: 'Offline',
-      unknown: 'Unknown',
-      heartbeatDataIncomplete:
-        'Heartbeat data unavailable — some module statuses may be incomplete. Refresh in a moment.',
       loading: 'Loading...',
       error: 'Error',
       tryAgain: 'Try Again',
@@ -178,8 +175,8 @@ const translations = {
       photoStep: 'Photo: Step {n}',
       tips: 'Tips',
       factoryReset:
-        'If you need to reconfigure your module: re-flash the firmware via USB with new settings (recommended — see the Firmware Update section in the deployment docs). If USB access is impractical, you can also temporarily change your WiFi password so the module fails to join — after three failed attempts (~2 minutes), the configuration portal reopens automatically.',
-      factoryResetLabel: 'Reconfigure:',
+        "To reconfigure your module: open http://192.168.4.1 (the module reopens this portal automatically after three failed WiFi joins) and submit the 'Factory reset (advanced)' section at the bottom of the form. With a serial cable: pio run -t erase && pio run -t upload.",
+      factoryResetLabel: 'Factory Reset:',
       ctaTitle: 'Module assembled?',
       ctaText: 'Now flash the firmware and connect your module to the server.',
       ctaCta: 'Start Setup Wizard',
@@ -370,9 +367,9 @@ const translations = {
         apTitle: 'Is the access point still visible?',
         apText:
           "If you can still see 'ESP32-Access-Point' in your WiFi list, the module hasn't connected to your home network yet. Reconnect and verify the WiFi settings.",
-        resetTitle: 'Re-open the configuration portal',
+        resetTitle: 'Factory Reset',
         resetText:
-          'Re-flash the firmware via USB with new credentials (recommended). If USB is unavailable, temporarily change your WiFi credentials so the module cannot join — after three failed attempts (~2 minutes), the portal reopens automatically.',
+          "Open http://192.168.4.1 (the module reopens this access point after three failed WiFi joins), expand 'Factory reset (advanced)' at the bottom of the form, tick the confirmation checkbox, and submit. The module reboots into the configuration portal.",
       },
     },
 
@@ -389,9 +386,6 @@ const translations = {
       next: 'Weiter',
       online: 'Online',
       offline: 'Offline',
-      unknown: 'Unbekannt',
-      heartbeatDataIncomplete:
-        'Heartbeat-Daten nicht verfügbar — einige Modul-Status können unvollständig sein. Bitte gleich neu laden.',
       loading: 'Laden...',
       error: 'Fehler',
       tryAgain: 'Erneut versuchen',
@@ -565,8 +559,8 @@ const translations = {
       photoStep: 'Foto: Schritt {n}',
       tips: 'Tipps',
       factoryReset:
-        'Wenn du dein Modul neu konfigurieren musst: Flash die Firmware mit neuen Einstellungen per USB neu (empfohlen \u2014 siehe Firmware-Update-Anleitung in der Deployment-Doku). Wenn USB-Zugang nicht m\u00F6glich ist, kannst du auch vor\u00FCbergehend dein WLAN-Passwort \u00E4ndern, sodass sich das Modul nicht verbinden kann \u2014 nach drei fehlgeschlagenen Versuchen (~2 Minuten) \u00F6ffnet sich das Konfigurationsportal automatisch wieder.',
-      factoryResetLabel: 'Neu konfigurieren:',
+        "Zum Neukonfigurieren deines Moduls: \u00F6ffne http://192.168.4.1 (das Modul \u00F6ffnet diesen Zugangspunkt nach drei fehlgeschlagenen WLAN-Verbindungsversuchen automatisch erneut) und sende den Bereich 'Factory reset (advanced)' unten im Formular ab. Mit einem seriellen Kabel: pio run -t erase && pio run -t upload.",
+      factoryResetLabel: 'Werkseinstellungen:',
       ctaTitle: 'Modul zusammengebaut?',
       ctaText: 'Jetzt die Firmware flashen und dein Modul mit dem Server verbinden.',
       ctaCta: 'Setup-Assistent starten',
@@ -758,9 +752,9 @@ const translations = {
         apTitle: 'Ist der Access Point noch sichtbar?',
         apText:
           "Wenn du 'ESP32-Access-Point' noch in deiner WLAN-Liste siehst, hat sich das Modul noch nicht mit deinem Heimnetzwerk verbunden. Verbinde dich erneut und \u00FCberpr\u00FCfe die WLAN-Einstellungen.",
-        resetTitle: 'Konfigurationsportal erneut \u00F6ffnen',
+        resetTitle: 'Werkseinstellungen',
         resetText:
-          'Flash die Firmware mit neuen Zugangsdaten per USB neu (empfohlen). Wenn USB nicht verf\u00FCgbar ist, \u00E4ndere vor\u00FCbergehend deine WLAN-Zugangsdaten, sodass sich das Modul nicht mehr verbinden kann \u2014 nach drei fehlgeschlagenen Versuchen (~2 Minuten) \u00F6ffnet sich das Portal automatisch wieder.',
+          "\u00D6ffne http://192.168.4.1 (das Modul \u00F6ffnet diesen Zugangspunkt nach drei fehlgeschlagenen WLAN-Verbindungsversuchen erneut), klappe 'Factory reset (advanced)' unten im Formular auf, aktiviere die Best\u00E4tigungs-Checkbox und sende ab. Das Modul startet neu in das Konfigurationsportal.",
       },
     },
 

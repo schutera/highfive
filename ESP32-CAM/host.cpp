@@ -178,7 +178,7 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   "h1{text-align:center;margin-top:0;font-size:26px;}"
 
   ".section{margin-top:28px;padding-top:18px;border-top:1px solid var(--border);}"
-  ".section h2{margin:0 0 10px 0;font-size:18px;}"
+  ".section h2,.summary-as-h2{margin:0 0 10px 0;font-size:18px;font-weight:600;cursor:pointer;}"
   ".section-desc{font-size:13px;color:var(--muted);margin-bottom:16px;}"
 
   ".field{margin-bottom:18px;}"
@@ -358,10 +358,12 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<form action=\"/factory_reset\" method=\"POST\" autocomplete=\"off\">");
   client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
   client.println("<details class=\"section\">");
-  client.println("<summary><h2 style=\"display:inline\">Factory reset (advanced)</h2></summary>");
-  client.println("<div class=\"section-desc\">Clears the saved configuration and reopens this access point so you can reconfigure from scratch. Use this when moving the module to a new WiFi network or when login credentials changed.</div>");
+  // <summary> is the screen-reader heading for the disclosure widget;
+  // wrapping <h2> inside it would announce the label twice.
+  client.println("<summary class=\"summary-as-h2\">Factory reset (advanced)</summary>");
+  client.println("<div class=\"section-desc\">Reboots the module back into this configuration portal so you can re-enter or edit the saved settings. Your previous values prefill the form for editing. Use this when moving the module to a new WiFi network or when login credentials changed.</div>");
   client.println("<div class=\"field\">");
-  client.println("<label><input type=\"checkbox\" name=\"confirm\" value=\"yes\" required> I understand this clears the saved configuration and reboots the module.</label>");
+  client.println("<label><input type=\"checkbox\" name=\"confirm\" value=\"yes\" required> I understand this reboots the module and reopens the configuration portal.</label>");
   client.println("</div>");
   client.println("<button type=\"submit\">Factory reset</button>");
   client.println("</details>");
@@ -547,18 +549,29 @@ void runAccessPoint() {
                 String sessionParam = getParam(query, "session");
                 String confirmParam = getParam(query, "confirm");
                 if (!isPost || sessionParam != sessionToken || confirmParam != "yes") {
-                  // Bad request -> just re-render the form. No leakage of why we rejected.
+                  // Bad request. Render the form without leaking which check failed
+                  // to the client, but log the reason locally so a developer at the
+                  // serial monitor can see why their curl test isn't working.
+                  Serial.printf("[host] /factory_reset rejected: isPost=%d sessionOk=%d confirmOk=%d\n",
+                                (int)isPost,
+                                (int)(sessionParam == sessionToken),
+                                (int)(confirmParam == "yes"));
                   sendConfigForm(client, false);
                 } else {
                   Serial.println("[host] Factory reset requested via captive portal");
                   // Tiny inline response page; the restart cuts the socket within ms.
+                  // The meta-refresh nudges the user back to the AP root once the
+                  // module has rebooted, so the success page doesn't sit as a dead
+                  // artifact after the AP disappears under it.
                   client.println("HTTP/1.1 200 OK");
                   client.println("Content-type:text/html");
                   client.println("Connection: close");
                   client.println();
-                  client.println("<!doctype html><html><body>");
+                  client.println("<!doctype html><html><head>");
+                  client.println("<meta http-equiv=\"refresh\" content=\"15; url=http://192.168.4.1/\">");
+                  client.println("</head><body>");
                   client.println("<h1>Factory reset</h1>");
-                  client.println("<p>The module is rebooting and will reopen the WiFi access point in a moment.</p>");
+                  client.println("<p>The module is rebooting and will reopen the WiFi access point in a moment. Reconnect to <code>ESP32-Access-Point</code> and this page will refresh automatically once you're back.</p>");
                   client.println("</body></html>");
                   client.flush();
 

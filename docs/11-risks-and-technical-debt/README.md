@@ -575,8 +575,11 @@ state.
 **What happened.** The firmware shipped with a documented factory-reset
 procedure ("hold IO0 for 5 seconds while powering on") at
 `ESP32-CAM/ESP32-CAM.ino`'s `setup()` (formerly the `digitalRead(CONFIG_BUTTON)
-== LOW` block), advertised in five doc sites and the running board's
-own Serial output. The procedure was physically impossible on AI
+== LOW` block), advertised across the firmware Serial output, four
+arc42 chapters, the `esp32-onboarding` skill, the homepage building-
+block doc, and four user-facing i18n strings (English + German on
+both the assembly guide and the wizard troubleshoot panel). The
+procedure was physically impossible on AI
 Thinker ESP32-CAM-MB: the ROM samples GPIO0 the moment EN/RST
 releases, so holding it LOW enters UART download mode (visible as
 garbled 74880-baud output, "waiting for download") instead of running
@@ -592,6 +595,22 @@ reference module the deployment docs target. The Serial.printf at the
 top of `setup()` _told_ users to hold IO0, so when nothing happened on
 real hardware the user assumed the procedure was finicky rather than
 broken.
+
+**Why the first PR-40 pass missed half the surface.** The first-pass
+fix targeted the firmware code and the five `docs/` sites named in the
+issue, but missed the four production i18n strings in
+`homepage/src/i18n/translations.ts`'s `assembly.factoryReset` and
+`wizard.troubleshoot.resetText` blocks, plus a related table row in
+`docs/05-building-block-view/homepage.md`. Senior-reviewer caught it.
+This is the same failure mode the "Drift sweep is not a substitute
+for a CI check" lesson 30 lines above warned about — and the warning
+was sitting one screen-scroll away while the PR was being written.
+The general lesson: prose warnings about cross-surface drift do not
+durably hold; they only hold the day they're written. A mechanical
+gate (e.g. a `grep` rule that fails the build when
+`IO0`/`GPIO0`/`hold.*5.*second` appears in a user-facing surface)
+is the only durable form. Tracked as a candidate addition to
+`make check-citations` in a follow-up.
 
 **Lesson.** When the ESP32 datasheet calls a pin a "strap pin", any
 user-visible behaviour assigned to it must work _despite_ the strap

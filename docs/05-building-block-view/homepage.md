@@ -130,14 +130,14 @@ Three-step configuration guide shown after flashing:
 
 **Interactive Troubleshooting** — accordion section with six common issues:
 
-| Issue                           | Solution                                                    |
-| ------------------------------- | ----------------------------------------------------------- |
-| Access point does not appear    | Power cycle the module and retry                            |
-| `192.168.4.1` does not open     | Ensure connected to `ESP32-Access-Point`, navigate manually |
-| ESP32 not detected in installer | Use a data USB cable, use Chrome or Edge                    |
-| Module not on dashboard         | Check port `8002` and `/new_module` endpoint                |
-| No image uploads                | Check port `8000` and `/upload` endpoint                    |
-| Need to reconfigure             | Hold left button (IO0) 5 seconds for factory reset          |
+| Issue                           | Solution                                                                                                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Access point does not appear    | Power cycle the module and retry                                                                                                                 |
+| `192.168.4.1` does not open     | Ensure connected to `ESP32-Access-Point`, navigate manually                                                                                      |
+| ESP32 not detected in installer | Use a data USB cable, use Chrome or Edge                                                                                                         |
+| Module not on dashboard         | Check port `8002` and `/new_module` endpoint                                                                                                     |
+| No image uploads                | Check port `8000` and `/upload` endpoint                                                                                                         |
+| Need to reconfigure             | Open `http://192.168.4.1` → expand "Factory reset (advanced)" → confirm → submit. The module auto-reopens this portal after 3 failed WiFi joins. |
 
 <br>
 

@@ -98,7 +98,8 @@ void setup() {
   } else {
     // Auto-fallback: if previous boots have repeatedly failed to join the
     // saved network, clear the configured flag so the next boot re-opens
-    // the captive portal. Faster recovery than the 5-second reset hold.
+    // the captive portal. Same NVS mutation as POST /factory_reset on the
+    // captive portal; this path triggers automatically without user input.
     uint8_t wifiFails = getWifiFailCount();
     if (wifiFails >= WIFI_FAIL_AP_FALLBACK_THRESH) {
       Serial.printf("-- %u consecutive WiFi join failures — re-entering AP mode\n",
@@ -317,9 +318,6 @@ void loop() {
   // the watchdog fires and reboots the device.
   esp_task_wdt_reset();
   ledTick();
-
-  // NOTE: GPIO0 config button check moved to setup() — it cannot be read
-  // reliably here because the camera XCLK drives GPIO0 after init.
 
   // Daily reboot safety net: prevents long-running drift (lwIP state, NVS
   // wear oddities, slow heap fragmentation). Triggers once at 24h uptime

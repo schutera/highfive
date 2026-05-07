@@ -10,7 +10,7 @@ services:
       - '3001:3001'
     environment:
       - NODE_ENV=production
-      - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:-hf_dev_key_2026}
+      - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:?HIGHFIVE_API_KEY must be set in .env.production (see .env.production.example)}
       - PORT=3001
     restart: unless-stopped
     networks:
@@ -22,7 +22,7 @@ services:
       dockerfile: Dockerfile
       args:
         - VITE_API_URL=https://api.highfive.schutera.com
-        - VITE_API_KEY=${VITE_API_KEY:-hf_dev_key_2026}
+        - VITE_API_KEY=${VITE_API_KEY:?VITE_API_KEY must be set in .env.production (see .env.production.example)}
     container_name: highfive-frontend
     ports:
       - '80:80'

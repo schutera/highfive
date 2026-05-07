@@ -15,7 +15,13 @@ COPY postcss.config.js ./
 COPY tailwind.config.js ./
 
 ARG VITE_API_URL=https://api.highfive.schutera.com
-ARG VITE_API_KEY=hf_prod_key_please_override
+# No default: docker-compose.prod.yml passes this via build-args with a
+# fail-fast ${VITE_API_KEY:?...} so a missing secret aborts before build.
+# A standalone `docker build` without --build-arg produces an image with
+# an empty key and the running app rejects every request - acceptable
+# failure mode, strictly better than baking a broken sentinel into the
+# image.
+ARG VITE_API_KEY
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_API_KEY=$VITE_API_KEY
 

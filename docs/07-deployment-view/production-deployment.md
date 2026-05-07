@@ -15,23 +15,22 @@ see [docker-compose.md](docker-compose.md).
 ## Topology at a glance
 
 ```
-                Internet
-                    │
-                    ▼
-          host-Nginx (TLS terminator)
-            │ :443                       :443 │
-            ▼                                 ▼
-   highfive.schutera.com            api.highfive.schutera.com
-            │ proxies to                       │ proxies to
-            ▼                                  ▼
-   127.0.0.1:8081                    127.0.0.1:3001
-   (frontend container)              (backend container)
-                                              │
-                                              ▼
-                                     duckdb-service:8000
-                                     image-service:4444
-                                     (Compose-internal,
-                                      via `highfive-network`)
+                              Internet
+                                  │
+                ┌─────────────────┼──────────────────┐
+                ▼                 ▼                  ▼
+      :443 highfive.*    :443 api.highfive.*    :80 highfive.*
+      ─────────────────  ──────────────────     ──────────────
+            host-Nginx (TLS for browsers, HTTP-passthrough for ESP)
+                ▼                 ▼                  ▼
+      127.0.0.1:8081     127.0.0.1:3001        /upload       → 127.0.0.1:8000
+      (frontend SPA)     (backend API)         /new_module   → 127.0.0.1:8002
+                                │               /heartbeat   → 127.0.0.1:8002
+                                ▼               (else 301 → HTTPS)
+                       duckdb-service:8000
+                       image-service:4444
+                       (Compose-internal,
+                        via `highfive-network`)
 ```
 
 ESP32-CAM firmware uploads reach `image-service` via the host-Nginx
@@ -334,19 +333,38 @@ curl -fsSI https://highfive.schutera.com/ | head -5
 Both should return 200. The frontend root serves the SPA; the API
 health check returns `{ "status": "ok", "timestamp": "..." }`.
 
-ESP firmware paths (HTTP):
+Dashboard fetch path (TLS, X-API-Key required):
 
 ```bash
-# Sanity-check the upload-path proxy is wired (returns 405 Method Not
-# Allowed because /upload only accepts POST - that's success: it means
-# nginx routed to image-service, not a 301 to HTTPS).
-curl -fsSI http://highfive.schutera.com/upload
-curl -fsSI http://highfive.schutera.com/heartbeat
+curl -fsS -H "X-API-Key: $HIGHFIVE_API_KEY" \
+    https://api.highfive.schutera.com/api/modules
+```
+
+This is the path the SPA actually exercises. A 401 means the host-Nginx
+TLS proxy is wired but the key is wrong; a 200 with a JSON array means
+the dashboard will load data correctly.
+
+ESP firmware paths (HTTP, no `-f` because /upload returns 405 for HEAD):
+
+```bash
+# 405 Method Not Allowed = success: nginx routed to image-service, not
+# a 301 to HTTPS. Pipe through grep so the test passes when 405 lands.
+curl -sSI http://highfive.schutera.com/upload | head -1
+curl -sSI http://highfive.schutera.com/heartbeat | head -1
 ```
 
 If either returns `HTTP/1.1 301 Moved Permanently` with a `Location:
 https://...` header, the firmware-proxy `location =` blocks aren't
 matching — check `nginx -t` and the order of server blocks.
+
+The cert lineage on disk uses the first `-d` value as the directory
+name. Confirm with:
+
+```bash
+sudo ls /etc/letsencrypt/live/
+# Should list: highfive.schutera.com  (one directory; both subdomains
+# share this SAN cert)
+```
 
 ### Step 7: Operational checks
 

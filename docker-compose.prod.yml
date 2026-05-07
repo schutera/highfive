@@ -30,7 +30,12 @@ services:
       context: .
       dockerfile: homepage/Dockerfile
       args:
-        - VITE_API_URL=https://api.highfive.schutera.com
+        # Must include the /api suffix - homepage/src/services/api.ts's
+        # ApiService concatenates resource paths directly onto baseUrl
+        # (e.g. ${baseUrl}/modules), and backend/src/app.ts mounts every
+        # business route under /api/*. Without the suffix, every dashboard
+        # fetch 404s.
+        - VITE_API_URL=https://api.highfive.schutera.com/api
         - VITE_API_KEY=${VITE_API_KEY:?VITE_API_KEY must be set in .env.production (see .env.production.example)}
     container_name: highfive-frontend
     # 127.0.0.1 bind: frontend is reachable only via host-Nginx terminator
@@ -53,10 +58,12 @@ services:
       # non-root user) gets its own Dockerfile then.
       dockerfile: Dockerfile.dev
     container_name: highfive-image-service
-    # 0.0.0.0 bind by design: ESP32-CAM firmware uploads images directly
-    # to this service over plain HTTP via the host-Nginx port-80 vhost
-    # (proxies /upload to 127.0.0.1:8000 internally). The 0.0.0.0 host
-    # bind is what makes the loopback proxy possible.
+    # 127.0.0.1 bind: image-service is reached only via the host-Nginx
+    # port-80 vhost which proxies /upload to 127.0.0.1:8000. ESP firmware
+    # cannot reach this loopback port directly; the public surface is
+    # the host-Nginx port-80 vhost on highfive.schutera.com. Same
+    # internal-only-via-loopback pattern as backend, frontend, and
+    # duckdb-service.
     ports:
       - '127.0.0.1:8000:4444'
     environment:

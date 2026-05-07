@@ -385,14 +385,20 @@ Environment="HIGHFIVE_API_KEY=your_generated_key_here"
 
 ### Frontend Configuration
 
-The frontend API key is built into the image during Docker build:
+The frontend API key is built into the image during Docker build. The
+homepage Dockerfile requires the **repo root** as build context (so npm
+workspaces resolve `@highfive/contracts`), and `VITE_API_URL` must
+include the `/api` suffix (`homepage/src/services/api.ts`'s `ApiService`
+appends resource paths directly to it):
 
 ```bash
+# From the repo root (NOT from ./homepage - the workspace wouldn't resolve)
 docker build \
+  -f homepage/Dockerfile \
   --build-arg VITE_API_KEY=your_key \
-  --build-arg VITE_API_URL=https://api.highfive.schutera.com \
+  --build-arg VITE_API_URL=https://api.highfive.schutera.com/api \
   -t highfive-frontend \
-  ./homepage
+  .
 ```
 
 ## Security Notes

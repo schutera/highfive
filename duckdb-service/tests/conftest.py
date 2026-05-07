@@ -39,6 +39,7 @@ def _purge_service_modules() -> None:
         "routes.progress",
         "routes.nests",
         "routes.modules",
+        "routes.heartbeats",
         "routes.health",
         "routes",
         "services.discord",

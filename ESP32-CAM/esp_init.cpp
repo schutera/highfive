@@ -2,7 +2,7 @@
 #include "esp_wifi.h"
 #include "esp_init.h"
 #include "led.h"
-#include "lib/wifi_diag/wifi_diag.h"
+#include "wifi_diag.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <FS.h>

@@ -4,8 +4,15 @@
 #include <Arduino.h>
 #include "esp_camera.h"
 
+// FIRMWARE_VERSION is normally injected from ESP32-CAM/VERSION by:
+//   * bash ESP32-CAM/build.sh  (arduino-cli release path, --build-property)
+//   * pio run -e esp32cam      (PlatformIO via extra_scripts.py)
+// This "dev-unset" fallback only fires when the sketch is compiled directly
+// in Arduino IDE without going through either build path. The string surfaces
+// in the boot log, telemetry sidecar, and heartbeat row, so a non-release
+// build is recognisable at a glance — switch to build.sh for a real release.
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "1.0.0"
+#define FIRMWARE_VERSION "dev-unset"
 #endif
 
 

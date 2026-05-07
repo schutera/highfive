@@ -349,7 +349,25 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<button type=\"submit\">Save Configuration</button>");
   client.println("<div id=\"errorText\" class=\"error-message\">Enter missing details before saving configuration.</div>");
 
-  client.println("</form></div></div></body></html>");
+  client.println("</form>");
+
+  // Factory reset is a separate form so the main Save button can't
+  // accidentally trigger it. Collapsed inside <details> by default.
+  // Issue #40: replaces the old "hold IO0 at boot" path which never
+  // actually worked because GPIO0 is a strap pin.
+  client.println("<form action=\"/factory_reset\" method=\"POST\" autocomplete=\"off\">");
+  client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
+  client.println("<details class=\"section\">");
+  client.println("<summary><h2 style=\"display:inline\">Factory reset (advanced)</h2></summary>");
+  client.println("<div class=\"section-desc\">Clears the saved configuration and reopens this access point so you can reconfigure from scratch. Use this when moving the module to a new WiFi network or when login credentials changed.</div>");
+  client.println("<div class=\"field\">");
+  client.println("<label><input type=\"checkbox\" name=\"confirm\" value=\"yes\" required> I understand this clears the saved configuration and reboots the module.</label>");
+  client.println("</div>");
+  client.println("<button type=\"submit\">Factory reset</button>");
+  client.println("</details>");
+  client.println("</form>");
+
+  client.println("</div></div></body></html>");
   client.println();
 }
 
@@ -514,6 +532,39 @@ void runAccessPoint() {
                 } else {
                   // /save but no params: show form
                   sendConfigForm(client, false);
+                }
+
+              } else if (fullPath.startsWith("/factory_reset")) {
+                // POST-only endpoint that wipes the NVS configured flag
+                // and reboots straight into AP mode. Issue #40 option A —
+                // replaces the broken GPIO0-hold path that never worked
+                // because GPIO0 is a strap pin on the AI Thinker board.
+                String query;
+                if (isPost) {
+                  query = body;
+                }
+
+                String sessionParam = getParam(query, "session");
+                String confirmParam = getParam(query, "confirm");
+                if (!isPost || sessionParam != sessionToken || confirmParam != "yes") {
+                  // Bad request -> just re-render the form. No leakage of why we rejected.
+                  sendConfigForm(client, false);
+                } else {
+                  Serial.println("[host] Factory reset requested via captive portal");
+                  // Tiny inline response page; the restart cuts the socket within ms.
+                  client.println("HTTP/1.1 200 OK");
+                  client.println("Content-type:text/html");
+                  client.println("Connection: close");
+                  client.println();
+                  client.println("<!doctype html><html><body>");
+                  client.println("<h1>Factory reset</h1>");
+                  client.println("<p>The module is rebooting and will reopen the WiFi access point in a moment.</p>");
+                  client.println("</body></html>");
+                  client.flush();
+
+                  setESPConfigured(false);
+                  delay(FACTORY_RESET_SETTLE_MS);  // give the kernel time to flush the TCP FIN
+                  ESP.restart();
                 }
 
               } else {

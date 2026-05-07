@@ -85,9 +85,14 @@ def test_heartbeat_dash_form_canonicalised(client, fresh_db):
 
 
 def test_heartbeat_mixed_forms_collapse_to_one_pk(client, fresh_db):
-    """Two clients posting the same MAC in different shapes must land on
-    the same ``module_id`` PK. Before canonicalisation they would have
-    silently created parallel rows keyed on different strings."""
+    """Three clients posting the same MAC in different shapes must all
+    land on the same canonical ``module_id`` value. The table itself is
+    append-only with a serial PK so the row count grows regardless;
+    what canonicalisation pins is the ``module_id`` *column*, which is
+    what every join, dashboard query, and silence-watcher GROUP BY uses
+    to decide "is this the same module?". Before the fix, three forms
+    would have written three different ``module_id`` strings and the
+    dashboard would have shown three "modules"."""
     forms = [CANONICAL_MAC, "AA:BB:CC:DD:EE:FF", "aa-bb-cc-dd-ee-ff"]
     for form in forms:
         resp = client.post("/heartbeat", data={"mac": form, "battery": 50})

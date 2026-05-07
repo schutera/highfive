@@ -1,0 +1,10 @@
+{
+  "name": "hf_breadcrumb",
+  "version": "0.1.0",
+  "description": "RTC_NOINIT stage breadcrumb that survives ESP32 software resets. Diagnostic mechanism for issue #42 (TASK_WDT reboots) — instrument long-running calls so the offending stage is recoverable on next boot. Pure C++17, host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

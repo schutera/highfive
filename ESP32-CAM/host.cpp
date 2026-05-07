@@ -445,8 +445,10 @@ void runAccessPoint() {
                     // unity tests; PR-47 verified it end-to-end on hardware
                     // (View Source → blank submit → WiFi rejoin) but a
                     // regression that re-introduces unconditional assignment
-                    // would only surface in hardware testing today.
+                    // would only surface in hardware testing today. Tracked
+                    // for extraction into a host-testable helper at issue #57.
                     String submittedPw = getParam(query, "password");
+                    submittedPw.trim();
                     if (submittedPw.length() > 0) {
                       cfg_password = submittedPw;
                     }

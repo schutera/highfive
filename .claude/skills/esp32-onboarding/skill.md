@@ -143,7 +143,7 @@ The board reboots and connects to your Wi-Fi. The access point disappears.
 - The ESP32 and the server must be on the **same LAN** — not one on a phone hotspot and the other on the home router
 - Use the server's **LAN IP**, not `localhost`
 
-**Factory reset** (to redo config): hold **IO0** for 5 seconds while powered → board clears config and reopens the access point.
+**Re-open the captive portal** (to redo config): temporarily change your WiFi password so the module fails to join. After three consecutive failed joins (~90 s) the firmware auto-falls back to AP mode without wiping SPIFFS. The historical IO0 long-press trigger is unreliable on standard ESP32-CAM hardware — see issue #56.
 
 ---
 

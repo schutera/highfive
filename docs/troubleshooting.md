@@ -170,9 +170,11 @@ Three quick pulses (~450 ms total) means the most recent WiFi join timed out. Th
 
 Note: the LED stays silent in AP mode — the on-board LED is the camera flash, so steady-state signalling would be obnoxious. Use the phone's WiFi list to confirm the captive portal is back, not the LED.
 
-### Factory reset to re-enter configuration
+### Re-open the configuration portal
 
-For an immediate manual reset (not waiting for the 3-failure auto-fallback), hold the **IO0** button for **5 seconds** while the board is powered. The configuration is cleared and the `ESP32-Access-Point` reopens. Do not press RST during the hold.
+The supported trigger is the WiFi-fail auto-fallback described above: temporarily change your WiFi credentials (or take the SSID offline) so the module cannot join. After **three consecutive failed joins (~90 s total)** the firmware clears `configured` in NVS and the `ESP32-Access-Point` reopens. The saved password in SPIFFS is preserved across this fallback — only the `configured` flag flips.
+
+The historical "hold IO0 for 5 seconds while powered" trigger is **unreliable on standard ESP32-CAM hardware** because GPIO0 is also the boot strap pin: holding it LOW around RESET routes the chip into ROM `DOWNLOAD_BOOT` (no app code runs), and finger-roll attempts have produced reproducible flash-read-error boot loops requiring a full re-flash. Tracked in [issue #56](https://github.com/schutera/highfive/issues/56). Prefer the WiFi-fail path; the IO0 long-press code is retained in firmware as last-resort recovery only.
 
 ---
 

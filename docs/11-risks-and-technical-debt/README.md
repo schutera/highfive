@@ -10,12 +10,13 @@ future contributors must know about. Two sub-registers below:
 Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
 Highlights worth knowing about even if you're not assigned:
 
-| #                                                     | Title (short)                                                                | Why it matters                                                                                                               |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.               |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                               |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                      |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
+| #                                                     | Title (short)                                                                | Why it matters                                                                                                                                                                          |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.                                                                          |
+| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                          |
+| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                 |
+| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                            |
+| [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today. |
 
 ## Field-name drift
 
@@ -367,6 +368,37 @@ print with one that advertises the auto-fallback path; the broader
 fix (wire CONFIG to a non-strap GPIO, or remove the long-press path
 entirely) is tracked at
 [issue #56](https://github.com/schutera/highfive/issues/56).
+
+### Captive-portal JS validator and `/save` handler are two halves of one contract (issue #46)
+
+**What happened.** The original PR-47 fix for issue #46 changed
+`host.cpp's sendConfigForm` to render the password input with
+`value=""` and updated `/save` to preserve `cfg_password` on empty
+submission. Both halves were correct in isolation. But the existing
+`validateForm` JS rejected every visible field with empty content,
+so the placeholder-promised "leave blank to keep current password"
+path was unreachable through the UI for the entire interval between
+commits `ef0d10c` (the fix) and `d4b94b5` (the follow-up). Hardware
+testing surfaced this; unit tests did not; the senior-reviewer pass
+on the original PR did not.
+
+**Why it happened.** The fix-#46 author updated the form's render
+side and the `/save` handler but treated the JS validator as
+out-of-scope cosmetic glue. It is not — it is the first half of the
+"blank means keep current" contract. Code review caught the leak
+fix; nobody clicked Save with the password field blank.
+
+**How to avoid it next time.** Captive-portal forms have three
+coordinated layers: HTML render attributes, JS pre-submit validator,
+and server-side handler. Any change to the contract for a field
+must touch all three (or document why two suffice). For HiveHive
+specifically: when adding or modifying a field that can be empty,
+exercise the empty-submission path manually before declaring the
+fix done — the JS validator does not know about field-level
+"optional" semantics by default. The current keep-current contract
+is encoded in the `data-keep-current-on-empty` HTML attribute and
+its mirroring `if (submitted.length() > 0)` server-side check; both
+must move together.
 
 ### `auth.md` "open AP" claim — captive portal is WPA2-protected
 

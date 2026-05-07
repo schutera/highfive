@@ -227,18 +227,20 @@ Content-Type: application/json
 
 ```json
 {
-  "mac": "esp-9081726354",
+  "esp_id": "b0696ef23a08",
   "module_name": "Garden-Hive",
   "latitude": 48.52137,
   "longitude": 9.05891,
-  "battery": 72
+  "battery_level": 72
 }
 ```
+
+`esp_id` is the canonical 12-char lowercase-hex form of the eFuse MAC. Legacy colon-separated and uppercase-hex inputs (e.g. `AA:BB:CC:DD:EE:FF`) are accepted and canonicalised; raw uint64 decimal stringification (~15 digits) is rejected with HTTP 400 — see issue #39.
 
 Returns:
 
 ```json
-{ "id": "esp-9081726354", "message": "Module added successfully" }
+{ "id": "b0696ef23a08", "message": "Module added successfully" }
 ```
 
 A module with the same identifier is replaced.

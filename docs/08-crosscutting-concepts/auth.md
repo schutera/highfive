@@ -110,7 +110,7 @@ assignment, and today only the password field has both halves wired
 up. If a future field needs the same "blank means keep current"
 semantics (an API key, an OAuth token), copying just the HTML
 attribute is not enough — the `/save` handler at
-`host.cpp's runAccessPoint` must also gain a matching
+`ESP32-CAM/host.cpp`'s `runAccessPoint` must also gain a matching
 `if (submitted.length() > 0) cfg_X = submitted;` branch, or the empty
 submission will silently wipe the saved value. Module name and the
 init/upload URL fields are not secrets and use the conventional

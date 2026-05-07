@@ -306,3 +306,51 @@ The Maps API key citations in chapters 3/5/11 and any future drift
 in files this PR didn't touch will surface in the
 `make check-citations` report next time someone edits those files.
 That's the gate's job now.
+
+### Production stack shipped with two silent gaps (#37 + #38)
+
+**What happened.** PR-27's `docker-compose.prod.yml` and chapter-7
+runbooks shipped two production hazards:
+
+1. The compose file used `${HIGHFIVE_API_KEY:-hf_dev_key_2026}` and
+   `${VITE_API_KEY:-hf_dev_key_2026}` — a forgotten `.env` silently
+   booted prod on the publicly-known dev key. Violates CLAUDE.md's
+   "Never ship the dev API key as a production fallback" rule.
+2. The compose file defined only `backend` and `frontend`. The
+   upload pipeline (`image-service` + `duckdb-service`) and the
+   `duckdb_data` volume were absent, the backend had no
+   `DUCKDB_SERVICE_URL`, and the `'443:443'` port mapping was a
+   no-op against a frontend nginx that only listened on `:80`.
+   Following the runbook produced a dashboard that loaded but
+   couldn't ingest images, on plain HTTP.
+
+**Why it happened.** The prod compose was authored as a stripped-down
+dev compose with the upload pipeline excised "for the next iteration"
+and a `${VAR:-default}` fallback dropped in for fail-soft. Both
+shortcuts looked harmless in review because the dev stack worked and
+the runbook carried a banner-marked TODO — but the banners were
+honest about an unsupported state, not a temporary gap. Operators
+following the runbook had no signal that the dashboard would silently
+boot with the dev key.
+
+**How to avoid it next time.**
+
+- **Production env interpolation must be `${VAR:?msg}`.** Fail-fast
+  on missing or empty secrets, with an explicit error message that
+  names the env var and points at `.env.production.example`.
+  `${VAR:-default}` and `${VAR:-broken_sentinel}` are both wrong
+  for production secrets — sentinels still let the deploy boot with
+  broken config; only fail-fast catches the misconfiguration before
+  startup.
+- **The prod compose must be a strict superset of the dev compose.**
+  Anything missing from prod that exists in dev is an architectural
+  decision that needs an ADR, not a quiet omission. If a service is
+  intentionally absent (e.g. duckdb-service is internal-only by
+  ADR-001 and exposes no host port), document the why-not in the
+  runbook's "Known gaps" section.
+- **Doc banners are not a substitute for fixing the runbook.** A
+  banner-marked TODO that says "this runbook is incomplete, see the
+  follow-up issue" gives the appearance of due diligence while still
+  shipping a broken artifact. If the artifact is broken, either fix
+  it in the same PR or remove it from the docs index — don't ship a
+  half-working file with a self-deprecating note.

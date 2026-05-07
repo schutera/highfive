@@ -83,6 +83,7 @@ export async function flashEsp(
       const firmwareResp = await fetch(part.path);
       if (!firmwareResp.ok) throw new Error(`Failed to fetch firmware: ${part.path}`);
       const blob = await firmwareResp.blob();
+      await assertFirmwareResponse(firmwareResp, blob, part.path);
       const data = await blobToBinaryString(blob);
       fileArray.push({ data, address: part.offset });
     }
@@ -144,6 +145,58 @@ export async function flashEsp(
         /* ignore */
       }
     }
+  }
+}
+
+/**
+ * ESP32 application image header magic byte (esp_image_format.h
+ * `ESP_IMAGE_HEADER_MAGIC`). Both single-app and merged-with-bootloader
+ * binaries start with this byte.
+ */
+export const ESP_IMAGE_MAGIC = 0xe9;
+
+/**
+ * Reject a /firmware.bin response that obviously isn't firmware before we
+ * hand its bytes to esptool-js.
+ *
+ * Two checks, layered:
+ *
+ * 1. **Content-Type** — Vite's SPA dev fallback returns `index.html` with
+ *    HTTP 200 + `text/html` when the requested path doesn't exist. Without
+ *    this check the wizard would treat the HTML payload as firmware,
+ *    `esptool-js`'s `writeFlash` would silently no-op on garbage bytes,
+ *    `hard_reset` would boot the chip into its previous firmware, and
+ *    Step 2 would flash green ("Firmware installiert!") in <1 s.
+ *
+ * 2. **Magic byte** — defence in depth. Catches misconfigured static
+ *    servers that send `application/octet-stream` for the SPA fallback,
+ *    and corrupt/truncated downloads.
+ *
+ * See issue #43.
+ */
+export async function assertFirmwareResponse(
+  resp: Response,
+  blob: Blob,
+  path: string,
+): Promise<void> {
+  const ctype = resp.headers.get('content-type') || '';
+  if (/text\/html/i.test(ctype)) {
+    throw new Error(
+      `Firmware not found at ${path} (server returned HTML). Run "make firmware" (or ESP32-CAM/build.sh) before opening the setup wizard.`,
+    );
+  }
+
+  if (blob.size === 0) {
+    throw new Error(`Firmware at ${path} is empty.`);
+  }
+
+  const headBuf = await blob.slice(0, 1).arrayBuffer();
+  const head = new Uint8Array(headBuf)[0];
+  if (head !== ESP_IMAGE_MAGIC) {
+    const hex = head.toString(16).padStart(2, '0').toUpperCase();
+    throw new Error(
+      `Firmware at ${path} is not a valid ESP32 image (first byte 0x${hex}, expected 0xE9). Rebuild with "make firmware".`,
+    );
   }
 }
 

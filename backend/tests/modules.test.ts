@@ -46,12 +46,34 @@ describe('GET /api/modules', () => {
         imageCount: 12,
       },
     ];
-    mocks.listModules.mockResolvedValue(fakeModules);
+    mocks.listModules.mockResolvedValue({ modules: fakeModules, heartbeatsFailed: false });
 
     const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
     expect(res.status).toBe(200);
     expect(res.body).toEqual(fakeModules);
+    expect(res.headers['x-highfive-data-incomplete']).toBeUndefined();
     expect(mocks.listModules).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets X-Highfive-Data-Incomplete=heartbeats when the read model flags partial data, and exposes it via CORS', async () => {
+    // Two contracts pinned together because they're load-bearing as a
+    // pair: production is split across highfive.schutera.com ↔
+    // api.highfive.schutera.com (and dev is :5173 → :3002), so without
+    // `Access-Control-Expose-Headers` on the GET response the browser
+    // strips the header from `fetch().headers.get(...)` and the
+    // dashboard banner is dead. Asserting on the GET response (not the
+    // OPTIONS preflight) is the phase the browser actually reads when
+    // resolving fetch().headers.get().
+    mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: true });
+
+    const res = await request(app)
+      .get('/api/modules')
+      .set('X-API-Key', KEY)
+      .set('Origin', 'http://localhost:5173');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['x-highfive-data-incomplete']).toBe('heartbeats');
+    expect(res.headers['access-control-expose-headers']).toContain('X-Highfive-Data-Incomplete');
   });
 });
 
@@ -69,16 +91,42 @@ describe('GET /api/modules/:id', () => {
       imageCount: 0,
       nests: [],
     };
-    mocks.getModuleDetail.mockResolvedValue(fakeModule);
+    mocks.getModuleDetail.mockResolvedValue({ detail: fakeModule, heartbeatsFailed: false });
 
     const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
     expect(res.status).toBe(200);
     expect(res.body).toEqual(fakeModule);
+    expect(res.headers['x-highfive-data-incomplete']).toBeUndefined();
     expect(mocks.getModuleDetail).toHaveBeenCalledWith(VALID_ID);
   });
 
+  it('does NOT emit X-Highfive-Data-Incomplete on the detail route even when heartbeatsFailed', async () => {
+    // Banner-rendering happens at the listing level — the detail panel
+    // is always opened from the listing, so the user has already seen
+    // the degradation signal. Pin this so future drift can't sneak in.
+    mocks.getModuleDetail.mockResolvedValue({
+      detail: {
+        id: VALID_ID,
+        name: 'x',
+        location: { lat: 0, lng: 0 },
+        status: 'unknown',
+        lastApiCall: '',
+        batteryLevel: 0,
+        firstOnline: '',
+        totalHatches: 0,
+        imageCount: 0,
+        nests: [],
+      },
+      heartbeatsFailed: true,
+    });
+
+    const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    expect(res.status).toBe(200);
+    expect(res.headers['x-highfive-data-incomplete']).toBeUndefined();
+  });
+
   it('returns 404 for an unknown id', async () => {
-    mocks.getModuleDetail.mockResolvedValue(null);
+    mocks.getModuleDetail.mockResolvedValue({ detail: null, heartbeatsFailed: false });
 
     const res = await request(app).get('/api/modules/000000000001').set('X-API-Key', KEY);
     expect(res.status).toBe(404);

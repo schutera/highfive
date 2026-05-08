@@ -57,7 +57,11 @@ export interface Module {
     lat: number;
     lng: number;
   };
-  status: 'online' | 'offline';
+  // 'unknown' is set when we cannot confidently tell — e.g. the heartbeat
+  // service was unreachable AND no other liveness signal exists. The
+  // dashboard renders a third (gray) badge for this state instead of a
+  // misleading red 'offline'. See backend/src/database.ts and #31.
+  status: 'online' | 'offline' | 'unknown';
   lastApiCall: string; // ISO date string
   batteryLevel: number;
   firstOnline: string; // ISO date string

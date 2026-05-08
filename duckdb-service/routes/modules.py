@@ -232,19 +232,31 @@ def list_image_uploads():
 
 @modules_bp.get("/modules")
 def get_modules():
-    modules = query_all(
-        """
-        SELECT m.*,
-               COUNT(i.id) AS real_image_count,
-               MAX(i.uploaded_at) AS last_image_at
-        FROM module_configs m
-        LEFT JOIN image_uploads i ON m.id = i.module_id
-        GROUP BY m.id, m.name, m.lat, m.lng, m.status, m.first_online,
-                 m.battery_level, m.image_count, m.email, m.updated_at,
-                 m.last_silence_alert_at
-        """
-    )
-    return jsonify(modules=modules), 200
+    try:
+        modules = query_all(
+            """
+            SELECT m.*,
+                   COUNT(i.id) AS real_image_count,
+                   MAX(i.uploaded_at) AS last_image_at
+            FROM module_configs m
+            LEFT JOIN image_uploads i ON m.id = i.module_id
+            GROUP BY m.id, m.name, m.lat, m.lng, m.status, m.first_online,
+                     m.battery_level, m.image_count, m.email, m.updated_at,
+                     m.last_silence_alert_at
+            """
+        )
+        return jsonify(modules=modules), 200
+    except Exception as e:
+        # Without this wrapper Flask serves the default HTML 500 page,
+        # which the backend then JSON.parses and throws on, masking the
+        # underlying DB error as a generic upstream 502 (#32). The body
+        # is the error only — no `modules: []` fallback. The backend's
+        # fetchAndAssemble checks `r.ok` first, so it never reads this
+        # body; any other consumer that ignores the status would TypeError
+        # on `data.modules.map`, which is more honest than a silent
+        # empty fleet.
+        print(f"[get_modules] {type(e).__name__}: {e}", flush=True)
+        return jsonify(error=str(e)), 500
 
 
 @modules_bp.get("/modules/<module_id>/progress_count")

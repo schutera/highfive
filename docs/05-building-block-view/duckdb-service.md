@@ -198,7 +198,7 @@ Side effect: a single `INSERT` into `module_heartbeats`
 `module_configs` — liveness derivation in the backend reads
 `module_configs.updated_at`, the latest `module_heartbeats.received_at`,
 and the latest `image_uploads.uploaded_at` separately and takes the
-freshest (`backend/src/database.ts:174-184`). The most recent
+freshest (`backend/src/database.ts`'s `fetchAndAssemble`). The most recent
 `module_heartbeats` row is materialised on the wire as
 `Module.latestHeartbeat`
 (shape: [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md))

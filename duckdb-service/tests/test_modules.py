@@ -109,3 +109,27 @@ def test_new_module_same_id_twice_replaces_row(client, fresh_db):
     assert listed[0]["battery_level"] == 42
     # Two successful creates -> two webhook calls.
     assert len(fresh_db.discord_calls) == 2
+
+
+def test_get_modules_returns_json_500_on_query_failure(client, monkeypatch):
+    """Pin behaviour from issue #32: an uncaught DB exception must surface as
+    parseable JSON with status 500, not the Flask default HTML page that the
+    Node backend can't deserialize (and would have masked as a generic 502)."""
+    import routes.modules as routes_modules
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("synthetic duckdb failure")
+
+    monkeypatch.setattr(routes_modules, "query_all", boom)
+
+    resp = client.get("/modules")
+    assert resp.status_code == 500
+    assert resp.is_json, "fallback HTML 500 would crash the JSON-parsing backend"
+    body = resp.get_json()
+    assert "error" in body
+    assert "synthetic duckdb failure" in body["error"]
+    # No silent `modules: []` fallback — a body without a modules key
+    # forces any consumer that ignores the status to TypeError on
+    # data.modules.map rather than render an empty fleet.
+    assert "modules" not in body
+

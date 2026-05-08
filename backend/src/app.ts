@@ -9,11 +9,18 @@ const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://image-service
 
 export const app = express();
 
-// Middleware - Configure CORS for production
+// Middleware - Configure CORS for production. The `exposedHeaders` field
+// is load-bearing: production runs `highfive.schutera.com` ↔
+// `api.highfive.schutera.com` (cross-origin), and dev is `:5173 → :3002`
+// (also cross-origin), so the browser only lets `fetch().headers.get(...)`
+// read response headers that are explicitly listed here. Without
+// `X-Highfive-Data-Incomplete` exposed, the dashboard's
+// "heartbeat data unavailable" banner (#31) never fires.
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production' ? 'https://highfive.schutera.com' : '*',
   credentials: true,
   optionsSuccessStatus: 200,
+  exposedHeaders: ['X-Highfive-Data-Incomplete'],
 };
 
 app.use(cors(corsOptions));
@@ -39,6 +46,10 @@ app.get('/api/images/:filename', async (req, res) => {
     const buffer = Buffer.from(await response.arrayBuffer());
     res.send(buffer);
   } catch (error) {
+    console.error('[GET /api/images/:filename]', {
+      filename: req.params.filename,
+      error: String(error),
+    });
     res.status(502).json({ error: 'Failed to fetch image from image service' });
   }
 });
@@ -50,9 +61,13 @@ app.use('/api', apiKeyAuth);
 
 app.get('/api/modules', async (req, res) => {
   try {
-    const modules = await db.listModules();
+    const { modules, heartbeatsFailed } = await db.listModules();
+    if (heartbeatsFailed) {
+      res.setHeader('X-Highfive-Data-Incomplete', 'heartbeats');
+    }
     res.json(modules);
   } catch (error) {
+    console.error('[GET /api/modules]', { error: String(error) });
     res.status(500).json({ error: 'Failed to fetch modules' });
   }
 });
@@ -64,13 +79,20 @@ app.get('/api/modules/:id', async (req, res) => {
     return;
   }
   try {
-    const module = await db.getModuleDetail(id);
-    if (module) {
-      res.json(module);
+    // The detail route deliberately does NOT emit
+    // X-Highfive-Data-Incomplete — the dashboard banner is rendered by
+    // the listing call (DashboardPage.tsx), and the detail panel is
+    // always opened from the listing, so the user has already seen the
+    // degradation signal. Avoids API/UI drift where one route surfaces
+    // the header but the consumer doesn't read it.
+    const { detail } = await db.getModuleDetail(id);
+    if (detail) {
+      res.json(detail);
     } else {
       res.status(404).json({ error: 'Module not found' });
     }
   } catch (error) {
+    console.error('[GET /api/modules/:id]', { id, error: String(error) });
     res.status(500).json({ error: 'Failed to fetch module details' });
   }
 });
@@ -87,6 +109,10 @@ app.get('/api/images', async (req, res) => {
     const data = await response.json();
     res.json(data);
   } catch (error) {
+    console.error('[GET /api/images]', {
+      moduleId: req.query.module_id,
+      error: String(error),
+    });
     res.status(502).json({ error: 'Failed to fetch images from image service' });
   }
 });
@@ -102,6 +128,10 @@ app.delete('/api/images/:filename', async (req, res) => {
     const data = await response.json();
     res.status(response.status).json(data);
   } catch (error) {
+    console.error('[DELETE /api/images/:filename]', {
+      filename: req.params.filename,
+      error: String(error),
+    });
     res.status(502).json({ error: 'Failed to delete image' });
   }
 });
@@ -119,6 +149,7 @@ app.delete('/api/modules/:id', async (req, res) => {
     const data = await response.json();
     res.status(response.status).json(data);
   } catch (error) {
+    console.error('[DELETE /api/modules/:id]', { id, error: String(error) });
     res.status(502).json({ error: 'Failed to delete module' });
   }
 });
@@ -147,6 +178,7 @@ app.get('/api/modules/:id/logs', async (req, res) => {
     const payload = await upstream.json();
     res.json(payload);
   } catch (error) {
+    console.error('[GET /api/modules/:id/logs]', { id, error: String(error) });
     res.status(502).json({ error: 'image-service unreachable' });
   }
 });

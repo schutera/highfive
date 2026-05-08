@@ -487,3 +487,35 @@ Serial.printf("...%u bytes\n", (unsigned)fb_len);
 Code review prompt: when you see a `Serial.printf` or `log` reading a
 field through a pointer, look up to see whether that pointer was
 released earlier in the same scope.
+
+### Three partial-failure shapes shipped together (#30, #31, #32)
+
+**What happened.** Three independent bugs at the backend ↔
+image-service ↔ duckdb-service seam shared the same shape:
+- `image-service/app.py's delete_image` would `os.remove()` the file
+  even when duckdb returned 5xx, leaving an orphaned DB row pointing
+  at a missing file (#30).
+- `backend/src/database.ts's fetchAndAssemble` flipped every module
+  whose dominant freshness signal was the heartbeat to `'offline'`
+  the moment the `/heartbeats_summary` endpoint hiccuped, misleading
+  the on-call into thinking the fleet was down (#31).
+- Seven catch blocks in `backend/src/app.ts` returned 5xx to the
+  caller while logging nothing. Production debugging from the logs
+  alone was impossible (#32).
+
+**Why it happened.** Each catch block was treated as "we caught it,
+ship a generic 5xx and move on" rather than "we caught it, log
+enough to debug AND classify into the smallest honest user-facing
+signal". The image-service docstring even acknowledged the orphan
+gap and pointed at #30 — but the gap stayed open because no test
+pinned the desired behaviour.
+
+**How to avoid it next time.** Every catch block at a service
+boundary must answer two questions explicitly: (a) what gets logged
+for the on-call (endpoint tag + structured payload, never naked
+`return res.status(5xx)`), and (b) what does the caller see — forward
+the upstream status, never lie with 200. When introducing a new
+fan-out fetch, also classify partial failures into the smallest
+honest signal (here: `'unknown'` instead of `'offline'`, plus an
+out-of-band header `X-Highfive-Data-Incomplete` that old clients
+ignore but the dashboard reads).

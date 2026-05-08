@@ -174,28 +174,43 @@ def list_images():
 def delete_image(filename):
     """Delete an image's DB record then its on-disk file.
 
-    DB-side outcomes:
-      * 404 from duckdb-service → return 404; the file is NOT deleted.
-      * Connection error / timeout (raised exception) → log a warning,
-        fall through and delete the file anyway (orphans the file
-        rather than the row).
-      * Any other response, including 5xx → fall through and delete
-        the file. No warning is logged in the 5xx case; the on-disk
-        file is removed silently while the DB row stays.
-      * 2xx → fall through and delete the file.
-
-    Atomicity gaps are tracked in #30; this docstring describes the
-    behaviour as it ships today, not the behaviour we want.
+    Wire shape (closes #30):
+      * 2xx from duckdb → row gone, remove the file, return 200.
+      * 404 from duckdb → row already gone; remove the file if still
+        present (idempotent cleanup) and return 404.
+      * Any other non-2xx from duckdb (3xx redirect, 4xx other than
+        404, 5xx) → leave the file in place and forward the upstream
+        status. A retry by the caller sees a consistent file+row pair
+        instead of an orphaned row pointing at a deleted file.
+      * Network/timeout exception → 502, file untouched.
     """
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     try:
         resp = http_requests.delete(
             f"{DUCKDB_SERVICE_URL}/image_uploads/{filename}", timeout=5
         )
-        if resp.status_code == 404:
-            return jsonify({"error": "Image not found"}), 404
     except Exception as e:
-        print(f"Warning: failed to delete image record: {e}")
+        print(
+            f"[delete_image] duckdb-service unreachable for {filename}: {e}",
+            flush=True,
+        )
+        return jsonify({"error": "duckdb-service unreachable"}), 502
+
+    if resp.status_code == 404:
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+        return jsonify({"error": "Image not found"}), 404
+
+    if not (200 <= resp.status_code < 300):
+        print(
+            f"[delete_image] duckdb-service returned {resp.status_code} for {filename}: {resp.text[:200]}",
+            flush=True,
+        )
+        return (
+            jsonify({"error": f"duckdb-service returned {resp.status_code}"}),
+            resp.status_code,
+        )
+
     if os.path.isfile(file_path):
         os.remove(file_path)
     return jsonify({"message": "Image deleted"}), 200

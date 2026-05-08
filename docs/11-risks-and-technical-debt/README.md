@@ -10,12 +10,14 @@ future contributors must know about. Two sub-registers below:
 Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
 Highlights worth knowing about even if you're not assigned:
 
-| #                                                     | Title (short)                                                 | Why it matters                                                                                                               |
-| ----------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp:362` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.               |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                     | Risk of silent truncation on telemetry growth.                                                                               |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                 | Should be configurable via the AP form.                                                                                      |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                   | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
+| #                                                     | Title (short)                                                                | Why it matters                                                                                                                                                                              |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.                                                                              |
+| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                              |
+| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                     |
+| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
+| [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
+| [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper             | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
 
 ## Field-name drift
 
@@ -29,7 +31,7 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 
 ## Hardcoded secrets
 
-- **Google Maps API key** in `ESP32-CAM/esp_init.cpp:362` — see
+- **Google Maps API key** in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` — see
   [issue #18](https://github.com/schutera/highfive/issues/18). The
   key has been committed to git history; rotation is the right fix,
   not just removal.
@@ -53,53 +55,41 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   The data-flow contract is what MaskRCNN will fill — replacing the
   classifier doesn't change the persistence layer.
 
-## Active tech debt
-
-### Firmware version: three uncoordinated sources of truth
-
-As of `upstream/main` HEAD `a3675de`, three different files each carry
-a different "firmware version" string and each is read by a different
-consumer:
-
-| File / location                                                   | Current value | Read by                                                                          | Consumer                                                                                                |
-| ----------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `ESP32-CAM/VERSION`                                               | `carpenter`   | `ESP32-CAM/build.sh`                                                             | OTA manifest `homepage/public/firmware.json` `version` field                                            |
-| `ESP32-CAM/esp_init.h` (`FIRMWARE_VERSION`)                       | `1.0.0`       | `logBootMarker` in `ESP32-CAM/logbuf.cpp`; boot log in `ESP32-CAM/ESP32-CAM.ino` | Telemetry sidecar `fw` field on every upload + boot log                                                 |
-| `ESP32-CAM/client.cpp` (`FW_VERSION`, just above `sendHeartbeat`) | `honeybee`    | `sendHeartbeat`'s body string in `ESP32-CAM/client.cpp`                          | Heartbeat body `fw_version` field → `module_heartbeats.fw_version` → `Module.latestHeartbeat.fwVersion` |
-
-So a single `carpenter` device today reports three different versions
-on three different surfaces. ADR-006 documents the desired bee-name
-convention but is currently flagged "Accepted (partial)" because the
-implementation hasn't caught up.
-
-**Proposed fix (next firmware PR):** make `ESP32-CAM/VERSION` the sole
-source. Inject it via `platformio.ini`:
-
-```ini
-[env:esp32cam]
-build_flags =
-    ${env.build_flags}
-    -DFIRMWARE_VERSION=\"$(shell cat ESP32-CAM/VERSION)\"
-```
-
-Delete the `#ifndef`/`#define` guards for `FIRMWARE_VERSION` in
-`esp_init.h` and for `FW_VERSION` in `client.cpp` (just above
-`sendHeartbeat`). Replace `String(FW_VERSION)` in `sendHeartbeat`'s
-body string with `String(FIRMWARE_VERSION)`. `build.sh` continues
-reading `VERSION` directly. One writer, three readers, no drift.
-
-**Why it's not fixed in this PR.** PR 27 is documentation-only — the
-plan is to land the doc-honest description first and let the firmware
-unification be a small, focused next PR (ideally before the next field
-deployment, or you will spend a debugging session figuring out which
-"version" is real).
-
 ## Lessons learned
 
 This section grows over time. Each entry is a problem we paid for —
 write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
+
+### Setup wizard shipped two silent-success bugs (issues #43, #44)
+
+**What happened.** Two failure modes in the setup wizard were
+mis-classified as success or non-actionable: (a) when
+`homepage/public/firmware.bin` was missing, Vite's SPA fallback served
+`index.html` with HTTP 200, the wizard handed the HTML payload to
+`esptool-js`, `writeFlash` silently no-op'd on garbage bytes, and
+Step 2 flashed green in <1 s while the chip kept its old firmware;
+(b) when the backend died during the 2-minute Step 5 poll window,
+all 24 polls failed, the wizard set a single `verificationTimedOut`
+flag, and the UI showed the orange "check the module" troubleshooting
+screen — pointing the user at completely the wrong remediation.
+
+**Why it happened.** Both bugs share the same shape: a fetch result
+was fed to a side-effecting consumer (`writeFlash`, the
+verification-classifier `setState`) without validating the response
+shape beyond `response.ok`. Status code alone doesn't distinguish
+"served firmware" from "served HTML fallback", and "all polls failed"
+doesn't distinguish "ESP didn't show up" from "backend went silent".
+
+**How to avoid it next time.** When a fetch result drives a
+side-effecting consumer, validate the *shape* of the response, not
+just the status. For binary payloads: assert the `Content-Type` and
+the magic byte before handing the bytes downstream. For polling
+loops: track the failure category (network vs. semantic-empty), not
+just success/fail, so the final state can route to the correct
+remediation branch. Both fixes shipped in PR-B
+(`fix/wizard-flash-and-poll-classification`).
 
 ### ESP watchdog crashed every ~44 s in AP mode (fixed dfd454b)
 
@@ -301,11 +291,202 @@ itself but the next round of fixes shipped with eight fresh stale
   the whole repo (`docs/`, `homepage/src/i18n/`, `.claude/skills/`)
   for prose making the old promise.
 
-**Out-of-scope follow-up: pre-existing drift not fixed in this PR.**
-The Maps API key citations in chapters 3/5/11 and any future drift
-in files this PR didn't touch will surface in the
-`make check-citations` report next time someone edits those files.
-That's the gate's job now.
+**Resolution.** The Maps API key citations in chapters 3/5/11 were
+left for the next editor to resolve. They surfaced in `make
+check-citations` when the #39 fix added a `#include "module_id.h"`
+to `ESP32-CAM/esp_init.cpp` and shifted the cited lines by one,
+and were converted to the symbol form `esp_init.cpp`'s
+`getGeolocation` in that same commit. The gate worked as intended.
+
+### Same canonicalisation bug shipped at three call sites (issue #39)
+
+**What happened.** PR-17 fixed the eFuse-MAC canonicalisation bug at
+the `/upload` and `/heartbeat` seams (`client.cpp's postImage` and
+`sendHeartbeat`) by routing `esp_config->esp_ID` through
+`hf::formatModuleId`. The third call site —
+`esp_init.cpp's initNewModuleOnServer`, which posts to `/new_module`
+— was missed. Boards in the field have been failing module
+registration with HTTP 400 on every boot, while image upload
+(canonicalised) and heartbeat (canonicalised) both succeed. The
+silent-failure mode hid behind a working dashboard.
+
+**Why it happened.** The fix was scoped per call site instead of per
+field. `esp_config->esp_ID` is the unsanitised input; the third
+caller (in `esp_init.cpp` rather than `client.cpp`) was missed
+during the original PR-17 review pass.
+
+**How to avoid it next time.** When fixing a wire-shape bug on a
+shared field, grep for the **field name**, not for the call sites
+the bug report mentions. For HiveHive specifically: any future
+canonicalisation change goes through `hf::formatModuleId`, and
+`grep -rn 'esp_config->esp_ID' ESP32-CAM/` is the gate — every
+result must either flow through the helper or be a comment/log.
+
+### Captive-portal "hold BOOT, tap RESET" reconfigure trigger lands in DOWNLOAD_BOOT
+
+**What happened.** During PR-47 hardware testing, the documented
+reconfigure trigger printed by `ESP32-CAM.ino`'s `setup` ("hold the
+CONFIG button (GPIO0), tap RESET to reboot, and keep holding CONFIG
+for 5 seconds") never reached the firmware's GPIO0 long-press check.
+Two reproducible failure modes on a CH340-based ESP32-CAM: holding
+GPIO0 LOW during the RESET tap put the chip in `boot:0x3
+DOWNLOAD_BOOT`, and finger-roll attempts (release RESET, then quickly
+press BOOT) triggered an `ets_main.c 371 flash read err, 1000` boot
+loop that required a full re-flash to recover.
+
+**Why it happened.** GPIO0 is the boot strap pin the ESP32 ROM
+bootloader samples at the rising edge of EN to choose between
+`SPI_FAST_FLASH_BOOT` and `DOWNLOAD_BOOT`. If GPIO0 is LOW at that
+moment, the chip enters the ROM bootloader and waits on UART for
+esptool — app code does not run at all, so the firmware-side
+`digitalRead(CONFIG_BUTTON)` check has no opportunity to win the
+race; there is no race. The `flash read err, 1000` variant has an
+**unproven mechanism** — possibly a power glitch or partial-erase
+residue from prior DOWNLOAD_BOOT entries; we did not isolate it
+during PR-47 testing and should not invent one. What is reproducible
+is the failure, not the cause.
+
+**How to avoid it next time.** Don't trust a documented "hold a strap
+pin to enter app-side mode" sequence on hardware where that pin is
+also the boot strap — the boot ROM always wins, by construction. The
+working trigger today is the WiFi-fail auto-fallback at
+`ESP32-CAM.ino`'s `setup` (3 consecutive failed joins →
+`setESPConfigured(false)` → AP). PR-47 also replaced the misleading
+`-- ESP already configured. To reconfigure: hold the CONFIG button…`
+print with one that advertises the auto-fallback path; the broader
+fix (wire CONFIG to a non-strap GPIO, or remove the long-press path
+entirely) is tracked at
+[issue #56](https://github.com/schutera/highfive/issues/56).
+
+### Captive-portal JS validator and `/save` handler are two halves of one contract (issue #46)
+
+**What happened.** The original PR-47 fix for issue #46 changed
+`ESP32-CAM/host.cpp`'s `sendConfigForm` to render the password input with
+`value=""` and updated `/save` to preserve `cfg_password` on empty
+submission. Both halves were correct in isolation. But the existing
+`validateForm` JS rejected every visible field with empty content,
+so the placeholder-promised "leave blank to keep current password"
+path was unreachable through the UI for the entire interval between
+commits `ef0d10c` (the fix) and `d4b94b5` (the follow-up). Hardware
+testing surfaced this; unit tests did not; the senior-reviewer pass
+on the original PR did not.
+
+**Why it happened.** The fix-#46 author updated the form's render
+side and the `/save` handler but treated the JS validator as
+out-of-scope cosmetic glue. It is not — it is the first half of the
+"blank means keep current" contract. Code review caught the leak
+fix; nobody clicked Save with the password field blank.
+
+**How to avoid it next time.** Captive-portal forms have three
+coordinated layers: HTML render attributes, JS pre-submit validator,
+and server-side handler. Any change to the contract for a field
+must touch all three (or document why two suffice). For HiveHive
+specifically: when adding or modifying a field that can be empty,
+exercise the empty-submission path manually before declaring the
+fix done — the JS validator does not know about field-level
+"optional" semantics by default. The current keep-current contract
+is encoded in the `data-keep-current-on-empty` HTML attribute and
+its mirroring server-side check (`submitted.trim();
+if (submitted.length() > 0) cfg_X = submitted;`); both must move
+together. Extraction of the server-side half into a host-testable
+helper is tracked at
+[issue #57](https://github.com/schutera/highfive/issues/57); land
+that before adding a second keep-current field, or this lesson is
+paid for again.
+
+### `auth.md` "open AP" claim — captive portal is WPA2-protected
+
+**What happened.** The "Captive-portal credential handling" section
+added in PR-47 originally claimed the portal "is served from an open
+WiFi AP — there is no PSK, anyone in RF range can join." Hardware
+verification proved the opposite: the AP is WPA2-PSK with
+`HOST_PASSWORD` hardcoded in `host.cpp`. The fix-#46 reasoning ("don't
+echo the password to View Source") still holds, just for a different
+threat model than the doc described. Corrected in the same PR.
+
+**Why it happened.** The threat-model paragraph was drafted from the
+assumed shape of the AP, not the actual `WiFi.softAP(HOST_SSID,
+HOST_PASSWORD, …)` call. Code review and unit tests caught the fix;
+hardware testing (a Windows "enter network password" prompt when
+joining the AP) caught the doc.
+
+**How to avoid it next time.** When writing a threat-model paragraph
+about a WiFi or HTTP surface, grep for the actual API call
+(`WiFi.softAP`, `app.use(...)`, `addRoute`) and read its arguments
+before describing what the surface looks like to the network. Doc
+review needs to inspect the API, not just the surrounding prose.
+
+### `lib/<name>/` includes diverge between PIO and arduino-cli (issue #36, PR #55)
+
+**What happened.** `bash ESP32-CAM/build.sh` (the arduino-cli release
+path) failed to link with `undefined reference to hf::wifiStatusName`
+and `hf::ledOnAt` after a clean checkout on a fresh box. Two source
+files used path-prefixed includes for lib subdirectories
+(`#include "lib/wifi_diag/wifi_diag.h"` in `esp_init.cpp`, and
+`#include "lib/led_state/led_state.h"` in `led.h`); the other six
+consumers used bare-name (`#include "module_id.h"` etc.). Under PIO
+both forms work because `lib_dir = lib` adds every `lib/<name>/`
+subdirectory to the include path AND auto-compiles its `.cpp` files.
+Under arduino-cli with `--libraries ESP32-CAM/lib`, only **bare-name**
+includes trigger the library-discovery → auto-compile → link chain.
+The path-prefixed form resolves the header (so compile succeeds) but
+never registers the library, so its `.cpp` is silently dropped from
+the link.
+
+**Why it happened.** The two outliers were probably written when the
+codebase still had a flat layout, then survived the `lib/` refactor
+because nobody re-ran `bash build.sh` end-to-end after that refactor.
+PIO compiled fine, so the mismatch was invisible. The post-compile
+guard added earlier in PR #55 caught a different `build.sh` bug
+(quote-escaping doubled), but only after we got past the linker.
+Manual end-to-end testing on a real ESP32-CAM was what surfaced this.
+
+**How to avoid it next time.**
+
+- When adding a new `ESP32-CAM/lib/<name>/` module, always include its
+  header by **bare name**: `#include "<name>.h"`. Documented in
+  [`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md)
+  ("Adding a new `lib/<name>/` module").
+- Don't trust `pio run` as the sole build verification when changing
+  firmware. PIO and arduino-cli have different library-discovery and
+  define-injection paths; "PIO is happy" doesn't mean `bash build.sh`
+  is. The cheapest CI improvement here would be a job that runs
+  `bash ESP32-CAM/build.sh` on PRs that touch `ESP32-CAM/`.
+- The post-compile guard in `build.sh` covers macro-injection drift,
+  not link-time symbol drift. Linker errors are loud, but they only
+  fire when someone actually runs `build.sh`.
+
+### Use-after-return on `esp_camera_fb_return` warm-up logging (issue #36)
+
+**What happened.** Both warm-up loops in `ESP32-CAM/ESP32-CAM.ino`
+(`setup()`'s sensor warm-up and the post-recovery loop) printed
+`fb->len` _after_ calling `esp_camera_fb_return(fb)`. The driver may
+reuse the buffer immediately, so the printed byte count was undefined
+behaviour — it happened to look right because the buffer was usually
+not yet reused, but a future driver/PSRAM pressure regime could print
+zero, garbage, or trip a panic on a freed pointer.
+
+**Why it happened.** The natural reading order ("get → log → release")
+got reordered to "get → release → log" during a refactor that pulled
+the release out of the success branch's tail. The log line and the
+release sat next to each other so the order looked symmetric; the bug
+hides in plain sight unless you remember `esp_camera_fb_return` is a
+free.
+
+**How to avoid it next time.** When releasing any pointer-bearing
+resource (camera frame buffer, malloc, smart-pointer reset), capture
+any value you still need into a local _before_ the release call. The
+fix in the same lines is the canonical pattern:
+
+```cpp
+size_t fb_len = fb->len;
+esp_camera_fb_return(fb);
+Serial.printf("...%u bytes\n", (unsigned)fb_len);
+```
+
+Code review prompt: when you see a `Serial.printf` or `log` reading a
+field through a pointer, look up to see whether that pointer was
+released earlier in the same scope.
 
 ### Three partial-failure shapes shipped together (#30, #31, #32)
 

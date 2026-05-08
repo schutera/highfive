@@ -35,6 +35,14 @@ endpoint with a different body and different side effects — see
 and the [glossary](../12-glossary/README.md) for the full
 disambiguation.
 
+Both heartbeat endpoints canonicalise their `mac` / `<module_id>`
+input through `ModuleId.model_validate(...)` before any DB write, so
+colon-form, dash-form, and uppercase MACs all collapse onto the same
+canonical 12-hex `module_id` PK. This mirrors the `/upload` seam in
+`image-service/app.py` — see
+[../api-reference.md](../api-reference.md) §3.7 for the wire-level
+behaviour.
+
 The wire shape:
 
 ```ts

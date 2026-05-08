@@ -127,8 +127,23 @@ void setup() {
       delay(FACTORY_RESET_SETTLE_MS);
       ESP.restart();
     }
-    Serial.printf("-- ESP already configured. To reconfigure: hold the CONFIG button (GPIO0), tap RESET to reboot, and keep holding CONFIG for %lu seconds until you see the reset message.\n",
-                  FACTORY_RESET_HOLD_MS / 1000UL);
+    // The historical "hold CONFIG (GPIO0), tap RESET, keep holding for N
+    // seconds" trigger is unreliable on standard ESP32-CAM hardware: GPIO0
+    // is also the boot strap pin, so holding it LOW during the RESET tap
+    // routes the chip into ROM DOWNLOAD_BOOT before app code runs (and on
+    // some boards reproducibly produces an ets_main.c flash-read-err loop
+    // that requires re-flashing to recover). Tracked in issue #56. The
+    // working trigger today is the WiFi-fail auto-fallback above: if the
+    // saved credentials stop working for WIFI_FAIL_AP_FALLBACK_THRESH boots
+    // in a row, the device clears `configured` and re-opens the captive
+    // portal automatically. The GPIO0 long-press check earlier in this
+    // setup() is retained for boards where it does work (and as last-resort
+    // recovery), but is no longer advertised in the user-facing print.
+    Serial.printf("-- ESP already configured. To reconfigure: temporarily "
+                  "change your WiFi credentials so the device fails to join %u "
+                  "times in a row; it will auto-fall-back to the captive "
+                  "portal. (See issue #56 for the historical GPIO0 trigger.)\n",
+                  (unsigned)WIFI_FAIL_AP_FALLBACK_THRESH);
   }
 
   Serial.println("[ESP] INITIALIZING ESP");
@@ -179,8 +194,9 @@ void setup() {
     delay(500);
     camera_fb_t *fb = esp_camera_fb_get();
     if (fb) {
+      size_t fb_len = fb->len;
       esp_camera_fb_return(fb);
-      Serial.printf("---- warm-up frame %d OK (%u bytes)\n", i + 1, fb->len);
+      Serial.printf("---- warm-up frame %d OK (%u bytes)\n", i + 1, (unsigned)fb_len);
     } else {
       Serial.printf("---- warm-up frame %d skipped (NULL)\n", i + 1);
       warmupNulls++;
@@ -195,8 +211,9 @@ void setup() {
       delay(500);
       camera_fb_t *fb = esp_camera_fb_get();
       if (fb) {
+        size_t fb_len = fb->len;
         esp_camera_fb_return(fb);
-        Serial.printf("---- post-recovery frame %d OK (%u bytes)\n", i + 1, fb->len);
+        Serial.printf("---- post-recovery frame %d OK (%u bytes)\n", i + 1, (unsigned)fb_len);
       } else {
         Serial.printf("---- post-recovery frame %d skipped (NULL)\n", i + 1);
         recovNulls++;

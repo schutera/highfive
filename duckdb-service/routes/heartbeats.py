@@ -1,6 +1,8 @@
 from flask import Blueprint, jsonify, request
+from pydantic import ValidationError
 
 from db.connection import lock, get_conn
+from models.module_id import ModuleId
 
 heartbeats_bp = Blueprint("heartbeats", __name__)
 
@@ -25,9 +27,13 @@ def post_heartbeat():
     else:
         data = request.form.to_dict()
 
-    mac = (data.get("mac") or data.get("esp_id") or "").strip()
-    if not mac:
+    raw_mac = (data.get("mac") or data.get("esp_id") or "").strip()
+    if not raw_mac:
         return jsonify({"error": "missing mac"}), 400
+    try:
+        mac = ModuleId.model_validate(raw_mac).root
+    except ValidationError:
+        return jsonify({"error": "invalid mac format"}), 400
 
     battery = _to_int(data.get("battery"))
     rssi = _to_int(data.get("rssi"))

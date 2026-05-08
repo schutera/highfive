@@ -52,7 +52,7 @@ of the type boundary), but the JSON keys backend reads from
 
 The wire body that the firmware actually sends is `application/x-www-form-urlencoded`
 (`mac=...&battery=...&rssi=...&uptime_ms=...&free_heap=...&fw_version=...`),
-parsed by `routes/heartbeats.py:18-30`. The snake-case→camelCase
+parsed by `routes/heartbeats.py`'s `post_heartbeat`. The snake-case→camelCase
 translation happens in the backend serializer when shaping the
 `Module.latestHeartbeat` response.
 

@@ -133,7 +133,7 @@ or wrong, `502` if the image-service is unreachable.
 ```json
 [
   {
-    "fw": "1.0.0",
+    "fw": "carpenter",
     "uptime_s": 72145,
     "last_reset_reason": "TASK_WDT",
     "free_heap": 124352,
@@ -141,7 +141,7 @@ or wrong, `502` if the image-service is unreachable.
     "rssi": -67,
     "wifi_reconnects": 2,
     "last_http_codes": [200, 200, 500, 200, 200],
-    "log": "[BOOT] fw=1.0.0 ...",
+    "log": "[BOOT] fw=carpenter ...",
     "_mac": "12345678901234",
     "_received_at": "2026-04-11T14:32:17",
     "_image": "esp_capture_20260411_143217.jpg"
@@ -244,18 +244,20 @@ Content-Type: application/json
 
 ```json
 {
-  "mac": "esp-9081726354",
+  "esp_id": "b0696ef23a08",
   "module_name": "Garden-Hive",
   "latitude": 48.52137,
   "longitude": 9.05891,
-  "battery": 72
+  "battery_level": 72
 }
 ```
+
+`esp_id` is the canonical 12-char lowercase-hex form of the eFuse MAC. Legacy colon-separated and uppercase-hex inputs (e.g. `AA:BB:CC:DD:EE:FF`) are accepted and canonicalised; raw uint64 decimal stringification (~15 digits) is rejected with HTTP 400 — see issue #39.
 
 Returns:
 
 ```json
-{ "id": "esp-9081726354", "message": "Module added successfully" }
+{ "id": "b0696ef23a08", "message": "Module added successfully" }
 ```
 
 A module with the same identifier is replaced.
@@ -349,17 +351,25 @@ Content-Type: application/x-www-form-urlencoded
 
 Form fields:
 
-| Field        | Type   | Notes                                                   |
-| ------------ | ------ | ------------------------------------------------------- |
-| `mac`        | string | canonical 12-char hex MAC (or `esp_id` alias)           |
-| `battery`    | int    | optional                                                |
-| `rssi`       | int    | optional, dBm                                           |
-| `uptime_ms`  | int    | optional, since last boot                               |
-| `free_heap`  | int    | optional, bytes                                         |
-| `fw_version` | string | optional, ≤40 chars (currently a bee-name; see ADR-006) |
+| Field        | Type   | Notes                                                                                                                  |
+| ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `mac`        | string | accepted in canonical 12-hex form, colon-separated, or dash-separated; canonicalised on the server (or `esp_id` alias) |
+| `battery`    | int    | optional                                                                                                               |
+| `rssi`       | int    | optional, dBm                                                                                                          |
+| `uptime_ms`  | int    | optional, since last boot                                                                                              |
+| `free_heap`  | int    | optional, bytes                                                                                                        |
+| `fw_version` | string | optional, ≤40 chars (a bee-name from `ESP32-CAM/VERSION`; see ADR-006)                                                 |
+
+The `mac` field is canonicalised to lowercase 12-hex via
+`ModuleId.model_validate(...)` before the `INSERT`, mirroring the
+`/upload` seam in `image-service/app.py`. Two clients sending
+`AA:BB:CC:DD:EE:FF` and `aabbccddeeff` therefore land on the same
+`module_id` PK rather than silently creating parallel rows.
 
 Returns `{ "ok": true }`, `200`. Missing `mac` returns
-`{ "error": "missing mac" }`, `400`.
+`{ "error": "missing mac" }`, `400`. A `mac` value that does not
+reduce to `[0-9a-f]{12}` returns `{ "error": "invalid mac format" }`,
+`400`.
 
 Side effect: a single `INSERT` into `module_heartbeats`. The handler
 does **not** update `module_configs`. Implementation in

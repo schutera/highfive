@@ -1,12 +1,11 @@
-# ADR-006: ESP firmware version — bee-name convention (currently divergent)
+# ADR-006: ESP firmware version — bee-name convention
 
 ## Status
 
-**Accepted (partial — see Tech debt).** The bee-name convention is the
-agreed direction. The implementation currently maintains **three
-uncoordinated sources of truth** for the same logical "firmware version"
-field. Unification is tracked in
-[`docs/11-risks-and-technical-debt/README.md`](../11-risks-and-technical-debt/README.md).
+**Accepted.** The bee-name convention is the agreed direction. As of
+issue #36, `ESP32-CAM/VERSION` is the single writer; the firmware boot
+log, telemetry sidecar, heartbeat body, and homepage OTA manifest all
+read the same string via build-flag injection.
 
 ## Context
 
@@ -35,41 +34,43 @@ and each is read by a different consumer.
 ## Decision
 
 Firmware versions are bee-species names, in roughly order of
-introduction. Each release should bump **all three** of the
-identifiers below to the same name, until the unification work
-collapses them to one source.
+introduction. Each release bumps the single source — `ESP32-CAM/VERSION`
+— and the build pipeline propagates that string to every consumer.
 
-### Currently divergent (as of `upstream/main` HEAD `a3675de`)
+### One writer, four readers
 
-| File / location        | Macro / value                                                | Read by                                                                                     | Surfaces as                                                                                                                                                                |
-| ---------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ESP32-CAM/VERSION`    | `carpenter`                                                  | `ESP32-CAM/build.sh`                                                                        | The `version` field in `homepage/public/firmware.json` (the OTA manifest the wizard reads).                                                                                |
-| `ESP32-CAM/esp_init.h` | `#define FIRMWARE_VERSION "1.0.0"`                           | `ESP32-CAM/logbuf.cpp` (`logBootMarker`) and `ESP32-CAM/ESP32-CAM.ino` (`setup()` boot log) | The telemetry sidecar `fw` field on every image upload, and the boot log line.                                                                                             |
-| `ESP32-CAM/client.cpp` | `#define FW_VERSION "honeybee"` (just above `sendHeartbeat`) | `ESP32-CAM/client.cpp` (`sendHeartbeat`'s body string)                                      | The `fw_version` form field in the hourly heartbeat body to `POST /heartbeat` (the column `module_heartbeats.fw_version`, surfaced as `Module.latestHeartbeat.fwVersion`). |
+| File / location                         | Macro / value                                            | Surfaces as                                                                                                                                                                                                  |
+| --------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ESP32-CAM/VERSION`                     | `carpenter` (single writer)                              | n/a                                                                                                                                                                                                          |
+| `ESP32-CAM/build.sh`                    | reads `VERSION`, then `cp` + `cat` for the manifest      | The `version` field in `homepage/public/firmware.json` (the OTA manifest the wizard reads).                                                                                                                  |
+| `ESP32-CAM/build.sh` `--build-property` | `-DFIRMWARE_VERSION="<value of VERSION>"` to arduino-cli | The `FIRMWARE_VERSION` macro inside the firmware binary produced by the release path.                                                                                                                        |
+| `ESP32-CAM/extra_scripts.py`            | injects `-DFIRMWARE_VERSION="<value>"` for PlatformIO    | Same macro for the `pio run -e esp32cam` cross-compile path.                                                                                                                                                 |
+| `ESP32-CAM/esp_init.h` (fallback)       | `#define FIRMWARE_VERSION "dev-unset"` if not injected   | Only fires when the sketch is compiled directly in Arduino IDE without going through `build.sh` or `pio`. The string surfaces in boot log + telemetry + heartbeat as a "this is not a release build" signal. |
 
-So a single deployed `carpenter` device today reports:
+The `FIRMWARE_VERSION` macro is consumed by:
 
-- `firmware.json` says `version: carpenter`,
-- the upload sidecar says `"fw": "1.0.0"`,
-- the heartbeat row says `fw_version: honeybee`.
+- `ESP32-CAM/ESP32-CAM.ino` (`setup()` boot log line)
+- `ESP32-CAM/logbuf.cpp` (`buildTelemetryJson` → telemetry sidecar `fw` field on every upload)
+- `ESP32-CAM/client.cpp` (`sendHeartbeat` → `module_heartbeats.fw_version`)
 
-### Desired end-state
-
-A single source of truth — `ESP32-CAM/VERSION` — feeding both macros
-via a `platformio.ini` `build_flags` injection:
-
-```ini
-build_flags =
-    -DFIRMWARE_VERSION=\"$(shell cat ESP32-CAM/VERSION)\"
-```
-
-`FW_VERSION` in `client.cpp` then deletes its `#ifndef` block and uses
-`FIRMWARE_VERSION` directly. `build.sh` continues to read `VERSION`
-for the manifest. Three readers, one writer.
+So a single deployed `carpenter` device now reports `carpenter` on
+all four surfaces (`firmware.json`, boot log, telemetry sidecar,
+heartbeat row).
 
 The semver scheme is retained for the **server-side** stack
 (`v1.0.0` and onwards in `CHANGELOG.md`) — only the embedded
 firmware uses bee names.
+
+### Historical: the three-source divergence
+
+Prior to issue #36, three uncoordinated definitions existed:
+`ESP32-CAM/VERSION` (`carpenter`, only read by `build.sh` for the
+manifest), `esp_init.h` (`#define FIRMWARE_VERSION "1.0.0"`, baked
+into telemetry + boot log), and `client.cpp` (`#define FW_VERSION
+"honeybee"`, baked into the heartbeat body). A single deployed
+device therefore reported three different "firmware versions"
+depending on which surface you looked at. Resolved by collapsing the
+two firmware-side macros into a single injected `FIRMWARE_VERSION`.
 
 ## Alternatives considered
 
@@ -90,28 +91,32 @@ firmware uses bee names.
 
 **Positive**:
 
-- Field reports become unambiguous (once unified): "module on `mason`,
-  last heartbeat 4h ago" reads cleaner than "module on 1.2.3".
+- Field reports are unambiguous: "module on `carpenter`, last heartbeat
+  4h ago" reads cleaner than "module on 1.2.3".
 - The named release becomes a forcing function — choosing the next
   bee makes you think about whether this batch of changes is a
   coherent release.
+- One writer, one macro, one string on every surface. Bumping `VERSION`
+  is the entire release-naming workflow.
 
 **Negative**:
 
-- **Today the three sources disagree.** Anyone reading the dashboard,
-  the manifest, or the boot log will see a different name. Fix the
-  three-source mess (see Tech debt) before the next field deployment
-  or you will spend a debugging session figuring out which "version"
-  is real.
 - No automatic ordering. We rely on commit history to know that
   `mason` is older than `carpenter`. Documented in
   `CHANGELOG.md` per release.
 - Pool of names is finite. When we run out of carpenter bees, the
   next ADR will pick a new pool.
+- Two build paths (arduino-cli via `build.sh`, PlatformIO via
+  `extra_scripts.py`) need to be kept in sync. Both inject the same
+  macro from the same `VERSION` file, but a future toolchain swap
+  needs to update both seams.
 
 **Forbidden** (only the rules with scar tissue):
 
 - Don't reuse a bee name. Once shipped, it points at exactly one
   firmware build forever.
-- Don't bump only one of the three current identifiers. Either bump
-  all three to the same value or fix the unification first.
+- Don't reintroduce a second firmware-side version macro. The
+  three-source mess this ADR was originally written about cost a
+  debugging session; if a future need is "this binary needs a
+  _different_ string for some surface", reach for a separate variable
+  with a clearly distinct name, not a parallel `*_VERSION`.

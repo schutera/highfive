@@ -121,6 +121,7 @@ export default function SetupWizard() {
               pollingActive={state.pollingActive}
               detectedModule={state.detectedModule}
               verificationTimedOut={state.verificationTimedOut}
+              verificationBackendUnreachable={state.verificationBackendUnreachable}
               startVerification={startVerification}
               onBack={goBack}
             />

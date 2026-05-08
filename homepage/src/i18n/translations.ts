@@ -178,8 +178,8 @@ const translations = {
       photoStep: 'Photo: Step {n}',
       tips: 'Tips',
       factoryReset:
-        'If you ever need to reconfigure your module, press and hold the left button on the ESP32-CAM for 5 seconds while powered. It will restart and reopen the WiFi configuration portal.',
-      factoryResetLabel: 'Factory Reset:',
+        'If you need to reconfigure your module: re-flash the firmware via USB with new settings (recommended — see the Firmware Update section in the deployment docs). If USB access is impractical, you can also temporarily change your WiFi password so the module fails to join — after three failed attempts (~2 minutes), the configuration portal reopens automatically.',
+      factoryResetLabel: 'Reconfigure:',
       ctaTitle: 'Module assembled?',
       ctaText: 'Now flash the firmware and connect your module to the server.',
       ctaCta: 'Start Setup Wizard',
@@ -370,9 +370,9 @@ const translations = {
         apTitle: 'Is the access point still visible?',
         apText:
           "If you can still see 'ESP32-Access-Point' in your WiFi list, the module hasn't connected to your home network yet. Reconnect and verify the WiFi settings.",
-        resetTitle: 'Factory Reset',
+        resetTitle: 'Re-open the configuration portal',
         resetText:
-          'Hold the left button on the ESP32-CAM for 5 seconds until it restarts. This resets all settings and re-opens the configuration portal.',
+          'Re-flash the firmware via USB with new credentials (recommended). If USB is unavailable, temporarily change your WiFi credentials so the module cannot join — after three failed attempts (~2 minutes), the portal reopens automatically.',
       },
     },
 
@@ -565,8 +565,8 @@ const translations = {
       photoStep: 'Foto: Schritt {n}',
       tips: 'Tipps',
       factoryReset:
-        'Wenn du dein Modul neu konfigurieren musst, halte den linken Knopf der ESP32-CAM bei laufendem Betrieb 5 Sekunden gedr\u00FCckt. Es startet neu und \u00F6ffnet das WLAN-Konfigurationsportal erneut.',
-      factoryResetLabel: 'Werkseinstellungen:',
+        'Wenn du dein Modul neu konfigurieren musst: Flash die Firmware mit neuen Einstellungen per USB neu (empfohlen \u2014 siehe Firmware-Update-Anleitung in der Deployment-Doku). Wenn USB-Zugang nicht m\u00F6glich ist, kannst du auch vor\u00FCbergehend dein WLAN-Passwort \u00E4ndern, sodass sich das Modul nicht verbinden kann \u2014 nach drei fehlgeschlagenen Versuchen (~2 Minuten) \u00F6ffnet sich das Konfigurationsportal automatisch wieder.',
+      factoryResetLabel: 'Neu konfigurieren:',
       ctaTitle: 'Modul zusammengebaut?',
       ctaText: 'Jetzt die Firmware flashen und dein Modul mit dem Server verbinden.',
       ctaCta: 'Setup-Assistent starten',
@@ -758,9 +758,9 @@ const translations = {
         apTitle: 'Ist der Access Point noch sichtbar?',
         apText:
           "Wenn du 'ESP32-Access-Point' noch in deiner WLAN-Liste siehst, hat sich das Modul noch nicht mit deinem Heimnetzwerk verbunden. Verbinde dich erneut und \u00FCberpr\u00FCfe die WLAN-Einstellungen.",
-        resetTitle: 'Werkseinstellungen',
+        resetTitle: 'Konfigurationsportal erneut \u00F6ffnen',
         resetText:
-          'Halte den linken Knopf der ESP32-CAM 5 Sekunden gedr\u00FCckt, bis sie neu startet. Dies setzt alle Einstellungen zur\u00FCck und \u00F6ffnet das Konfigurationsportal erneut.',
+          'Flash die Firmware mit neuen Zugangsdaten per USB neu (empfohlen). Wenn USB nicht verf\u00FCgbar ist, \u00E4ndere vor\u00FCbergehend deine WLAN-Zugangsdaten, sodass sich das Modul nicht mehr verbinden kann \u2014 nach drei fehlgeschlagenen Versuchen (~2 Minuten) \u00F6ffnet sich das Portal automatisch wieder.',
       },
     },
 

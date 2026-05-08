@@ -75,6 +75,6 @@ full setup walkthrough.
 - **2.4 GHz Wi-Fi only.** No 5 GHz support.
 - **No OTA today.** Firmware updates require physical USB access. Tracked
   in [issue #26](https://github.com/schutera/highfive/issues/26).
-- **Hardcoded Google Maps key** at `esp_init.cpp:362`. Tracked in
+- **Hardcoded Google Maps key** in `esp_init.cpp`'s `getGeolocation`. Tracked in
   [issue #18](https://github.com/schutera/highfive/issues/18). Listed
   in [11-risks-and-technical-debt](../11-risks-and-technical-debt/README.md).

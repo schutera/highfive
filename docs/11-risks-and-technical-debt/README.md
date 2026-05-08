@@ -10,12 +10,14 @@ future contributors must know about. Two sub-registers below:
 Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
 Highlights worth knowing about even if you're not assigned:
 
-| #                                                     | Title (short)                                                 | Why it matters                                                                                                               |
-| ----------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp:362` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.               |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                     | Risk of silent truncation on telemetry growth.                                                                               |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                 | Should be configurable via the AP form.                                                                                      |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                   | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing. |
+| #                                                     | Title (short)                                                                | Why it matters                                                                                                                                                                              |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.                                                                              |
+| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                              |
+| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                     |
+| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
+| [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
+| [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper             | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
 
 ## Field-name drift
 
@@ -29,7 +31,7 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 
 ## Hardcoded secrets
 
-- **Google Maps API key** in `ESP32-CAM/esp_init.cpp:362` — see
+- **Google Maps API key** in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` — see
   [issue #18](https://github.com/schutera/highfive/issues/18). The
   key has been committed to git history; rotation is the right fix,
   not just removal.
@@ -260,11 +262,130 @@ itself but the next round of fixes shipped with eight fresh stale
   the whole repo (`docs/`, `homepage/src/i18n/`, `.claude/skills/`)
   for prose making the old promise.
 
-**Out-of-scope follow-up: pre-existing drift not fixed in this PR.**
-The Maps API key citations in chapters 3/5/11 and any future drift
-in files this PR didn't touch will surface in the
-`make check-citations` report next time someone edits those files.
-That's the gate's job now.
+**Resolution.** The Maps API key citations in chapters 3/5/11 were
+left for the next editor to resolve. They surfaced in `make
+check-citations` when the #39 fix added a `#include "module_id.h"`
+to `ESP32-CAM/esp_init.cpp` and shifted the cited lines by one,
+and were converted to the symbol form `esp_init.cpp`'s
+`getGeolocation` in that same commit. The gate worked as intended.
+
+### Same canonicalisation bug shipped at three call sites (issue #39)
+
+**What happened.** PR-17 fixed the eFuse-MAC canonicalisation bug at
+the `/upload` and `/heartbeat` seams (`client.cpp's postImage` and
+`sendHeartbeat`) by routing `esp_config->esp_ID` through
+`hf::formatModuleId`. The third call site —
+`esp_init.cpp's initNewModuleOnServer`, which posts to `/new_module`
+— was missed. Boards in the field have been failing module
+registration with HTTP 400 on every boot, while image upload
+(canonicalised) and heartbeat (canonicalised) both succeed. The
+silent-failure mode hid behind a working dashboard.
+
+**Why it happened.** The fix was scoped per call site instead of per
+field. `esp_config->esp_ID` is the unsanitised input; the third
+caller (in `esp_init.cpp` rather than `client.cpp`) was missed
+during the original PR-17 review pass.
+
+**How to avoid it next time.** When fixing a wire-shape bug on a
+shared field, grep for the **field name**, not for the call sites
+the bug report mentions. For HiveHive specifically: any future
+canonicalisation change goes through `hf::formatModuleId`, and
+`grep -rn 'esp_config->esp_ID' ESP32-CAM/` is the gate — every
+result must either flow through the helper or be a comment/log.
+
+### Captive-portal "hold BOOT, tap RESET" reconfigure trigger lands in DOWNLOAD_BOOT
+
+**What happened.** During PR-47 hardware testing, the documented
+reconfigure trigger printed by `ESP32-CAM.ino`'s `setup` ("hold the
+CONFIG button (GPIO0), tap RESET to reboot, and keep holding CONFIG
+for 5 seconds") never reached the firmware's GPIO0 long-press check.
+Two reproducible failure modes on a CH340-based ESP32-CAM: holding
+GPIO0 LOW during the RESET tap put the chip in `boot:0x3
+DOWNLOAD_BOOT`, and finger-roll attempts (release RESET, then quickly
+press BOOT) triggered an `ets_main.c 371 flash read err, 1000` boot
+loop that required a full re-flash to recover.
+
+**Why it happened.** GPIO0 is the boot strap pin the ESP32 ROM
+bootloader samples at the rising edge of EN to choose between
+`SPI_FAST_FLASH_BOOT` and `DOWNLOAD_BOOT`. If GPIO0 is LOW at that
+moment, the chip enters the ROM bootloader and waits on UART for
+esptool — app code does not run at all, so the firmware-side
+`digitalRead(CONFIG_BUTTON)` check has no opportunity to win the
+race; there is no race. The `flash read err, 1000` variant has an
+**unproven mechanism** — possibly a power glitch or partial-erase
+residue from prior DOWNLOAD_BOOT entries; we did not isolate it
+during PR-47 testing and should not invent one. What is reproducible
+is the failure, not the cause.
+
+**How to avoid it next time.** Don't trust a documented "hold a strap
+pin to enter app-side mode" sequence on hardware where that pin is
+also the boot strap — the boot ROM always wins, by construction. The
+working trigger today is the WiFi-fail auto-fallback at
+`ESP32-CAM.ino`'s `setup` (3 consecutive failed joins →
+`setESPConfigured(false)` → AP). PR-47 also replaced the misleading
+`-- ESP already configured. To reconfigure: hold the CONFIG button…`
+print with one that advertises the auto-fallback path; the broader
+fix (wire CONFIG to a non-strap GPIO, or remove the long-press path
+entirely) is tracked at
+[issue #56](https://github.com/schutera/highfive/issues/56).
+
+### Captive-portal JS validator and `/save` handler are two halves of one contract (issue #46)
+
+**What happened.** The original PR-47 fix for issue #46 changed
+`ESP32-CAM/host.cpp`'s `sendConfigForm` to render the password input with
+`value=""` and updated `/save` to preserve `cfg_password` on empty
+submission. Both halves were correct in isolation. But the existing
+`validateForm` JS rejected every visible field with empty content,
+so the placeholder-promised "leave blank to keep current password"
+path was unreachable through the UI for the entire interval between
+commits `ef0d10c` (the fix) and `d4b94b5` (the follow-up). Hardware
+testing surfaced this; unit tests did not; the senior-reviewer pass
+on the original PR did not.
+
+**Why it happened.** The fix-#46 author updated the form's render
+side and the `/save` handler but treated the JS validator as
+out-of-scope cosmetic glue. It is not — it is the first half of the
+"blank means keep current" contract. Code review caught the leak
+fix; nobody clicked Save with the password field blank.
+
+**How to avoid it next time.** Captive-portal forms have three
+coordinated layers: HTML render attributes, JS pre-submit validator,
+and server-side handler. Any change to the contract for a field
+must touch all three (or document why two suffice). For HiveHive
+specifically: when adding or modifying a field that can be empty,
+exercise the empty-submission path manually before declaring the
+fix done — the JS validator does not know about field-level
+"optional" semantics by default. The current keep-current contract
+is encoded in the `data-keep-current-on-empty` HTML attribute and
+its mirroring server-side check (`submitted.trim();
+if (submitted.length() > 0) cfg_X = submitted;`); both must move
+together. Extraction of the server-side half into a host-testable
+helper is tracked at
+[issue #57](https://github.com/schutera/highfive/issues/57); land
+that before adding a second keep-current field, or this lesson is
+paid for again.
+
+### `auth.md` "open AP" claim — captive portal is WPA2-protected
+
+**What happened.** The "Captive-portal credential handling" section
+added in PR-47 originally claimed the portal "is served from an open
+WiFi AP — there is no PSK, anyone in RF range can join." Hardware
+verification proved the opposite: the AP is WPA2-PSK with
+`HOST_PASSWORD` hardcoded in `host.cpp`. The fix-#46 reasoning ("don't
+echo the password to View Source") still holds, just for a different
+threat model than the doc described. Corrected in the same PR.
+
+**Why it happened.** The threat-model paragraph was drafted from the
+assumed shape of the AP, not the actual `WiFi.softAP(HOST_SSID,
+HOST_PASSWORD, …)` call. Code review and unit tests caught the fix;
+hardware testing (a Windows "enter network password" prompt when
+joining the AP) caught the doc.
+
+**How to avoid it next time.** When writing a threat-model paragraph
+about a WiFi or HTTP surface, grep for the actual API call
+(`WiFi.softAP`, `app.use(...)`, `addRoute`) and read its arguments
+before describing what the surface looks like to the network. Doc
+review needs to inspect the API, not just the surrounding prose.
 
 ### `lib/<name>/` includes diverge between PIO and arduino-cli (issue #36, PR #55)
 

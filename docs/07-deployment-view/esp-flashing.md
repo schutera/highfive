@@ -268,15 +268,19 @@ Then open `esp_log.txt` to read the boot log.
 
 ---
 
-## Reconfiguration (factory reset)
+## Reconfiguration (re-open the captive portal)
 
-To clear the saved configuration and re-enter setup mode:
+**Recommended path: re-flash the firmware via USB** with the new settings (see "Firmware update" section below). This is the cleanest reconfigure for a device on the bench — no LAN disruption, no auto-fallback timing.
 
-- Press and hold the **IO0** button for **5 seconds** while the module is powered.
-- The module resets its configuration and reopens the `ESP32-Access-Point`.
-- Repeat the initial setup process.
+**Bench-less alternative: WiFi-fail auto-fallback.**
 
-> Do not press RST during the hold — that enters flash mode instead of triggering the config reset.
+- Temporarily change your WiFi password (or take the SSID offline) so the module cannot join.
+- After **three consecutive failed joins (~2 minutes)**, the firmware clears the `configured` flag in NVS and the `ESP32-Access-Point` reopens automatically.
+- Reconnect to the AP and walk the captive portal again.
+- The previously-saved WiFi password remains in SPIFFS across this fallback (only the `configured` flag flips); leave the password field blank to keep it, or type a new one to overwrite.
+- Caveat: this disconnects every device on the affected SSID for the duration. Awkward for shared LANs.
+
+> The historical "hold IO0 for 5 seconds while powered" trigger is unreliable on standard ESP32-CAM hardware because GPIO0 is also the boot strap pin. Tracked in [issue #56](https://github.com/schutera/highfive/issues/56). Use one of the two paths above.
 
 ---
 

@@ -68,3 +68,53 @@ keeps onboarding to one secret while preserving the gating semantics.
   deployment); revisit if multi-tenancy is added.
 - All `duckdb-service` routes — assumed to be reachable only from
   inside the Docker `net` bridge. Don't expose this port to LAN.
+
+## Captive-portal credential handling
+
+The ESP32-CAM captive portal (`ESP32-CAM/host.cpp`'s `sendConfigForm`)
+is served from a WiFi AP whose WPA2 PSK is hardcoded in firmware
+(`HOST_PASSWORD` at `host.cpp`'s top-of-file constants, passed into
+the `WiFi.softAP` call in `setupAccessPoint`). The PSK is committed to
+source and reproduced in onboarding docs, so the threat model is
+"anyone with knowledge of the hardcoded PSK" — not an open network,
+but not far from one either: anyone who has read the codebase, the
+wiki, or guessed the default can join. The form is therefore a
+hostile rendering surface for any secret it has previously stored.
+
+- **WiFi password is never echoed back into the form.** The
+  `<input type="password">` field renders with `value=""` and a
+  placeholder hint. When a password is already saved, the field is
+  tagged `data-keep-current-on-empty="1"` so client-side
+  `validateForm` permits empty submission, and the `/save` handler
+  mirrors the contract by assigning `cfg_password` only when the
+  submitted value is non-empty. Submitting a non-empty value
+  overwrites. Fixed in issue #46 — previously the saved credential
+  was visible via View Source, and an earlier draft of the fix
+  shipped with a client-side validator that blocked the "keep
+  current" path so the placeholder promised a feature unreachable
+  through the UI (caught in PR-47 hardware testing — see chapter 11
+  lessons learned).
+- **The form cannot CLEAR the saved password — only overwrite or
+  preserve.** Today there is no UI affordance for "I want this
+  device to have no saved WiFi credential." Operators moving between
+  an open WiFi and a WPA2 home network would need a factory-reset
+  trigger that wipes SPIFFS (the in-firmware long-press path is
+  unreliable on standard ESP32-CAM hardware — see issue #56). Worth
+  filing as a separate UX issue if hobbyist deployment hits it.
+- **`Serial.println` of the saved password was redacted in #41.**
+  Earlier versions printed the credential to USB serial during boot.
+
+The `data-keep-current-on-empty` attribute is intentionally narrow:
+it pairs a JS validator skip with a server-side conditional
+assignment, and today only the password field has both halves wired
+up. If a future field needs the same "blank means keep current"
+semantics (an API key, an OAuth token), copying just the HTML
+attribute is not enough — the `/save` handler at
+`ESP32-CAM/host.cpp`'s `runAccessPoint` must also gain a matching
+`submitted.trim(); if (submitted.length() > 0) cfg_X = submitted;`
+branch (the trim guards against whitespace-only submissions from
+non-browser clients), or the empty submission will silently wipe the
+saved value. Module name and the
+init/upload URL fields are not secrets and use the conventional
+pre-fill pattern; do not add `data-keep-current-on-empty` to them
+without first wiring the server-side mirror.

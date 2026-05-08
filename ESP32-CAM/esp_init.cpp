@@ -2,6 +2,7 @@
 #include "esp_wifi.h"
 #include "esp_init.h"
 #include "led.h"
+#include "module_id.h"
 #include "wifi_diag.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -526,8 +527,13 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
     //http.begin("http://192.168.0.36:8002/new_module");
     http.addHeader("Content-Type", "application/json");
 
+    // Canonical 12-char lowercase-hex module ID (same as /upload + /heartbeat).
+    // Stringifying the uint64_t directly emitted a decimal that the
+    // duckdb-service ModuleId validator rejects with HTTP 400. See issue #39.
+    String macStr = String(hf::formatModuleId(esp_config->esp_ID).c_str());
+
     StaticJsonDocument<256> doc;
-    doc["esp_id"] = String(esp_config->esp_ID);
+    doc["esp_id"] = macStr;
     doc["module_name"] = esp_config->module_name;
     doc["latitude"] = String(esp_config->geolocation.latitude);
     doc["longitude"] = String(esp_config->geolocation.longitude);

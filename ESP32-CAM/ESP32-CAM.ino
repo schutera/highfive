@@ -194,8 +194,9 @@ void setup() {
     delay(500);
     camera_fb_t *fb = esp_camera_fb_get();
     if (fb) {
+      size_t fb_len = fb->len;
       esp_camera_fb_return(fb);
-      Serial.printf("---- warm-up frame %d OK (%u bytes)\n", i + 1, fb->len);
+      Serial.printf("---- warm-up frame %d OK (%u bytes)\n", i + 1, (unsigned)fb_len);
     } else {
       Serial.printf("---- warm-up frame %d skipped (NULL)\n", i + 1);
       warmupNulls++;
@@ -210,8 +211,9 @@ void setup() {
       delay(500);
       camera_fb_t *fb = esp_camera_fb_get();
       if (fb) {
+        size_t fb_len = fb->len;
         esp_camera_fb_return(fb);
-        Serial.printf("---- post-recovery frame %d OK (%u bytes)\n", i + 1, fb->len);
+        Serial.printf("---- post-recovery frame %d OK (%u bytes)\n", i + 1, (unsigned)fb_len);
       } else {
         Serial.printf("---- post-recovery frame %d skipped (NULL)\n", i + 1);
         recovNulls++;

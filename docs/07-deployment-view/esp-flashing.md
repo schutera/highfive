@@ -72,109 +72,6 @@ pio run -e esp32cam --target upload --upload-port <port>
 
 Find the port: **Device Manager → Ports → USB-SERIAL CH340 (COMx)** on Windows; `/dev/ttyUSB0` or `/dev/cu.usbserial-*` on Linux/Mac.
 
-> **Firmware version on the wire.** `ESP32-CAM/VERSION` is the single
-> source of truth for the bee-name release identifier. Both build paths
-> inject it as `-DFIRMWARE_VERSION="<value>"`:
->
-> - `pio run -e esp32cam` reads it via `ESP32-CAM/extra_scripts.py`.
-> - `bash ESP32-CAM/build.sh` (the arduino-cli release path used to
->   produce `homepage/public/firmware.bin` + `firmware.json`) reads it
->   via `--build-property`.
->
-> If you compile the sketch directly in Arduino IDE without going
-> through either path, the macro falls back to the literal string
-> `dev-unset`, which then surfaces in the boot log, the telemetry
-> sidecar `fw` field, and the `module_heartbeats.fw_version` column.
-> A flashed device reporting `dev-unset` is your signal that this binary
-> didn't go through the release pipeline — re-flash from `build.sh` or
-> `pio run` for a real release. See
-> [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md).
-
-### Cutting a release binary (`bash ESP32-CAM/build.sh`)
-
-The `pio run` flow is for development/upload. The `build.sh` flow is for
-producing the merged `homepage/public/firmware.bin` + matching
-`firmware.json` manifest that the OTA wizard serves. Run it when you
-bump `ESP32-CAM/VERSION` and want to publish a new release binary.
-
-`build.sh` invokes `arduino-cli` (not PlatformIO) so it has its own
-toolchain prerequisites. One-time setup on a fresh box:
-
-```bash
-# arduino-cli itself
-# Linux (incl. WSL):
-curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=$HOME/.local/bin sh
-export PATH="$HOME/.local/bin:$PATH"
-# Windows (PowerShell, then open a new shell so PATH refreshes):
-#   winget install ArduinoSA.CLI
-
-# ESP32 board core — pin to 2.0.17. The 3.x core changed the
-# esp_task_wdt_init signature and won't compile against this firmware.
-# (If you already use arduino-cli for non-HiveHive work, drop --overwrite
-# so `config init` doesn't clobber your existing arduino-cli.yaml; the
-# `config add` line below appends to it either way.)
-arduino-cli config init --overwrite
-arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-arduino-cli core update-index
-arduino-cli core install esp32:esp32@2.0.17
-
-# ArduinoJson (matches platformio.ini's pinned version)
-arduino-cli lib install "ArduinoJson@6.21.5"
-
-# pyserial (esptool's Python dep, not bundled). On Debian/Ubuntu/WSL:
-pip3 install --user pyserial
-# Or via apt: sudo apt install -y python3-serial
-```
-
-Then run the build:
-
-```bash
-bash ESP32-CAM/build.sh
-```
-
-`build.sh` exits non-zero with a clear error if any prereq is missing.
-On success, it prints `Verified: FIRMWARE_VERSION=<bee-name> is in the
-binary as a plain string.` (the post-compile guard) and writes
-`homepage/public/firmware.bin` plus `firmware.json`.
-
-If the post-compile guard fires, the most likely cause is the
-arduino-cli `--build-property` quote escaping has drifted; the guard
-exists specifically to catch that failure mode before it ships a
-broken binary. See the inline comments in `build.sh` for the exact
-escaping rules.
-
-#### Flash params (override only if needed)
-
-`build.sh` defaults to `dio / 80m / 4MB` flash params, which match the
-standard AI Thinker ESP32-CAM. A small fraction of older units in the
-wild have 40MHz-rated flash and won't boot from an 80MHz image. If
-you're cutting a release for one of those, override:
-
-```bash
-FLASH_FREQ=40m bash ESP32-CAM/build.sh
-# (or FLASH_MODE=qio / FLASH_SIZE=8MB for non-default boards)
-```
-
-#### Adding a new `lib/<name>/` module
-
-When you add a new host-testable C++ helper under `ESP32-CAM/lib/`,
-**include its header by bare name** from any sketch source that uses
-it:
-
-```cpp
-#include "module_id.h"   // CORRECT — both PIO and arduino-cli auto-compile lib/module_id/
-#include "lib/module_id/module_id.h"   // WRONG — PIO accepts it, arduino-cli compiles
-                                       //   the header but never links the lib's .cpp,
-                                       //   producing silent undefined-reference errors
-                                       //   only at the arduino-cli release step.
-```
-
-This is non-obvious because both styles "work" under `pio run`. The
-divergence is only caught when `bash build.sh` actually runs, which CI
-does not do today. Bisected at non-zero cost in PR #55 for `wifi_diag`
-and `led_state` — see the lessons-learned entry in
-[chapter 11](../11-risks-and-technical-debt/README.md).
-
 ### Boot normally after flashing
 
 Press **RST** once (without IO0). The module boots and opens the configuration access point — verify by opening your phone's WiFi list and looking for `ESP32-Access-Point`. The on-board LED stays silent in AP mode (the LED is the camera-flash GPIO; steady-state signalling would be obnoxious). See [the LED legend in chapter 06](../06-runtime-view/esp-reliability.md#led-legend) for the brief failure / upload pulses the LED does emit during normal operation.
@@ -268,19 +165,14 @@ Then open `esp_log.txt` to read the boot log.
 
 ---
 
-## Reconfiguration (re-open the captive portal)
+## Reconfiguration (factory reset)
 
-**Recommended path: re-flash the firmware via USB** with the new settings (see "Firmware update" section below). This is the cleanest reconfigure for a device on the bench — no LAN disruption, no auto-fallback timing.
+To clear the saved configuration and re-enter setup mode:
 
-**Bench-less alternative: WiFi-fail auto-fallback.**
+- **From AP mode** (`ESP32-Access-Point` visible): connect to it, open <http://192.168.4.1>, expand **Factory reset (advanced)**, tick the confirmation checkbox, and click **Factory reset**. The module reboots and reopens the AP.
+- **From STA mode** (joined WiFi): cause three consecutive failed joins to trigger the auto-AP-fallback, then follow the AP-mode steps. The least disruptive way: reconnect to `ESP32-Access-Point`, open `http://192.168.4.1`, and save intentionally wrong WiFi credentials — the board will fail three times (~90 s total) and reopen the AP automatically. Or, with a serial cable: `pio run -t erase && pio run -t upload`.
 
-- Temporarily change your WiFi password (or take the SSID offline) so the module cannot join.
-- After **three consecutive failed joins (~2 minutes)**, the firmware clears the `configured` flag in NVS and the `ESP32-Access-Point` reopens automatically.
-- Reconnect to the AP and walk the captive portal again.
-- The previously-saved WiFi password remains in SPIFFS across this fallback (only the `configured` flag flips); leave the password field blank to keep it, or type a new one to overwrite.
-- Caveat: this disconnects every device on the affected SSID for the duration. Awkward for shared LANs.
-
-> The historical "hold IO0 for 5 seconds while powered" trigger is unreliable on standard ESP32-CAM hardware because GPIO0 is also the boot strap pin. Tracked in [issue #56](https://github.com/schutera/highfive/issues/56). Use one of the two paths above.
+> The legacy "hold IO0 for 5 seconds" procedure was removed in #40 — GPIO0 is a strap pin, the procedure was unreachable on AI Thinker ESP32-CAM-MB boards. See chapter 11 "Lessons learned" for the post-mortem.
 
 ---
 

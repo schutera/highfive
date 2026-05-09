@@ -11,7 +11,6 @@
 #include <esp_system.h>
 
 
-#define CONFIG_BUTTON 0
 #define HEARTBEAT_INTERVAL_MS (60UL * 60UL * 1000UL)  // 1 hour
 #define DAILY_REBOOT_MS       (24UL * 3600UL * 1000UL)
 // Watchdog timeout: budget = capture+upload+heartbeat (~10–25 s under
@@ -19,16 +18,8 @@
 // the worst case. 60 s gives a safety margin while still rebooting on
 // genuine deadlocks within ~1 minute.
 #define TASK_WDT_TIMEOUT_S    60
-// Factory-reset hold (CONFIG button held at boot for this long clears
-// `configured` in NVS and reboots into the captive portal). The Serial
-// prints below derive their second-count from FACTORY_RESET_HOLD_MS so
-// firmware logs can't drift. User-facing wizard strings, troubleshooting
-// docs, and onboarding skill copy still hardcode "5 seconds" — keep
-// them in lockstep with this macro by hand or via `make check-citations`.
-#define FACTORY_RESET_HOLD_MS    5000UL
-#define FACTORY_RESET_SETTLE_MS  500UL
-// WIFI_FAIL_AP_FALLBACK_THRESH lives in esp_init.h alongside the NVS
-// fail-counter helpers it gates on.
+// FACTORY_RESET_SETTLE_MS and WIFI_FAIL_AP_FALLBACK_THRESH live in
+// esp_init.h alongside the NVS helpers they gate on.
 
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
@@ -47,8 +38,6 @@ unsigned long lastHeartbeatMs = 0;
 */
 void setup() {
   Serial.begin(115200);
-
-  pinMode(CONFIG_BUTTON, INPUT_PULLUP);
 
   if (!SPIFFS.begin(true)) {
     Serial.println("SPIFFS Mount Failed");
@@ -78,23 +67,15 @@ void setup() {
 
   strlcpy(esp_config.CONFIG_FILE, CONFIG_FILE_PATH, sizeof(esp_config.CONFIG_FILE));
 
-  // Check for config reset: hold GPIO0 LOW for FACTORY_RESET_HOLD_MS at boot.
-  // Must happen before camera init claims GPIO0 for XCLK.
-  if (digitalRead(CONFIG_BUTTON) == LOW) {
-    Serial.printf("CONFIG button held at boot - hold for %lus to reset...\n",
-                  FACTORY_RESET_HOLD_MS / 1000UL);
-    unsigned long start = millis();
-    while (digitalRead(CONFIG_BUTTON) == LOW) {
-      if (millis() - start > FACTORY_RESET_HOLD_MS) {
-        Serial.println("Long press detected - resetting config");
-        setESPConfigured(false);
-        delay(FACTORY_RESET_SETTLE_MS);
-        ESP.restart();
-      }
-      delay(50);
-    }
-    Serial.println("Button released, continuing normal boot");
-  }
+  // Note: an earlier "hold IO0 for 5 s at boot to factory-reset" path used
+  // to live here. It was unreachable on AI Thinker ESP32-CAM-MB because
+  // GPIO0 is a strap pin — the ROM samples it at the moment EN releases,
+  // so holding it LOW enters UART download mode and this firmware never
+  // runs. Removed in #40. The supported reset paths are:
+  //   1. The 3-WiFi-fail auto-fallback below (re-opens AP).
+  //   2. POST /factory_reset on the captive portal (host.cpp).
+  //   3. `pio run -t erase` over a serial cable.
+  // See docs/troubleshooting.md "Factory reset" for details.
 
   /*
     ESP opens WiFi access point to receive the configuration from user input
@@ -117,7 +98,8 @@ void setup() {
   } else {
     // Auto-fallback: if previous boots have repeatedly failed to join the
     // saved network, clear the configured flag so the next boot re-opens
-    // the captive portal. Faster recovery than the 5-second reset hold.
+    // the captive portal. Same NVS mutation as POST /factory_reset on the
+    // captive portal; this path triggers automatically without user input.
     uint8_t wifiFails = getWifiFailCount();
     if (wifiFails >= WIFI_FAIL_AP_FALLBACK_THRESH) {
       Serial.printf("-- %u consecutive WiFi join failures — re-entering AP mode\n",
@@ -127,23 +109,10 @@ void setup() {
       delay(FACTORY_RESET_SETTLE_MS);
       ESP.restart();
     }
-    // The historical "hold CONFIG (GPIO0), tap RESET, keep holding for N
-    // seconds" trigger is unreliable on standard ESP32-CAM hardware: GPIO0
-    // is also the boot strap pin, so holding it LOW during the RESET tap
-    // routes the chip into ROM DOWNLOAD_BOOT before app code runs (and on
-    // some boards reproducibly produces an ets_main.c flash-read-err loop
-    // that requires re-flashing to recover). Tracked in issue #56. The
-    // working trigger today is the WiFi-fail auto-fallback above: if the
-    // saved credentials stop working for WIFI_FAIL_AP_FALLBACK_THRESH boots
-    // in a row, the device clears `configured` and re-opens the captive
-    // portal automatically. The GPIO0 long-press check earlier in this
-    // setup() is retained for boards where it does work (and as last-resort
-    // recovery), but is no longer advertised in the user-facing print.
-    Serial.printf("-- ESP already configured. To reconfigure: temporarily "
-                  "change your WiFi credentials so the device fails to join %u "
-                  "times in a row; it will auto-fall-back to the captive "
-                  "portal. (See issue #56 for the historical GPIO0 trigger.)\n",
-                  (unsigned)WIFI_FAIL_AP_FALLBACK_THRESH);
+    Serial.println("-- ESP already configured. To reconfigure:");
+    Serial.println("   (1) Cause 3 consecutive WiFi-join failures (e.g. save wrong credentials) — board auto-reopens AP at http://192.168.4.1.");
+    Serial.println("   (2) Once at the captive portal, expand 'Factory reset (advanced)' and submit.");
+    Serial.println("   (3) Or via serial cable: cd ESP32-CAM && pio run -t erase && pio run -t upload");
   }
 
   Serial.println("[ESP] INITIALIZING ESP");
@@ -349,9 +318,6 @@ void loop() {
   // the watchdog fires and reboots the device.
   esp_task_wdt_reset();
   ledTick();
-
-  // NOTE: GPIO0 config button check moved to setup() — it cannot be read
-  // reliably here because the camera XCLK drives GPIO0 after init.
 
   // Daily reboot safety net: prevents long-running drift (lwIP state, NVS
   // wear oddities, slow heap fragmentation). Triggers once at 24h uptime

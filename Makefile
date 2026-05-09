@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware test test-esp test-esp-native test-e2e test-e2e-deps check-citations
+.PHONY: help firmware test test-esp test-esp-native test-e2e test-e2e-deps check-citations check-stale-reset-prose
 
 help:
 	@echo "HiveHive — available make targets"
@@ -16,6 +16,8 @@ help:
 	@echo "  make test-e2e           Run end-to-end pipeline test (boots docker compose)"
 	@echo "  make test-e2e-deps      Install Python deps for the e2e test"
 	@echo "  make check-citations    Verify path:line citations in docs/ + CLAUDE.md still resolve"
+	@echo "  make check-stale-reset-prose"
+	@echo "                          Catch broken pre-#40 'hold IO0 for N seconds' factory-reset prose"
 	@echo ""
 	@echo "Prerequisites:"
 	@echo "  firmware    →   arduino-cli with esp32:esp32 core installed"
@@ -52,3 +54,7 @@ test-e2e:
 check-citations:
 	@echo ">>> bash scripts/check-doc-citations.sh"
 	@bash scripts/check-doc-citations.sh
+
+check-stale-reset-prose:
+	@echo ">>> bash scripts/check-stale-reset-prose.sh"
+	@bash scripts/check-stale-reset-prose.sh

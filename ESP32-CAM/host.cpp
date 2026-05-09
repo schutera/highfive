@@ -178,7 +178,7 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   "h1{text-align:center;margin-top:0;font-size:26px;}"
 
   ".section{margin-top:28px;padding-top:18px;border-top:1px solid var(--border);}"
-  ".section h2{margin:0 0 10px 0;font-size:18px;}"
+  ".section h2,.summary-as-h2{margin:0 0 10px 0;font-size:18px;font-weight:600;cursor:pointer;}"
   ".section-desc{font-size:13px;color:var(--muted);margin-bottom:16px;}"
 
   ".field{margin-bottom:18px;}"
@@ -349,7 +349,27 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<button type=\"submit\">Save Configuration</button>");
   client.println("<div id=\"errorText\" class=\"error-message\">Enter missing details before saving configuration.</div>");
 
-  client.println("</form></div></div></body></html>");
+  client.println("</form>");
+
+  // Factory reset is a separate form so the main Save button can't
+  // accidentally trigger it. Collapsed inside <details> by default.
+  // Issue #40: replaces the old "hold IO0 at boot" path which never
+  // actually worked because GPIO0 is a strap pin.
+  client.println("<form action=\"/factory_reset\" method=\"POST\" autocomplete=\"off\">");
+  client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
+  client.println("<details class=\"section\">");
+  // <summary> is the screen-reader heading for the disclosure widget;
+  // wrapping <h2> inside it would announce the label twice.
+  client.println("<summary class=\"summary-as-h2\">Factory reset (advanced)</summary>");
+  client.println("<div class=\"section-desc\">Reboots the module back into this configuration portal so you can re-enter or edit the saved settings. Your previous values prefill the form for editing. Use this when moving the module to a new WiFi network or when login credentials changed.</div>");
+  client.println("<div class=\"field\">");
+  client.println("<label><input type=\"checkbox\" name=\"confirm\" value=\"yes\" required> I understand this reboots the module and reopens the configuration portal.</label>");
+  client.println("</div>");
+  client.println("<button type=\"submit\">Factory reset</button>");
+  client.println("</details>");
+  client.println("</form>");
+
+  client.println("</div></div></body></html>");
   client.println();
 }
 
@@ -514,6 +534,57 @@ void runAccessPoint() {
                 } else {
                   // /save but no params: show form
                   sendConfigForm(client, false);
+                }
+
+              } else if (fullPath.startsWith("/factory_reset")) {
+                // POST-only endpoint that wipes the NVS configured flag
+                // and reboots straight into AP mode. Issue #40 option A —
+                // replaces the broken GPIO0-hold path that never worked
+                // because GPIO0 is a strap pin on the AI Thinker board.
+                String query;
+                if (isPost) {
+                  query = body;
+                }
+
+                String sessionParam = getParam(query, "session");
+                String confirmParam = getParam(query, "confirm");
+                if (!isPost || sessionParam != sessionToken || confirmParam != "yes") {
+                  // Bad request. Render the form without leaking which check failed
+                  // to the client, but log the reason locally so a developer at the
+                  // serial monitor can see why their curl test isn't working.
+                  Serial.printf("[host] /factory_reset rejected: isPost=%d sessionOk=%d confirmOk=%d\n",
+                                (int)isPost,
+                                (int)(sessionParam == sessionToken),
+                                (int)(confirmParam == "yes"));
+                  sendConfigForm(client, false);
+                } else {
+                  Serial.println("[host] Factory reset requested via captive portal");
+                  // Tiny inline response page; the restart cuts the socket within ms.
+                  // The 60 s meta-refresh is a best-effort nudge — meta-refresh has
+                  // no event hook for "SSID has come back", just a fixed timer, and
+                  // an iOS/Android SSID switch round-trip can be 30+ s. If the user
+                  // is still off-network when the timer fires, the page errors and
+                  // the copy below tells them to reload manually. Better than
+                  // pretending the browser knows when the AP is back.
+                  client.println("HTTP/1.1 200 OK");
+                  client.println("Content-type:text/html");
+                  client.println("Connection: close");
+                  client.println();
+                  client.println("<!doctype html><html><head>");
+                  client.println("<meta http-equiv=\"refresh\" content=\"60; url=http://192.168.4.1/\">");
+                  client.println("</head><body>");
+                  client.println("<h1>Factory reset</h1>");
+                  client.println("<p>The module is rebooting and will reopen the WiFi access point in a moment. Reconnect your phone to <code>ESP32-Access-Point</code>, then either wait up to 60 seconds for this page to refresh on its own, or reload it manually.</p>");
+                  client.println("</body></html>");
+                  // WiFiClient::flush() on Arduino-ESP32 is best-effort — it
+                  // doesn't guarantee bytes have actually left the radio. The
+                  // 500 ms FACTORY_RESET_SETTLE_MS below is what gives the TCP
+                  // stack a fighting chance to drain before ESP.restart().
+                  client.flush();
+
+                  setESPConfigured(false);
+                  delay(FACTORY_RESET_SETTLE_MS);  // give the kernel time to flush the TCP FIN
+                  ESP.restart();
                 }
 
               } else {

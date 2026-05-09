@@ -49,51 +49,21 @@ The IO0 pin must be grounded **before** the reset signal is sent.
 
 If it still hangs, check the USB cable (some cables are charge-only) and the COM port selection.
 
-### Setup wizard step 2 finishes in <1s with "Firmware installiert" but the board still runs old firmware
+### Setup wizard step 2 says "/firmware.bin not found" / 404
 
-**Symptom:** Step 2 flashes green almost immediately (instead of the
-expected ~20 s), the board reboots, and you discover after the fact
-that the new firmware never landed.
-
-**Cause:** `homepage/public/firmware.bin` is missing or stale. Vite's
-SPA dev fallback serves `index.html` with HTTP 200 + `text/html` for
-any unknown path, so the wizard's `fetch('/firmware.bin')` succeeds
-on what is in fact an HTML page. Issue #43.
-
-**Fix:** the wizard now validates the response shape — `Content-Type`
-must not be HTML, and the first byte must be `0xE9` (the ESP32 image
-magic byte). If either check fails, Step 2 surfaces a clear error
-pointing at this fix. Build the firmware:
+The wizard pins firmware to a local `homepage/public/firmware.bin`
+file (commit `f7300b9`). That file is **not** checked in — it lands
+there only after `ESP32-CAM/build.sh` runs:
 
 ```bash
-make firmware              # wraps ESP32-CAM/build.sh
-# or directly:
-cd ESP32-CAM && ./build.sh # writes homepage/public/firmware.bin + firmware.json
+cd ESP32-CAM
+./build.sh                # writes homepage/public/firmware.bin + firmware.json
 ```
 
-`ESP32-CAM/build.sh's` final block writes the manifest and binary
-together. The file is not checked in; on shared checkouts, regenerate
-after every firmware change.
-
-### Setup wizard step 5 shows "Backend Server Not Reachable" mid-poll
-
-**Symptom:** the wizard passed the initial healthcheck on Step 5 and
-started polling, but the red "Backend Server Not Reachable" branch
-appears (instead of the orange "Module Not Detected Yet" timeout
-screen) before any module shows up.
-
-**Cause:** the backend went silent during the 2-minute poll window —
-`docker compose stop backend`, an OOM kill, or a network hiccup
-between the homepage and `:3002`. Issue #44 used to mis-classify this
-as a timeout and direct users to factory-reset the ESP, which would
-fix nothing. The wizard now tracks consecutive trailing poll failures
-and flips to the unreachable branch when ≥5 of the last polls
-network-failed.
-
-**Fix:** restart the backend (`docker compose up -d backend`), then
-click **Check Again** on the wizard. The pre-poll healthcheck retries
-8× before failing, so the wizard recovers on its own once the backend
-is healthy.
+`build.sh:33-37` writes the manifest and binary together. Without that
+build step, step 2 of the wizard 404s on the OTA URL. If you've never
+flashed firmware on this checkout, run `build.sh` first; on shared
+checkouts, regenerate after every firmware change.
 
 ### PlatformIO not found / "No module named platformio"
 
@@ -200,13 +170,22 @@ Three quick pulses (~450 ms total) means the most recent WiFi join timed out. Th
 
 Note: the LED stays silent in AP mode — the on-board LED is the camera flash, so steady-state signalling would be obnoxious. Use the phone's WiFi list to confirm the captive portal is back, not the LED.
 
-### Re-open the configuration portal
+### Factory reset to re-enter configuration
 
-**Recommended:** re-flash the firmware via USB with new settings — see [docs/07-deployment-view/esp-flashing.md](07-deployment-view/esp-flashing.md). This is the cleanest path if the device is on your bench.
+Two paths, depending on whether the module is currently in AP mode or already joined to WiFi:
 
-**No USB access?** Use the WiFi-fail auto-fallback: temporarily change your WiFi credentials (or take the SSID offline) so the module cannot join. After **three consecutive failed joins (~2 minutes)** the firmware clears `configured` in NVS and the `ESP32-Access-Point` reopens. The saved password in SPIFFS is preserved across this fallback — only the `configured` flag flips. Note: this temporarily disconnects every device on the SSID, so it's an awkward path for shared LANs.
+**From AP mode** (the `ESP32-Access-Point` SSID is visible — either a fresh-flashed board, or one that hit the 3-consecutive-WiFi-join-failure auto-fallback):
 
-The historical "hold IO0 for 5 seconds while powered" trigger is **unreliable on standard ESP32-CAM hardware** because GPIO0 is also the boot strap pin: holding it LOW around RESET routes the chip into ROM `DOWNLOAD_BOOT` (no app code runs), and finger-roll attempts have produced reproducible flash-read-error boot loops requiring a full re-flash. Tracked in [issue #56](https://github.com/schutera/highfive/issues/56). The IO0 long-press code is retained in firmware as last-resort recovery but not advertised here.
+1. Connect to `ESP32-Access-Point` and visit <http://192.168.4.1>.
+2. Scroll to the **Factory reset (advanced)** section at the bottom of the form.
+3. Tick the confirmation checkbox and click **Factory reset**. The module reboots and reopens the AP for fresh configuration.
+
+**From STA mode** (the module joined WiFi but you want to move it to a different network) — there is no in-band reset. Either:
+
+- Cause three consecutive WiFi-join failures so the module's auto-fallback re-opens `ESP32-Access-Point`, then use the AP-mode steps above. The least disruptive way: reconnect to `ESP32-Access-Point`, open `http://192.168.4.1`, and save intentionally wrong WiFi credentials — the board will fail three times (~90 s total) and reopen the AP automatically.
+- Or, with a serial cable: `cd ESP32-CAM && pio run -t erase && pio run -t upload`.
+
+> The "hold IO0 for 5 seconds" procedure documented in older guides did not work — GPIO0 is a strap pin and holding it LOW at boot puts the ESP32 into UART download mode instead of running the firmware. Removed in #40; see chapter 11 "Lessons learned" for the post-mortem.
 
 ---
 

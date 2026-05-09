@@ -6,4 +6,9 @@
 # past-EOF citations; warns (without failing) on blank-line landings
 # so legitimate "quoted past mistake" examples in lessons-learned don't
 # block the push.
-bash scripts/check-doc-citations.sh
+bash scripts/check-doc-citations.sh || exit 1
+
+# Catch broken pre-#40 factory-reset prose ("hold IO0 / the left button
+# for N seconds") regressing in user-facing surfaces. See
+# docs/11-risks-and-technical-debt/README.md "GPIO0 is a strap pin".
+bash scripts/check-stale-reset-prose.sh || exit 1

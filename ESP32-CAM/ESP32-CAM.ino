@@ -55,8 +55,6 @@ void setup() {
   bool hadRecoveredCrumb =
       hf::breadcrumbReadAndClear(recoveredCrumb, sizeof(recoveredCrumb));
 
-  pinMode(CONFIG_BUTTON, INPUT_PULLUP);
-
   // Issue #42: SPIFFS.begin(true) auto-formats on a corrupted partition,
   // which can run for several seconds with no esp_task_wdt_reset. Set
   // the breadcrumb just before the call so a TASK_WDT here is

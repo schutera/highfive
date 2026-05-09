@@ -1,6 +1,15 @@
 import type { Module, ModuleDetail } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
+// Fail loudly on production builds with empty/missing build-args - the
+// dev fallbacks below would otherwise silently bake the dev key + dev
+// API URL into a prod bundle (e.g. a standalone `docker build` without
+// --build-arg). docker-compose.prod.yml already rejects empty values
+// upstream via ${VAR:?msg}, but this guards direct-build paths too.
+if (import.meta.env.PROD && (!import.meta.env.VITE_API_URL || !import.meta.env.VITE_API_KEY)) {
+  throw new Error('VITE_API_URL and VITE_API_KEY must be set at build time for production builds');
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 
 export interface TelemetryEntry {

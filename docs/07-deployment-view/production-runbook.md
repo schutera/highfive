@@ -1,13 +1,14 @@
-# Production Runbook (Nginx + PM2)
+# Production Runbook (Nginx + PM2) — non-recommended bare-metal path
 
-> ⚠️ **This runbook is incomplete and deploys a partial stack.**
-> Only the Node backend (PM2) and the static frontend (Nginx-served)
-> are covered. The upload pipeline (`image-service` + `duckdb-service`,
-> both Python/Flask) is **not** described here, and the backend is
-> not configured to reach them. Following this guide as-shipped gives
-> you a dashboard that loads but cannot ingest images. Tracked as a
-> follow-up issue (see chapter 11 for the cross-link). Use this
-> runbook only for partial-stack experiments until that issue lands.
+> ⚠️ **Non-recommended legacy path.** This runbook covers only the
+> Node backend (PM2) and the static frontend (Nginx-served). It does
+> **not** describe how to deploy `image-service` and `duckdb-service`
+> on bare metal — those would each need their own systemd service,
+> shared filesystem volume, and reverse-proxy plumbing. The supported
+> production path is **Docker Compose + host-Nginx**:
+> [production-deployment.md](production-deployment.md). Use this PM2
+> runbook only if Docker is not an option on the target host; expect
+> to fill in the upload-pipeline plumbing yourself.
 
 ## Overview
 
@@ -15,7 +16,7 @@ This runbook covers deploying HighFive to production at
 `highfive.schutera.com` using Nginx as the public-facing reverse proxy
 and PM2 to supervise the Node backend on bare metal — no Docker.
 
-For a Docker-Compose-based production deploy, see
+For the supported Docker-Compose-based production deploy, see
 [production-deployment.md](production-deployment.md). For dev-laptop
 setup, see [docker-compose.md](docker-compose.md).
 
@@ -384,14 +385,20 @@ Environment="HIGHFIVE_API_KEY=your_generated_key_here"
 
 ### Frontend Configuration
 
-The frontend API key is built into the image during Docker build:
+The frontend API key is built into the image during Docker build. The
+homepage Dockerfile requires the **repo root** as build context (so npm
+workspaces resolve `@highfive/contracts`), and `VITE_API_URL` must
+include the `/api` suffix (`homepage/src/services/api.ts`'s `ApiService`
+appends resource paths directly to it):
 
 ```bash
+# From the repo root (NOT from ./homepage - the workspace wouldn't resolve)
 docker build \
+  -f homepage/Dockerfile \
   --build-arg VITE_API_KEY=your_key \
-  --build-arg VITE_API_URL=https://api.highfive.schutera.com \
+  --build-arg VITE_API_URL=https://api.highfive.schutera.com/api \
   -t highfive-frontend \
-  ./homepage
+  .
 ```
 
 ## Security Notes

@@ -81,9 +81,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
   it('GET /api/images logs and 502s when fetch rejects', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('img-list down')) as typeof fetch;
 
-    const res = await request(app)
-      .get('/api/images?module_id=aabbccddeeff')
-      .set('X-API-Key', KEY);
+    const res = await request(app).get('/api/images?module_id=aabbccddeeff').set('X-API-Key', KEY);
 
     expect(res.status).toBe(502);
     expect(consoleError).toHaveBeenCalledWith(
@@ -98,9 +96,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
   it('DELETE /api/images/:filename logs and 502s when fetch rejects', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('delete fetch down')) as typeof fetch;
 
-    const res = await request(app)
-      .delete('/api/images/foo.jpg')
-      .set('X-API-Key', KEY);
+    const res = await request(app).delete('/api/images/foo.jpg').set('X-API-Key', KEY);
 
     expect(res.status).toBe(502);
     expect(consoleError).toHaveBeenCalledWith(
@@ -115,9 +111,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
   it('DELETE /api/modules/:id logs and 502s when fetch rejects', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('mod delete down')) as typeof fetch;
 
-    const res = await request(app)
-      .delete(`/api/modules/${VALID_ID}`)
-      .set('X-API-Key', KEY);
+    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
 
     expect(res.status).toBe(502);
     expect(consoleError).toHaveBeenCalledWith(

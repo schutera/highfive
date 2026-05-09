@@ -132,4 +132,3 @@ def test_get_modules_returns_json_500_on_query_failure(client, monkeypatch):
     # forces any consumer that ignores the status to TypeError on
     # data.modules.map rather than render an empty fleet.
     assert "modules" not in body
-

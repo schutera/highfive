@@ -1,37 +1,122 @@
-version: '3.8'
-
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # Repo root context is required so npm workspaces (@highfive/contracts)
+      # resolve. See backend/Dockerfile.
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: highfive-backend
+    # 127.0.0.1 bind: backend is reachable only via host-Nginx terminator,
+    # never directly from the public internet. See
+    # docs/07-deployment-view/production-deployment.md.
     ports:
-      - '3001:3001'
+      - '127.0.0.1:3001:3001'
     environment:
       - NODE_ENV=production
-      - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:-hf_dev_key_2026}
+      - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:?HIGHFIVE_API_KEY must be set in .env.production (see .env.production.example)}
       - PORT=3001
+      - DUCKDB_SERVICE_URL=http://duckdb-service:8000
+      - IMAGE_SERVICE_URL=http://image-service:4444
     restart: unless-stopped
     networks:
       - highfive-network
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
 
   frontend:
     build:
-      context: ./homepage
-      dockerfile: Dockerfile
+      # Repo root context for the same reason as backend.
+      context: .
+      dockerfile: homepage/Dockerfile
       args:
-        - VITE_API_URL=https://api.highfive.schutera.com
-        - VITE_API_KEY=${VITE_API_KEY:-hf_dev_key_2026}
+        # Must include the /api suffix - homepage/src/services/api.ts's
+        # ApiService concatenates resource paths directly onto baseUrl
+        # (e.g. ${baseUrl}/modules), and backend/src/app.ts mounts every
+        # business route under /api/*. Without the suffix, every dashboard
+        # fetch 404s.
+        - VITE_API_URL=https://api.highfive.schutera.com/api
+        - VITE_API_KEY=${VITE_API_KEY:?VITE_API_KEY must be set in .env.production (see .env.production.example)}
     container_name: highfive-frontend
+    # 127.0.0.1 bind: frontend is reachable only via host-Nginx terminator
+    # on :443. The previous '80:80' direct bind plus dead '443:443' mapping
+    # was Topology A (HTTP-only) - now superseded by host-Nginx + TLS.
     ports:
-      - '80:80'
-      - '443:443'
+      - '127.0.0.1:8081:80'
     restart: unless-stopped
     networks:
       - highfive-network
     depends_on:
       - backend
+
+  image-service:
+    build:
+      context: ./image-service
+      # Dockerfile.dev is workspace-free and functionally identical to
+      # what a minimal prod Dockerfile would be (Flask app.py, no live
+      # bind-mounts at runtime). A future hardening pass (gunicorn,
+      # non-root user) gets its own Dockerfile then.
+      dockerfile: Dockerfile.dev
+    container_name: highfive-image-service
+    # 127.0.0.1 bind: image-service is reached only via the host-Nginx
+    # port-80 vhost which proxies /upload to 127.0.0.1:8000. ESP firmware
+    # cannot reach this loopback port directly; the public surface is
+    # the host-Nginx port-80 vhost on highfive.schutera.com. Same
+    # internal-only-via-loopback pattern as backend, frontend, and
+    # duckdb-service.
+    ports:
+      - '127.0.0.1:8000:4444'
+    environment:
+      - DUCKDB_PATH=/data/app.duckdb
+      - DUCKDB_SERVICE_URL=http://duckdb-service:8000
+    volumes:
+      - duckdb_data:/data
+    restart: unless-stopped
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
+    networks:
+      - highfive-network
+
+  duckdb-service:
+    build:
+      context: ./duckdb-service
+      # Reused from dev compose - see image-service comment above.
+      dockerfile: Dockerfile.dev
+    container_name: highfive-duckdb-service
+    # 127.0.0.1 bind: host-Nginx proxies /new_module and /heartbeat
+    # (the only two ESP firmware paths that hit duckdb-service directly)
+    # via 127.0.0.1:8002. Production never exposes duckdb-service to the
+    # public internet - ADR-001 (DuckDB as sole writer); the public
+    # surface is the backend API on api.highfive.schutera.com.
+    #
+    # The absence of a public-interface ports entry is what enforces
+    # internal-only - `expose:` alone is purely cosmetic on a user-defined
+    # bridge network.
+    ports:
+      - '127.0.0.1:8002:8000'
+    environment:
+      - SEED_DATA=false
+    volumes:
+      - duckdb_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - highfive-network
+
+volumes:
+  duckdb_data:
 
 networks:
   highfive-network:

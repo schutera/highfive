@@ -113,7 +113,9 @@ def test_delete_5xx_leaves_file_in_place_and_forwards_status(
 def test_delete_503_also_leaves_file_in_place(
     app, client, installed_image, monkeypatch
 ):
-    _patch_duckdb_delete(app, monkeypatch, _Resp(503, {"error": "unavailable"}, text="x"))
+    _patch_duckdb_delete(
+        app, monkeypatch, _Resp(503, {"error": "unavailable"}, text="x")
+    )
 
     resp = client.delete(f"/images/{installed_image.name}")
 

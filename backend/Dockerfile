@@ -1,31 +1,75 @@
+# backend/Dockerfile (production)
+#
+# Build context is the repo root (see docker-compose.prod.yml). The
+# image installs the whole npm workspace (contracts + backend + homepage)
+# so the `@highfive/contracts` workspace symlink resolves at build and
+# runtime. The image does NOT bind-mount source - the dist/ is baked in.
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy lockfile + every workspace package.json so `npm ci` can resolve
+# the workspace graph without needing the rest of the source.
+COPY package.json package-lock.json ./
+COPY contracts/package.json ./contracts/package.json
+COPY backend/package.json ./backend/package.json
+COPY homepage/package.json ./homepage/package.json
+
+RUN npm ci
+
+# Contracts source - backend imports its types at compile time.
+COPY contracts ./contracts
+
+# Backend source.
+COPY backend ./backend
+
+WORKDIR /app/backend
+RUN npm run build
+
+# Compile contracts to CommonJS JS for the runtime stage.
+# contracts/package.json "main":"src/index.ts" is intentional for dev (tsx
+# loads it transparently), but plain `node` in prod cannot parse TypeScript.
+# Compiled output is placed at /tmp/contracts-js/index.js and copied into
+# the runtime stage under the same filename the "main" field expects.
+WORKDIR /app
+RUN node_modules/.bin/tsc \
+    --module commonjs \
+    --moduleResolution node \
+    --target ES2020 \
+    --declaration false \
+    --rootDir contracts/src \
+    --outDir /tmp/contracts-js \
+    contracts/src/index.ts
+
+# ---- Runtime stage ----
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Re-install with --omit=dev for a slim runtime image. Workspace
+# package.jsons must be present so the contracts symlink resolves.
+COPY package.json package-lock.json ./
+COPY contracts/package.json ./contracts/package.json
+COPY backend/package.json ./backend/package.json
+COPY homepage/package.json ./homepage/package.json
 
-# Install all dependencies (including dev dependencies for build)
-RUN npm install
+RUN npm ci --omit=dev --ignore-scripts
 
-# Create images directory
-RUN mkdir -p /app/images
+# contracts/package.json intentionally points "main" at "src/index.ts" so
+# that tsx (dev) and tsc (compile-time) both find TypeScript source.  Plain
+# `node` cannot parse TypeScript, so we compile contracts to CJS JS in the
+# builder stage and copy the output here under the same filename the "main"
+# field expects.  Node loads files by path regardless of extension, so the
+# .ts filename causes no issue at runtime.
+RUN mkdir -p contracts/src
+COPY --from=builder /tmp/contracts-js/index.js ./contracts/src/index.ts
 
-# Copy source code
-COPY src ./src
-COPY tsconfig.json ./
+COPY --from=builder /app/backend/dist ./backend/dist
 
-# Build TypeScript
-RUN npm run build
+WORKDIR /app/backend
 
-# Remove dev dependencies and source files to reduce image size
-RUN npm prune --production && rm -rf src tsconfig.json
+ENV NODE_ENV=production
 
-# Expose port
 EXPOSE 3001
 
-# Note: Set HIGHFIVE_API_KEY environment variable when running
-# docker run -e HIGHFIVE_API_KEY=your_secure_key backend-image
-
-# Start server
 CMD ["node", "dist/server.js"]

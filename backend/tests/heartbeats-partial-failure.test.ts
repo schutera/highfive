@@ -116,10 +116,7 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
 
     expect(heartbeatsFailed).toBe(true);
     // Existing diagnostic line stays — humans grep for this in the logs.
-    expect(warnSpy).toHaveBeenCalledWith(
-      '⚠️ Failed to fetch heartbeats:',
-      expect.any(Error),
-    );
+    expect(warnSpy).toHaveBeenCalledWith('⚠️ Failed to fetch heartbeats:', expect.any(Error));
   });
 
   it("classifies a module with no last_image_at and no updated_at as 'unknown' on heartbeat failure", async () => {
@@ -213,9 +210,7 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
     });
     const db = new ModuleReadModel();
 
-    const { detail, heartbeatsFailed } = await db.getModuleDetail(
-      'aabbccddeeff' as never,
-    );
+    const { detail, heartbeatsFailed } = await db.getModuleDetail('aabbccddeeff' as never);
 
     expect(detail).not.toBeNull();
     expect(heartbeatsFailed).toBe(true);

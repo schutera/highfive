@@ -15,8 +15,12 @@ async function bootstrap() {
 
   app.listen(PORT, () => {
     console.log(`🐝 HighFive Backend API running on http://localhost:${PORT}`);
-    console.log(`🔑 Dev API Key: ${getApiKey()}`);
-    console.log(`   Use header: X-API-Key: ${getApiKey()}`);
+    // Never print the configured API key in production - it would land
+    // in Docker logs and any aggregator collecting them. Dev/test only.
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`🔑 Dev API Key: ${getApiKey()}`);
+      console.log(`   Use header: X-API-Key: ${getApiKey()}`);
+    }
   });
 }
 

@@ -166,10 +166,7 @@ export default function Step5Verify({
   // Gate the parent flag on `backendReachable !== null` so a remount of
   // Step 5 (e.g. user back-navigates and returns) doesn't flash the red
   // screen before the fresh local healthcheck has fired.
-  if (
-    backendReachable === false ||
-    (backendReachable !== null && verificationBackendUnreachable)
-  ) {
+  if (backendReachable === false || (backendReachable !== null && verificationBackendUnreachable)) {
     return (
       <section
         className="flex flex-col items-center text-center"

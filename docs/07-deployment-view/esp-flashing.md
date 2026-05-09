@@ -170,7 +170,7 @@ Then open `esp_log.txt` to read the boot log.
 To clear the saved configuration and re-enter setup mode:
 
 - **From AP mode** (`ESP32-Access-Point` visible): connect to it, open <http://192.168.4.1>, expand **Factory reset (advanced)**, tick the confirmation checkbox, and click **Factory reset**. The module reboots and reopens the AP.
-- **From STA mode** (joined WiFi): cause three consecutive failed joins (e.g. block the SSID) to trigger the auto-AP-fallback, then follow the AP-mode steps. Or, with a serial cable: `pio run -t erase && pio run -t upload`.
+- **From STA mode** (joined WiFi): cause three consecutive failed joins to trigger the auto-AP-fallback, then follow the AP-mode steps. The least disruptive way: reconnect to `ESP32-Access-Point`, open `http://192.168.4.1`, and save intentionally wrong WiFi credentials — the board will fail three times (~90 s total) and reopen the AP automatically. Or, with a serial cable: `pio run -t erase && pio run -t upload`.
 
 > The legacy "hold IO0 for 5 seconds" procedure was removed in #40 — GPIO0 is a strap pin, the procedure was unreachable on AI Thinker ESP32-CAM-MB boards. See chapter 11 "Lessons learned" for the post-mortem.
 

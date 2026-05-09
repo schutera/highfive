@@ -182,7 +182,7 @@ Two paths, depending on whether the module is currently in AP mode or already jo
 
 **From STA mode** (the module joined WiFi but you want to move it to a different network) — there is no in-band reset. Either:
 
-- Cause three consecutive WiFi-join failures (e.g. temporarily change the AP password) so the module's auto-fallback re-opens `ESP32-Access-Point`, then use the AP-mode steps above.
+- Cause three consecutive WiFi-join failures so the module's auto-fallback re-opens `ESP32-Access-Point`, then use the AP-mode steps above. The least disruptive way: reconnect to `ESP32-Access-Point`, open `http://192.168.4.1`, and save intentionally wrong WiFi credentials — the board will fail three times (~90 s total) and reopen the AP automatically.
 - Or, with a serial cable: `cd ESP32-CAM && pio run -t erase && pio run -t upload`.
 
 > The "hold IO0 for 5 seconds" procedure documented in older guides did not work — GPIO0 is a strap pin and holding it LOW at boot puts the ESP32 into UART download mode instead of running the firmware. Removed in #40; see chapter 11 "Lessons learned" for the post-mortem.

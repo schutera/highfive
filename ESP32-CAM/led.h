@@ -1,7 +1,7 @@
 #ifndef LED_H
 #define LED_H
 
-#include "lib/led_state/led_state.h"
+#include "led_state.h"
 
 // On-board LED driver. Thin Arduino wrapper around hf::ledOnAt — all the
 // pattern logic lives in the host-testable lib/led_state/ module.

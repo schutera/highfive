@@ -7,6 +7,9 @@ import { LanguageProvider } from '../i18n/LanguageContext';
 vi.mock('../services/api', () => ({
   api: {
     getAllModules: vi.fn().mockResolvedValue([]),
+    getAllModulesWithMeta: vi
+      .fn()
+      .mockResolvedValue({ modules: [], dataIncomplete: { heartbeats: false } }),
     getModuleById: vi.fn(),
     getModuleLogs: vi.fn().mockResolvedValue([]),
     healthCheck: vi.fn().mockResolvedValue({ status: 'ok', timestamp: '' }),

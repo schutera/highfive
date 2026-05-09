@@ -52,18 +52,39 @@ class ApiService {
   }
 
   async getAllModules(): Promise<Module[]> {
+    const { modules } = await this.getAllModulesWithMeta();
+    return modules;
+  }
+
+  /**
+   * Companion to getAllModules() that surfaces the X-Highfive-Data-Incomplete
+   * response header. Used by the dashboard to render a banner when the
+   * backend couldn't reach the heartbeats endpoint (#31).
+   */
+  async getAllModulesWithMeta(): Promise<{
+    modules: Module[];
+    dataIncomplete: { heartbeats: boolean };
+  }> {
     const response = await fetch(`${this.baseUrl}/modules`, {
-      //const response = await fetch(`localhost:8002/modules`, {
       headers: this.getHeaders(),
     });
     if (!response.ok) {
       throw new Error('Failed to fetch modules');
     }
+    const incompleteHeader = response.headers.get('X-Highfive-Data-Incomplete') ?? '';
+    const incompleteParts = incompleteHeader
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     const data: unknown = await response.json();
-    return (data as Array<Record<string, unknown>>).map((raw) => ({
+    const modules = (data as Array<Record<string, unknown>>).map((raw) => ({
       ...raw,
       id: parseModuleId(raw.id as string),
     })) as Module[];
+    return {
+      modules,
+      dataIncomplete: { heartbeats: incompleteParts.includes('heartbeats') },
+    };
   }
 
   async getModuleById(id: string): Promise<ModuleDetail> {

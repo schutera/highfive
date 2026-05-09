@@ -58,10 +58,26 @@ interface ApiModuleResponse {
  * is the actual value of this layer — the only place where the duckdb wire
  * shape is translated into the contracts package shape.
  */
+/**
+ * Wrapper returned by ModuleReadModel methods so callers can surface
+ * upstream-fetch failures to the wire (currently as the
+ * ``X-Highfive-Data-Incomplete`` response header). The body itself stays
+ * shape-compatible with old clients — only the meta moves out-of-band.
+ */
+export interface ModulesWithMeta {
+  modules: Module[];
+  heartbeatsFailed: boolean;
+}
+
+export interface ModuleDetailWithMeta {
+  detail: ModuleDetail | null;
+  heartbeatsFailed: boolean;
+}
+
 export class ModuleReadModel {
-  async listModules(): Promise<Module[]> {
-    const all = await this.fetchAndAssemble();
-    return all.map(({ detail, totalHatches }) => ({
+  async listModules(): Promise<ModulesWithMeta> {
+    const { items, heartbeatsFailed } = await this.fetchAndAssemble();
+    const modules = items.map(({ detail, totalHatches }) => ({
       id: detail.id,
       name: detail.name,
       location: detail.location,
@@ -76,20 +92,41 @@ export class ModuleReadModel {
       lastSeenAt: detail.lastSeenAt,
       latestHeartbeat: detail.latestHeartbeat,
     }));
+    return { modules, heartbeatsFailed };
   }
 
-  async getModuleDetail(id: ModuleId): Promise<ModuleDetail | null> {
-    const all = await this.fetchAndAssemble();
-    return all.find((x) => x.detail.id === id)?.detail ?? null;
+  async getModuleDetail(id: ModuleId): Promise<ModuleDetailWithMeta> {
+    const { items, heartbeatsFailed } = await this.fetchAndAssemble();
+    const detail = items.find((x) => x.detail.id === id)?.detail ?? null;
+    return { detail, heartbeatsFailed };
   }
 
-  private async fetchAndAssemble(): Promise<Array<{ detail: ModuleDetail; totalHatches: number }>> {
+  private async fetchAndAssemble(): Promise<{
+    items: Array<{ detail: ModuleDetail; totalHatches: number }>;
+    heartbeatsFailed: boolean;
+  }> {
+    // Reject on non-2xx so the existing `.status === 'rejected'` branches
+    // fire on a duckdb HTTP 500 (or any other non-2xx). Without this,
+    // `r.json()` happily parses the JSON error body, the promise resolves
+    // 'fulfilled', and an upstream 500 on /modules silently renders an
+    // empty fleet (#31 review P0). The body is captured (capped at 200
+    // chars so a misbehaving upstream can't fill the log) because
+    // duckdb-service's error handlers put a useful `error` field there
+    // and we lose it otherwise.
+    const fetchJsonOk = async (url: string): Promise<unknown> => {
+      const r = await fetch(url);
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        throw new Error(`upstream ${url} responded ${r.status}: ${body.slice(0, 200)}`);
+      }
+      return r.json();
+    };
     const [modulesResult, nestsResult, progressResult, heartbeatsResult] = await Promise.allSettled(
       [
-        fetch(`${DUCKDB_URL}/modules`).then((r) => r.json()),
-        fetch(`${DUCKDB_URL}/nests`).then((r) => r.json()),
-        fetch(`${DUCKDB_URL}/progress`).then((r) => r.json()),
-        fetch(`${DUCKDB_URL}/heartbeats_summary`).then((r) => r.json()),
+        fetchJsonOk(`${DUCKDB_URL}/modules`),
+        fetchJsonOk(`${DUCKDB_URL}/nests`),
+        fetchJsonOk(`${DUCKDB_URL}/progress`),
+        fetchJsonOk(`${DUCKDB_URL}/heartbeats_summary`),
       ],
     );
 
@@ -102,7 +139,8 @@ export class ModuleReadModel {
     if (progressResult.status === 'rejected') {
       console.warn('⚠️ Failed to fetch progress:', progressResult.reason);
     }
-    if (heartbeatsResult.status === 'rejected') {
+    const heartbeatsFailed = heartbeatsResult.status === 'rejected';
+    if (heartbeatsFailed) {
       console.warn('⚠️ Failed to fetch heartbeats:', heartbeatsResult.reason);
     }
 
@@ -156,7 +194,7 @@ export class ModuleReadModel {
     // ---- 3) Build modules ----
     const heartbeatSummary = heartbeatsData.summary || {};
     const now = new Date();
-    return modulesData.modules.map((m) => {
+    const items = modulesData.modules.map((m) => {
       const moduleId = parseModuleId(m.id);
 
       const hbEntry = heartbeatSummary[m.id];
@@ -185,6 +223,28 @@ export class ModuleReadModel {
         ? now.getTime() - new Date(lastSeenAt).getTime() <= 2 * 60 * 60 * 1000
         : false;
 
+      // Status classification (#31). When the heartbeat fetch failed we
+      // can't compute liveness from the freshest signal — most modules
+      // heartbeat every 60 s but only image on motion, so a missing
+      // heartbeats summary deletes their dominant freshness signal. Any
+      // module that would have been 'offline' might actually be online
+      // — we just couldn't ask. Surface 'unknown' (gray) rather than
+      // misleading the user with red 'offline'.
+      //
+      // Note: an earlier draft gated this on `!m.updated_at`, but
+      // `updated_at` is set permanently at module registration and never
+      // refreshes — so the 'unknown' branch was unreachable for the
+      // exact population the fix was for. Switched to gating on the
+      // would-be-offline outcome itself.
+      let status: 'online' | 'offline' | 'unknown';
+      if (isOnline) {
+        status = 'online';
+      } else if (heartbeatsFailed) {
+        status = 'unknown';
+      } else {
+        status = 'offline';
+      }
+
       // first_online is a DATE column (no time), pass the date portion only
       const firstOnlineStr = m.first_online
         ? new Date(m.first_online).toISOString().split('T')[0]
@@ -200,7 +260,7 @@ export class ModuleReadModel {
         id: moduleId,
         name: m.name,
         location: { lat: Number(m.lat), lng: Number(m.lng) },
-        status: isOnline ? 'online' : 'offline',
+        status,
         firstOnline: firstOnlineStr,
         lastApiCall: m.last_image_at ? new Date(m.last_image_at).toISOString() : '',
         batteryLevel: m.battery_level ?? 0,
@@ -215,6 +275,7 @@ export class ModuleReadModel {
 
       return { detail, totalHatches };
     });
+    return { items, heartbeatsFailed };
   }
 }
 

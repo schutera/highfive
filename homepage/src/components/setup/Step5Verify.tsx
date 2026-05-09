@@ -10,6 +10,11 @@ interface Step5VerifyProps {
   pollingActive: boolean;
   detectedModule: Module | null;
   verificationTimedOut: boolean;
+  // True if the poll loop ran out the clock with the backend silent — a
+  // mid-poll outage that should surface the same red "unreachable" branch
+  // as a failed initial healthcheck, not the orange "check the module"
+  // troubleshooting screen. See issue #44.
+  verificationBackendUnreachable: boolean;
   startVerification: () => void;
   onBack: () => void;
 }
@@ -18,6 +23,7 @@ export default function Step5Verify({
   pollingActive,
   detectedModule,
   verificationTimedOut,
+  verificationBackendUnreachable,
   startVerification,
   onBack,
 }: Step5VerifyProps) {
@@ -153,7 +159,14 @@ export default function Step5Verify({
   }
 
   // ---- BACKEND UNREACHABLE ----
-  if (backendReachable === false) {
+  // Two routes into this branch:
+  //   1. checkBackendAndStart's initial 8-attempt healthcheck never succeeded.
+  //   2. Poll loop ran out the clock with the trailing run of failures long
+  //      enough to indicate the backend (not the ESP) is at fault (#44).
+  // Gate the parent flag on `backendReachable !== null` so a remount of
+  // Step 5 (e.g. user back-navigates and returns) doesn't flash the red
+  // screen before the fresh local healthcheck has fired.
+  if (backendReachable === false || (backendReachable !== null && verificationBackendUnreachable)) {
     return (
       <section
         className="flex flex-col items-center text-center"

@@ -60,6 +60,20 @@ def test_new_module_invalid_mac_returns_400(client):
     assert "error" in resp.get_json()
 
 
+def test_new_module_rejects_uint64_decimal_str_too_long(client):
+    # Issue #39 regression: firmware previously called String(uint64) on the
+    # eFuse MAC, which produces a 15–20 digit decimal that exceeds the 12-char
+    # canonical ModuleId regex `^[0-9a-f]{12}$`. This test pins the LENGTH
+    # rejection at the validator boundary — the chosen sample (15 digits)
+    # would also pass [0-9a-f] character-wise, which makes it a faithful
+    # reproduction of what the buggy firmware actually posted. A hypothetical
+    # 12-digit decimal MAC would still pass the regex (digits are valid
+    # hex); that is intentional in the canonical contract, not a bug here.
+    resp = client.post("/new_module", json=_valid_payload(esp_id="193966879422984"))
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
 def test_new_module_battery_above_100_returns_400(client):
     resp = client.post("/new_module", json=_valid_payload(battery_level=150))
     assert resp.status_code == 400
@@ -95,3 +109,26 @@ def test_new_module_same_id_twice_replaces_row(client, fresh_db):
     assert listed[0]["battery_level"] == 42
     # Two successful creates -> two webhook calls.
     assert len(fresh_db.discord_calls) == 2
+
+
+def test_get_modules_returns_json_500_on_query_failure(client, monkeypatch):
+    """Pin behaviour from issue #32: an uncaught DB exception must surface as
+    parseable JSON with status 500, not the Flask default HTML page that the
+    Node backend can't deserialize (and would have masked as a generic 502)."""
+    import routes.modules as routes_modules
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("synthetic duckdb failure")
+
+    monkeypatch.setattr(routes_modules, "query_all", boom)
+
+    resp = client.get("/modules")
+    assert resp.status_code == 500
+    assert resp.is_json, "fallback HTML 500 would crash the JSON-parsing backend"
+    body = resp.get_json()
+    assert "error" in body
+    assert "synthetic duckdb failure" in body["error"]
+    # No silent `modules: []` fallback — a body without a modules key
+    # forces any consumer that ignores the status to TypeError on
+    # data.modules.map rather than render an empty fleet.
+    assert "modules" not in body

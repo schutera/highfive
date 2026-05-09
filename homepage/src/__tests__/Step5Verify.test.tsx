@@ -14,14 +14,21 @@ vi.mock('../services/api', () => ({
 
 import Step5Verify from '../components/setup/Step5Verify';
 
-function renderWizardStep(startVerification: () => void = () => {}) {
+function renderWizardStep(
+  startVerification: () => void = () => {},
+  overrides: Partial<{
+    verificationTimedOut: boolean;
+    verificationBackendUnreachable: boolean;
+  }> = {},
+) {
   return render(
     <LanguageProvider>
       <MemoryRouter>
         <Step5Verify
           pollingActive={true}
           detectedModule={null}
-          verificationTimedOut={false}
+          verificationTimedOut={overrides.verificationTimedOut ?? false}
+          verificationBackendUnreachable={overrides.verificationBackendUnreachable ?? false}
           startVerification={startVerification}
           onBack={() => {}}
         />
@@ -110,6 +117,34 @@ describe('Step5Verify retry visibility', () => {
       expect.any(Error),
     );
     warn.mockRestore();
+  });
+
+  it('also renders the unreachable-screen when the poll loop reports backend-down (issue #44)', async () => {
+    // The pre-poll healthcheck succeeded, the poll loop ran for 2 minutes,
+    // the trailing run of failures crossed the threshold, and the wizard
+    // hook set verificationBackendUnreachable=true. Show the same red
+    // "Backend Server Not Reachable" branch as a failed initial healthcheck
+    // — not the orange "check the module" troubleshooting screen, which
+    // would point the user at completely the wrong remediation.
+    //
+    // The local healthcheck must succeed first: the new gate in
+    // Step5Verify suppresses the parent flag while backendReachable is
+    // still null (avoiding a red flash on remount). Without the
+    // healthcheck mock + microtask drain below, the assertion would
+    // race the still-pending `checkBackendAndStart` and could flake.
+    healthCheck.mockResolvedValueOnce({ status: 'ok', timestamp: '' });
+
+    renderWizardStep(() => {}, { verificationBackendUnreachable: true });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(/Backend Server Not Reachable/i)).toBeInTheDocument();
+    // And NOT the orange timeout copy — would be a regression of #44.
+    expect(screen.queryByText(/Module Not Detected Yet/i)).not.toBeInTheDocument();
   });
 
   it('renders the unreachable-screen alert when all 8 attempts fail', async () => {

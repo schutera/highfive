@@ -205,10 +205,9 @@ Content-Type: multipart/form-data
 | `battery` | Text | Yes      | Integer 0–100                                                                      |
 | `logs`    | Text | No       | JSON telemetry payload (see [esp-reliability](06-runtime-view/esp-reliability.md)) |
 
-If `logs` is present and parseable, it is written to
-`{image_path}.log.json` next to the saved image with three extra
-fields appended (`_mac`, `_received_at`, `_image`). Unparseable
-payloads are still saved as `{ "raw": ..., "parse_error": true, ... }`.
+If `logs` is present and parseable, it is saved to `{image_path}.log.json`
+in `LogSidecarEnvelope` format: `{mac, received_at, image, payload: {…}}`.
+Unparseable payloads are still saved as `{ "raw": ..., "parse_error": true, ... }`.
 
 Response:
 
@@ -234,9 +233,9 @@ The classifier is currently a stub returning random 0/1 values.
 GET /modules/<mac>/logs?limit=N
 ```
 
-Reads `*.log.json` sidecars on disk, filters by `_mac`, sorts by mtime
-descending, and returns the newest N (default 10, max 100). Used by the
-backend admin proxy in section 1.5.
+Reads `*.log.json` sidecars on disk, filters by `mac` (envelope field),
+sorts by mtime descending, and returns the newest N (default 10, max 100).
+Used by the backend admin proxy in section 1.4.
 
 <br>
 

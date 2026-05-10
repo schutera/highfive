@@ -48,9 +48,8 @@ void setup() {
   //
   // Sequencing constraint: do NOT introduce blocking calls between
   // this read and the first breadcrumbSet below. The clobber window
-  // currently contains pinMode (microsecond-scale) and is acceptable.
-  // A WDT firing in that window means the previous boot's value is
-  // lost — minor diagnostic miss but acceptable.
+  // is currently empty. A WDT firing in that window means the previous
+  // boot's value is lost — minor diagnostic miss but acceptable.
   char recoveredCrumb[64] = {0};
   bool hadRecoveredCrumb =
       hf::breadcrumbReadAndClear(recoveredCrumb, sizeof(recoveredCrumb));

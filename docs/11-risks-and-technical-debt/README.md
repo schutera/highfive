@@ -731,8 +731,8 @@ silence exit from ever triggering. The loop can run for >60 s with no
 Note: every boot also logged `WiFiClient.cpp setSocketOption() fail on -1,
 errno: 9, "Bad file number"`, indicating the socket is in an error state
 across reconnects. The WDT-feed fix stops the reboot symptom; the
-underlying socket-state corruption is a separate issue not yet addressed
-and should be tracked in a follow-up.
+underlying socket-state corruption is tracked separately at
+[issue #60](https://github.com/schutera/highfive/issues/60).
 
 **Why it happened.** The write-body loop in the same function already had
 `esp_task_wdt_reset()` inside it (added for the same reason in an earlier
@@ -745,9 +745,12 @@ the trickle-data scenario surfaced on real hardware.
 an `esp_task_wdt_reset()` call if the loop can iterate for more than a few
 seconds. The write-body loop in `client.cpp`'s `postImage` is the reference
 model — feed the watchdog on each chunk write; follow the same pattern for
-each chunk (or byte) read.
+each chunk (or byte) read. The same fix also added `delay(1)` in the
+body-read polling loop's else branch to stop the loop from CPU-spinning
+between byte arrivals — `delay(1)` is the Arduino-on-ESP32 way to yield
+to other FreeRTOS tasks while waiting on a non-blocking poll.
 
-### Hardware-test misdiagnosis: assumed cadence without reading the constant (PR for [#42](https://github.com/schutera/highfive/issues/42))
+### Hardware-test misdiagnosis: assumed cadence without reading the constant (issue #42)
 
 **What happened.** During hardware verification of the WDT-feed fix above,
 docker logs showed exactly one heartbeat from the module after first boot,
@@ -777,7 +780,10 @@ the upload completes. Costs of the misdiagnosis: one fork-the-fork branch,
 tracker, and a contributor's evening. A second, related test-completeness
 miss landed in the same session: the 3 loop iterations observed only
 exercised `postImage` once (per `firstCaptureDone` plus daily-noon-only
-recapture), so the trickle-data scenario the WDT fix targets was not
+recapture) and `sendHeartbeat` once (per `HEARTBEAT_INTERVAL_MS = 1 hour`
+gating it on iteration 2 and 3). The 90 s test window was therefore
+mostly the no-network-call branch of `loop()` running and `delay(30000)`
+returning. The trickle-data scenario the WDT fix targets was not
 artificially re-induced — the verification proves the fix doesn't regress
 the happy path, not that it cures the original failure mode under load.
 

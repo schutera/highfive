@@ -217,4 +217,6 @@ Do after the WDT fix (closes #42 / #53) and firmware housekeeping (PR D) are mer
 
 ---
 
+## Branch model
+
 See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed prefix (`feat/`, `fix/`, `docs/`, `refactor/`, `chore/`, `test/`, `ci/`); first commit line `<type>: <imperative summary>` ≤ ~72 chars; PRs require all CI green.

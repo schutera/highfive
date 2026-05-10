@@ -212,9 +212,11 @@ is RAM, not flash — zero wear cost, side-steps the question entirely.
 This mechanism was used to diagnose issue #42 (recurring `reset_reason=7`
 in normal STA-mode operation). Hardware testing reproduced the WDT
 consistently; recovery boots consistently showed breadcrumb `postImage:read_body`.
-The fix added `esp_task_wdt_reset()` inside the header-read loop and the
-body-read loop in `client.cpp`'s `postImage`. The breadcrumb library
-remains in place as general-purpose diagnostic infrastructure for future
+The fix added `esp_task_wdt_reset()` inside the header-read loop and
+inside the `if (client.available())` branch of the body-read polling
+loop in `client.cpp`'s `postImage` (plus `delay(1)` in the same loop's
+else branch to stop the polling spin). The breadcrumb library remains
+in place as general-purpose diagnostic infrastructure for future
 regressions.
 
 ### LED legend

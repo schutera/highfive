@@ -16,8 +16,76 @@ Highlights worth knowing about even if you're not assigned:
 | [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                              |
 | [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                     |
 | [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
+| [#42](https://github.com/schutera/highfive/issues/42) | Recurring task-watchdog reboots (`reset_reason=7`)                           | ESP reboots every other boot under STA mode. Telemetry-first instrumentation landed (RTC_NOINIT stage breadcrumb) — see "Active investigation" below; surgical fix waits on a few days of field data identifying the culprit. |
 | [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
 | [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper             | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
+
+## Active investigation: #42 task-watchdog reboots
+
+**Symptom**: every other boot on AI Thinker ESP32-CAM-MB reports
+`reset_reason=7` (TASK_WDT) in normal STA-mode operation; reproducible
+immediately after `pio run -t erase && pio run -t upload`. Suspects
+per the issue: `getGeolocation` (Google Geolocation API), `initNewModuleOnServer`
+(duckdb-service `/new_module`), `postImage`'s body-read loop, or
+`sendHeartbeat`. None of the four currently calls `esp_task_wdt_reset()`
+mid-call, and the first two use the legacy `HTTPClient` `begin/POST/getString`
+pattern with no explicit `setTimeout()`.
+
+**Why this lives in "Active investigation" rather than "Lessons learned"**:
+the lesson hasn't been earned yet — we don't know what's hanging, only
+that something is. The lesson registers the **diagnosis approach** to
+prove out, not the root cause, which is still unknown by design.
+
+**What the telemetry-first PR shipped** (branch
+`feat/esp-wdt-stage-breadcrumb`, commit message
+`feat(esp): add RTC_NOINIT stage-breadcrumb library + native tests`):
+
+- New library `ESP32-CAM/lib/breadcrumb/` — a 64-byte stage name in
+  RTC slow memory via `RTC_NOINIT_ATTR`. RTC slow memory survives
+  software resets (TASK_WDT, panic, `ESP.restart()`) but is wiped on
+  power-on. NVS would have served the same shape but the loop()-side
+  breadcrumbs update every ~30 s; even with NVS wear-levelling, that
+  rate makes the wear-out boundary an unbounded design question for
+  multi-month deployment. RTC slow memory is RAM, not flash — zero
+  wear cost, side-steps the question entirely.
+- Each long-running call in `setup()` / `loop()` / `client.cpp` /
+  `esp_init.cpp` (network I/O, NTP poll, SPIFFS `loadConfig`, camera
+  init) calls `breadcrumbSet("section:name")` on entry. Single slot,
+  last writer wins.
+- On boot, `setup()` reads + clears the slot **first** (before any
+  in-boot `breadcrumbSet` could clobber it) and buffers the recovered
+  value. After `logbufInit()` runs, the value is logged via
+  `logf("[BOOT] last_stage_before_reboot=%s")` and attached to every
+  subsequent telemetry sidecar JSON via the new optional
+  `last_stage_before_reboot` field on the inner `payload`. The admin
+  Telemetry view (`TelemetryRow` in
+  `homepage/src/components/ModulePanel.tsx`) renders it as a "stage at
+  previous reboot" row next to the existing `reset` row when present.
+- The sidecar field is **omitted** when no breadcrumb survived, keeping
+  the pre-#42 wire shape byte-for-byte intact for clean boots.
+
+Mechanism documented in
+[`docs/06-runtime-view/esp-reliability.md`](../06-runtime-view/esp-reliability.md#8-stage-breadcrumb-cross-reboot-diagnostic)
+"safety net 8".
+
+**What the follow-up PR will do** (after a few days of field data):
+
+- Identify the offending stage from the trended `last_stage_before_reboot`
+  values across the fleet.
+- At that exact section, add a targeted `esp_task_wdt_reset()` and/or
+  explicit `setTimeout()` so the call can't block past the 60 s budget
+  undetected.
+- Keep the breadcrumb library in place — it's general-purpose
+  diagnostic infrastructure now, not single-issue scaffolding.
+- Close #42 when the fix is verified by a deployment cycle showing
+  `reset_reason=7` no longer fires in normal operation.
+
+**Why a CI gate isn't the right shape here**: the bug is observable
+only on real hardware in real network conditions (slow Google response,
+concurrent WiFi traffic). A unit test of the breadcrumb library alone
+doesn't catch a regression of the actual hang. The native tests in
+`test_native_breadcrumb/` cover the library's invariants; the field
+verification cycle proves the diagnostic + fix.
 
 ## Field-name drift
 
@@ -31,7 +99,8 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 
 ## Hardcoded secrets
 
-- **Google Maps API key** in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` — see
+- **Google Maps API key** in `ESP32-CAM/esp_init.cpp`'s `getGeolocation`
+  `apiKey` local in the function body — see
   [issue #18](https://github.com/schutera/highfive/issues/18). The
   key has been committed to git history; rotation is the right fix,
   not just removal.
@@ -637,3 +706,79 @@ homepage i18n strings. The `check-stale-reset-prose.sh` gate exists
 to keep it removed. Future "hold this button
 at boot" features must use a non-strap GPIO (e.g. GPIO13 or GPIO14
 on the ESP32-CAM, both broken out and both safe at strap time).
+
+### Telemetry sidecar envelope drift — admin UI silently rendered `—` for every field
+
+**What happened.** PR-42 (the issue-#42 telemetry-first stage-breadcrumb
+PR) shipped an initial round-1 fix to extend the homepage's
+`TelemetryRow` with the new `last_stage_before_reboot` field. The fix
+extended `homepage/src/services/api.ts`'s `TelemetryEntry` interface
+and `homepage/src/components/ModulePanel.tsx`'s `TelemetryRow` JSX,
+ran `npm test && npm run build` (both green), and the round-1
+reviewer's P0 was declared addressed.
+
+The round-2 reviewer caught what no test exercised: the homepage was
+reading a **flat** wire shape (`entry.fw`, `entry.last_reset_reason`,
+`entry._received_at`) but `image-service/services/sidecar.py`'s
+`LogSidecarEnvelope` had been wrapping telemetry inside a typed
+envelope (`{mac, received_at, image, payload: {…}}`) since some prior
+refactor. Every `TelemetryEntry` field on the homepage had been
+`undefined` at runtime — the existing `reset` row had been showing
+`—` for every entry across the dashboard, silently, since that
+envelope refactor. Adding a new optional field next to the existing
+broken ones rendered nothing because the existing ones rendered
+nothing. The fix-up commit message claimed "telemetry surface now
+actually surfaces the field"; in production it did not surface
+anything at all.
+
+**Why it shipped.** Three TypeScript optionals stacked: every
+field is `string | undefined`, every `entry.X || '—'` falls through
+silently when `X` is undefined, and no test exercised the actual wire
+shape end-to-end. The author trusted `npm test && npm run build` as
+proof the fix was real and never opened the dev stack to confirm a
+single sidecar entry rendered. The round-1 P0 was technically a
+typo-class bug — read the wrong level of the JSON — but the lesson
+is meta: the very same PR's chapter-11 contribution
+(`Documentation drifted from code in PR 27 first-pass review`) names
+exactly the failure mode that re-occurred inside the round-1 fix-up.
+
+**Lesson — the lesson PR-42 actually earned, not the one it set out
+to earn.**
+
+1. **TypeScript optionals are not type safety.** A wire-shape mismatch
+   between an emitter and a consumer that's all-`field?: T` falls
+   through to all-`undefined` at runtime. The compile passes; the
+   tests pass; the operator's dashboard shows `—` for every entry.
+   Contract types whose every field is optional don't actually pin
+   anything — they're `unknown` with extra steps.
+
+2. **Run the dev stack before claiming a UI claim is true.** When a
+   PR's docs say "the admin Telemetry view renders the field", the
+   verification step is `docker compose up && curl /api/modules/.../logs &&
+open http://localhost:5173/dashboard?admin=1` — not `npm test &&
+npm run build`. The unit test surface and the wire-shape surface
+   are different surfaces. Both need a check-step.
+
+3. **Wire-shape contracts at service boundaries belong in
+   `contracts/`** (per ADR-004). The fact that `TelemetryEntry`
+   lived in `homepage/src/services/api.ts` rather than
+   `contracts/src/index.ts` is exactly the conditions
+   "Frontend / backend type drift before `@highfive/contracts`"
+   above warns against. The shape was crossing the
+   backend↔homepage boundary; it belonged in the workspace package.
+   Round-2 fix moved it.
+
+4. **Test the wire shape, not just the type.** Round-2 fix added
+   `homepage/src/__tests__/TelemetryRow.test.tsx` mounting
+   `TelemetryRow` with a realistic envelope fixture and asserting
+   the fields actually render. Without that pin, the same drift
+   recurs the next refactor.
+
+**How to avoid next time.** Three concrete rules landed in
+[`CLAUDE.md`'s "Verifying UI claims, wire shapes, and component-test
+fixtures"](../../CLAUDE.md#verifying-ui-claims-wire-shapes-and-component-test-fixtures)
+section in the same PR — UI-claim verification, contracts-package
+discipline, and realistic component-test fixtures. The rules earned
+their own slot in the project orientation rather than living only as
+post-mortem prose so the next contributor sees them before writing
+the bug, not after.

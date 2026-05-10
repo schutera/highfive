@@ -4,6 +4,7 @@
 #include "led.h"
 #include "module_id.h"
 #include "wifi_diag.h"
+#include "breadcrumb.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <FS.h>
@@ -214,6 +215,10 @@ void setupTime() {
   if (WiFi.status() == WL_CONNECTED) {
     configTzTime(TZ_EU_CENTRAL, NTP1, NTP2);
 
+    // Issue #42 instrumentation: breadcrumb the NTP poll loop. The
+    // 5 s outer cap means this is unlikely to be the WDT culprit, but
+    // the breadcrumb costs nothing and rules it out cleanly.
+    hf::breadcrumbSet("setupTime:ntp_poll");
     struct tm tmcheck;
     const uint32_t start = millis();
     while (!getLocalTime(&tmcheck, 500 /*ms timeout*/)) {
@@ -460,6 +465,12 @@ void getGeolocation(esp_config_t *esp_config) {
 
   const char* apiKey = "AIzaSyDJbAIkbkFhhCaieIvMDbmt4pf7-SLNGPQ";
 
+  // Issue #42 instrumentation: breadcrumb each blocking call inside
+  // getGeolocation. The HTTPClient calls below have NO explicit
+  // setTimeout(), so a slow Google response can block past the 60 s
+  // TASK_WDT budget undetected. If the WDT fires, the next boot's
+  // last_stage_before_reboot field will name the section.
+  hf::breadcrumbSet("getGeolocation:wifi_scan");
   // Scan WiFi networks
   int n = WiFi.scanNetworks();
   Serial.println("Scan complete");
@@ -488,10 +499,12 @@ void getGeolocation(esp_config_t *esp_config) {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
+  hf::breadcrumbSet("getGeolocation:http_post");
   int httpResponseCode = http.POST(requestBody);
 
   if (httpResponseCode > 0) {
 
+    hf::breadcrumbSet("getGeolocation:get_string");
     String response = http.getString();
     //Serial.println("Response:");
     //Serial.println(response);
@@ -546,7 +559,12 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
     String jsonData;
     serializeJson(doc, jsonData);
 
+    // Issue #42 instrumentation: same shape as getGeolocation —
+    // HTTPClient with no explicit setTimeout, prime suspect for the
+    // first-boot TASK_WDT reboot the issue describes.
+    hf::breadcrumbSet("initNewModuleOnServer:http_post");
     int httpResponseCode = http.POST(jsonData);
+    hf::breadcrumbSet("initNewModuleOnServer:get_string");
     String response = http.getString();
     if (httpResponseCode > 0) {
       Serial.println("Response: " + response);

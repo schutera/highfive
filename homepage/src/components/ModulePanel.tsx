@@ -454,18 +454,30 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   );
 }
 
-function TelemetryRow({ entry }: { entry: TelemetryEntry }) {
-  const uptime = typeof entry.uptime_s === 'number' ? formatUptime(entry.uptime_s) : '—';
-  const heap =
-    typeof entry.free_heap === 'number' ? `${Math.round(entry.free_heap / 1024)} KB` : '—';
-  const rssi = typeof entry.rssi === 'number' ? `${entry.rssi} dBm` : '—';
-  const received = entry._received_at || '';
+// Renders one telemetry sidecar entry. The wire shape is the envelope
+// produced by image-service/services/sidecar.py — service-injected
+// metadata (mac, received_at, image) at the top level, raw ESP
+// telemetry nested under `payload`. Reading off the wrong level was
+// the failure mode that caused this row to render `—` for every field
+// (silently, since all telemetry fields are optional) until #42
+// surfaced it. Keep the destructure explicit so the next reader can
+// see the structure.
+//
+// Copy is hardcoded English — admin-only diagnostic surface, not
+// translated. Other surfaces in this file go through the i18n hook;
+// this one deliberately doesn't.
+export function TelemetryRow({ entry }: { entry: TelemetryEntry }) {
+  const t = entry.payload ?? {};
+  const uptime = typeof t.uptime_s === 'number' ? formatUptime(t.uptime_s) : '—';
+  const heap = typeof t.free_heap === 'number' ? `${Math.round(t.free_heap / 1024)} KB` : '—';
+  const rssi = typeof t.rssi === 'number' ? `${t.rssi} dBm` : '—';
+  const received = entry.received_at || '';
 
   return (
     <div className="hf-card p-2.5 text-hf-xs">
       <div className="flex items-center justify-between mb-1.5">
         <span className="font-mono text-hf-fg-soft">{received}</span>
-        {entry.fw && <span className="text-hf-fg-mute">fw {entry.fw}</span>}
+        {t.fw && <span className="text-hf-fg-mute">fw {t.fw}</span>}
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-hf-fg-soft">
         <div>
@@ -478,27 +490,33 @@ function TelemetryRow({ entry }: { entry: TelemetryEntry }) {
           <span className="text-hf-fg-mute">rssi</span> {rssi}
         </div>
         <div>
-          <span className="text-hf-fg-mute">reset</span> {entry.last_reset_reason || '—'}
+          <span className="text-hf-fg-mute">reset</span> {t.last_reset_reason || '—'}
         </div>
-        {typeof entry.wifi_reconnects === 'number' && (
-          <div>
-            <span className="text-hf-fg-mute">reconnects</span> {entry.wifi_reconnects}
+        {t.last_stage_before_reboot && (
+          <div className="col-span-2 font-mono text-hf-fg-soft">
+            <span className="text-hf-fg-mute">stage at previous reboot</span>{' '}
+            {t.last_stage_before_reboot}
           </div>
         )}
-        {entry.last_http_codes && entry.last_http_codes.length > 0 && (
+        {typeof t.wifi_reconnects === 'number' && (
+          <div>
+            <span className="text-hf-fg-mute">reconnects</span> {t.wifi_reconnects}
+          </div>
+        )}
+        {t.last_http_codes && t.last_http_codes.length > 0 && (
           <div className="col-span-2">
-            <span className="text-hf-fg-mute">http</span> {entry.last_http_codes.join(', ')}
+            <span className="text-hf-fg-mute">http</span> {t.last_http_codes.join(', ')}
           </div>
         )}
       </div>
-      {entry.log && (
+      {t.log && (
         <details className="mt-1.5">
           <summary className="text-hf-fg-mute cursor-pointer hover:text-hf-fg-soft">log</summary>
           <pre
             className="mt-1 text-[10px] font-mono whitespace-pre-wrap text-hf-fg-soft p-2 rounded max-h-40 overflow-y-auto"
             style={{ background: 'var(--hf-line-soft)' }}
           >
-            {entry.log}
+            {t.log}
           </pre>
         </details>
       )}

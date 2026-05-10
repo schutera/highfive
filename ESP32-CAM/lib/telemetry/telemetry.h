@@ -9,15 +9,21 @@ namespace hf {
 // Inputs to the telemetry payload that ships alongside every image upload.
 //
 // The firmware fills this in by reading device state at upload time:
-//   fw                  → FIRMWARE_VERSION macro
-//   uptime_seconds      → millis() / 1000
-//   last_reset_reason   → resetReasonStr(esp_reset_reason()) (e.g. "POWERON")
-//   free_heap           → ESP.getFreeHeap()
-//   min_free_heap       → ESP.getMinFreeHeap()
-//   rssi                → WiFi.isConnected() ? WiFi.RSSI() : 0
-//   wifi_reconnects     → ReconnectCounter::value()
-//   last_http_codes     → HttpCodeRing::snapshot()
-//   log                 → RingBuffer::snapshot() (latest ~2 KB of logf)
+//   fw                       → FIRMWARE_VERSION macro
+//   uptime_seconds           → millis() / 1000
+//   last_reset_reason        → resetReasonStr(esp_reset_reason()) (e.g. "POWERON")
+//   last_stage_before_reboot → hf::breadcrumb slot recovered at boot;
+//                              empty string when no breadcrumb survived
+//                              (clean boot, or first boot after power-on).
+//                              When non-empty, this pinpoints which long-
+//                              running call was active when the previous
+//                              boot's reset fired — diagnostic for #42.
+//   free_heap                → ESP.getFreeHeap()
+//   min_free_heap            → ESP.getMinFreeHeap()
+//   rssi                     → WiFi.isConnected() ? WiFi.RSSI() : 0
+//   wifi_reconnects          → ReconnectCounter::value()
+//   last_http_codes          → HttpCodeRing::snapshot()
+//   log                      → RingBuffer::snapshot() (latest ~2 KB of logf)
 //
 // All Arduino-bound concerns sit in the firmware; the JSON serializer
 // itself is pure and host-testable.
@@ -25,6 +31,7 @@ struct TelemetryInputs {
     std::string fw;
     std::uint32_t uptime_seconds = 0;
     std::string last_reset_reason;
+    std::string last_stage_before_reboot;  // omitted from JSON when empty
     std::uint32_t free_heap = 0;
     std::uint32_t min_free_heap = 0;
     int rssi = 0;
@@ -44,6 +51,11 @@ struct TelemetryInputs {
 //     "fw": <string>,
 //     "uptime_s": <uint>,
 //     "last_reset_reason": <string>,
+//     "last_stage_before_reboot": <string>,   // optional — present iff
+//                                             // inputs.last_stage_before_reboot
+//                                             // is non-empty. Backwards-compat
+//                                             // with consumers that haven't
+//                                             // been taught the field.
 //     "free_heap": <uint>,
 //     "min_free_heap": <uint>,
 //     "rssi": <int>,

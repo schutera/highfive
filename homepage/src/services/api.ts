@@ -1,4 +1,4 @@
-import type { Module, ModuleDetail } from '@highfive/contracts';
+import type { Module, ModuleDetail, TelemetryEntry } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
 // Fail loudly on production builds with empty/missing build-args - the
@@ -10,21 +10,9 @@ if (import.meta.env.PROD && (!import.meta.env.VITE_API_URL || !import.meta.env.V
   throw new Error('VITE_API_URL and VITE_API_KEY must be set at build time for production builds');
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
+export type { TelemetryEntry } from '@highfive/contracts';
 
-export interface TelemetryEntry {
-  fw?: string;
-  uptime_s?: number;
-  last_reset_reason?: string;
-  free_heap?: number;
-  min_free_heap?: number;
-  rssi?: number;
-  wifi_reconnects?: number;
-  last_http_codes?: number[];
-  log?: string;
-  _received_at?: string;
-  _image?: string;
-}
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 
 export interface ImageUpload {
   module_id: string;

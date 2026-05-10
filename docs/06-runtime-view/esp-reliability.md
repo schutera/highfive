@@ -21,8 +21,11 @@ An earlier firmware revision ran for 8–10 days and then went silent in the fie
 
 ## Reliability layers
 
-The firmware has six independent safety nets, each handling a
-different failure mode.
+The firmware has eight independent safety nets, each handling a
+different failure mode. Nets 1–6 were the original architecture
+(v1.0.0 + PR 17); net 7 (WiFi-fail AP fallback) was added in
+`feat/onboarding-feedback`; net 8 (cross-reboot stage breadcrumb)
+landed in `feat/esp-wdt-stage-breadcrumb` for issue #42.
 
 ### 1. WiFi watchdog
 
@@ -135,6 +138,84 @@ Three failures × ~30 s ≈ 90 s before the portal returns. Designed for
 the most common onboarding mistake (mistyped WiFi password) without
 forcing the user through a 5-second CONFIG-button hold.
 
+### 8. Stage breadcrumb (cross-reboot diagnostic)
+
+[`ESP32-CAM/lib/breadcrumb/breadcrumb.cpp`](../../ESP32-CAM/lib/breadcrumb/breadcrumb.cpp)
+— `breadcrumbSet` / `breadcrumbReadAndClear`.
+
+The other safety nets above describe what the firmware does **when**
+something goes wrong. The stage breadcrumb describes how we find out
+**what** went wrong — specifically when safety net 2 (the task watchdog)
+fires in the field and the in-RAM `logbuf` is wiped on the reboot it
+triggered.
+
+The library writes a 64-byte stage name into RTC slow memory using
+`RTC_NOINIT_ATTR`. RTC slow memory survives software resets — task
+watchdog (`reset_reason=7`), panic, `ESP.restart()` — but is wiped on
+power-on, which is exactly the window we need: a 30-second sleep loop
+that ends in a watchdog reboot is a software reset, so the breadcrumb
+makes it across; a fresh power cycle clears the slot so the next session
+starts clean.
+
+The instrumented call sites (canonical list — keep in sync with the
+firmware grep `breadcrumbSet`):
+
+| Site                                                                                                     | Where set                                                          |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `setup:spiffs_mount`                                                                                     | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `SPIFFS.begin(true)`    |
+| `setup:loadConfig`                                                                                       | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `loadConfig`            |
+| `setup:setupWifiConnection`                                                                              | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `setupWifiConnection`   |
+| `setup:getGeolocation`                                                                                   | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `getGeolocation`        |
+| `setup:initNewModuleOnServer`                                                                            | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `initNewModuleOnServer` |
+| `setup:initEspCamera`                                                                                    | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `initEspCamera`         |
+| `setupTime:ntp_poll`                                                                                     | `ESP32-CAM/esp_init.cpp`'s `setupTime` before the NTP poll loop    |
+| `getGeolocation:wifi_scan` / `:http_post` / `:get_string`                                                | `ESP32-CAM/esp_init.cpp`'s `getGeolocation` per section            |
+| `initNewModuleOnServer:http_post` / `:get_string`                                                        | `ESP32-CAM/esp_init.cpp`'s `initNewModuleOnServer` per section     |
+| `loop:sendHeartbeat` / `:captureAndUpload:first` / `:captureAndUpload:noon` / `:sleep`                   | `ESP32-CAM/ESP32-CAM.ino`'s `loop`                                 |
+| `postImage:connect` / `:write_headers` / `:write_body` / `:read_status` / `:read_headers` / `:read_body` | `ESP32-CAM/client.cpp`'s `postImage` per section                   |
+| `sendHeartbeat:connect` / `:write` / `:read_status`                                                      | `ESP32-CAM/client.cpp`'s `sendHeartbeat` per section               |
+
+There is one RTC slot — last writer wins — so the breadcrumb always
+names the most-recently-entered section. On clean exit from `setup()`
+the slot is cleared (`breadcrumbClear`); `loop()` continually overwrites
+it across sleep / heartbeat / capture, so after the first `loop()`
+iteration the slot holds `loop:sleep` (harmless — the slot is set
+immediately before the per-iteration `esp_task_wdt_reset()` and the
+cooperative-yield `delay(30000)`; `delay()` yields to FreeRTOS and the
+60 s WDT timeout is double the 30 s sleep, so a hang inside the delay
+is not observed in practice. The task watchdog is per-task so a same-
+task ISR storm or priority inversion could in principle still fire it;
+none has been reported).
+
+On the **next** boot, `setup()` calls `breadcrumbReadAndClear` early
+(before camera init). When that returns true, the recovered stage name
+is logged via `logf("[BOOT] last_stage_before_reboot=%s", crumb)` and
+attached to every subsequent telemetry sidecar JSON via the optional
+`last_stage_before_reboot` field. The admin Telemetry view (admin
+ModulePanel `TelemetryRow` in `homepage/src/components/ModulePanel.tsx`)
+renders the field as a `stage at previous reboot` row when present, next to
+the `reset` row per upload, so a "TASK_WDT in `getGeolocation:http_post`"
+pattern across the fleet is visible without a serial cable on every
+board.
+
+The slot uses a magic guard (`0xCAFEBABE`) so the random RTC contents
+on a true power-on don't masquerade as a valid breadcrumb. False-positive
+odds: 1-in-4-billion per power-on — acceptable for diagnostic data.
+
+NVS would have served the same shape, but the loop()-side breadcrumbs
+update every ~30 s. NVS uses wear-levelled writes across the partition,
+so the per-sector erase rate is much lower than the logical write rate;
+even so, multi-month deployment with continuous writes adds up enough to
+make the wear-out boundary an unbounded design question. RTC slow memory
+is RAM, not flash — zero wear cost, side-steps the question entirely.
+
+This is a diagnostic mechanism for issue #42 (recurring `reset_reason=7`
+in normal STA-mode operation). Once the offending blocking call is
+identified from a few days of field telemetry, a follow-up PR will add
+a targeted `setTimeout()` and/or `esp_task_wdt_reset()` at that site
+and the breadcrumb will revert to its dormant role of catching future
+regressions.
+
 ### LED legend
 
 The on-board LED (GPIO 4) is the **camera flash** — bright enough to
@@ -169,26 +250,28 @@ The ESP piggybacks a JSON telemetry payload onto every image upload as an additi
   "fw": "1.0.0",
   "uptime_s": 72145,
   "last_reset_reason": "TASK_WDT",
+  "last_stage_before_reboot": "setup:getGeolocation",
   "free_heap": 124352,
   "min_free_heap": 98211,
   "rssi": -67,
   "wifi_reconnects": 2,
   "last_http_codes": [200, 200, 500, 200, 200],
-  "log": "[BOOT] fw=1.0.0 reset_reason=1 boot_count=3\n[WIFI] disconnected — attempting reconnect\n..."
+  "log": "[BOOT] fw=1.0.0 reset_reason=7 boot_count=3\n[BOOT] last_stage_before_reboot=setup:getGeolocation\n..."
 }
 ```
 
-| Field               | Source                                                                                                                                     | Meaning                                                                                                                                                                                                                                                                                  |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fw`                | `FIRMWARE_VERSION` macro, injected from `ESP32-CAM/VERSION` by both build paths (`build.sh` → arduino-cli; `pio run` → `extra_scripts.py`) | Firmware version string. Same value lands here, in the heartbeat body's `fw_version` field, in the boot log line, and in `homepage/public/firmware.json`. `ESP32-CAM/VERSION` is the single writer. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md). |
-| `uptime_s`          | `millis()/1000`                                                                                                                            | Seconds since last boot                                                                                                                                                                                                                                                                  |
-| `last_reset_reason` | `esp_reset_reason()`                                                                                                                       | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc.                                                                                                                                                                                                                                         |
-| `free_heap`         | `ESP.getFreeHeap()`                                                                                                                        | Current free heap in bytes                                                                                                                                                                                                                                                               |
-| `min_free_heap`     | `ESP.getMinFreeHeap()`                                                                                                                     | Low-water mark over this boot session                                                                                                                                                                                                                                                    |
-| `rssi`              | `WiFi.RSSI()`                                                                                                                              | WiFi signal strength in dBm                                                                                                                                                                                                                                                              |
-| `wifi_reconnects`   | logbuf counter                                                                                                                             | Count of `reconnectWifi()` fires since boot                                                                                                                                                                                                                                              |
-| `last_http_codes`   | logbuf ring                                                                                                                                | Last 8 HTTP status codes from `postImage()`                                                                                                                                                                                                                                              |
-| `log`               | logbuf ring                                                                                                                                | Last ~2 KB of `logf()` output, oldest→newest                                                                                                                                                                                                                                             |
+| Field                      | Source                                                                                                                                     | Meaning                                                                                                                                                                                                                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fw`                       | `FIRMWARE_VERSION` macro, injected from `ESP32-CAM/VERSION` by both build paths (`build.sh` → arduino-cli; `pio run` → `extra_scripts.py`) | Firmware version string. Same value lands here, in the heartbeat body's `fw_version` field, in the boot log line, and in `homepage/public/firmware.json`. `ESP32-CAM/VERSION` is the single writer. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md).       |
+| `uptime_s`                 | `millis()/1000`                                                                                                                            | Seconds since last boot                                                                                                                                                                                                                                                                        |
+| `last_reset_reason`        | `esp_reset_reason()`                                                                                                                       | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc.                                                                                                                                                                                                                                               |
+| `last_stage_before_reboot` | RTC_NOINIT breadcrumb recovered at boot                                                                                                    | **Optional.** Names the section of code that was active when the previous boot's reboot fired (e.g. `setup:getGeolocation`, `postImage:read_body`). Field is **omitted** when no breadcrumb survived (clean boot or first boot after power-on); see safety net 8 above for the full mechanism. |
+| `free_heap`                | `ESP.getFreeHeap()`                                                                                                                        | Current free heap in bytes                                                                                                                                                                                                                                                                     |
+| `min_free_heap`            | `ESP.getMinFreeHeap()`                                                                                                                     | Low-water mark over this boot session                                                                                                                                                                                                                                                          |
+| `rssi`                     | `WiFi.RSSI()`                                                                                                                              | WiFi signal strength in dBm                                                                                                                                                                                                                                                                    |
+| `wifi_reconnects`          | logbuf counter                                                                                                                             | Count of `reconnectWifi()` fires since boot                                                                                                                                                                                                                                                    |
+| `last_http_codes`          | logbuf ring                                                                                                                                | Last 8 HTTP status codes from `postImage()`                                                                                                                                                                                                                                                    |
+| `log`                      | logbuf ring                                                                                                                                | Last ~2 KB of `logf()` output, oldest→newest                                                                                                                                                                                                                                                   |
 
 ### Circular log buffer
 
@@ -218,25 +301,38 @@ flowchart TD
     BE --> HP
 ```
 
-1. ESP uploads an image. The `logs` part is parsed and written to `{image_path}.log.json`.
-2. `GET /modules/<mac>/logs?limit=N` (image-service) globs `*.log.json`, filters by `_mac`, sorts by mtime, returns the newest N entries.
+1. ESP uploads an image. The `logs` part is parsed and wrapped in a typed envelope (`image-service/services/sidecar.py`'s `LogSidecarEnvelope`), then written to `{image_path}.log.json`.
+2. `GET /modules/<mac>/logs?limit=N` (image-service) globs `*.log.json`, filters by `mac`, sorts by mtime, returns the newest N entries — each entry is the envelope shape below.
 3. `GET /api/modules/:id/logs` (backend) proxies the above behind the existing `X-API-Key` middleware so the frontend can use a single origin.
-4. `ModulePanel.tsx` has a collapsible "Telemetry" section that lazy-loads logs when opened.
+4. `ModulePanel.tsx` has a collapsible "Telemetry" section that lazy-loads logs when opened. The `TelemetryRow` component reads service-injected metadata at the top level and the raw ESP telemetry from `entry.payload`.
 
 ### Sidecar file contents
 
-Each `.log.json` is the raw telemetry payload plus three fields added by the image-service:
+Each `.log.json` is a typed envelope: service-injected metadata (`mac`, `received_at`, `image`) at the top level, with the raw ESP telemetry nested under `payload`. Pre-envelope (legacy) sidecars on disk continue to be readable — `LogSidecarEnvelope.from_disk` reshapes them into the same envelope on the way out.
 
 ```json
 {
-  "...telemetry fields...": "...",
-  "_mac": "12345678901234",
-  "_received_at": "2026-04-11T14:32:17",
-  "_image": "esp_capture_20260411_143217.jpg"
+  "mac": "aabbccddeeff",
+  "received_at": "2026-05-07T12:00:00",
+  "image": "esp_capture_20260507_120000.jpg",
+  "payload": {
+    "fw": "1.0.0",
+    "uptime_s": 72145,
+    "last_reset_reason": "TASK_WDT",
+    "last_stage_before_reboot": "setup:getGeolocation",
+    "free_heap": 124352,
+    "min_free_heap": 98211,
+    "rssi": -67,
+    "wifi_reconnects": 2,
+    "last_http_codes": [200, 200, 500, 200, 200],
+    "log": "..."
+  }
 }
 ```
 
-If the ESP ever sends non-JSON, the sidecar still gets written as `{"raw": "...", "parse_error": true, "_mac": ..., ...}` so the admin view can always show _something_.
+If the ESP ever sends non-JSON, the sidecar still gets written with `payload: { "raw": "...", "parse_error": true }` so the admin view can always show _something_.
+
+The TypeScript wire-shape contract for this envelope is `TelemetryEntry` in [`contracts/src/index.ts`](../../contracts/src/index.ts) — shared between `backend` and `homepage` per [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md)'s "any wire-shape that crosses the backend↔homepage boundary lives in the workspace package" rule.
 
 ---
 

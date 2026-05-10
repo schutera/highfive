@@ -4,6 +4,7 @@
 #include "logbuf.h"
 #include "module_id.h"
 #include "url.h"
+#include "breadcrumb.h"
 #include <string>
 #include <time.h>
 #include <HTTPClient.h>
@@ -140,6 +141,13 @@ int postImage(esp_config_t *esp_config) {
 
   Serial.printf("---- trying to send image to: %s:%u\n",
                 url.host.c_str(), (unsigned)url.port);
+  // Issue #42 instrumentation: breadcrumb at each section boundary
+  // inside postImage so a TASK_WDT reboot pinpoints connect-vs-write-
+  // vs-read. Updates the single RTC_NOINIT slot — last writer wins.
+  // No breadcrumbs inside the hot framebuffer-write or body-read loops:
+  // those would flood the slot with rewrites and obscure the actual
+  // last-section signal we want.
+  hf::breadcrumbSet("postImage:connect");
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
     if (!client.connect(url.host.c_str(), url.port)) {
@@ -153,6 +161,7 @@ int postImage(esp_config_t *esp_config) {
   }
 
   // POST headers
+  hf::breadcrumbSet("postImage:write_headers");
   client.print(String("POST ") + url.path.c_str() + " HTTP/1.1\r\n");
   client.print(String("Host: ") + url.host.c_str() + "\r\n");
   client.print("Connection: keep-alive\r\n");
@@ -160,6 +169,7 @@ int postImage(esp_config_t *esp_config) {
   client.print("Content-Length: " + String(contentLength) + "\r\n\r\n");
 
   // Send body
+  hf::breadcrumbSet("postImage:write_body");
   client.print(head);
   size_t sent = 0;
   while (sent < fb->len) {
@@ -189,13 +199,16 @@ int postImage(esp_config_t *esp_config) {
   }
 
   // Read HTTP response
+  hf::breadcrumbSet("postImage:read_status");
   String status = client.readStringUntil('\n');
 
+  hf::breadcrumbSet("postImage:read_headers");
   while (client.connected()) {
     String line = client.readStringUntil('\n');
     if (line == "\r" || line.length() == 0) break;
   }
 
+  hf::breadcrumbSet("postImage:read_body");
   String response = "";
   unsigned long start = millis();
   while (client.connected() || client.available()) {
@@ -247,6 +260,10 @@ int sendHeartbeat(esp_config_t *esp_config) {
 
   WiFiClient hbClient;
   hbClient.setTimeout(5000);
+  // Issue #42 instrumentation: breadcrumb at each section boundary
+  // inside sendHeartbeat — the per-issue suspect list calls heartbeat
+  // out separately from upload. Same shape as postImage above.
+  hf::breadcrumbSet("sendHeartbeat:connect");
   if (!hbClient.connect(url.host.c_str(), (uint16_t)url.port)) {
     logf("[heartbeat] connect failed to %s:%u",
          url.host.c_str(), (unsigned)url.port);
@@ -261,6 +278,7 @@ int sendHeartbeat(esp_config_t *esp_config) {
               + "&free_heap=" + String(ESP.getFreeHeap())
               + "&fw_version=" + String(FIRMWARE_VERSION);
 
+  hf::breadcrumbSet("sendHeartbeat:write");
   hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
                + "Host: " + String(url.host.c_str()) + ":" + String((unsigned)url.port) + "\r\n"
                + "Content-Type: application/x-www-form-urlencoded\r\n"
@@ -273,6 +291,7 @@ int sendHeartbeat(esp_config_t *esp_config) {
   // "HTTP/1.1 200 OK\r\n"; we want the integer between the first and
   // second space. Anything not 2xx is a real upload failure that
   // belongs in the telemetry ring buffer.
+  hf::breadcrumbSet("sendHeartbeat:read_status");
   String statusLine = hbClient.readStringUntil('\n');
   hbClient.stop();
   Serial.print("[heartbeat] ");

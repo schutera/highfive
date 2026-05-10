@@ -111,6 +111,14 @@ Every PR that changes behaviour, adds a feature, or fixes a non-obvious bug must
 
 If unsure, default to [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md) — it is the catch-all for anything you don't want the next person to have to relearn.
 
+### Verifying UI claims, wire shapes, and component-test fixtures
+
+Three structural rules earned across PR-42's review cycle (see [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md) "Telemetry sidecar envelope drift" for the incident). Apply when touching wire shapes that cross service boundaries:
+
+1. **If a doc claims the admin UI renders a field, prove it before pushing.** Run the dev stack (`docker compose up`), hit the relevant view, and confirm the field actually renders. `npm test && npm run build` is necessary, not sufficient — both can pass while every wire-shape field renders as `undefined` (TypeScript optionals collapse silently on level mismatch).
+2. **Wire shapes at the backend ↔ homepage boundary live in [`contracts/src/index.ts`](contracts/src/index.ts).** A service-local `interface` declaration for a wire shape is a smell — it means the type isn't pinned across the boundary, and ADR-004's "drift becomes a TypeScript compile error" guarantee doesn't hold. Move the type to the shared workspace package and re-export it where needed.
+3. **Component tests for views that render wire-shape data must mount with a realistic fixture, not a mock object the test author guessed at.** The fixture shape is itself the contract under test. Bonus: a wire-shape round-trip test (mock `fetch` with the exact JSON the emitting service produces, feed through the consumer's API client, render the component) catches refactors that would silently break the production code path.
+
 ## Critical rules (do NOT violate)
 
 These are the most-violated rules from past incidents. Full list in [`docs/02-constraints/`](docs/02-constraints/README.md). Lessons from individual incidents live in [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md).

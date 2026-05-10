@@ -747,20 +747,21 @@ seconds. The write-body loop in `client.cpp`'s `postImage` is the reference
 model — feed the watchdog on each chunk write; follow the same pattern for
 each chunk (or byte) read.
 
-### Hardware-test misdiagnosis: assumed cadence without reading the constant (PR for #42)
+### Hardware-test misdiagnosis: assumed cadence without reading the constant (PR for [#42](https://github.com/schutera/highfive/issues/42))
 
 **What happened.** During hardware verification of the WDT-feed fix above,
 docker logs showed exactly one heartbeat from the module after first boot,
 then silence for 8+ minutes. A "silent hang in `sendHeartbeat`" hypothesis
-was built on top of that observation: a follow-up issue was filed (#59,
-since closed), Serial-debug instrumentation was added on a debug branch,
-and a fresh diagnostic cycle was walked through. The instrumentation
-immediately showed the loop iterating cleanly every 30 s, with the line
-`[DBG] iter=2 heartbeat skipped (interval not reached)`. The "missing"
-heartbeats were not missing — `ESP32-CAM/ESP32-CAM.ino`'s
-`HEARTBEAT_INTERVAL_MS` is `(60UL * 60UL * 1000UL)`, **one hour**, not the
-30 s loop-tick cadence assumed during the diagnosis. There was no hang;
-the WDT fix was working as designed all along.
+was built on top of that observation: a follow-up issue was filed
+([#59](https://github.com/schutera/highfive/issues/59), since closed),
+Serial-debug instrumentation was added on a debug branch, and a fresh
+diagnostic cycle was walked through. The instrumentation immediately showed
+the loop iterating cleanly every 30 s, with the line `[DBG] iter=2
+heartbeat skipped (interval not reached)`. The "missing" heartbeats were
+not missing — `ESP32-CAM/ESP32-CAM.ino`'s `HEARTBEAT_INTERVAL_MS` is
+`(60UL * 60UL * 1000UL)`, **one hour**, not the 30 s loop-tick cadence
+assumed during the diagnosis. There was no hang; the WDT fix was working
+as designed all along.
 
 **Why it happened.** The Docker log shape ("one heartbeat then silence")
 was equally consistent with two explanations: (a) a real hang, and (b) a
@@ -768,9 +769,17 @@ was equally consistent with two explanations: (a) a real hang, and (b) a
 investigation context was about hangs, and never grep'd for the cadence
 constant to disambiguate. The matching error log
 (`WiFiClient.cpp setSocketOption() fail on -1, errno: 9`) on every connect
-reinforced the wrong hypothesis by looking causal when it was incidental.
-Costs: one fork-the-fork branch, ~20 lines of instrumentation, a noise PR
-filed on the upstream issue tracker, and a contributor's evening.
+looked causal to the silence-hypothesis when it was incidental to it — the
+errno-9 is a real, separate socket-state issue (see the WDT-feed lesson
+directly above), but it does not cause a hang; the connect succeeds and
+the upload completes. Costs of the misdiagnosis: one fork-the-fork branch,
+~20 lines of instrumentation, a noise PR filed on the upstream issue
+tracker, and a contributor's evening. A second, related test-completeness
+miss landed in the same session: the 3 loop iterations observed only
+exercised `postImage` once (per `firstCaptureDone` plus daily-noon-only
+recapture), so the trickle-data scenario the WDT fix targets was not
+artificially re-induced — the verification proves the fix doesn't regress
+the happy path, not that it cures the original failure mode under load.
 
 **How to avoid it next time.** Before building a theory on top of
 "behaviour X happens with cadence Y," `git grep` for the constant that
@@ -779,7 +788,11 @@ related claim about ESP firmware behaviour (heartbeat cadence, capture
 schedule, retry backoff, sleep length) must be backed by reading the
 relevant `#define` or constant in `ESP32-CAM/`. Same rule applies to
 backend polling intervals (`backend/src/`) and silence-watcher thresholds
-(`duckdb-service/`). Generalisation: the "Documentation drifted from code"
-lesson 100+ lines above is about not assuming a documented value matches
-code; this is the runtime sibling — don't assume an observed cadence
-matches the model in your head. Read the constant.
+(`duckdb-service/`). Generalisation: the
+`Documentation drifted from code in PR 27 first-pass review` lesson above
+is about not assuming a documented value matches code; this is the runtime
+sibling — don't assume an observed cadence matches the model in your head.
+Read the constant. For verification: when a hardware test is meant to
+exercise a specific failure mode, confirm the test path actually reaches
+that mode (e.g. by injecting the failure on the server side) rather than
+asserting "no regression on the happy path" and calling the fix verified.

@@ -208,12 +208,12 @@ Two follow-ups from PR #47's captive-portal work. No new behaviour — UX clarif
 
 ### PR F — `feat/esp-ota` (later — closes #26)
 
-OTA firmware update support. Requires a one-time breaking partition table change (USB flash required to get the first OTA-capable binary onto hardware). Do after the WDT fix (PR A) and firmware housekeeping (PR D) to ensure a stable baseline.
+OTA firmware update support. Requires a one-time breaking partition table change (USB flash required to get the first OTA-capable binary onto hardware).
 
 **Phase 1:** ArduinoOTA — update partition table to "Minimal SPIFFS with OTA", add `ArduinoOTA.begin()` in `setup()` and `ArduinoOTA.handle()` in the main loop. LAN-only.
 **Phase 2:** HTTP OTA — periodic version-check + self-update from a hosted `.bin` (e.g. GitHub Release asset). Enables remote updates without LAN access.
 
-Do after the WDT fix (closes #42/#53) and firmware housekeeping (PR D) are merged, to ensure a stable firmware baseline.
+Do after the WDT fix (closes #42 / #53) and firmware housekeeping (PR D) are merged, to ensure a stable firmware baseline.
 
 ---
 

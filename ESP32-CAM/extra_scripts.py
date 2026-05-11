@@ -27,17 +27,26 @@ project_dir = Path(env["PROJECT_DIR"])  # noqa: F821
 
 
 def _strip_all_whitespace(value: str) -> str:
-    """Mirror ``build.sh``'s ``tr -d '[:space:]'`` byte-for-byte.
+    """Mirror ``build.sh``'s ``tr -d '[:space:]'`` for ASCII whitespace.
 
     ``str.strip()`` only removes outer whitespace, but ``build.sh`` strips
     ALL whitespace from both env-var and file sources. If the two paths
     diverged on a key with embedded whitespace (a stray space pasted from
     a wrapped-line email, a tab from clipboard tooling), the same source
     file would produce two binaries with different keys baked in
-    depending on which builder ran. ``re.sub(r'\\s+', '', ...)`` matches
-    bash's behaviour for any ASCII / Unicode whitespace.
+    depending on which builder ran. The character class
+    ``[ \\t\\n\\v\\f\\r]`` matches POSIX ``[:space:]`` byte-for-byte —
+    the same six bytes ``tr -d '[:space:]'`` removes — so the two paths
+    converge on identical output for any byte sequence either could
+    encounter.
+
+    Python's ``\\s`` (without ``re.ASCII``) would additionally match
+    Unicode whitespace such as NBSP (U+00A0) and U+2028/2029, which
+    ``tr`` would leave alone — that asymmetry is deliberately avoided
+    here so ``len()`` reported at build time matches what bash would
+    have produced from the same input.
     """
-    return re.sub(r"\s+", "", value)
+    return re.sub(r"[ \t\n\v\f\r]+", "", value)
 
 
 version_file = project_dir / "VERSION"

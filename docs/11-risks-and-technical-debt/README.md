@@ -833,7 +833,7 @@ notice. By the time someone did, the value was already in git
 history — removing it from `HEAD` does not unleak it, only
 revocation does.
 
-**How to avoid it next time.** Two rules:
+**How to avoid it next time.** Three rules:
 
 1. **Treat any third-party API key as a build-time macro from
    day one.** The canonical pattern in this repo is
@@ -850,7 +850,7 @@ env.StringifyMacro(value))])` mirrored by `build.sh`'s
    is both insufficient (history caches, mirrors, code search
    indices) and forbidden here (no force-push to `main`). Revoke
    first, then commit the code change. Document the rotation
-   procedure (e.g. the table in
+   procedure (e.g. the numbered procedure in
    [auth.md](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation))
    so the next person doesn't re-derive it under pressure.
 3. **Watch for the third macro.** The "two builders, same macro,

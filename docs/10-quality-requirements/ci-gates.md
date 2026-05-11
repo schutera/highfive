@@ -1,17 +1,18 @@
 # CI gates
 
-`.github/workflows/tests.yml` runs **seven parallel jobs** on PRs to
+`.github/workflows/tests.yml` runs **eight parallel jobs** on PRs to
 `main` and pushes to `main`. All must stay green to merge.
 
-| Job             | What it runs                                             |
-| --------------- | -------------------------------------------------------- |
-| `esp-native`    | `pio test -e native` in `ESP32-CAM/`                     |
-| `esp-firmware`  | `pio run -e esp32cam` in `ESP32-CAM/` (cross-compile)    |
-| `backend-unit`  | `npm test` (vitest + supertest) in `backend/`            |
-| `duckdb-unit`   | `pytest tests/ -q` in `duckdb-service/`                  |
-| `image-unit`    | `pytest tests/ -q` in `image-service/`                   |
-| `homepage-unit` | `npm test` (vitest + jsdom) in `homepage/`               |
-| `e2e-pipeline`  | `pytest tests/e2e/ -v` (boots full compose, ports +1000) |
+| Job             | What it runs                                                                                                                                                                                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `esp-native`    | `pio test -e native` in `ESP32-CAM/`                                                                                                                                                                                                                         |
+| `esp-firmware`  | `pio run -e esp32cam` in `ESP32-CAM/` (cross-compile). Consumes `secrets.GEO_API_KEY`; a pre-build guard hard-fails the job on push-to-main if the secret is missing. See [`auth.md`](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation). |
+| `backend-unit`  | `npm test` (vitest + supertest) in `backend/`                                                                                                                                                                                                                |
+| `duckdb-unit`   | `pytest tests/ -q` in `duckdb-service/`                                                                                                                                                                                                                      |
+| `image-unit`    | `pytest tests/ -q` in `image-service/`                                                                                                                                                                                                                       |
+| `homepage-unit` | `npm test` (vitest + jsdom) in `homepage/`                                                                                                                                                                                                                   |
+| `doc-citations` | `bash scripts/check-doc-citations.sh` — verifies `path:line` references in `docs/` and `CLAUDE.md` still resolve to non-blank lines of the current source                                                                                                    |
+| `e2e-pipeline`  | `pytest tests/e2e/ -v` (boots full compose, ports +1000)                                                                                                                                                                                                     |
 
 Concurrency cancels superseded runs on the same ref. The workflow
 also runs on pushes to `chore/test-harness`.

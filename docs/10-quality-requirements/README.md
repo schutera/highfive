@@ -12,12 +12,12 @@ Three layers, each fast and hermetic where possible:
 
 Run hermetically — no Docker, no real DB, no network.
 
-| Service          | Stack                | Count | Run                                  |
-|------------------|----------------------|-------|--------------------------------------|
-| `backend`        | vitest + supertest   | 17    | `cd backend && npm test`             |
-| `homepage`       | vitest + jsdom       | 8     | `cd homepage && npm test`            |
-| `image-service`  | pytest               | 31    | `cd image-service && pytest tests/`  |
-| `duckdb-service` | pytest (in-mem DuckDB) | 24  | `cd duckdb-service && pytest tests/` |
+| Service          | Stack                  | Count | Run                                  |
+| ---------------- | ---------------------- | ----- | ------------------------------------ |
+| `backend`        | vitest + supertest     | 17    | `cd backend && npm test`             |
+| `homepage`       | vitest + jsdom         | 8     | `cd homepage && npm test`            |
+| `image-service`  | pytest                 | 31    | `cd image-service && pytest tests/`  |
+| `duckdb-service` | pytest (in-mem DuckDB) | 24    | `cd duckdb-service && pytest tests/` |
 
 In `backend`, the duckdb-service client is mocked via `vi.mock`. In
 `image-service`, all outbound HTTP and `duckdb.connect` calls are
@@ -28,11 +28,11 @@ exercises schema, nest creation, progress insertion.
 
 PlatformIO `native` env (no Arduino core, runs on the CI host).
 
-| Suite                                | Count | Run                                  |
-|--------------------------------------|-------|--------------------------------------|
-| `ESP32-CAM/test/test_native_url`     | -     | `cd ESP32-CAM && pio test -e native` |
-| `ESP32-CAM/test/test_native_ring_*`  | -     | (same — runs all 38 in one job)      |
-| `ESP32-CAM/test/test_native_telemetry` | -   | (same)                               |
+| Suite                                  | Count | Run                                  |
+| -------------------------------------- | ----- | ------------------------------------ |
+| `ESP32-CAM/test/test_native_url`       | -     | `cd ESP32-CAM && pio test -e native` |
+| `ESP32-CAM/test/test_native_ring_*`    | -     | (same — runs all 38 in one job)      |
+| `ESP32-CAM/test/test_native_telemetry` | -     | (same)                               |
 
 Total: 38 tests covering `lib/url`, `lib/ring_buffer`, `lib/telemetry`.
 Why this works: see [ADR-002](../09-architecture-decisions/adr-002-esp-host-testable-lib.md).
@@ -66,5 +66,5 @@ make test-e2e           # python -m pytest tests/e2e/ -v
 
 ## CI
 
-Seven parallel jobs gate every PR — see [ci-gates.md](ci-gates.md).
+Eight parallel jobs gate every PR — see [ci-gates.md](ci-gates.md).
 All must be green to merge.

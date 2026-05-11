@@ -35,6 +35,17 @@
 
 name: tests
 
+# Adding a new trigger here? Then also:
+#   1. Update the matrix in docs/08-crosscutting-concepts/auth.md
+#      ("GitHub Actions integration" — 5 rows today, one per current trigger).
+#   2. Revisit the esp-firmware "Guard — GEO_API_KEY must be set on main"
+#      step's `if:` so manual / scheduled runs against `main` stay
+#      protected from accidentally building Null-Island firmware.
+# Without those two updates, the doc and the guard drift silently from
+# the actual trigger matrix. See chapter 11 lessons-learned
+# "Drift sweep is not a substitute for a CI check" for why we do not
+# rely on prose warnings alone for this kind of cross-surface
+# consistency.
 on:
   push:
     branches: [main, 'chore/test-harness']

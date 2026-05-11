@@ -22,11 +22,14 @@ VERSION="$(cat "${SKETCH_DIR}/VERSION")"
 # fatal: the firmware's runtime guard logs a clear message and skips the
 # HTTPS call. We never print the value — only its length — so this script
 # can run in CI without leaking the secret into build logs.
-# Trim outer whitespace from both sources so the env-var and file paths
-# cannot diverge on a stray trailing newline (which is the common shape
-# of a CI secret written via `echo "$KEY" > file`). Google API keys
-# contain no internal whitespace, so a `tr -d` over the whole value is
-# equivalent to a trim here.
+# Strip ALL whitespace from both sources (not just outer) so the env-var
+# and file paths cannot diverge on a stray trailing newline (the common
+# shape of a CI secret written via `echo "$KEY" > file`) OR an embedded
+# space pasted from a wrapped-line email. Google API keys contain no
+# internal whitespace, so deleting all whitespace is harmless on any
+# valid input. extra_scripts.py mirrors this byte-for-byte via
+# re.sub(r'[ \t\n\v\f\r]+', '', ...) so the two builders converge on
+# identical macro values from any byte sequence either could see.
 GEO_API_KEY="$(printf '%s' "${GEO_API_KEY:-}" | tr -d '[:space:]')"
 if [ -z "${GEO_API_KEY}" ] && [ -f "${SKETCH_DIR}/GEO_API_KEY" ]; then
   GEO_API_KEY="$(tr -d '[:space:]' < "${SKETCH_DIR}/GEO_API_KEY")"

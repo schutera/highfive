@@ -153,7 +153,7 @@ How to run it:
 
 ## Open-issue roadmap
 
-Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. After completion / deletion of the last section, remove this open-issue roadmap section entirely.
+Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. (PR A — the issue-#42 / #53 WDT fix — was the first to open and was deleted from this section; the list now starts at PR B.) After completion / deletion of the last section, remove this open-issue roadmap section entirely.
 
 ---
 

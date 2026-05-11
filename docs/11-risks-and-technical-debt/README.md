@@ -745,10 +745,14 @@ the trickle-data scenario surfaced on real hardware.
 an `esp_task_wdt_reset()` call if the loop can iterate for more than a few
 seconds. The write-body loop in `client.cpp`'s `postImage` is the reference
 model — feed the watchdog on each chunk write; follow the same pattern for
-each chunk (or byte) read. The same fix also added `delay(1)` in the
-body-read polling loop's else branch to stop the loop from CPU-spinning
-between byte arrivals — `delay(1)` is the Arduino-on-ESP32 way to yield
-to other FreeRTOS tasks while waiting on a non-blocking poll.
+each chunk (or byte) read. Pair the feed with `client.setTimeout(N)` where
+`N < TASK_WDT_TIMEOUT_S` so a single blocking read can't itself exhaust the
+budget (the existing `setTimeout(8000)` at `postImage`'s static-init block
+already does this — it is the other half of the same defence). The same
+fix also added `delay(1)` in the body-read polling loop's else branch to
+stop the loop from CPU-spinning between byte arrivals — `delay(1)` is the
+Arduino-on-ESP32 way to yield to other FreeRTOS tasks while waiting on a
+non-blocking poll.
 
 ### Hardware-test misdiagnosis: assumed cadence without reading the constant (issue #42)
 
@@ -779,9 +783,10 @@ the upload completes. Costs of the misdiagnosis: one fork-the-fork branch,
 ~20 lines of instrumentation, a noise PR filed on the upstream issue
 tracker, and a contributor's evening. A second, related test-completeness
 miss landed in the same session: the 3 loop iterations observed only
-exercised `postImage` once (per `firstCaptureDone` plus daily-noon-only
-recapture) and `sendHeartbeat` once (per `HEARTBEAT_INTERVAL_MS = 1 hour`
-gating it on iteration 2 and 3). The 90 s test window was therefore
+exercised `postImage` once (the `firstCaptureDone` flag prevents another
+non-noon recapture, and the test wasn't at noon so the noon path didn't
+fire either) and `sendHeartbeat` once (the one-hour interval kept iter 2
+and 3 in the skip-heartbeat branch). The 90 s test window was therefore
 mostly the no-network-call branch of `loop()` running and `delay(30000)`
 returning. The trickle-data scenario the WDT fix targets was not
 artificially re-induced — the verification proves the fix doesn't regress

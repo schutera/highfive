@@ -62,6 +62,8 @@ cd ESP32-CAM      && pio test -e native                       # Unity host tests
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware
 ```
 
+The `pio run -e esp32cam` line builds the firmware as a smoke test — it works without `GEO_API_KEY` and produces a binary that reports `(0, 0, 0)` on first boot. **Do not flash that binary** without first writing the Geolocation API key to `ESP32-CAM/GEO_API_KEY` (gitignored) or exporting `GEO_API_KEY` in your shell. Full setup: [`docs/07-deployment-view/esp-flashing.md` → "Provide the Geolocation API key"](docs/07-deployment-view/esp-flashing.md#provide-the-geolocation-api-key-one-time-before-first-build); mechanism + rotation: [`docs/08-crosscutting-concepts/auth.md` → "Third-party API keys: Geolocation"](docs/08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
+
 Full testing strategy: [`docs/10-quality-requirements/`](docs/10-quality-requirements/README.md). CI gate manifest: [`docs/10-quality-requirements/ci-gates.md`](docs/10-quality-requirements/ci-gates.md).
 
 ## Documentation map (arc42)
@@ -153,15 +155,7 @@ How to run it:
 
 ## Open-issue roadmap
 
-Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. (PR A — the issue-#42 / #53 WDT fix — was the first to open and was deleted from this section; the list now starts at PR B.) After completion / deletion of the last section, remove this open-issue roadmap section entirely.
-
----
-
-### PR B — `fix/esp-api-key-hardcoded` (urgent — closes #18)
-
-Google Maps API key is hardcoded in `ESP32-CAM/esp_init.cpp` and already public on GitHub. Revoke the key in Google Cloud Console first (before the PR), then make it configurable.
-
-**Recommended approach:** inject at build time via `platformio.ini` `build_flags` env var (`-DGEO_API_KEY=\"$(GEO_API_KEY)\"`), exclude from version control, document in `docs/08-crosscutting-concepts/auth.md`.
+Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. (PR A — the issue-#42 / #53 WDT fix — and PR B — the issue-#18 hardcoded Google Geolocation key fix — were both opened and deleted from this section; the list now starts at PR C.) After completion / deletion of the last section, remove this open-issue roadmap section entirely.
 
 ---
 

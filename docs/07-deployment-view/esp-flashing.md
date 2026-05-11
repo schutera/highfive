@@ -63,6 +63,48 @@ If you have multiple Python versions on the same machine and `python -m platform
 
 The chip is now waiting for firmware.
 
+### Provide the Geolocation API key (one-time, before first build)
+
+> **Skip this and your modules will plot at Null Island in the
+> Gulf of Guinea on the dashboard.** The Google Geolocation API key
+> used by the firmware's first-boot WiFi-AP lookup is **build-time
+> injected** — it is no longer hardcoded. Without a key, the
+> firmware compiles cleanly and the runtime guard skips the lookup,
+> but every module reports `(0, 0, 0)` to the backend.
+
+Write the key to the gitignored `ESP32-CAM/GEO_API_KEY` file once
+(it's listed in the repo root `.gitignore` next to `secrets.h`):
+
+```powershell
+# Windows / PowerShell — from repo root
+"AIza<your-google-geolocation-api-key>" | Out-File -NoNewline -Encoding ascii ESP32-CAM\GEO_API_KEY
+```
+
+```bash
+# Linux / macOS — from repo root
+printf '%s' "AIza<your-google-geolocation-api-key>" > ESP32-CAM/GEO_API_KEY
+```
+
+Or set the env var in the shell where you run `pio` /
+`build.sh`:
+
+```bash
+export GEO_API_KEY="AIza<your-google-geolocation-api-key>"
+```
+
+Either source survives in `extra_scripts.py`'s pre-build hook,
+which prints `[extra_scripts] GEO_API_KEY len=<N>` so you can
+confirm the value reached the build (the value itself is **never**
+logged). Full mechanism, source order, and rotation procedure:
+[`docs/08-crosscutting-concepts/auth.md` → "Third-party API keys:
+Geolocation"](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
+The leak that prompted this design: [chapter 11 lessons-learned →
+"Third-party API keys belong in build-time macros, not source"](../11-risks-and-technical-debt/README.md#third-party-api-keys-belong-in-build-time-macros-not-source-issue-18).
+
+The maintainer issues the key from the project's Google Cloud
+Console (restricted to the Geolocation API). Ask in the issue
+tracker if you need access for a personal fork.
+
 ### Flash
 
 ```bash

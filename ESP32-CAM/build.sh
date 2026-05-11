@@ -16,18 +16,55 @@ if [ ! -f "${SKETCH_DIR}/VERSION" ]; then
 fi
 VERSION="$(cat "${SKETCH_DIR}/VERSION")"
 
+# GEO_API_KEY is the Google Geolocation API key used by getGeolocation in
+# esp_init.cpp. Sourced from env var first, then a .gitignored file (so
+# local dev doesn't have to export it every shell). Missing key is NOT
+# fatal: the firmware's runtime guard logs a clear message and skips the
+# HTTPS call. We never print the value — only its length — so this script
+# can run in CI without leaking the secret into build logs.
+# Strip ALL whitespace from both sources (not just outer) so the env-var
+# and file paths cannot diverge on a stray trailing newline (the common
+# shape of a CI secret written via `echo "$KEY" > file`) OR an embedded
+# space pasted from a wrapped-line email. Google API keys contain no
+# internal whitespace, so deleting all whitespace is harmless on any
+# valid input. extra_scripts.py mirrors this byte-for-byte via
+# re.sub(r'[ \t\n\v\f\r]+', '', ...) so the two builders converge on
+# identical macro values from any byte sequence either could see.
+GEO_API_KEY="$(printf '%s' "${GEO_API_KEY:-}" | tr -d '[:space:]')"
+if [ -z "${GEO_API_KEY}" ] && [ -f "${SKETCH_DIR}/GEO_API_KEY" ]; then
+  GEO_API_KEY="$(tr -d '[:space:]' < "${SKETCH_DIR}/GEO_API_KEY")"
+fi
+
 echo "Compiling ESP32-CAM firmware..."
 echo "  FQBN:    ${FQBN}"
 echo "  Sketch:  ${SKETCH_DIR}"
 echo "  Output:  ${BUILD_DIR}"
 echo "  Version: ${VERSION}"
+if [ -n "${GEO_API_KEY}" ]; then
+  echo "  GeoKey:  set (len=${#GEO_API_KEY})"
+else
+  echo "  GeoKey:  <unset>"
+  # First-boot side effect: with the geolocation fields left at their
+  # 0.0f defaults, the module reports (lat=0, lng=0, acc=0) on its
+  # first heartbeat and the homepage map plots it at Null Island in
+  # the Gulf of Guinea until an operator corrects it. Loud on stderr
+  # so the message survives a `> build.log` redirect. See
+  # docs/08-crosscutting-concepts/auth.md "Third-party API keys".
+  echo "" >&2
+  echo "WARNING: GEO_API_KEY is unset. Firmware will skip the Google" >&2
+  echo "         Geolocation call at first boot and report (0, 0, 0)," >&2
+  echo "         which plots the module at Null Island on the dashboard." >&2
+  echo "         Set GEO_API_KEY or write ESP32-CAM/GEO_API_KEY for a" >&2
+  echo "         release build intended to reach an operator's map view." >&2
+  echo "" >&2
+fi
 echo ""
 
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --output-dir "${BUILD_DIR}" \
   --libraries "${SKETCH_DIR}/lib" \
-  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\"" \
+  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\"" \
   "${SKETCH_DIR}"
 
 # Post-compile guard. The contract: FIRMWARE_VERSION must land in the

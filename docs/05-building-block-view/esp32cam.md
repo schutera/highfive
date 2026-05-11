@@ -82,6 +82,13 @@ full setup walkthrough.
 - **2.4 GHz Wi-Fi only.** No 5 GHz support.
 - **No OTA today.** Firmware updates require physical USB access. Tracked
   in [issue #26](https://github.com/schutera/highfive/issues/26).
-- **Hardcoded Google Maps key** in `esp_init.cpp`'s `getGeolocation`. Tracked in
-  [issue #18](https://github.com/schutera/highfive/issues/18). Listed
-  in [11-risks-and-technical-debt](../11-risks-and-technical-debt/README.md).
+- **Google Geolocation API key is build-time injected**, not hardcoded.
+  `esp_init.cpp`'s `getGeolocation` reads the `GEO_API_KEY` macro
+  supplied by `extra_scripts.py` (PlatformIO) or `build.sh`
+  (`arduino-cli`); raw Arduino IDE builds fall back to an empty
+  string and the runtime guard skips the Google call. Source order
+  and rotation procedure: [auth.md "Third-party API keys:
+  Geolocation"](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
+  Background on the leak that prompted the change:
+  [chapter 11 lessons-learned "Third-party API keys belong in
+  build-time macros, not source"](../11-risks-and-technical-debt/README.md#third-party-api-keys-belong-in-build-time-macros-not-source-issue-18).

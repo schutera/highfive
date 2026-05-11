@@ -35,6 +35,17 @@
 
 name: tests
 
+# Adding a new trigger here? Then also:
+#   1. Update the matrix in docs/08-crosscutting-concepts/auth.md
+#      ("GitHub Actions integration" — 5 rows today, one per current trigger).
+#   2. Revisit the esp-firmware "Guard — GEO_API_KEY must be set on main"
+#      step's `if:` so manual / scheduled runs against `main` stay
+#      protected from accidentally building Null-Island firmware.
+# Without those two updates, the doc and the guard drift silently from
+# the actual trigger matrix. See chapter 11 lessons-learned
+# "Drift sweep is not a substitute for a CI check" for why we do not
+# rely on prose warnings alone for this kind of cross-surface
+# consistency.
 on:
   push:
     branches: [main, 'chore/test-harness']
@@ -102,8 +113,36 @@ jobs:
           restore-keys: |
             pio-fw-${{ runner.os }}-
 
+      # Hard-fail when building from main with no GEO_API_KEY stored. On
+      # main, a missing secret means deployed firmware would skip the
+      # Google call at first boot and report (0, 0, 0) — modules plot at
+      # Null Island on the dashboard. We want a loud build failure, not
+      # a silent broken release. Fork PRs and same-repo branch builds
+      # are exempt: forks can't access secrets by design (GitHub
+      # security feature), and branch builds may legitimately be tested
+      # without the production key. See
+      # docs/08-crosscutting-concepts/auth.md "Third-party API keys".
+      - name: Guard — GEO_API_KEY must be set on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GEO_API_KEY: ${{ secrets.GEO_API_KEY }}
+        run: |
+          if [ -z "${GEO_API_KEY}" ]; then
+            echo "::error title=GEO_API_KEY missing::No GEO_API_KEY repository secret is configured. A main-branch firmware build without the key produces Null Island modules. Add the secret at https://github.com/${{ github.repository }}/settings/secrets/actions before re-running this workflow."
+            exit 1
+          fi
+          echo "GEO_API_KEY present (len=${#GEO_API_KEY})"
+
       - name: Build esp32cam firmware
         working-directory: ESP32-CAM
+        env:
+          # extra_scripts.py reads this via os.environ.get and injects
+          # -DGEO_API_KEY="<value>" into the firmware build. The value
+          # never reaches build logs — only its length is printed.
+          # Empty / missing on fork PRs is intentional; the runtime
+          # guard handles it. The push-to-main guard above catches
+          # accidental "deleted secret on main" regressions.
+          GEO_API_KEY: ${{ secrets.GEO_API_KEY }}
         run: pio run -e esp32cam
 
   backend-unit:

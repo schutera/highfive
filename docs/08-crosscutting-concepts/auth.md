@@ -50,6 +50,113 @@ The same admin gate protects the `/admin` route in the homepage
 [`HeartbeatSnapshot`](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md),
 the image inspector, and the Discord webhook test surface).
 
+## Third-party API keys: Geolocation
+
+`getGeolocation` in `ESP32-CAM/esp_init.cpp` calls Google's
+[Geolocation API v1](https://developers.google.com/maps/documentation/geolocation/overview)
+to translate the nearby WiFi-AP fingerprint into a coarse
+(latitude, longitude, accuracy) triple at first-boot, so the
+admin dashboard can place a fresh module on the map without the
+operator typing coordinates. The API key is **not a HiveHive
+secret**; it is a Google Cloud Console key tied to a specific
+project's billing account.
+
+**Key never lives in source.** The literal previously sat at the
+top of `getGeolocation`'s body and ended up public on GitHub
+([issue #18](https://github.com/schutera/highfive/issues/18)).
+It has since been revoked and re-issued; the new key enters the
+binary at build time only.
+
+**Injection mechanism** — two paths, same macro:
+
+| Builder       | How                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| PlatformIO    | `ESP32-CAM/extra_scripts.py`'s pre-build hook appends `-DGEO_API_KEY="<value>"` to `CPPDEFINES`.                         |
+| `arduino-cli` | `ESP32-CAM/build.sh` appends `-DGEO_API_KEY="<value>"` to the `--build-property build.extra_flags=...` string.           |
+| Arduino IDE   | No injection. The firmware's `#ifndef GEO_API_KEY` fallback defines an empty string and `getGeolocation` skips the call. |
+
+**Source-of-truth order** (both builders agree):
+
+1. `GEO_API_KEY` environment variable — used by CI / production
+   builds.
+2. `ESP32-CAM/GEO_API_KEY` file — single-line key, trimmed.
+   Listed in the repo root `.gitignore` next to `secrets.h`.
+3. Empty string — runtime guard in `getGeolocation` prints
+   `getGeolocation: GEO_API_KEY not set at build time — skipping
+geolocation lookup.` and returns before the HTTPS call. No
+   broken request to Google, no false "geolocation OK" telemetry.
+
+**First-boot side effect when no key is set.** `esp_init.cpp`'s
+`loadConfig` initialises `esp_config->geolocation` to
+`{latitude: 0.0f, longitude: 0.0f, accuracy: 0.0f}`. If
+`getGeolocation` skips its lookup, those zeros remain and ship
+to the backend on the first heartbeat. The `homepage` map view
+has no `(0, 0)` special-case today, so the module plots at the
+Null Island coordinate in the Gulf of Guinea until an operator
+manually corrects the location. A release build without
+`GEO_API_KEY` therefore produces map-broken modules. `build.sh`
+prints `WARNING:` on `stderr` when the key is unset for this
+reason — do not suppress it unless you have a `dev` / `test`
+build that will never reach the dashboard.
+
+Only the **length** of the key is logged at build time
+(`[extra_scripts] GEO_API_KEY len=<N>`); the value never appears
+in build output. `build.sh` deliberately does not add a
+post-compile `grep` for `GEO_API_KEY` in the binary (the
+`FIRMWARE_VERSION` post-compile guard does grep, but the version
+string is safe to echo in logs — the API key is not).
+
+**GitHub Actions integration.** The `esp-firmware` job in
+`.github/workflows/tests.yml` consumes a repository secret named
+`GEO_API_KEY` and exposes it to `pio run -e esp32cam` as the
+`GEO_API_KEY` env var, where `extra_scripts.py` picks it up
+exactly as in a local build. The workflow's `on:` block fires on
+`push: [main, 'chore/test-harness']` and `pull_request: [main]` —
+no other event triggers it today, so the matrix is:
+
+| Trigger                                                    | Secret available? | Pre-build guard | Build behaviour                                                                                                                                             |
+| ---------------------------------------------------------- | ----------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `push` to `main`                                           | required          | **enforced**    | Hard-fail with `::error::` annotation if the secret is missing. Catches "secret accidentally deleted" before a release artefact ships broken.               |
+| `push` to `chore/test-harness`                             | yes               | skipped         | Real key baked in. Lets the CI gate self-test before being merged to `main`.                                                                                |
+| `pull_request` to `main` from same-repo branch             | yes               | skipped         | Real key baked in.                                                                                                                                          |
+| `pull_request` to `main` from a fork                       | no (by GitHub)    | skipped         | Build proceeds with empty key; the firmware's runtime guard skips the Google call. Fork PRs cannot be regression-tested against geolocation.                |
+| Push to any other branch / `workflow_dispatch` / scheduled | n/a               | n/a             | Workflow doesn't fire at all today. If a `workflow_dispatch` trigger is ever added, revisit the guard's `if:` so manual runs against `main` stay protected. |
+
+To store or rotate the secret:
+
+```bash
+gh secret set GEO_API_KEY --repo schutera/highfive
+# or via the web UI:
+# https://github.com/schutera/highfive/settings/secrets/actions
+```
+
+**Rotation procedure** (operator-side). Most security-rotation
+playbooks recommend create-new → roll-out → revoke-old to avoid a
+quota-less window. Here we revoke first because in-field modules
+tolerate a revoked key gracefully (see step 4 below) and it forecloses
+the worst case (a leaked key remaining usable while a calmer rotation
+is being staged):
+
+1. Revoke the current key in Google Cloud Console
+   (`APIs & Services → Credentials`).
+2. Create a new key, restricted to **Geolocation API** only.
+   Restrict by HTTP referrer / Android / iOS fingerprint where
+   feasible.
+3. Update every build host that produces release firmware:
+   - **GitHub Actions:** `gh secret set GEO_API_KEY --repo schutera/highfive`
+     (replaces the previous secret).
+   - **Local release builds:** write the new key into
+     `ESP32-CAM/GEO_API_KEY` (gitignored) or `export GEO_API_KEY=...`
+     in your shell profile.
+4. Rebuild firmware and USB-flash deployed modules (OTA is
+   tracked in
+   [issue #26](https://github.com/schutera/highfive/issues/26)
+   and not implemented today). Until then, in-field modules
+   continue to hit Google with the now-revoked key — `getGeolocation`
+   will log the non-2xx response, but heartbeats, uploads, and the
+   map view are unaffected (the saved geolocation from first boot
+   persists in module config).
+
 ## Why one secret, two header names
 
 See [ADR-003](../09-architecture-decisions/adr-003-shared-api-key-for-admin.md).

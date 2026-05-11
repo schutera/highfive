@@ -12,3 +12,8 @@ bash scripts/check-doc-citations.sh || exit 1
 # for N seconds") regressing in user-facing surfaces. See
 # docs/11-risks-and-technical-debt/README.md "GPIO0 is a strap pin".
 bash scripts/check-stale-reset-prose.sh || exit 1
+
+# Catch a hardcoded Google API key literal — the failure mode of
+# issue #18. See docs/11-risks-and-technical-debt/README.md
+# "Third-party API keys belong in build-time macros, not source".
+bash scripts/check-no-hardcoded-api-keys.sh || exit 1

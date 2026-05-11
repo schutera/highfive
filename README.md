@@ -36,16 +36,16 @@ Automated monitoring pipeline that captures images of wild bee hotels, analyzes 
 
 ## Documentation
 
-| Guide                                                                | Description                                                   |
-| -------------------------------------------------------------------- | ------------------------------------------------------------- |
-| [Deployment Guide](docs/07-deployment-view/docker-compose.md)        | How to run all services with Docker Compose                   |
-| [Homepage](docs/05-building-block-view/homepage.md)                  | Frontend pages, routes, and backend connection                |
-| [ESP Deployment](docs/07-deployment-view/esp-flashing.md)            | ESP32 firmware flashing, WiFi setup, configuration            |
-| [Troubleshooting](docs/troubleshooting.md)                           | ESP32-CAM setup issues, server connectivity, Windows Firewall |
-| [API Reference](docs/api-reference.md)                               | All API endpoints with example requests and responses         |
-| [Architecture (arc42)](docs/05-building-block-view/README.md)        | System architecture, building blocks, and design decisions    |
-| [Image Service](docs/05-building-block-view/image-service.md)        | Image ingestion and analysis service                          |
-| [DuckDB & Data Model](docs/05-building-block-view/duckdb-service.md) | Database schema and query reference                           |
+| Guide                                                                | Description                                                                                                                                                                                                 |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Deployment Guide](docs/07-deployment-view/docker-compose.md)        | How to run all services with Docker Compose                                                                                                                                                                 |
+| [Homepage](docs/05-building-block-view/homepage.md)                  | Frontend pages, routes, and backend connection                                                                                                                                                              |
+| [ESP Deployment](docs/07-deployment-view/esp-flashing.md)            | ESP32 firmware flashing, WiFi setup, configuration. **Read this before building firmware** — the Google Geolocation API key is build-time injected via `ESP32-CAM/GEO_API_KEY` (gitignored), not hardcoded. |
+| [Troubleshooting](docs/troubleshooting.md)                           | ESP32-CAM setup issues, server connectivity, Windows Firewall                                                                                                                                               |
+| [API Reference](docs/api-reference.md)                               | All API endpoints with example requests and responses                                                                                                                                                       |
+| [Architecture (arc42)](docs/05-building-block-view/README.md)        | System architecture, building blocks, and design decisions                                                                                                                                                  |
+| [Image Service](docs/05-building-block-view/image-service.md)        | Image ingestion and analysis service                                                                                                                                                                        |
+| [DuckDB & Data Model](docs/05-building-block-view/duckdb-service.md) | Database schema and query reference                                                                                                                                                                         |
 
 <br>
 

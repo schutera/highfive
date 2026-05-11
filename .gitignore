@@ -197,6 +197,7 @@ cython_debug/
 
 # Secrets
 secrets.h
+ESP32-CAM/GEO_API_KEY
 
 # Configuration files - server-specific
 .env

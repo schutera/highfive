@@ -463,7 +463,19 @@ bool loadConfig(esp_config_t *esp_config) {
 // GEOLOCATION (uses Google Geolocation API and stores latitdue and longitude)
 void getGeolocation(esp_config_t *esp_config) {
 
-  const char* apiKey = "AIzaSyDJbAIkbkFhhCaieIvMDbmt4pf7-SLNGPQ";
+  // GEO_API_KEY is injected at build time by extra_scripts.py (PlatformIO)
+  // or build.sh (arduino-cli). Fallback to empty string so raw Arduino IDE
+  // builds compile; the runtime guard below makes the missing-key case
+  // observable instead of producing a broken HTTPS request to Google.
+  #ifndef GEO_API_KEY
+  #define GEO_API_KEY ""
+  #endif
+  const char* apiKey = GEO_API_KEY;
+
+  if (apiKey[0] == '\0') {
+    Serial.println("getGeolocation: GEO_API_KEY not set at build time — skipping geolocation lookup.");
+    return;
+  }
 
   // Issue #42 instrumentation: breadcrumb each blocking call inside
   // getGeolocation. The HTTPClient calls below have NO explicit

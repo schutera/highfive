@@ -62,6 +62,8 @@ cd ESP32-CAM      && pio test -e native                       # Unity host tests
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware
 ```
 
+The `pio run -e esp32cam` line builds the firmware as a smoke test — it works without `GEO_API_KEY` and produces a binary that reports `(0, 0, 0)` on first boot. **Do not flash that binary** without first writing the Geolocation API key to `ESP32-CAM/GEO_API_KEY` (gitignored) or exporting `GEO_API_KEY` in your shell. Full setup: [`docs/07-deployment-view/esp-flashing.md` → "Provide the Geolocation API key"](docs/07-deployment-view/esp-flashing.md#provide-the-geolocation-api-key-one-time-before-first-build); mechanism + rotation: [`docs/08-crosscutting-concepts/auth.md` → "Third-party API keys: Geolocation"](docs/08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
+
 Full testing strategy: [`docs/10-quality-requirements/`](docs/10-quality-requirements/README.md). CI gate manifest: [`docs/10-quality-requirements/ci-gates.md`](docs/10-quality-requirements/ci-gates.md).
 
 ## Documentation map (arc42)

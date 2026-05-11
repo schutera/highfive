@@ -102,6 +102,15 @@ binary. To do the same locally:
 cd ESP32-CAM && python -m platformio run -e esp32cam
 ```
 
+> **Heads-up:** the Google Geolocation API key used by the firmware
+> is **build-time injected**, not in source. A bare `pio run` works,
+> but produces a binary that reports `(0, 0, 0)` on first boot — fine
+> for a CI smoke test, **not fine** for a binary you intend to flash.
+> Before flashing for real, write the key to `ESP32-CAM/GEO_API_KEY`
+> (gitignored) or `export GEO_API_KEY=...`. Full setup:
+> [`docs/07-deployment-view/esp-flashing.md` → "Provide the
+> Geolocation API key"](docs/07-deployment-view/esp-flashing.md#provide-the-geolocation-api-key-one-time-before-first-build).
+
 ### CI
 
 `.github/workflows/tests.yml` runs three parallel jobs on every PR to

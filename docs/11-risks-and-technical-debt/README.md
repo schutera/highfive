@@ -10,13 +10,13 @@ future contributors must know about. Two sub-registers below:
 Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
 Highlights worth knowing about even if you're not assigned:
 
-| #                                                     | Title (short)                                                                | Why it matters                                                                                                                                                                              |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                              |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                     |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
-| [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
-| [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper             | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
+| #                                                     | Title (short)                                                         | Why it matters                                                                                                                                                                              |
+| ----------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                             | Risk of silent truncation on telemetry growth.                                                                                                                                              |
+| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                         | Should be configurable via the AP form.                                                                                                                                                     |
+| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                           | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
+| [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash) | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
+| [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper      | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
 
 ## Field-name drift
 
@@ -834,10 +834,11 @@ history — removing it from `HEAD` does not unleak it, only
 revocation does.
 
 **How to avoid it next time.** Two rules:
+
 1. **Treat any third-party API key as a build-time macro from
    day one.** The canonical pattern in this repo is
    `ESP32-CAM/extra_scripts.py`'s `env.Append(CPPDEFINES=[("NAME",
-   env.StringifyMacro(value))])` mirrored by `build.sh`'s
+env.StringifyMacro(value))])` mirrored by `build.sh`'s
    `--build-property build.extra_flags=-DNAME=...`. Source order
    is env var → `.gitignored` file → empty-string default with a
    runtime guard. New keys (Slack webhooks, Discord tokens, OTA
@@ -852,3 +853,24 @@ revocation does.
    procedure (e.g. the table in
    [auth.md](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation))
    so the next person doesn't re-derive it under pressure.
+3. **Watch for the third macro.** The "two builders, same macro,
+   must agree" pattern (`extra_scripts.py` mirroring `build.sh`
+   mirroring the Arduino-IDE `#ifndef` fallback in `esp_init.cpp`)
+   is now load-bearing for two macros — `FIRMWARE_VERSION` (since
+   PR #36) and `GEO_API_KEY` (since this entry). When a third
+   build-time macro lands (Slack webhook, OTA signing material,
+   per-environment Discord tokens, …), the three-way duplication
+   starts to bite. The right move at that point is to consolidate
+   the source-order + length-only-logging logic into a single
+   `ESP32-CAM/build_macros.{sh,py}` that both paths source/import,
+   instead of pasting a fourth `-D` into `build.extra_flags`.
+
+**Coverage caveat.** The runtime guard in `getGeolocation` is
+hardware-verified (a real ESP32-CAM module flashed from this
+branch returned real Garching coordinates, not Null Island), but
+it is **not** unit-tested. The function lives in `esp_init.cpp`
+and depends on `WiFi.h` / `HTTPClient.h`, neither of which is
+available to PlatformIO's `[env:native]`. A test-extraction
+refactor of a four-line `if (apiKey[0] == '\0')` early-return
+would be disproportionate; the missing coverage is intentional,
+not forgotten.

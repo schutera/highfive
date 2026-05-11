@@ -113,12 +113,17 @@ cd ESP32-CAM && python -m platformio run -e esp32cam
 
 ### CI
 
-`.github/workflows/tests.yml` runs three parallel jobs on every PR to
+`.github/workflows/tests.yml` runs eight parallel jobs on every PR to
 `main` and on push to `main`:
 
-- `esp-native` — host unit tests
-- `esp-firmware` — cross-compile firmware
-- `e2e-pipeline` — full docker-compose pipeline
+- `esp-native` — host unit tests for `ESP32-CAM/lib/*`
+- `esp-firmware` — cross-compile firmware (consumes `secrets.GEO_API_KEY`; pre-build guard hard-fails on push-to-main if the secret is missing)
+- `backend-unit` — vitest + supertest tests for the Node/Express backend
+- `duckdb-unit` — pytest tests for `duckdb-service`
+- `image-unit` — pytest tests for `image-service`
+- `homepage-unit` — vitest + jsdom smoke tests for the React homepage
+- `doc-citations` — verifies `path:line` references in `docs/` and `CLAUDE.md` still resolve
+- `e2e-pipeline` — boots the four-service docker-compose stack and drives it with the mock ESP
 
 The badge on `README.md` is wired to this workflow.
 

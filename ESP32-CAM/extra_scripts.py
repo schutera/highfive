@@ -18,11 +18,27 @@ Only the *length* of the key is printed at build time, never the value.
 """
 
 import os
+import re
 from pathlib import Path
 
 Import("env")  # noqa: F821 — provided by PlatformIO at script-eval time
 
 project_dir = Path(env["PROJECT_DIR"])  # noqa: F821
+
+
+def _strip_all_whitespace(value: str) -> str:
+    """Mirror ``build.sh``'s ``tr -d '[:space:]'`` byte-for-byte.
+
+    ``str.strip()`` only removes outer whitespace, but ``build.sh`` strips
+    ALL whitespace from both env-var and file sources. If the two paths
+    diverged on a key with embedded whitespace (a stray space pasted from
+    a wrapped-line email, a tab from clipboard tooling), the same source
+    file would produce two binaries with different keys baked in
+    depending on which builder ran. ``re.sub(r'\\s+', '', ...)`` matches
+    bash's behaviour for any ASCII / Unicode whitespace.
+    """
+    return re.sub(r"\s+", "", value)
+
 
 version_file = project_dir / "VERSION"
 version = (
@@ -32,12 +48,9 @@ version = (
 )
 
 geo_key_file = project_dir / "GEO_API_KEY"
-# Both sources are .strip()'d so a trailing newline (common when a CI
-# secret is written via `echo "$KEY" > file`) cannot land in the macro
-# and silently break the request.
 geo_key = (
-    (os.environ.get("GEO_API_KEY") or "").strip()
-    or (geo_key_file.read_text(encoding="utf-8").strip() if geo_key_file.exists() else "")
+    _strip_all_whitespace(os.environ.get("GEO_API_KEY") or "")
+    or (_strip_all_whitespace(geo_key_file.read_text(encoding="utf-8")) if geo_key_file.exists() else "")
 )
 
 env.Append(  # noqa: F821

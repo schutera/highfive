@@ -22,10 +22,18 @@ cd "$repo_root"
 
 pattern='AIza[0-9A-Za-z_-]{20,}'
 
-# Allowlist: files that legitimately discuss the pattern (this script,
-# the chapter-11 lessons-learned post-mortem) without actually carrying
-# a live key. Add new entries sparingly — the whole point of this gate
-# is to make every match a deliberate decision.
+# Allowlist: files that legitimately discuss the pattern without
+# actually carrying a live key. Add new entries sparingly — the whole
+# point of this gate is to make every match a deliberate decision.
+#
+# Why each entry is on the list:
+#   * scripts/check-no-hardcoded-api-keys.sh — this script itself
+#     contains the regex (line 23 above), which would obviously match.
+#   * docs/11-risks-and-technical-debt/README.md — the post-mortem
+#     entry for issue #18 doesn't quote the leaked literal today, but
+#     the file is allowlisted so a future post-mortem can quote a
+#     (revoked) key verbatim if that aids the lesson, without forcing
+#     a global allowlist edit at the same time.
 skip_files=(
   'scripts/check-no-hardcoded-api-keys.sh'
   'docs/11-risks-and-technical-debt/README.md'

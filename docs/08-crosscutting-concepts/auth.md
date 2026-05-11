@@ -110,13 +110,17 @@ string is safe to echo in logs — the API key is not).
 `.github/workflows/tests.yml` consumes a repository secret named
 `GEO_API_KEY` and exposes it to `pio run -e esp32cam` as the
 `GEO_API_KEY` env var, where `extra_scripts.py` picks it up
-exactly as in a local build. Three behaviours, one workflow:
+exactly as in a local build. The workflow's `on:` block fires on
+`push: [main, 'chore/test-harness']` and `pull_request: [main]` —
+no other event triggers it today, so the matrix is:
 
-| Trigger                                               | Secret available? | Behaviour                                                                                                                                                 |
-| ----------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `push` to `main`                                      | required          | A pre-build guard step fails the job loudly if the secret is missing. This catches "secret accidentally deleted" before a release artefact ships broken.  |
-| `push` to other branches / `pull_request` (same repo) | yes               | Build proceeds with the real key baked in; pre-build guard is skipped.                                                                                    |
-| `pull_request` from a fork                            | no (by GitHub)    | Build proceeds with empty key; the firmware's runtime guard skips the Google call. Fork PRs cannot be regression-tested against geolocation; that's fine. |
+| Trigger                                                    | Secret available? | Pre-build guard | Build behaviour                                                                                                                                             |
+| ---------------------------------------------------------- | ----------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `push` to `main`                                           | required          | **enforced**    | Hard-fail with `::error::` annotation if the secret is missing. Catches "secret accidentally deleted" before a release artefact ships broken.               |
+| `push` to `chore/test-harness`                             | yes               | skipped         | Real key baked in. Lets the CI gate self-test before being merged to `main`.                                                                                |
+| `pull_request` to `main` from same-repo branch             | yes               | skipped         | Real key baked in.                                                                                                                                          |
+| `pull_request` to `main` from a fork                       | no (by GitHub)    | skipped         | Build proceeds with empty key; the firmware's runtime guard skips the Google call. Fork PRs cannot be regression-tested against geolocation.                |
+| Push to any other branch / `workflow_dispatch` / scheduled | n/a               | n/a             | Workflow doesn't fire at all today. If a `workflow_dispatch` trigger is ever added, revisit the guard's `if:` so manual runs against `main` stay protected. |
 
 To store or rotate the secret:
 
@@ -126,12 +130,17 @@ gh secret set GEO_API_KEY --repo schutera/highfive
 # https://github.com/schutera/highfive/settings/secrets/actions
 ```
 
-**Rotation procedure** (operator-side):
+**Rotation procedure** (operator-side). Most security-rotation
+playbooks recommend create-new → roll-out → revoke-old to avoid a
+quota-less window. Here we revoke first because in-field modules
+tolerate a revoked key gracefully (see step 4 below) and it forecloses
+the worst case (a leaked key remaining usable while a calmer rotation
+is being staged):
 
 1. Revoke the current key in Google Cloud Console
    (`APIs & Services → Credentials`).
 2. Create a new key, restricted to **Geolocation API** only.
-   Restrict by HTTP referrer / Android-iOS fingerprint where
+   Restrict by HTTP referrer / Android / iOS fingerprint where
    feasible.
 3. Update every build host that produces release firmware:
    - **GitHub Actions:** `gh secret set GEO_API_KEY --repo schutera/highfive`

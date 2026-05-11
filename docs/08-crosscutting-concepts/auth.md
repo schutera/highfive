@@ -69,11 +69,11 @@ binary at build time only.
 
 **Injection mechanism** — two paths, same macro:
 
-| Builder         | How                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| PlatformIO      | `ESP32-CAM/extra_scripts.py`'s pre-build hook appends `-DGEO_API_KEY="<value>"` to `CPPDEFINES`.                          |
-| `arduino-cli`   | `ESP32-CAM/build.sh` appends `-DGEO_API_KEY="<value>"` to the `--build-property build.extra_flags=...` string.            |
-| Arduino IDE     | No injection. The firmware's `#ifndef GEO_API_KEY` fallback defines an empty string and `getGeolocation` skips the call.  |
+| Builder       | How                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| PlatformIO    | `ESP32-CAM/extra_scripts.py`'s pre-build hook appends `-DGEO_API_KEY="<value>"` to `CPPDEFINES`.                         |
+| `arduino-cli` | `ESP32-CAM/build.sh` appends `-DGEO_API_KEY="<value>"` to the `--build-property build.extra_flags=...` string.           |
+| Arduino IDE   | No injection. The firmware's `#ifndef GEO_API_KEY` fallback defines an empty string and `getGeolocation` skips the call. |
 
 **Source-of-truth order** (both builders agree):
 
@@ -83,7 +83,7 @@ binary at build time only.
    Listed in the repo root `.gitignore` next to `secrets.h`.
 3. Empty string — runtime guard in `getGeolocation` prints
    `getGeolocation: GEO_API_KEY not set at build time — skipping
-   geolocation lookup.` and returns before the HTTPS call. No
+geolocation lookup.` and returns before the HTTPS call. No
    broken request to Google, no false "geolocation OK" telemetry.
 
 **First-boot side effect when no key is set.** `esp_init.cpp`'s
@@ -106,6 +106,26 @@ post-compile `grep` for `GEO_API_KEY` in the binary (the
 `FIRMWARE_VERSION` post-compile guard does grep, but the version
 string is safe to echo in logs — the API key is not).
 
+**GitHub Actions integration.** The `esp-firmware` job in
+`.github/workflows/tests.yml` consumes a repository secret named
+`GEO_API_KEY` and exposes it to `pio run -e esp32cam` as the
+`GEO_API_KEY` env var, where `extra_scripts.py` picks it up
+exactly as in a local build. Three behaviours, one workflow:
+
+| Trigger                                               | Secret available? | Behaviour                                                                                                                                                 |
+| ----------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `push` to `main`                                      | required          | A pre-build guard step fails the job loudly if the secret is missing. This catches "secret accidentally deleted" before a release artefact ships broken.  |
+| `push` to other branches / `pull_request` (same repo) | yes               | Build proceeds with the real key baked in; pre-build guard is skipped.                                                                                    |
+| `pull_request` from a fork                            | no (by GitHub)    | Build proceeds with empty key; the firmware's runtime guard skips the Google call. Fork PRs cannot be regression-tested against geolocation; that's fine. |
+
+To store or rotate the secret:
+
+```bash
+gh secret set GEO_API_KEY --repo schutera/highfive
+# or via the web UI:
+# https://github.com/schutera/highfive/settings/secrets/actions
+```
+
 **Rotation procedure** (operator-side):
 
 1. Revoke the current key in Google Cloud Console
@@ -113,9 +133,12 @@ string is safe to echo in logs — the API key is not).
 2. Create a new key, restricted to **Geolocation API** only.
    Restrict by HTTP referrer / Android-iOS fingerprint where
    feasible.
-3. Update the build host: either `export GEO_API_KEY=...` in CI
-   secrets or write the new key into `ESP32-CAM/GEO_API_KEY` for
-   local builds.
+3. Update every build host that produces release firmware:
+   - **GitHub Actions:** `gh secret set GEO_API_KEY --repo schutera/highfive`
+     (replaces the previous secret).
+   - **Local release builds:** write the new key into
+     `ESP32-CAM/GEO_API_KEY` (gitignored) or `export GEO_API_KEY=...`
+     in your shell profile.
 4. Rebuild firmware and USB-flash deployed modules (OTA is
    tracked in
    [issue #26](https://github.com/schutera/highfive/issues/26)

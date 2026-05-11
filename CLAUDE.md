@@ -153,15 +153,7 @@ How to run it:
 
 ## Open-issue roadmap
 
-Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. (PR A — the issue-#42 / #53 WDT fix — was the first to open and was deleted from this section; the list now starts at PR B.) After completion / deletion of the last section, remove this open-issue roadmap section entirely.
-
----
-
-### PR B — `fix/esp-api-key-hardcoded` (urgent — closes #18)
-
-Google Maps API key is hardcoded in `ESP32-CAM/esp_init.cpp` and already public on GitHub. Revoke the key in Google Cloud Console first (before the PR), then make it configurable.
-
-**Recommended approach:** inject at build time via `platformio.ini` `build_flags` env var (`-DGEO_API_KEY=\"$(GEO_API_KEY)\"`), exclude from version control, document in `docs/08-crosscutting-concepts/auth.md`.
+Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. (PR A — the issue-#42 / #53 WDT fix — and PR B — the issue-#18 hardcoded Google Geolocation key fix — were both opened and deleted from this section; the list now starts at PR C.) After completion / deletion of the last section, remove this open-issue roadmap section entirely.
 
 ---
 

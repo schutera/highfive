@@ -50,6 +50,66 @@ The same admin gate protects the `/admin` route in the homepage
 [`HeartbeatSnapshot`](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md),
 the image inspector, and the Discord webhook test surface).
 
+## Third-party API keys: Geolocation
+
+`getGeolocation` in `ESP32-CAM/esp_init.cpp` calls Google's
+[Geolocation API v1](https://developers.google.com/maps/documentation/geolocation/overview)
+to translate the nearby WiFi-AP fingerprint into a coarse
+(latitude, longitude, accuracy) triple at first-boot, so the
+admin dashboard can place a fresh module on the map without the
+operator typing coordinates. The API key is **not a HiveHive
+secret**; it is a Google Cloud Console key tied to a specific
+project's billing account.
+
+**Key never lives in source.** The literal previously sat at the
+top of `getGeolocation`'s body and ended up public on GitHub
+([issue #18](https://github.com/schutera/highfive/issues/18)).
+It has since been revoked and re-issued; the new key enters the
+binary at build time only.
+
+**Injection mechanism** — two paths, same macro:
+
+| Builder         | How                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| PlatformIO      | `ESP32-CAM/extra_scripts.py`'s pre-build hook appends `-DGEO_API_KEY="<value>"` to `CPPDEFINES`.                          |
+| `arduino-cli`   | `ESP32-CAM/build.sh` appends `-DGEO_API_KEY="<value>"` to the `--build-property build.extra_flags=...` string.            |
+| Arduino IDE     | No injection. The firmware's `#ifndef GEO_API_KEY` fallback defines an empty string and `getGeolocation` skips the call.  |
+
+**Source-of-truth order** (both builders agree):
+
+1. `GEO_API_KEY` environment variable — used by CI / production
+   builds.
+2. `ESP32-CAM/GEO_API_KEY` file — single-line key, trimmed.
+   Listed in the repo root `.gitignore` next to `secrets.h`.
+3. Empty string — runtime guard in `getGeolocation` prints
+   `getGeolocation: GEO_API_KEY not set at build time — skipping
+   geolocation lookup.` and returns before the HTTPS call. No
+   broken request to Google, no false "geolocation OK" telemetry.
+
+Only the **length** of the key is logged at build time
+(`[extra_scripts] GEO_API_KEY len=<N>`); the value never appears
+in build output. `build.sh` deliberately does not add a
+post-compile `grep` for `GEO_API_KEY` in the binary (the
+`FIRMWARE_VERSION` post-compile guard does grep, but the version
+string is safe to echo in logs — the API key is not).
+
+**Rotation procedure** (operator-side):
+
+1. Revoke the current key in Google Cloud Console
+   (`APIs & Services → Credentials`).
+2. Create a new key, restricted to **Geolocation API** only.
+   Restrict by HTTP referrer / Android-iOS fingerprint where
+   feasible.
+3. Update the build host: either `export GEO_API_KEY=...` in CI
+   secrets or write the new key into `ESP32-CAM/GEO_API_KEY` for
+   local builds.
+4. Rebuild firmware and OTA-flash (or USB-flash) deployed
+   modules. Until then, in-field modules continue to hit Google
+   with the now-revoked key — getGeolocation will log the
+   non-2xx response, but heartbeats, uploads, and the map view
+   are unaffected (the saved geolocation from first boot
+   persists in module config).
+
 ## Why one secret, two header names
 
 See [ADR-003](../09-architecture-decisions/adr-003-shared-api-key-for-admin.md).

@@ -12,7 +12,6 @@ Highlights worth knowing about even if you're not assigned:
 
 | #                                                     | Title (short)                                                                | Why it matters                                                                                                                                                                              |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [#18](https://github.com/schutera/highfive/issues/18) | Hardcoded Google Maps API key in `ESP32-CAM/esp_init.cpp`'s `getGeolocation` | Secret in source. Should be revoked in Google Cloud Console and re-issued via env var or build-time injection.                                                                              |
 | [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                              |
 | [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                     |
 | [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
@@ -31,11 +30,17 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 
 ## Hardcoded secrets
 
-- **Google Maps API key** in `ESP32-CAM/esp_init.cpp`'s `getGeolocation`
-  `apiKey` local in the function body — see
-  [issue #18](https://github.com/schutera/highfive/issues/18). The
-  key has been committed to git history; rotation is the right fix,
-  not just removal.
+- **Google Geolocation API key** — formerly hardcoded as the
+  `apiKey` local in `ESP32-CAM/esp_init.cpp`'s `getGeolocation`.
+  Removed in the PR that closed
+  [issue #18](https://github.com/schutera/highfive/issues/18); the
+  key now enters the binary at build time via
+  `ESP32-CAM/extra_scripts.py` (PlatformIO) or
+  `ESP32-CAM/build.sh` (`arduino-cli`), sourced from a
+  `GEO_API_KEY` env var with a `.gitignored`
+  `ESP32-CAM/GEO_API_KEY` file fallback. Full mechanism:
+  [`docs/08-crosscutting-concepts/auth.md`](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
+  The original key remains in git history and must stay revoked.
 - **Dev API key fallback** `hf_dev_key_2026` in `backend/src/auth.ts:4`
   — intentional for local dev. **Must** be overridden via
   `HIGHFIVE_API_KEY` for any non-local deploy. See
@@ -807,3 +812,43 @@ Read the constant. For verification: when a hardware test is meant to
 exercise a specific failure mode, confirm the test path actually reaches
 that mode (e.g. by injecting the failure on the server side) rather than
 asserting "no regression on the happy path" and calling the fix verified.
+
+### Third-party API keys belong in build-time macros, not source (issue #18)
+
+**What happened.** The Google Geolocation API key used by
+`getGeolocation` in `ESP32-CAM/esp_init.cpp` was committed as a
+string literal at the top of the function body and pushed to a
+public GitHub repository. Anyone reading the repo could spend the
+quota on the owning Google Cloud project until the key was
+revoked. The fix required two motions: an out-of-band human
+action (revoke + re-issue in Google Cloud Console, which only the
+project owner can do) and a code change (move the value out of
+source).
+
+**Why it happened.** The shape of the firmware code made
+inlining the key the path of least resistance: there was no
+existing build-time injection point at the time the function was
+first written, so the literal sat there waiting for someone to
+notice. By the time someone did, the value was already in git
+history — removing it from `HEAD` does not unleak it, only
+revocation does.
+
+**How to avoid it next time.** Two rules:
+1. **Treat any third-party API key as a build-time macro from
+   day one.** The canonical pattern in this repo is
+   `ESP32-CAM/extra_scripts.py`'s `env.Append(CPPDEFINES=[("NAME",
+   env.StringifyMacro(value))])` mirrored by `build.sh`'s
+   `--build-property build.extra_flags=-DNAME=...`. Source order
+   is env var → `.gitignored` file → empty-string default with a
+   runtime guard. New keys (Slack webhooks, Discord tokens, OTA
+   signing material, …) should follow the same shape — including
+   the "only the length is logged at build time" rule, so CI
+   build output is safe to share.
+2. **If a key has already been pushed, rotation is the only
+   real fix.** Removing the literal from `HEAD` and force-pushing
+   is both insufficient (history caches, mirrors, code search
+   indices) and forbidden here (no force-push to `main`). Revoke
+   first, then commit the code change. Document the rotation
+   procedure (e.g. the table in
+   [auth.md](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation))
+   so the next person doesn't re-derive it under pressure.

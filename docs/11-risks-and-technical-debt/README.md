@@ -16,76 +16,8 @@ Highlights worth knowing about even if you're not assigned:
 | [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                                    | Risk of silent truncation on telemetry growth.                                                                                                                                              |
 | [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                                | Should be configurable via the AP form.                                                                                                                                                     |
 | [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                                  | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
-| [#42](https://github.com/schutera/highfive/issues/42) | Recurring task-watchdog reboots (`reset_reason=7`)                           | ESP reboots every other boot under STA mode. Telemetry-first instrumentation landed (RTC_NOINIT stage breadcrumb) — see "Active investigation" below; surgical fix waits on a few days of field data identifying the culprit. |
 | [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash)        | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
 | [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper             | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
-
-## Active investigation: #42 task-watchdog reboots
-
-**Symptom**: every other boot on AI Thinker ESP32-CAM-MB reports
-`reset_reason=7` (TASK_WDT) in normal STA-mode operation; reproducible
-immediately after `pio run -t erase && pio run -t upload`. Suspects
-per the issue: `getGeolocation` (Google Geolocation API), `initNewModuleOnServer`
-(duckdb-service `/new_module`), `postImage`'s body-read loop, or
-`sendHeartbeat`. None of the four currently calls `esp_task_wdt_reset()`
-mid-call, and the first two use the legacy `HTTPClient` `begin/POST/getString`
-pattern with no explicit `setTimeout()`.
-
-**Why this lives in "Active investigation" rather than "Lessons learned"**:
-the lesson hasn't been earned yet — we don't know what's hanging, only
-that something is. The lesson registers the **diagnosis approach** to
-prove out, not the root cause, which is still unknown by design.
-
-**What the telemetry-first PR shipped** (branch
-`feat/esp-wdt-stage-breadcrumb`, commit message
-`feat(esp): add RTC_NOINIT stage-breadcrumb library + native tests`):
-
-- New library `ESP32-CAM/lib/breadcrumb/` — a 64-byte stage name in
-  RTC slow memory via `RTC_NOINIT_ATTR`. RTC slow memory survives
-  software resets (TASK_WDT, panic, `ESP.restart()`) but is wiped on
-  power-on. NVS would have served the same shape but the loop()-side
-  breadcrumbs update every ~30 s; even with NVS wear-levelling, that
-  rate makes the wear-out boundary an unbounded design question for
-  multi-month deployment. RTC slow memory is RAM, not flash — zero
-  wear cost, side-steps the question entirely.
-- Each long-running call in `setup()` / `loop()` / `client.cpp` /
-  `esp_init.cpp` (network I/O, NTP poll, SPIFFS `loadConfig`, camera
-  init) calls `breadcrumbSet("section:name")` on entry. Single slot,
-  last writer wins.
-- On boot, `setup()` reads + clears the slot **first** (before any
-  in-boot `breadcrumbSet` could clobber it) and buffers the recovered
-  value. After `logbufInit()` runs, the value is logged via
-  `logf("[BOOT] last_stage_before_reboot=%s")` and attached to every
-  subsequent telemetry sidecar JSON via the new optional
-  `last_stage_before_reboot` field on the inner `payload`. The admin
-  Telemetry view (`TelemetryRow` in
-  `homepage/src/components/ModulePanel.tsx`) renders it as a "stage at
-  previous reboot" row next to the existing `reset` row when present.
-- The sidecar field is **omitted** when no breadcrumb survived, keeping
-  the pre-#42 wire shape byte-for-byte intact for clean boots.
-
-Mechanism documented in
-[`docs/06-runtime-view/esp-reliability.md`](../06-runtime-view/esp-reliability.md#8-stage-breadcrumb-cross-reboot-diagnostic)
-"safety net 8".
-
-**What the follow-up PR will do** (after a few days of field data):
-
-- Identify the offending stage from the trended `last_stage_before_reboot`
-  values across the fleet.
-- At that exact section, add a targeted `esp_task_wdt_reset()` and/or
-  explicit `setTimeout()` so the call can't block past the 60 s budget
-  undetected.
-- Keep the breadcrumb library in place — it's general-purpose
-  diagnostic infrastructure now, not single-issue scaffolding.
-- Close #42 when the fix is verified by a deployment cycle showing
-  `reset_reason=7` no longer fires in normal operation.
-
-**Why a CI gate isn't the right shape here**: the bug is observable
-only on real hardware in real network conditions (slow Google response,
-concurrent WiFi traffic). A unit test of the breadcrumb library alone
-doesn't catch a regression of the actual hang. The native tests in
-`test_native_breadcrumb/` cover the library's invariants; the field
-verification cycle proves the diagnostic + fix.
 
 ## Field-name drift
 
@@ -782,3 +714,96 @@ discipline, and realistic component-test fixtures. The rules earned
 their own slot in the project orientation rather than living only as
 post-mortem prose so the next contributor sees them before writing
 the bug, not after.
+
+### TASK_WDT in `postImage:read_body` — WiFiClient read loops must feed the watchdog (issues #42, #53)
+
+**What happened.** The ESP32 rebooted via TASK_WDT on every other boot
+during normal STA-mode operation (`reset_reason=7`). The stage-breadcrumb
+library in `ESP32-CAM/lib/breadcrumb/` (RTC slow memory, survives software
+resets) identified `postImage:read_body` as the stage consistently active
+when the watchdog fired. The response-body reading loop in `client.cpp`'s
+`postImage` uses `WiFiClient.read()` in a polling loop with a 5-second
+silence-based exit (`millis() - start > 5000`). When the server sends
+trickle data, each received byte resets `start = millis()`, preventing the
+silence exit from ever triggering. The loop can run for >60 s with no
+`esp_task_wdt_reset()` call — the WDT fires.
+
+Note: every boot also logged `WiFiClient.cpp setSocketOption() fail on -1,
+errno: 9, "Bad file number"`, indicating the socket is in an error state
+across reconnects. The WDT-feed fix stops the reboot symptom; the
+underlying socket-state corruption is tracked separately at
+[issue #60](https://github.com/schutera/highfive/issues/60).
+
+**Why it happened.** The write-body loop in the same function already had
+`esp_task_wdt_reset()` inside it (added for the same reason in an earlier
+PR) but the two read loops (headers and body) were never given the same
+treatment. The write → feed / read → no-feed asymmetry was invisible until
+the trickle-data scenario surfaced on real hardware.
+
+**How to avoid it next time.** Any loop that calls blocking or polling
+`WiFiClient` methods (`readStringUntil`, `readBytes`, `read`) must contain
+an `esp_task_wdt_reset()` call if the loop can iterate for more than a few
+seconds. The write-body loop in `client.cpp`'s `postImage` is the reference
+model — feed the watchdog on each chunk write; follow the same pattern for
+each chunk (or byte) read. Pair the feed with `client.setTimeout(N)` where
+`N < TASK_WDT_TIMEOUT_S` so a single blocking read can't itself exhaust the
+budget (the existing `setTimeout(8000)` at `postImage`'s static-init block
+already does this — it is the other half of the same defence). The same
+fix also added `delay(1)` in the body-read polling loop's else branch to
+stop the loop from CPU-spinning between byte arrivals — `delay(1)` is the
+Arduino-on-ESP32 way to yield to other FreeRTOS tasks while waiting on a
+non-blocking poll.
+
+### Hardware-test misdiagnosis: assumed cadence without reading the constant (issue #42)
+
+**What happened.** During hardware verification of the WDT-feed fix above,
+docker logs showed exactly one heartbeat from the module after first boot,
+then silence for 8+ minutes. A "silent hang in `sendHeartbeat`" hypothesis
+was built on top of that observation: a follow-up issue was filed
+([#59](https://github.com/schutera/highfive/issues/59), since closed),
+Serial-debug instrumentation was added on a debug branch, and a fresh
+diagnostic cycle was walked through. The instrumentation immediately showed
+the loop iterating cleanly every 30 s, with the line `[DBG] iter=2
+heartbeat skipped (interval not reached)`. The "missing" heartbeats were
+not missing — `ESP32-CAM/ESP32-CAM.ino`'s `HEARTBEAT_INTERVAL_MS` is
+`(60UL * 60UL * 1000UL)`, **one hour**, not the 30 s loop-tick cadence
+assumed during the diagnosis. There was no hang; the WDT fix was working
+as designed all along.
+
+**Why it happened.** The Docker log shape ("one heartbeat then silence")
+was equally consistent with two explanations: (a) a real hang, and (b) a
+1-hour heartbeat interval. The reviewer picked (a) because the active
+investigation context was about hangs, and never grep'd for the cadence
+constant to disambiguate. The matching error log
+(`WiFiClient.cpp setSocketOption() fail on -1, errno: 9`) on every connect
+looked causal to the silence-hypothesis when it was incidental to it — the
+errno-9 is a real, separate socket-state issue (see the WDT-feed lesson
+directly above), but it does not cause a hang; the connect succeeds and
+the upload completes. Costs of the misdiagnosis: one fork-the-fork branch,
+~20 lines of instrumentation, a noise PR filed on the upstream issue
+tracker, and a contributor's evening. A second, related test-completeness
+miss landed in the same session: the 3 loop iterations observed only
+exercised `postImage` once (the `firstCaptureDone` flag prevents another
+non-noon recapture, and the test wasn't at noon so the noon path didn't
+fire either) and `sendHeartbeat` once (the one-hour interval kept iter 2
+and 3 in the skip-heartbeat branch). The 90 s test window was therefore
+mostly the no-network-call branch of `loop()` running and `delay(30000)`
+returning. The trickle-data scenario the WDT fix targets was not
+artificially re-induced — the verification proves the fix doesn't regress
+the happy path, not that it cures the original failure mode under load.
+
+**How to avoid it next time.** Before building a theory on top of
+"behaviour X happens with cadence Y," `git grep` for the constant that
+defines Y and confirm the value. For HiveHive specifically: any timing-
+related claim about ESP firmware behaviour (heartbeat cadence, capture
+schedule, retry backoff, sleep length) must be backed by reading the
+relevant `#define` or constant in `ESP32-CAM/`. Same rule applies to
+backend polling intervals (`backend/src/`) and silence-watcher thresholds
+(`duckdb-service/`). Generalisation: the
+`Documentation drifted from code in PR 27 first-pass review` lesson above
+is about not assuming a documented value matches code; this is the runtime
+sibling — don't assume an observed cadence matches the model in your head.
+Read the constant. For verification: when a hardware test is meant to
+exercise a specific failure mode, confirm the test path actually reaches
+that mode (e.g. by injecting the failure on the server side) rather than
+asserting "no regression on the happy path" and calling the fix verified.

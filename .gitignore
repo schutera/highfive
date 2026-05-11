@@ -246,3 +246,6 @@ homepage/coverage/
 # DuckDB
 *.duckdb
 *.duckdb.wal
+
+# Stray docker-compose / process logs at repo root
+/error.txt

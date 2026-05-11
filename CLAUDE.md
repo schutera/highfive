@@ -151,6 +151,72 @@ How to run it:
 - Address every P0 before pushing for review. P1s should be fixed or have an explicit "out of scope, tracked in issue #N" justification. P2s are nits and may be deferred.
 - Treat its findings as input, not as a verdict. If it claims something is wrong, verify against the code yourself — but do not dismiss without checking.
 
+## Open-issue roadmap
+
+Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. (PR A — the issue-#42 / #53 WDT fix — was the first to open and was deleted from this section; the list now starts at PR B.) After completion / deletion of the last section, remove this open-issue roadmap section entirely.
+
+---
+
+### PR B — `fix/esp-api-key-hardcoded` (urgent — closes #18)
+
+Google Maps API key is hardcoded in `ESP32-CAM/esp_init.cpp` and already public on GitHub. Revoke the key in Google Cloud Console first (before the PR), then make it configurable.
+
+**Recommended approach:** inject at build time via `platformio.ini` `build_flags` env var (`-DGEO_API_KEY=\"$(GEO_API_KEY)\"`), exclude from version control, document in `docs/08-crosscutting-concepts/auth.md`.
+
+---
+
+### PR C — `fix/service-layer-correctness` (closes #58, #33)
+
+Two independent backend/service correctness gaps — no ESP dependency.
+
+**#58 — `image-service` missing `/record_image` call:**
+
+- Add `_record_image_upload` step to `UploadPipeline.run` in `image-service/services/upload_pipeline.py` that POSTs to duckdb-service's `/record_image` after `_persist_image` succeeds.
+- On failure: log the error (do not swallow silently, per lessons-learned "every cross-service catch block must answer two questions"). The caller still sees a 200 — the image is persisted; the DB row failure is non-fatal but must be observable.
+- Verify: after the fix, a bare `curl -F ... /upload` must produce a visible row in the admin page.
+
+**#33 — Backend tests for destructive admin endpoints:**
+
+- Add supertest cases for `DELETE /api/modules/:id` and `DELETE /api/images/:filename` in `backend/tests/`, mirroring the pattern in `backend/tests/admin-logs.test.ts`.
+- Cover: upstream URL construction, method forwarding, upstream status forwarded verbatim, and the malformed-id 400 path.
+
+---
+
+### PR D — `fix/esp-firmware-housekeeping` (closes #19, #20, #36)
+
+Four surgical ESP32 firmware fixes, all low-risk, no hardware required beyond cross-compile.
+
+- **#20** — Raise default `cfg_interval_ms` from 300 to 60 000 (1 min) in `ESP32-CAM/host.cpp`. Add a comment in the config form describing the battery-life tradeoff.
+- **#19** — `ESP32-CAM/host.cpp`'s `saveConfig` and `ESP32-CAM/esp_init.cpp`'s `loadConfig`: increase `StaticJsonDocument<512>` to `<1024>`. Add a guard that `serializeJson` returns > 0 before calling `setESPConfigured(true)`.
+- **#36 Bug 1** — Capture `fb->len` into a local variable before `esp_camera_fb_return(fb)` in `ESP32-CAM/ESP32-CAM.ino`'s warm-up frame loops (two symmetric blocks). Log the local, not the pointer.
+- **#36 Bug 2** — Wrap incoming `mac` in `ModuleId.model_validate(...).root` before the DB write in `duckdb-service/routes/heartbeats.py`, mirroring `upload_image` in `image-service/app.py`.
+- **#36 Bug 3** — Make `ESP32-CAM/VERSION` the sole firmware-version source via `platformio.ini` build flag (`-DFIRMWARE_VERSION=...`). Remove the `#define` guards in `esp_init.h` and `client.cpp`. `build.sh` continues to read `VERSION` directly.
+
+If Bug 3 proves fiddly (cross-file coordination across `platformio.ini`, `esp_init.h`, `client.cpp`, `build.sh`), split it into its own PR rather than blocking the other three.
+
+---
+
+### PR E — `fix/captive-portal-debt` (closes #56, #57)
+
+Two follow-ups from PR #47's captive-portal work. No new behaviour — UX clarification and test coverage only.
+
+**#56** — Replace the misleading GPIO0 reconfigure hint in `ESP32-CAM/ESP32-CAM.ino`'s `setup()` with text that advertises the auto-fallback trigger ("change WiFi credentials so the device fails to join — it will auto-fall-back to the captive portal after 3 attempts"). Update `docs/11-risks-and-technical-debt/README.md` lessons-learned entry.
+
+**#57** — Extract `resolveKeepCurrentField(submitted, current)` helper into `ESP32-CAM/lib/form_query/` (already host-testable). `runAccessPoint` calls it for the password field. Add 4 Unity tests in `test/test_native_form_query/`: empty submitted → returns current; whitespace-only → returns current; non-empty → returns trimmed submitted; both empty → returns empty.
+
+---
+
+### PR F — `feat/esp-ota` (later — closes #26)
+
+OTA firmware update support. Requires a one-time breaking partition table change (USB flash required to get the first OTA-capable binary onto hardware).
+
+**Phase 1:** ArduinoOTA — update partition table to "Minimal SPIFFS with OTA", add `ArduinoOTA.begin()` in `setup()` and `ArduinoOTA.handle()` in the main loop. LAN-only.
+**Phase 2:** HTTP OTA — periodic version-check + self-update from a hosted `.bin` (e.g. GitHub Release asset). Enables remote updates without LAN access.
+
+Do after the WDT fix (closes #42 / #53) and firmware housekeeping (PR D) are merged, to ensure a stable firmware baseline.
+
+---
+
 ## Branch model
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed prefix (`feat/`, `fix/`, `docs/`, `refactor/`, `chore/`, `test/`, `ci/`); first commit line `<type>: <imperative summary>` ≤ ~72 chars; PRs require all CI green.

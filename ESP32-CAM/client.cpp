@@ -206,6 +206,7 @@ int postImage(esp_config_t *esp_config) {
   while (client.connected()) {
     String line = client.readStringUntil('\n');
     if (line == "\r" || line.length() == 0) break;
+    esp_task_wdt_reset();
   }
 
   hf::breadcrumbSet("postImage:read_body");
@@ -216,8 +217,11 @@ int postImage(esp_config_t *esp_config) {
       char c = client.read();
       response += c;
       start = millis();
+      esp_task_wdt_reset();
     } else if (millis() - start > 5000) {
       break;
+    } else {
+      delay(1);
     }
   }
 

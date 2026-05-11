@@ -209,11 +209,14 @@ even so, multi-month deployment with continuous writes adds up enough to
 make the wear-out boundary an unbounded design question. RTC slow memory
 is RAM, not flash — zero wear cost, side-steps the question entirely.
 
-This is a diagnostic mechanism for issue #42 (recurring `reset_reason=7`
-in normal STA-mode operation). Once the offending blocking call is
-identified from a few days of field telemetry, a follow-up PR will add
-a targeted `setTimeout()` and/or `esp_task_wdt_reset()` at that site
-and the breadcrumb will revert to its dormant role of catching future
+This mechanism was used to diagnose issue #42 (recurring `reset_reason=7`
+in normal STA-mode operation). Hardware testing reproduced the WDT
+consistently; recovery boots consistently showed breadcrumb `postImage:read_body`.
+The fix added `esp_task_wdt_reset()` inside the header-read loop and
+inside the `if (client.available())` branch of the body-read polling
+loop in `client.cpp`'s `postImage` (plus `delay(1)` in the same loop's
+else branch to stop the polling spin). The breadcrumb library remains
+in place as general-purpose diagnostic infrastructure for future
 regressions.
 
 ### LED legend

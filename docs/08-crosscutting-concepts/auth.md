@@ -86,6 +86,19 @@ binary at build time only.
    geolocation lookup.` and returns before the HTTPS call. No
    broken request to Google, no false "geolocation OK" telemetry.
 
+**First-boot side effect when no key is set.** `esp_init.cpp`'s
+`loadConfig` initialises `esp_config->geolocation` to
+`{latitude: 0.0f, longitude: 0.0f, accuracy: 0.0f}`. If
+`getGeolocation` skips its lookup, those zeros remain and ship
+to the backend on the first heartbeat. The `homepage` map view
+has no `(0, 0)` special-case today, so the module plots at the
+Null Island coordinate in the Gulf of Guinea until an operator
+manually corrects the location. A release build without
+`GEO_API_KEY` therefore produces map-broken modules. `build.sh`
+prints `WARNING:` on `stderr` when the key is unset for this
+reason — do not suppress it unless you have a `dev` / `test`
+build that will never reach the dashboard.
+
 Only the **length** of the key is logged at build time
 (`[extra_scripts] GEO_API_KEY len=<N>`); the value never appears
 in build output. `build.sh` deliberately does not add a
@@ -103,11 +116,13 @@ string is safe to echo in logs — the API key is not).
 3. Update the build host: either `export GEO_API_KEY=...` in CI
    secrets or write the new key into `ESP32-CAM/GEO_API_KEY` for
    local builds.
-4. Rebuild firmware and OTA-flash (or USB-flash) deployed
-   modules. Until then, in-field modules continue to hit Google
-   with the now-revoked key — getGeolocation will log the
-   non-2xx response, but heartbeats, uploads, and the map view
-   are unaffected (the saved geolocation from first boot
+4. Rebuild firmware and USB-flash deployed modules (OTA is
+   tracked in
+   [issue #26](https://github.com/schutera/highfive/issues/26)
+   and not implemented today). Until then, in-field modules
+   continue to hit Google with the now-revoked key — `getGeolocation`
+   will log the non-2xx response, but heartbeats, uploads, and the
+   map view are unaffected (the saved geolocation from first boot
    persists in module config).
 
 ## Why one secret, two header names

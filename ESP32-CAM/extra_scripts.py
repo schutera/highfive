@@ -32,8 +32,11 @@ version = (
 )
 
 geo_key_file = project_dir / "GEO_API_KEY"
+# Both sources are .strip()'d so a trailing newline (common when a CI
+# secret is written via `echo "$KEY" > file`) cannot land in the macro
+# and silently break the request.
 geo_key = (
-    os.environ.get("GEO_API_KEY")
+    (os.environ.get("GEO_API_KEY") or "").strip()
     or (geo_key_file.read_text(encoding="utf-8").strip() if geo_key_file.exists() else "")
 )
 

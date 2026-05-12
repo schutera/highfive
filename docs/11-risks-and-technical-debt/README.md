@@ -1104,3 +1104,119 @@ site — tracked at follow-up
 [#66](https://github.com/schutera/highfive/issues/66) alongside the
 dead-weight discovery [#65](https://github.com/schutera/highfive/issues/65)
 above.
+
+### Post-reflash dashboard latency: status is derived, not stored (#15)
+
+**What happened.** After flashing a new firmware build onto a
+module via USB, the dashboard kept showing the module as 'offline'
+for 30–90 seconds after the flash completed and the device was
+clearly alive (Serial monitor showed `[BOOT]`, WiFi connected, the
+operator could see network traffic). The status only flipped to
+'online' once the first daily capture fired its post-upload
+aggregate heartbeat. For a once-on-boot + daily-noon capture
+cadence, that meant operators stared at a stale 'offline' badge
+through most of the reflash workflow.
+
+**Why it happened — and where the narrative had to be corrected.**
+The dashboard's `Module.status` is **derived** server-side in
+`backend/src/database.ts`'s `fetchAndAssemble` from the freshest
+of three timestamps — `image_uploads.uploaded_at`,
+`module_configs.updated_at`, and the latest
+`module_heartbeats.received_at` — with a 2 h window.
+`module_configs.status` itself, despite the believable name, is
+never read by the dashboard (separate dead-weight issue tracked
+at [#69](https://github.com/schutera/highfive/issues/69)).
+
+The senior-reviewer of this PR caught a load-bearing factual
+error in the first draft of this entry **and** in the in-source
+comment at `backend/src/database.ts`'s `fetchAndAssemble` (the
+"earlier draft gated `'unknown'` on `!m.updated_at`" note): both
+asserted that `updated_at` "never refreshes after registration."
+That is false. `duckdb-service/routes/modules.py`'s `add_module`
+contains an `ON CONFLICT (id) DO UPDATE SET ... status =
+EXCLUDED.status, ... updated_at = NOW()` branch that fires on
+every call. Firmware calls `initNewModuleOnServer` unconditionally
+in `setup()` on every boot, so both `status` and `updated_at` are
+rewritten on every reflash and every daily reboot. That UPSERT
+plants a freshness signal in `module_configs.updated_at` long
+before the boot heartbeat fires, and the dashboard's `lastSeenAt`
+candidate set picks it up.
+
+So why is the boot heartbeat still warranted? **Three reasons,
+none of them about `lastSeenAt` freshness:**
+
+1. **Defense-in-depth for the registration POST failing.** The
+   `initNewModuleOnServer` HTTP call can fail (network race,
+   server transient unavailability). If registration fails AND
+   we wait for the loop's first-iteration heartbeat, the
+   dashboard sees a stale `updated_at` for the full setup
+   pipeline duration (30+ s). The boot heartbeat plants a
+   second, independent freshness signal in `module_heartbeats`
+   so the dashboard recovers even if registration didn't.
+2. **Fresh telemetry for the panel that the UPSERT doesn't
+   reach.** Heartbeat rows carry `battery`, `rssi`, `uptime_ms`,
+   `free_heap`, and `fw_version` — and surface as
+   `Module.latestHeartbeat` (per ADR-004), which the
+   `/heartbeats_summary` query reads strictly from
+   `module_heartbeats`, never from `module_configs`. The
+   registration UPSERT _does_ write `module_configs.battery_level`
+   on every boot, but that column feeds a different DTO field;
+   the telemetry panel itself doesn't read it. So `rssi`,
+   `uptime_ms`, `free_heap`, and `fw_version` are not written
+   anywhere on the boot path at all, and `battery` on the panel
+   would still show the pre-reflash heartbeat value until the
+   hourly cadence ticks. The boot heartbeat refreshes the panel
+   within seconds. (The first draft of this bullet said "none of
+   which the UPSERT refreshes" — that was wrong about
+   `battery_level`; corrected here against the DDL.)
+3. **The hourly cadence isn't aware of boots.** `lastHeartbeatMs
+== 0` short-circuits the first iteration, but that iteration
+   runs after the full setup pipeline — WiFi + geolocation +
+   registration + camera init + 3-frame warm-up + NTP sync,
+   consistently 30+ s and sometimes more on real hardware. The
+   boot heartbeat closes that window for the telemetry panel,
+   even though the status badge was already covered by the
+   registration UPSERT.
+
+**How to avoid it next time.** Two complementary rules:
+
+1. **Plant freshness signals early — including ones the next
+   table over already provides.** When two write paths
+   contribute to the same derived field (here `lastSeenAt`),
+   firing both early is cheap belt-and-braces. The #15 fix
+   inserts a `sendHeartbeat(&esp_config)` call immediately after
+   `initNewModuleOnServer()` returns, before the slow camera
+   init begins, so the boot signal is independent of the
+   registration POST succeeding **and** carries fresh telemetry
+   that the registration UPSERT doesn't. Same fix serves the
+   ADR-007 daily-reboot path with no extra code. The general
+   rule: when verifying a state-derivation bug, enumerate every
+   write path that contributes to the derived field and confirm
+   each one's behaviour from the actual DDL, not from comments.
+   The first draft of this entry shipped a "`updated_at` never
+   refreshes" claim that the `ON CONFLICT` UPSERT directly
+   contradicts.
+2. **Stored-vs-derived state needs a named owner.** The
+   `module_configs.status` column is currently dead weight — it
+   exists, it has a CHECK constraint (`'online' | 'offline'`),
+   it is written once, it is never read by the dashboard. Either
+   make it the authoritative source (with a writer at every
+   liveness-event seam) or remove it from the schema. Leaving it
+   in place encourages the next contributor to "update status"
+   in some new code path and discover only at integration time
+   that the dashboard ignores their writes. Tracked at
+   [#69](https://github.com/schutera/highfive/issues/69)
+   for resolution; recommended fix is dropping the column rather
+   than retrofitting writers (same shape as
+   [#65](https://github.com/schutera/highfive/issues/65)'s
+   `CAPTURE_INTERVAL` recommendation, filed during PR D's
+   senior-review).
+
+When a field exists on a schema but no read path consults it, the
+design has a third party who left and didn't come back; either wire
+it through or remove it, but don't leave it in the table as a
+debugging hazard. Two such dead-weight fields are tracked today:
+[#65](https://github.com/schutera/highfive/issues/65) (`CAPTURE_INTERVAL`
+in `esp_config_t`) and
+[#69](https://github.com/schutera/highfive/issues/69)
+(`module_configs.status`).

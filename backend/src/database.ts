@@ -232,10 +232,16 @@ export class ModuleReadModel {
       // misleading the user with red 'offline'.
       //
       // Note: an earlier draft gated this on `!m.updated_at`, but
-      // `updated_at` is set permanently at module registration and never
-      // refreshes — so the 'unknown' branch was unreachable for the
+      // `updated_at` refreshes on every module-registration call via
+      // the `ON CONFLICT (id) DO UPDATE SET ... updated_at = NOW()`
+      // branch in `duckdb-service/routes/modules.py`'s `add_module`,
+      // which firmware fires unconditionally in setup() on every
+      // boot. So a `!m.updated_at` guard was unreachable for the
       // exact population the fix was for. Switched to gating on the
-      // would-be-offline outcome itself.
+      // would-be-offline outcome itself. (The first draft of this
+      // comment said `updated_at` "never refreshes" — corrected by
+      // the #15 fix's senior-review against the DDL. See chapter-11
+      // "Post-reflash dashboard latency" for the full incident.)
       let status: 'online' | 'offline' | 'unknown';
       if (isOnline) {
         status = 'online';

@@ -206,6 +206,20 @@ void setup() {
   initNewModuleOnServer(&esp_config);
   logf("[STAGE] initNewModuleOnServer took=%lums", millis() - stageStartMs);
 
+  // Boot-time heartbeat (#15): plant freshness signal before slow
+  // camera init so the dashboard reflects the post-reflash / daily-
+  // reboot live state in seconds, not after the full setup pipeline.
+  // Gate `lastHeartbeatMs` stamping on success so a failed boot POST
+  // falls through to the loop's `lastHeartbeatMs == 0` retry branch.
+  // `sendHeartbeat` fails quiet — chapter-11 "Post-reflash dashboard
+  // latency" carries the full rationale.
+  hf::breadcrumbSet("setup:sendHeartbeat:boot");
+  stageStartMs = millis();
+  if (sendHeartbeat(&esp_config) == 0) {
+    lastHeartbeatMs = millis();
+  }
+  logf("[STAGE] sendHeartbeat:boot took=%lums", millis() - stageStartMs);
+
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
   */
@@ -402,8 +416,14 @@ void loop() {
     ESP.restart();
   }
 
-  // Hourly heartbeat so the dashboard knows the module is alive between
-  // images. Tiny payload, no camera work, fails-quiet — never restarts.
+  // Hourly telemetry heartbeat so the dashboard's lastSeenAt stays
+  // fresh between captures. Tiny payload, no camera work, fails-quiet
+  // — never restarts. The setup-time boot heartbeat (#15) primes
+  // `lastHeartbeatMs` before this branch is ever reached, so the
+  // `lastHeartbeatMs == 0` short-circuit below is now a defence-in-depth
+  // path for the case where the boot heartbeat's POST failed — the
+  // first loop iteration still gets a chance to plant the freshness
+  // signal in `module_heartbeats`.
   if (millis() - lastHeartbeatMs > HEARTBEAT_INTERVAL_MS || lastHeartbeatMs == 0) {
     hf::breadcrumbSet("loop:sendHeartbeat");
     sendHeartbeat(&esp_config);

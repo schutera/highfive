@@ -159,23 +159,6 @@ Derived from the open issues as of 2026-05-10. Each section below maps to one pl
 
 ---
 
-### PR C — `fix/service-layer-correctness` (closes #58, #33)
-
-Two independent backend/service correctness gaps — no ESP dependency.
-
-**#58 — `image-service` missing `/record_image` call:**
-
-- Add `_record_image_upload` step to `UploadPipeline.run` in `image-service/services/upload_pipeline.py` that POSTs to duckdb-service's `/record_image` after `_persist_image` succeeds.
-- On failure: log the error (do not swallow silently, per lessons-learned "every cross-service catch block must answer two questions"). The caller still sees a 200 — the image is persisted; the DB row failure is non-fatal but must be observable.
-- Verify: after the fix, a bare `curl -F ... /upload` must produce a visible row in the admin page.
-
-**#33 — Backend tests for destructive admin endpoints:**
-
-- Add supertest cases for `DELETE /api/modules/:id` and `DELETE /api/images/:filename` in `backend/tests/`, mirroring the pattern in `backend/tests/admin-logs.test.ts`.
-- Cover: upstream URL construction, method forwarding, upstream status forwarded verbatim, and the malformed-id 400 path.
-
----
-
 ### PR E — `fix/captive-portal-debt` (closes #56, #57)
 
 Two follow-ups from PR #47's captive-portal work. No new behaviour — UX clarification and test coverage only.

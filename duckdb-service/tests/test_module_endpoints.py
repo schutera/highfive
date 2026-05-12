@@ -1,8 +1,9 @@
 """Tests for per-module endpoints used by image-service.
 
 Covers:
-* GET /modules/<id>/progress_count
+* GET  /modules/<id>/progress_count
 * POST /modules/<id>/heartbeat
+* POST /record_image
 """
 
 from datetime import date
@@ -192,3 +193,71 @@ def test_heartbeat_increments_image_count_idempotently(client, fresh_db):
     # Most recent battery is what stuck.
     assert row["battery_level"] == 55
     assert str(row["first_online"]) == date.today().isoformat()
+
+
+# ---------- record_image ----------
+
+
+def _fetch_image_uploads(fresh_db, module_id):
+    con = fresh_db.connection.get_conn()
+    try:
+        cur = con.execute(
+            "SELECT module_id, filename FROM image_uploads WHERE module_id = ?",
+            (module_id,),
+        )
+        return cur.fetchall()
+    finally:
+        con.close()
+
+
+def test_record_image_inserts_row(client, fresh_db):
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.post(
+        "/record_image",
+        json={"module_id": TEST_MAC_1, "filename": "esp_capture_001.jpg"},
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"message": "Image recorded"}
+
+    rows = _fetch_image_uploads(fresh_db, TEST_MAC_1)
+    assert len(rows) == 1
+    assert rows[0][0] == TEST_MAC_1
+    assert rows[0][1] == "esp_capture_001.jpg"
+
+
+def test_record_image_missing_module_id_returns_400(client):
+    resp = client.post("/record_image", json={"filename": "x.jpg"})
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
+def test_record_image_missing_filename_returns_400(client):
+    resp = client.post("/record_image", json={"module_id": TEST_MAC_1})
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
+def test_record_image_canonicalises_legacy_colon_mac(client, fresh_db):
+    """A direct curl with `AA:BB:CC:DD:EE:FF` lands on the canonical 12-hex
+    row. Without this gate at the route, the row would join against zero
+    `module_configs` and be invisible to the admin page (the issue #58
+    failure mode, one layer down)."""
+    _seed_module(fresh_db, TEST_MAC_1)  # TEST_MAC_1 = canonical "aabbccddeeff"
+    resp = client.post(
+        "/record_image",
+        json={"module_id": "AA:BB:CC:DD:EE:FF", "filename": "legacy.jpg"},
+    )
+    assert resp.status_code == 200
+
+    rows = _fetch_image_uploads(fresh_db, TEST_MAC_1)
+    assert len(rows) == 1
+    assert rows[0][0] == TEST_MAC_1
+
+
+def test_record_image_invalid_module_id_returns_400(client):
+    resp = client.post(
+        "/record_image",
+        json={"module_id": "not-a-mac", "filename": "x.jpg"},
+    )
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()

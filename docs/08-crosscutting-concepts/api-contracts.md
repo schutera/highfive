@@ -29,7 +29,7 @@ PR 17 added the **telemetry heartbeat** channel
 surfaced the most recent snapshot on every `Module`. This is
 **distinct from** the post-upload aggregate at
 `POST /modules/<mac>/heartbeat`
-(`duckdb-service/routes/modules.py:266`), which is a separate
+(`duckdb-service/routes/modules.py`'s `heartbeat`), which is a separate
 endpoint with a different body and different side effects — see
 [duckdb-service.md](../05-building-block-view/duckdb-service.md)
 and the [glossary](../12-glossary/README.md) for the full
@@ -108,19 +108,25 @@ test in `tests/e2e/test_upload_pipeline.py` is the canary.
 These three patterns have caused real bugs. Grep before changing
 anything in this neighbourhood.
 
-### `modul_id` (still live)
+### `modul_id` (deprecation alias)
 
-`POST /add_progress_for_module` carries `modul_id` (typo, missing
-"e"). Everywhere else (DB column, route param, DTO) the canonical
-name is `module_id`. Verified in `duckdb-service/models/progress.py`'s
-`ClassificationOutput` and `duckdb-service/routes/progress.py`.
+`POST /add_progress_for_module` accepts the canonical `module_id` on
+the wire as of the cutover. The legacy typo `modul_id` (missing "e")
+is still **accepted** by `duckdb-service/models/progress.py`'s
+`ClassificationOutput` via Pydantic `AliasChoices`, but `image-service`
+emits the canonical name (`image-service/services/upload_pipeline.py`'s
+`_record_progress`). Everywhere else (DB column, route param, DTO) the
+canonical name is `module_id` and always has been.
 
-**Why it exists**: original misspelling, kept on the wire to avoid
-breaking image-service ↔ duckdb-service in lockstep.
+**Why the alias exists**: deprecation window for any in-tree or
+external caller that still posts the old key. Removable once nothing
+in the tree references it; the canonical wire field has been
+`module_id` since the cutover.
 
-**Recommendation**: keep on the wire for now. When the contract next
-needs a breaking change, rename to `module_id` on both ends in the
-same PR. Add a Pydantic alias in the transition.
+**Recommendation**: do not regress emitters back to `modul_id`. When
+removing the alias, grep for the string in this repo and in any
+out-of-tree consumer first, drop the `AliasChoices` validator, and
+land both ends in the same PR.
 
 ### `progess` / `hateched` (fixed, do not regress)
 
@@ -139,6 +145,29 @@ test covered the read.
 
 Resolved on 2026-04-26 by introducing the `@highfive/contracts`
 workspace package. Don't reintroduce per-service DTO copies.
+
+## image-service → duckdb-service wire shapes (Python ↔ Python)
+
+The `@highfive/contracts` package is TypeScript-only (ADR-004); the
+Python ↔ Python boundary between `image-service` and `duckdb-service`
+has no shared-types mechanism. Wire shapes on this boundary are
+documented here and pinned by tests on both sides.
+
+| Endpoint                                   | Caller                                                  | Payload fields                                                       |
+| ------------------------------------------ | ------------------------------------------------------- | -------------------------------------------------------------------- |
+| `POST /add_progress_for_module`            | `image-service`'s `UploadPipeline._record_progress`     | `module_id` (canonical, `modul_id` alias accepted), `classification` |
+| `POST /record_image`                       | `image-service`'s `UploadPipeline._record_image_upload` | `module_id` (canonical), `filename`                                  |
+| `POST /modules/<module_id>/heartbeat`      | `image-service`'s `UploadPipeline._record_heartbeat`    | `battery` (int 0-100)                                                |
+| `GET  /modules/<module_id>/progress_count` | `image-service`'s `UploadPipeline._check_first_upload`  | (no body)                                                            |
+
+Server-side canonicalisation through `ModuleId.model_validate(...)` is
+the rule, not the exception — colon-/dash-separated and uppercase
+MACs all collapse onto the same canonical 12-hex `module_id` PK before
+any DB write, so a direct `curl` with a non-canonical MAC cannot
+create an orphaned row joining against zero `module_configs` rows.
+
+Full request/response shape for each endpoint lives in
+[`docs/api-reference.md`](../api-reference.md) §3.
 
 ## General mitigation
 

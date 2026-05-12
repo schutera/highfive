@@ -84,7 +84,24 @@ def test_upload_lands_image_then_writes_sidecar_and_updates_db(stack, mock_esp):
     )
     assert int(module["battery_level"]) == mock_esp.battery
 
-    # 4. image-service must have written a .log.json sidecar that
+    # 4. duckdb-service /image_uploads must list the just-uploaded file.
+    # Pre-#58 the bare /upload path never inserted this row and the admin
+    # page was silently empty; the e2e suite is the only place that
+    # crosses the image-service ↔ duckdb-service boundary on this path.
+    r = requests.get(
+        f"{stack['duckdb']}/image_uploads", params={"module_id": mock_esp.mac}
+    )
+    assert r.status_code == 200, r.text
+    image_rows = r.json().get("images", [])
+    # Each e2e test gets a unique MAC (per conftest fixture); a single
+    # upload here must produce exactly one row. == 1 (not >= 1) catches a
+    # future regression where `record_image` fires more than once per
+    # upload from the caller side.
+    assert len(image_rows) == 1, (
+        f"expected 1 image_uploads row for {mock_esp.mac}, got {len(image_rows)}"
+    )
+
+    # 5. image-service must have written a .log.json sidecar that
     #    round-trips the telemetry fields the firmware sent.
     r = requests.get(
         f"{stack['image_service']}/modules/{mock_esp.mac}/logs?limit=10"

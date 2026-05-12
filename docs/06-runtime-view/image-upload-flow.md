@@ -14,14 +14,17 @@ sequenceDiagram
 
     ESP->>ESP: capture, build telemetry
     ESP->>IMG: POST /upload<br/>(multipart: image, mac, battery, logs)
-    IMG->>IMG: save image + write &lt;img&gt;.log.json
+    IMG->>DDB: GET /modules/&lt;mac&gt;/progress_count
+    DDB-->>IMG: count (used for first-upload detection)
+    IMG->>IMG: save image to /data/images
+    IMG->>DDB: POST /record_image<br/>(body: {module_id, filename})
+    DDB->>DDB: insert image_uploads row (uploaded_at server-stamped)
+    IMG->>IMG: write &lt;img&gt;.log.json sidecar (if logs present)
     IMG->>IMG: stub_classify()
     IMG->>DDB: POST /add_progress_for_module
     DDB->>DDB: insert/replace daily_progress row
     IMG->>DDB: POST /modules/&lt;mac&gt;/heartbeat<br/>(post-upload aggregate, body: {battery})
     DDB->>DDB: update battery, image_count, first_online
-    IMG->>DDB: GET /modules/&lt;mac&gt;/progress_count
-    DDB-->>IMG: count (used for first-upload detection)
     IMG-->>ESP: 200 OK
 
     Note over ESP,DDB: independently, hourly
@@ -37,8 +40,8 @@ sequenceDiagram
 > `POST /modules/<mac>/heartbeat` call shown in the upload sequence is
 > the **post-upload aggregate** — fired by image-service after every
 > accepted upload, body `{battery}` only, updates `module_configs`
-> (`duckdb-service/routes/modules.py:266`,
-> `image-service/services/duckdb.py:53`).
+> (`duckdb-service/routes/modules.py`'s `heartbeat`,
+> `image-service/services/duckdb.py`'s `heartbeat`).
 >
 > The hourly `POST /heartbeat` fired directly by firmware is the
 > **telemetry heartbeat** — body
@@ -66,10 +69,12 @@ sequenceDiagram
 
 2. **Image-service ingestion.**
    - Saves the JPEG to the shared `duckdb_data` volume.
+   - Records the upload row via duckdb-service (see step 3).
    - If `logs` is parseable, writes a `<image>.log.json` sidecar next
-     to the image with three appended envelope fields: `_mac`,
-     `_received_at`, `_image`. Unparseable logs are dropped (the image
-     itself still persists).
+     to the image as a `LogSidecarEnvelope` (`mac`, `received_at`,
+     `image`, `payload`). Unparseable logs are preserved with a
+     `parse_error: true` marker inside `payload` (the image itself
+     still persists).
    - Runs `stub_classify()` — returns random 0/1 per (bee_type, nest
      index). This is a placeholder; the contract shape is what
      MaskRCNN will fill.
@@ -77,14 +82,23 @@ sequenceDiagram
 3. **Persistence write-back.**
    `image-service` calls `duckdb-service` over HTTP (never opens its
    own DuckDB connection — see
-   [ADR-001](../09-architecture-decisions/adr-001-duckdb-as-sole-writer.md)):
+   [ADR-001](../09-architecture-decisions/adr-001-duckdb-as-sole-writer.md)).
+   In call order:
+   - `GET /modules/<mac>/progress_count` — fires first, before the
+     image is even saved. Used to detect first-upload events for new
+     modules so the Discord ping only fires once per module's lifetime.
+   - `POST /record_image` — inserts an `image_uploads` row tying the
+     filename on disk to its `module_id`. The admin page and the
+     dashboard's `last_image_at` both join on this table. Failure is
+     **non-fatal but logged**: the file is on disk and the rest of
+     the pipeline still runs, but without the row the upload is
+     invisible to admin and the dashboard. The `[record_image]` log
+     line is the on-call's signal that an orphaned file exists.
    - `POST /add_progress_for_module` — inserts or replaces a
      `daily_progress` row for today. Missing nests are auto-created.
    - `POST /modules/<mac>/heartbeat` — **post-upload aggregate**:
      updates `battery_level`, `image_count`, and `first_online` on
      `module_configs`. Body is `{battery}` only.
-   - `GET /modules/<mac>/progress_count` — used to detect first-upload
-     events for new modules.
 
 4. **Read.** A browser polling `/api/modules` from the dashboard
    picks up the new row on its next request via the
@@ -112,7 +126,11 @@ shared volume locally; only the DB writes are HTTP. See
 
 ## Field-name drift to watch
 
-The `POST /add_progress_for_module` payload carries `modul_id` (typo,
-kept on the wire for compatibility), not `module_id`. Don't "fix" it
-without updating both ends in lockstep. See
+The `POST /add_progress_for_module` payload carries the canonical
+`module_id` on the wire. The legacy typo `modul_id` (missing "e") is
+still accepted by `duckdb-service/models/progress.py`'s
+`ClassificationOutput` via Pydantic `AliasChoices` as a deprecation
+window for any in-flight callers that still emit the old key; new
+emitters must use `module_id`. The alias will be removed once
+nothing in the tree references it — see
 [08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md).

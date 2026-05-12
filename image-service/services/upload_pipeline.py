@@ -8,7 +8,10 @@ HTTP request, build an `UploadRequest`, and consume an `UploadResult`.
 
 Behavior is preserved exactly from the original inline `/upload` handler:
 - Failure tolerance: the first-upload check, progress POST, and heartbeat
-  POST all silently swallow `requests.RequestException`.
+  POST all silently swallow `requests.RequestException`. The
+  `_record_image_upload` step (added for #58) is non-fatal too but logs
+  the failure so the on-call can see it — without the DB row the upload
+  is invisible to admin and dashboard.
 - Sidecar shape: written via `LogSidecarEnvelope` (unchanged).
 - Discord message format: identical to the original.
 - Filenames written to the upload volume are unchanged.
@@ -75,6 +78,7 @@ class UploadPipeline:
     def run(self, req: UploadRequest) -> UploadResult:
         is_first = self._check_first_upload(req.mac)
         file_path = self._persist_image(req)
+        self._record_image_upload(req.mac, req.image.filename)
         self._persist_sidecar(req, file_path)
         classification = self.classify()
         self._record_progress(req.mac, classification)
@@ -104,6 +108,23 @@ class UploadPipeline:
         file_path = os.path.join(self.upload_folder, req.image.filename)
         req.image.save(file_path)
         return file_path
+
+    def _record_image_upload(self, mac: str, filename: str) -> None:
+        """Insert image_uploads row in duckdb-service.
+
+        Logs on failure rather than swallowing silently: the file is on disk,
+        classification will still run, and the caller still sees 200 — but the
+        missing DB row would make this upload invisible to the admin page and
+        the dashboard's ``last_image_at``, so the on-call needs to see it.
+        """
+        try:
+            self.duckdb_service.record_image(mac, filename)
+        except RequestException as exc:
+            print(
+                f"[record_image] duckdb-service failed for mac={mac} "
+                f"filename={filename}: {exc}",
+                flush=True,
+            )
 
     def _persist_sidecar(self, req: UploadRequest, file_path: str) -> None:
         """Write optional ESP telemetry beside the image as a typed envelope.
@@ -137,7 +158,8 @@ class UploadPipeline:
 
         Wire field is the canonical ``module_id``; duckdb-service still
         accepts the legacy ``modul_id`` typo via Pydantic ``AliasChoices``
-        for one release as the deprecation window.
+        as a deprecation alias, removable once nothing in the tree
+        references it.
         """
         payload = {"module_id": mac, "classification": classification}
         try:

@@ -20,9 +20,14 @@ Highlights worth knowing about even if you're not assigned:
 
 ## Field-name drift
 
-The `modul_id` typo (missing "e") is **live on the wire** between
-`image-service` and `duckdb-service` as of 2026-04-25. Don't fix it
-without changing both ends in lockstep. Full discussion:
+The canonical wire field on `POST /add_progress_for_module` is
+`module_id`. The legacy typo `modul_id` (missing "e") is still
+**accepted** by `duckdb-service/models/progress.py`'s
+`ClassificationOutput` via Pydantic `AliasChoices` as a deprecation
+alias; `image-service`'s `UploadPipeline._record_progress` emits the
+canonical name. The alias is removable once nothing in or out of the
+tree references it — don't regress emitters back to `modul_id`. Full
+discussion:
 [../08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md).
 
 The `progess_id` / `hateched` typos in `backend/database.ts` were
@@ -874,3 +879,63 @@ available to PlatformIO's `[env:native]`. A test-extraction
 refactor of a four-line `if (apiKey[0] == '\0')` early-return
 would be disproportionate; the missing coverage is intentional,
 not forgotten.
+
+### Orphan `/record_image` endpoint — every bare upload invisible (issue #58)
+
+**What happened.** `duckdb-service/routes/modules.py`'s `record_image`
+(`POST /record_image`) shipped as the canonical way to insert an
+`image_uploads` row. Nothing in `image-service` called it. Every
+successful `POST /upload` persisted the JPEG, wrote the sidecar, ran
+classification, and POSTed progress + heartbeat — but never inserted
+the row. As a result:
+
+- the admin page (`backend /api/images` → `image-service /images` →
+  `duckdb /image_uploads`) showed nothing for any bare upload,
+- the dashboard's `last_image_at` column on `/api/modules` was empty,
+- and the only way to test the partial-failure fix for #30 was the
+  `Invoke-RestMethod -Uri /record_image` workaround documented in the
+  issue.
+
+Caught during manual testing of #50; pre-existing.
+
+**Why it happened.** The duckdb endpoint was added in the same
+iteration that introduced `UploadPipeline`, but the pipeline step that
+calls it was forgotten — both halves of the contract need to land
+together or the endpoint is fiction. No test exercised the
+post-upload row from outside `image-service`, so neither suite
+flagged the gap.
+
+**How to avoid it next time.**
+
+- **An endpoint without a caller is dead code; an endpoint with one
+  caller is a contract.** When you add an HTTP route on a service that
+  exists only to be called by another service in the monorepo, the
+  caller's PR commits the call in the same change — or the endpoint
+  doesn't ship. `grep -rn record_image image-service/` would have
+  surfaced the gap on day one.
+- **Cross-service catch blocks log.** The fix wires
+  `_record_image_upload` into the pipeline with a `[record_image]
+print(..., flush=True)` log on failure (matching the
+  `[delete_image]` style in `image-service/app.py`'s `delete_image`)
+  rather than the silent `except RequestException: pass` the older
+  `_record_progress` / `_record_heartbeat` steps use. Same lesson as
+  the "Three partial-failure shapes" entry above: every catch block
+  at a service boundary answers what gets logged for the on-call and
+  what the caller sees. The caller still sees 200 — file is on disk,
+  classification ran — but the orphan is observable.
+- **A boundary-spanning round-trip test would have caught this.**
+  `tests/e2e/test_upload_pipeline.py` exercises the upload write
+  path; an assertion that `GET /api/images` lists the just-uploaded
+  filename pins the contract that the unit suites can't (each unit
+  suite tests its own side of the boundary in isolation).
+
+**Latency budget note.** Wiring `_record_image_upload` into
+`UploadPipeline.run` adds a fourth serial duckdb-service round-trip
+to the upload path (alongside `progress_count`, `add_progress`, and
+the post-upload aggregate `heartbeat`). With `DuckDBService.__init__`'s
+default `timeout=5.0`, worst-case duckdb-down latency on `/upload`
+moves from ~15 s to ~20 s. Firmware's `TASK_WDT_TIMEOUT_S` is 60 s
+(see [ADR-007](../09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md)),
+so nothing breaks today, but the budget tightened. A future
+performance pass could fire `record_image` on a background thread or
+batch the duckdb writes — both invasive, neither warranted yet.

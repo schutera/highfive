@@ -33,7 +33,7 @@ and flags the synonyms, typos, and overloads that have caused bugs.
 | **First Online**                      | Calendar date the module was first registered (and currently also bumped on each **post-upload aggregate heartbeat** — see Flagged ambiguities). `module_configs.first_online`.                                                                                                                                                                                                 | registered_at, registration_date                                   |
 | **Last API Call**                     | Timestamp of the module's most recent contact with the backend / image-service. Surfaced as `lastApiCall` on the frontend `Module` DTO.                                                                                                                                                                                                                                         | last_seen, lastSeen                                                |
 | **Image Count**                       | Total accepted uploads for a module. Maintained by the **post-upload aggregate heartbeat** on `module_configs.image_count`. Surfaced as `imageCount`.                                                                                                                                                                                                                           | upload_count, total_images                                         |
-| **Heartbeat (post-upload aggregate)** | `POST /modules/<module_id>/heartbeat` (`duckdb-service/routes/modules.py:266`). Fired by `image-service` after every accepted upload (`image-service/services/duckdb.py:53`). Body: `{battery}` only. Updates `module_configs.battery_level/first_online/image_count`. **Not** the same endpoint as the telemetry heartbeat.                                                    | keepalive, ping (avoid — name-collides with telemetry)             |
+| **Heartbeat (post-upload aggregate)** | `POST /modules/<module_id>/heartbeat` (`duckdb-service/routes/modules.py`'s `heartbeat`). Fired by `image-service` after every accepted upload (`image-service/services/duckdb.py`'s `heartbeat`). Body: `{battery}` only. Updates `module_configs.battery_level/first_online/image_count`. **Not** the same endpoint as the telemetry heartbeat.                               | keepalive, ping (avoid — name-collides with telemetry)             |
 | **Heartbeat (telemetry)**             | `POST /heartbeat` (`heartbeat` route in `duckdb-service/routes/heartbeats.py`). Fired hourly by firmware's `sendHeartbeat` (`ESP32-CAM/client.cpp`). Body: `mac/battery/rssi/uptime_ms/free_heap/fw_version`. Inserts a row in `module_heartbeats`; the most recent row is surfaced on `Module.latestHeartbeat` as a [`HeartbeatSnapshot`](#telemetry-and-admin) — see ADR-004. | keepalive, ping (avoid — name-collides with post-upload aggregate) |
 | **Progress Count**                    | Number of `daily_progress` rows for a given module, returned by `GET /modules/<module_id>/progress_count`. Used to detect first-upload events.                                                                                                                                                                                                                                  | progress_total                                                     |
 
@@ -112,23 +112,31 @@ and flags the synonyms, typos, and overloads that have caused bugs.
 > **Dev:** "And the **Classification Output** — that's the JSON with
 > per-bee-type cell values?"
 
-> **Domain expert:** "Right. Note the payload field is `modul_id`, not
-> `module_id`. It's a typo we've kept on the wire for compatibility
-> but it should be flagged in any contract refactor."
+> **Domain expert:** "Right. Note `ClassificationOutput` accepts both
+> the canonical `module_id` and the legacy typo `modul_id` via
+> Pydantic `AliasChoices` — image-service emits the canonical name
+> today; the alias is a deprecation window for any out-of-tree caller
+> still on the old key, and will be removed once nothing references
+> it. Worth flagging on any contract refactor that closes the window."
 
 ## Flagged ambiguities
 
 ### Same concept, two names
 
 - **`modul_id` vs `module_id`** — `ClassificationOutput` (the payload
-  on `POST /add_progress_for_module`) carries the field `modul_id`.
-  Everywhere else (DB column, route param, DTO) the canonical name is
-  `module_id`. Still live on the wire as of 2026-04-25; verified in
-  `duckdb-service/models/progress.py`'s `ClassificationOutput` and
-  `duckdb-service/routes/progress.py`.
-  **Recommendation:** keep on the wire for now to avoid breaking
-  image-service, but rename to `module_id` next time the contract
-  changes; add a Pydantic alias during transition.
+  on `POST /add_progress_for_module`) carries the canonical
+  `module_id` on the wire as of the cutover; the legacy typo
+  `modul_id` is still **accepted** via Pydantic `AliasChoices` as a
+  deprecation window for any caller still on the old key. Verified in
+  `duckdb-service/models/progress.py`'s `ClassificationOutput`
+  (`validation_alias=AliasChoices("module_id", "modul_id")`) and
+  `image-service/services/upload_pipeline.py`'s `_record_progress`
+  (emits `{"module_id": mac, ...}`). DB column, route param, DTO all
+  use `module_id`.
+  **Recommendation:** do not regress emitters back to `modul_id`. When
+  removing the alias, grep the tree (and any out-of-tree consumer)
+  for the typo first, drop the `AliasChoices` validator, and land both
+  ends in the same PR.
 - **`mac` vs `esp_id` vs `module_id` vs `id`** — the same string is
   called `mac` on multipart upload and the ESP firmware,
   `esp_id` as a `validation_alias` on `ModuleData`, `module_id` in
@@ -204,9 +212,11 @@ and flags the synonyms, typos, and overloads that have caused bugs.
   the bug. **Why this happened:** comments in `database.ts`
   ("Backend name!") asserted the typos were the canonical names. No
   contract test covered the read.
-- **`modul_id`** — same shape of risk as above, currently _live_ on
-  the wire between image-service and duckdb-service. Highest-priority
-  drift hazard remaining.
+- **`modul_id`** — accepted as a deprecation alias for `module_id`
+  on `POST /add_progress_for_module` via Pydantic `AliasChoices`.
+  Image-service emits the canonical `module_id`; the alias remains
+  for any out-of-tree consumer still on the old key, removable once
+  nothing references it.
 - **TS interface duplication between `backend` and `homepage`**
   — _RESOLVED 2026-04-26_. Both sides used to declare their own
   `Module`, `ModuleDetail`, `NestData`, `DailyProgress`. The homepage

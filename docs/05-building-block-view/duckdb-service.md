@@ -167,13 +167,13 @@ This endpoint is used by the AI model to save classification results.
 ### POST /modules/<module_id>/heartbeat — post-upload aggregate
 
 Called by `image-service` after every accepted upload
-(`image-service/services/duckdb.py:53`). Implementation in
-`duckdb-service/routes/modules.py:266`.
+(`image-service/services/duckdb.py`'s `heartbeat`). Implementation:
+`duckdb-service/routes/modules.py`'s `heartbeat`.
 
 Body: `{"battery": <int 0-100>}` → returns `{"ok": true}`.
 
 Side effects (single `UPDATE` on `module_configs`, see
-`routes/modules.py:285-296`):
+`routes/modules.py`'s `heartbeat`):
 
 - Sets `battery_level` to the supplied value.
 - Sets `first_online` to today's date (overwrites — this is the

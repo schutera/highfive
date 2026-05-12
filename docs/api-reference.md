@@ -349,7 +349,7 @@ Content-Type: application/json
 
 ```json
 {
-  "modul_id": "esp-9081726354",
+  "module_id": "aabbccddeeff",
   "classification": {
     "black_masked_bee": { "1": 1, "2": 1, "3": 0 },
     "orchard_bee": { "1": 0, "2": 1, "3": 1 }
@@ -358,7 +358,11 @@ Content-Type: application/json
 ```
 
 Returns `{ "success": true }`. Missing nests are auto-created. Progress
-rows are inserted with the current date.
+rows are inserted with the current date. The legacy typo `modul_id` is
+still accepted via `AliasChoices` on
+`duckdb-service/models/progress.py`'s `ClassificationOutput` as a
+deprecation window — see
+[08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md).
 
 ## 3.7 Telemetry heartbeat
 
@@ -427,8 +431,43 @@ Side effect (single `UPDATE` on `module_configs`):
 - `image_count` ← `image_count + 1`
 
 Does **not** insert into `module_heartbeats`. Called by `image-service`
-after every accepted upload (`image-service/services/duckdb.py:53`).
-Implementation in `duckdb-service/routes/modules.py:266-298`.
+after every accepted upload (`image-service/services/duckdb.py`'s
+`heartbeat`). Implementation: `duckdb-service/routes/modules.py`'s
+`heartbeat`.
+
+## 3.9 Record image upload
+
+```
+POST /record_image
+Content-Type: application/json
+```
+
+```json
+{ "module_id": "aabbccddeeff", "filename": "esp_capture_20260511_143022.jpg" }
+```
+
+| Field       | Type   | Notes                                                                                                                    |
+| ----------- | ------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `module_id` | string | canonicalised on the server via `ModuleId.model_validate(...)`; colon- and dash-separated MACs both accepted             |
+| `filename`  | string | filename of the persisted image on the shared `duckdb_data` volume (image-service writes the bytes; this writes the row) |
+
+Returns `{ "message": "Image recorded" }`, `200`. Missing either field
+returns `{ "error": "module_id and filename required" }`, `400`. An
+invalid `module_id` (does not reduce to `[0-9a-f]{12}` — e.g. raw
+uint64 decimal stringification per the §3.2 rule) returns
+`{ "error": "invalid module id" }`, `400`.
+
+Side effect: a single `INSERT` into `image_uploads` with `module_id`,
+`filename`, and a server-stamped `uploaded_at`. The `admin /api/images`
+listing and the dashboard's `last_image_at` column on `/api/modules`
+both join on this table.
+
+Called by `image-service` after every successful `_persist_image` step
+(`image-service/services/upload_pipeline.py`'s
+`_record_image_upload`). The image bytes themselves are written
+locally; this endpoint is what makes the upload visible to the rest of
+the stack. Implementation: `duckdb-service/routes/modules.py`'s
+`record_image`.
 
 <br>
 

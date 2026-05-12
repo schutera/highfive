@@ -51,14 +51,17 @@ class _FakeDuckDB:
         progress_count_raises: bool = False,
         add_progress_raises: bool = False,
         heartbeat_raises: bool = False,
+        record_image_raises: bool = False,
     ):
         self.progress_count = progress_count
         self.progress_count_raises = progress_count_raises
         self.add_progress_raises = add_progress_raises
         self.heartbeat_raises = heartbeat_raises
+        self.record_image_raises = record_image_raises
         self.progress_count_calls: list[str] = []
         self.add_progress_calls: list[dict] = []
         self.heartbeat_calls: list[tuple[str, int]] = []
+        self.record_image_calls: list[tuple[str, str]] = []
 
     def get_progress_count(self, mac: str) -> int:
         self.progress_count_calls.append(mac)
@@ -77,6 +80,12 @@ class _FakeDuckDB:
         if self.heartbeat_raises:
             raise RequestException("boom")
         return True
+
+    def record_image(self, module_id: str, filename: str) -> dict:
+        self.record_image_calls.append((module_id, filename))
+        if self.record_image_raises:
+            raise RequestException("boom")
+        return {"message": "Image recorded"}
 
 
 def _make_pipeline(
@@ -142,6 +151,8 @@ def test_pipeline_first_upload_runs_all_steps_and_pings_discord(tmp_path: Path):
         "orchard_bee": {"1": 1, "2": 0}
     }
     assert duckdb.heartbeat_calls == [(TEST_MAC_1, 88)]
+    # /record_image fires once per upload with canonical mac + raw filename (#58).
+    assert duckdb.record_image_calls == [(TEST_MAC_1, "first.jpg")]
 
     # Discord fired with the exact message format
     assert len(discord) == 1
@@ -166,19 +177,21 @@ def test_pipeline_non_first_upload_skips_discord(tmp_path: Path):
     assert discord == []
     # No sidecar when logs_raw is None
     assert not (tmp_path / "later.jpg.log.json").exists()
-    # But image, progress, heartbeat all happened
+    # But image, progress, heartbeat, record_image all happened
     assert (tmp_path / "later.jpg").exists()
     assert len(duckdb.add_progress_calls) == 1
     assert duckdb.heartbeat_calls == [(TEST_MAC_2, 10)]
+    assert duckdb.record_image_calls == [(TEST_MAC_2, "later.jpg")]
 
 
 def test_pipeline_tolerates_duckdb_failures_and_skips_discord(tmp_path: Path):
-    """All three duckdb calls raising RequestException => upload still completes,
+    """All four duckdb calls raising RequestException => upload still completes,
     Discord skipped (couldn't determine first-upload), no exception bubbles up."""
     duckdb = _FakeDuckDB(
         progress_count_raises=True,
         add_progress_raises=True,
         heartbeat_raises=True,
+        record_image_raises=True,
     )
     discord: list[str] = []
     pipeline = _make_pipeline(tmp_path, duckdb, discord_sink=discord)
@@ -194,6 +207,24 @@ def test_pipeline_tolerates_duckdb_failures_and_skips_discord(tmp_path: Path):
     assert discord == []
     # Image still persisted despite all DB failures
     assert (tmp_path / "flaky.jpg").exists()
+
+
+def test_pipeline_logs_record_image_failure(tmp_path: Path, capsys):
+    """`_record_image_upload` must log on failure — the file is on disk but
+    invisible to admin/dashboard until somebody sees the log line.
+    Lessons-learned (PR #50): no silent cross-service catches."""
+    duckdb = _FakeDuckDB(progress_count=5, record_image_raises=True)
+    pipeline = _make_pipeline(tmp_path, duckdb)
+
+    req = UploadRequest(
+        mac=TEST_MAC_4, battery=60, image=_FakeImage("orphan.jpg"), logs_raw=None
+    )
+    pipeline.run(req)  # must not raise
+
+    captured = capsys.readouterr()
+    assert "[record_image]" in captured.out
+    assert TEST_MAC_4 in captured.out
+    assert "orphan.jpg" in captured.out
 
 
 def test_pipeline_malformed_logs_writes_parse_error_sidecar(tmp_path: Path):

@@ -138,24 +138,23 @@ def delete_module(module_id):
 
 @modules_bp.post("/record_image")
 def record_image():
-    data = request.get_json()
-    module_id = data.get("module_id")
+    data = request.get_json(silent=True) or {}
+    raw_module_id = data.get("module_id")
     filename = data.get("filename")
-    if not module_id or not filename:
+    if not raw_module_id or not filename:
         return jsonify({"error": "module_id and filename required"}), 400
-    with lock:
-        con = get_conn()
-        try:
+    canonical, err = _canonicalize_or_400(raw_module_id)
+    if err is not None:
+        return err
+    try:
+        with write_transaction() as con:
             con.execute(
                 "INSERT INTO image_uploads (module_id, filename, uploaded_at) VALUES (?, ?, ?)",
-                (module_id, filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                (canonical, filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             )
-            con.commit()
-            return jsonify({"message": "Image recorded"}), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-        finally:
-            con.close()
+        return jsonify({"message": "Image recorded"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @modules_bp.post("/update_module_status")

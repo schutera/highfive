@@ -41,6 +41,7 @@ image-service/
 ```
 
 ### Technologies
+
 - **Python + Flask** — lightweight REST API
 - **DuckDB client** — forwards classification results to the database service
 
@@ -56,7 +57,7 @@ The central entry point. Called by Hive modules whenever a new image is captured
 | --------- | ------ | -------------------------------------------------- |
 | `image`   | File   | Captured image of the hive module                  |
 | `mac`     | String | Unique identifier (MAC address) of the Hive module |
-| `battery` | Int    | Current battery level of the device (0–100)         |
+| `battery` | Int    | Current battery level of the device (0–100)        |
 
 ### Data Flow
 
@@ -68,8 +69,8 @@ The central entry point. Called by Hive modules whenever a new image is captured
 5. Module `battery_level`, `image_count`, and `first_online` are
    updated via the **post-upload aggregate** at
    `POST /modules/<mac>/heartbeat` on `duckdb-service`
-   (`image-service/services/duckdb.py:53` →
-   `duckdb-service/routes/modules.py:266`). First-upload detection
+   (`image-service/services/duckdb.py`'s `heartbeat` →
+   `duckdb-service/routes/modules.py`'s `heartbeat`). First-upload detection
    uses `GET /modules/<mac>/progress_count`. All DuckDB persistence
    flows through HTTP — `image-service` does not open its own DuckDB
    connection.
@@ -98,6 +99,7 @@ Values: `1` = filled/sealed, `0` = empty.
 # 4. Planned: MaskRCNN Integration
 
 The stub classification will be replaced with a **MaskRCNN model** that can:
+
 - Detect individual nesting tubes in the image
 - Classify each tube as empty or sealed
 - Handle variations in lighting, angle, and environmental conditions

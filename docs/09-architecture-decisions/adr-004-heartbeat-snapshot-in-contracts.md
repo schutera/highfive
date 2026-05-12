@@ -19,8 +19,8 @@ as `Module.latestHeartbeat` so the dashboard can show liveness without
 requiring a fresh image upload.
 
 > **Not the same endpoint** as the post-upload aggregate at
-> `POST /modules/<module_id>/heartbeat` (`duckdb-service/routes/modules.py:266`,
-> called by `image-service/services/duckdb.py:53` after every accepted
+> `POST /modules/<module_id>/heartbeat` (`duckdb-service/routes/modules.py`'s
+> `heartbeat`, called by `image-service/services/duckdb.py`'s `heartbeat` after every accepted
 > upload). That older endpoint takes only `{battery}` and updates
 > `module_configs.battery_level/first_online/image_count` — it is **not**
 > what this ADR is about. The two paths share a name and a verb but do

@@ -84,9 +84,10 @@ def test_upload_happy_path_saves_image_and_returns_classification(
     # No logs field => no sidecar should be written.
     assert not (tmp_upload_dir / "bee01.jpg.log.json").exists()
 
-    # Outbound POSTs to duckdb-service: /add_progress_for_module and /heartbeat.
+    # Outbound POSTs to duckdb-service: /record_image, /add_progress_for_module
+    # and /heartbeat.
     posts = upload_env["duckdb_posts"]
-    assert len(posts) == 2
+    assert len(posts) == 3
 
     progress_calls = [p for p in posts if p["url"].endswith("/add_progress_for_module")]
     assert len(progress_calls) == 1
@@ -99,6 +100,14 @@ def test_upload_happy_path_saves_image_and_returns_classification(
     ]
     assert len(heartbeat_calls) == 1
     assert heartbeat_calls[0]["json"] == {"battery": 80}
+
+    # /record_image fires once after the file lands on disk (#58).
+    record_image_calls = [p for p in posts if p["url"].endswith("/record_image")]
+    assert len(record_image_calls) == 1
+    assert record_image_calls[0]["json"] == {
+        "module_id": TEST_MAC,
+        "filename": "bee01.jpg",
+    }
 
     # progress_count is fetched once per upload via GET.
     gets = upload_env["duckdb_gets"]
@@ -124,6 +133,9 @@ def test_upload_canonicalises_legacy_colon_mac(client, upload_env):
     assert progress_calls[0]["json"]["module_id"] == TEST_MAC
     heartbeat_urls = [p["url"] for p in posts if p["url"].endswith("/heartbeat")]
     assert any(f"/modules/{TEST_MAC}/heartbeat" in u for u in heartbeat_urls)
+    record_image_calls = [p for p in posts if p["url"].endswith("/record_image")]
+    assert len(record_image_calls) == 1
+    assert record_image_calls[0]["json"]["module_id"] == TEST_MAC
 
 
 def test_upload_invalid_mac_returns_400(client, upload_env):
@@ -344,6 +356,44 @@ def test_upload_survives_progress_count_failure(client, upload_env, monkeypatch)
     assert resp.status_code == 200
     # And no Discord (we couldn't determine first-upload status).
     assert upload_env["discord"] == []
+
+
+def test_upload_survives_record_image_failure(client, upload_env, monkeypatch, capsys):
+    """A duckdb-service hiccup on /record_image must not fail the upload, and
+    the failure MUST be logged so the on-call can see an orphaned file."""
+    from requests import ConnectionError as RequestsConnectionError
+
+    import services.duckdb as duckdb_svc_mod
+
+    posts = upload_env["duckdb_posts"]
+
+    def selective_post(url, json=None, **kwargs):
+        posts.append({"url": url, "json": json, "kwargs": kwargs})
+        if url.endswith("/record_image"):
+            raise RequestsConnectionError("record_image boom")
+
+        class _R:
+            status_code = 200
+
+            def json(self_inner):
+                return {"ok": True}
+
+            def raise_for_status(self_inner):
+                return None
+
+        return _R()
+
+    monkeypatch.setattr(duckdb_svc_mod.requests, "post", selective_post)
+
+    resp = client.post(
+        "/upload",
+        data=_make_form(filename="orphan.jpg"),
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    captured = capsys.readouterr()
+    assert "[record_image]" in captured.out
+    assert "orphan.jpg" in captured.out
 
 
 def test_upload_survives_heartbeat_failure(client, upload_env, monkeypatch):

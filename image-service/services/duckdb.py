@@ -1,9 +1,13 @@
 import os
+
 import requests
+
 
 class DuckDBService:
     def __init__(self, base_url: str | None = None, timeout: float = 5.0):
-        self.base_url = (base_url or os.getenv("DUCKDB_SERVICE_URL") or "http://duckdb-service:8000").rstrip("/")
+        self.base_url = (
+            base_url or os.getenv("DUCKDB_SERVICE_URL") or "http://duckdb-service:8000"
+        ).rstrip("/")
         self.timeout = timeout
 
     def health(self) -> dict:
@@ -38,6 +42,16 @@ class DuckDBService:
         r = requests.post(
             f"{self.base_url}/add_progress_for_module",
             json=payload,
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def record_image(self, module_id: str, filename: str) -> dict:
+        """Insert an image_uploads row for a successful /upload."""
+        r = requests.post(
+            f"{self.base_url}/record_image",
+            json={"module_id": module_id, "filename": filename},
             timeout=self.timeout,
         )
         r.raise_for_status()

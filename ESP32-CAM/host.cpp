@@ -23,7 +23,7 @@ String cfg_password       = "";
 String cfg_upload_url     = "";
 String cfg_init_url       = "";
 String cfg_resolution     = "VGA";
-int    cfg_interval_ms    = 300;
+int    cfg_interval_ms    = 60000;
 int    cfg_vflip          = 0;
 int    cfg_brightness     = 0;
 int    cfg_saturation     = 0;
@@ -67,7 +67,7 @@ void loadConfig() {
     return;
   }
 
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
   DeserializationError err = deserializeJson(doc, f);
   f.close();
   if (err) {
@@ -82,7 +82,17 @@ void loadConfig() {
   cfg_upload_url  = doc["NETWORK"]["UPLOAD_URL"]     | "";
   cfg_init_url  = doc["NETWORK"]["INIT_URL"]     | "";
 
-  cfg_interval_ms = doc["CAMERA"]["CAPTURE_INTERVAL_IN_MS"] | 0;
+  // Form-prefill fallback (issue #20). Asymmetric on purpose with the
+  // production reader in `esp_init.cpp`'s `loadConfig` (which falls back to
+  // 86400000 / 24 h — the "do nothing aggressive when unconfigured" value).
+  // This reader's job is to render a sensible operator-facing default in the
+  // captive-portal form when the key is missing from a pre-existing config.
+  // ArduinoJson v6 `|` fires only on missing or non-numeric values — a
+  // stored 0 reads as 0 and would still appear in the form; the `/save`
+  // POST handler's `< 10` floor is what keeps a 0 from being saved in the
+  // first place. The two-defaults dance is tracked at issue #66 — a shared
+  // `firmware_defaults.h` with named constants is the permanent fix.
+  cfg_interval_ms = doc["CAMERA"]["CAPTURE_INTERVAL_IN_MS"] | 60000;
   cfg_resolution  = doc["CAMERA"]["RESOLUTION"]              | "VGA";
   cfg_vflip       = doc["CAMERA"]["VERTICAL_FLIP"]          | 0;
   cfg_brightness  = doc["CAMERA"]["BRIGHTNESS"]             | 0;
@@ -95,7 +105,7 @@ void loadConfig() {
   ----------------------------------
 */
 void saveConfig() {
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
 
   JsonObject net  = doc.createNestedObject("NETWORK");
   JsonObject cam  = doc.createNestedObject("CAMERA");
@@ -117,10 +127,34 @@ void saveConfig() {
     Serial.println("Failed to open config.json for writing");
     return;
   }
-  if (serializeJson(doc, f) == 0) {
-    Serial.println("Failed to write JSON to file");
-  }
+  // Truncation gate (issue #19). If `serializeJson` returns 0 the document
+  // overflowed the StaticJsonDocument pool. The on-disk `/config.json` has
+  // already been opened "w" (truncated to zero bytes) by `SPIFFS.open`
+  // above, so a previously-good file is now empty regardless of what we
+  // do next — but we can still skip `setESPConfigured(true)`. On first-time
+  // setup that keeps the NVS `configured` flag false, so next boot re-enters
+  // the captive portal; the captive-portal reader (`host.cpp`'s own
+  // `loadConfig`) will trip over the empty file once, log "Failed to parse
+  // config.json", and fall back to the compiled-in `cfg_*` defaults. On
+  // re-configuration the flag persists `true` from an earlier successful
+  // save; next boot calls `esp_init.cpp`'s `loadConfig`, `deserializeJson`
+  // returns a parse error on the empty file, `loadConfig` logs "JSON parse
+  // error" and returns false without touching `esp_config->wifi_config`,
+  // so the SSID/PASSWORD fields keep their BSS-zero defaults.
+  // `setupWifiConnection` then times out trying to join an empty SSID, the
+  // WiFi-fail counter advances, and after `WIFI_FAIL_AP_FALLBACK_THRESH`
+  // consecutive failures the setup path in `ESP32-CAM/ESP32-CAM.ino`
+  // re-enters the captive portal. Either way the device does not run with
+  // truncated credentials in the field.
+  size_t bytes_written = serializeJson(doc, f);
   f.close();
+  if (bytes_written == 0) {
+    Serial.println("[saveConfig] serializeJson wrote 0 bytes — config.json "
+                   "is now empty, skipping setESPConfigured so the next boot "
+                   "lands back in the captive portal (first-time or via "
+                   "WiFi-fail auto-fallback on re-config)");
+    return;
+  }
 
   setESPConfigured(true);
 }
@@ -316,6 +350,7 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<div class=\"field\">");
   client.println("<label>Capture Interval (ms)</label>");
   client.println("<input type=\"number\" name=\"interval\" min=\"10\" value=\"" + String(cfg_interval_ms) + "\">");
+  client.println("<div class=\"description\">Stored for forward compatibility. Current firmware schedules captures on a hardcoded cadence (once on boot plus once daily at noon local time, CET/CEST per TZ_EU_CENTRAL) and does not yet read this field at runtime. The 60000 ms default is preserved against the eventual wiring; tracked at issue #65.</div>");
   client.println("</div>");
 
   client.println("<div class=\"field\">");
@@ -519,6 +554,23 @@ void runAccessPoint() {
                     }
 
                     cfg_interval_ms = getParam(query, "interval").toInt();
+                    // Server-side floor (issue #20). The form's `min="10"` is
+                    // client-side only and trivially bypassed by curl, an
+                    // empty submit, or a non-numeric value (which `toInt()`
+                    // coerces to 0). Clamp to the safe default so SPIFFS can
+                    // never hold a near-zero interval. The threshold of 10 ms
+                    // mirrors the form's stated minimum and rejects only the
+                    // pathological values (0 / negative). TODO when
+                    // CAPTURE_INTERVAL is wired through the capture scheduler
+                    // (issue #65), raise this to
+                    // the form-recommended default (60000 ms) so the lower
+                    // bound matches the operational tradeoff the form copy
+                    // and `esp-flashing.md` advertise — there is no honest
+                    // reason to silently accept a 5 s interval when we tell
+                    // the operator 60 s is the field default.
+                    if (cfg_interval_ms < 10) {
+                      cfg_interval_ms = 60000;
+                    }
                     cfg_resolution  = getParam(query, "res");
                     cfg_vflip       = getParam(query, "vflip").toInt();
                     cfg_brightness  = getParam(query, "bright").toInt();

@@ -151,6 +151,8 @@ Navigate to **http://192.168.4.1**
 
 > **Same network.** The ESP32 must be on the same LAN as the server. If you configure it to join a phone hotspot while the server runs on your home router, the module cannot reach the server.
 
+> **Capture interval — currently informational only.** The form's `Capture Interval (ms)` field is stored to `/config.json` and into `esp_config_t::CAPTURE_INTERVAL`, but **no firmware path reads it for scheduling**. Capture cadence in the shipping firmware is hardcoded in `ESP32-CAM/ESP32-CAM.ino`'s `loop`: once on first boot plus once daily at noon local time (the firmware configures `TZ_EU_CENTRAL` — `CET`/`CEST` — in `ESP32-CAM/esp_init.cpp`'s `configTzTime` call). The field is wired through the captive portal and persistence in preparation for being consumed later; the form's inline hint and the `60000` default were aligned with that planned cadence as part of the fix that closes issue #20. Tracked at [issue #65](https://github.com/schutera/highfive/issues/65); `docs/11-risks-and-technical-debt/README.md` carries the post-mortem.
+
 Click **Save Configuration**. The module reboots, joins your Wi-Fi, registers itself with the server, and starts uploading images. It will appear on the dashboard at `http://localhost:5173/dashboard` within a minute.
 
 ---

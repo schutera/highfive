@@ -939,3 +939,149 @@ moves from ~15 s to ~20 s. Firmware's `TASK_WDT_TIMEOUT_S` is 60 s
 so nothing breaks today, but the budget tightened. A future
 performance pass could fire `record_image` on a background thread or
 batch the duckdb writes — both invasive, neither warranted yet.
+
+### CLAUDE.md "Open-issue roadmap" drifted from the code (issues #19, #20, #36)
+
+**What happened.** PR D was planned against the five-item roadmap entry
+"`fix/esp-firmware-housekeeping` (closes #19, #20, #36)" in CLAUDE.md. On
+read-through verification against `main`, three of the five items were
+already done — independently fixed in earlier PRs without the roadmap
+section being updated:
+
+- **#36 Bug 1** (use-after-free on `fb->len` in the warm-up loops):
+  closed in commit `4045116` ("fix: ESP32 firmware follow-ups (#36)").
+  `ESP32-CAM/ESP32-CAM.ino`'s `setup`'s warm-up loop captures `size_t
+fb_len = fb->len;` before `esp_camera_fb_return(fb)`, and the
+  post-recovery loop does the same. The chapter-11 "Use-after-return
+  on `esp_camera_fb_return` warm-up logging (issue #36)" entry above
+  documents the fix; the roadmap kept listing the bug as pending.
+- **#36 Bug 2** (heartbeats route doesn't canonicalise the mac):
+  closed in commit `4045116` (same).
+  `duckdb-service/routes/heartbeats.py`'s `post_heartbeat` wraps the
+  inbound `raw_mac` in `ModuleId.model_validate(...).root` before the
+  `INSERT`. The roadmap was written before this fix landed.
+- **#36 Bug 3** (`FIRMWARE_VERSION` was three uncoordinated sources):
+  closed in commit `4045116` (FIRMWARE_VERSION injection added to
+  `ESP32-CAM/extra_scripts.py`), refined in commit `07c10ac` ("close
+  #18 — inject Google Geolocation API key at build time") which added
+  the `GEO_API_KEY` sibling alongside. `ESP32-CAM/VERSION` is now
+  the sole source. `ESP32-CAM/extra_scripts.py`'s pre-build hook
+  injects `("FIRMWARE_VERSION", env.StringifyMacro(version))` for the
+  PlatformIO path; `ESP32-CAM/build.sh` passes
+  `-DFIRMWARE_VERSION=\"${VERSION}\"` for the arduino-cli path;
+  `ESP32-CAM/esp_init.h`'s `#ifndef FIRMWARE_VERSION` / `#define
+FIRMWARE_VERSION "dev-unset"` is the documented Arduino-IDE-only
+  fallback. No `"1.0.0"` or `"honeybee"` string remains in the tree.
+
+The sharpest framing: **commit `4045116` is titled "fix: ESP32
+firmware follow-ups (#36)" — the same PR that closed all three of
+issue #36's sub-bugs**. The GH issue itself stayed open against the
+roadmap, but the code shipped at the same time. The PR-D roadmap
+entry was citing an issue whose actionable content had already been
+delivered by the _same-numbered_ PR.
+
+The actual PR D shipped only the **#19** (host.cpp `StaticJsonDocument`
+512 → 1024 + `serializeJson > 0` guard before `setESPConfigured(true)`)
+and **#20** (`cfg_interval_ms` default 300 → 60000 + form hint + the
+load-fallback fix) work; the other three were closed by PR-body
+quotation of the actual-already-resolved code.
+
+**Why it happened.** The "Open-issue roadmap" section was written
+once when the issues were filed and never reconciled when the fixes
+landed in earlier PRs. PRs A and B (closed in earlier rounds, also
+deleted from the same roadmap section per the documented protocol)
+removed their own entries on close; the fixes that landed _without
+an associated PR-D-closing-this commit_ (Bug 1 and Bug 2 in
+particular, plausibly hardened during the round-2 senior-reviewer
+passes on the PRs that earned the chapter-11 entries cited above)
+left the roadmap section behind.
+
+**How to avoid it next time.** Three rules, in priority order:
+
+1. **The "delete the section when the PR is opened" protocol must
+   apply to _any_ PR that resolves an item in the roadmap, not just
+   the PR explicitly tagged with the roadmap-section letter.** If a
+   side-quest commit during PR-N happens to close a bug listed under
+   PR-D's roadmap entry, that line gets deleted in the same commit
+   that lands the fix. The roadmap is _signal that work is owed_; a
+   stale line in it is a lie about ownership.
+2. **Plan-phase verification reads the code, not the roadmap.** PR D's
+   planning agent caught all three already-done items by reading
+   `ESP32-CAM/ESP32-CAM.ino`'s `setup`'s warm-up loop, `routes/heartbeats.py`'s
+   `post_heartbeat`, and `extra_scripts.py`'s `FIRMWARE_VERSION` injection
+   directly. The "Trust code, not commit messages" rule in CLAUDE.md
+   extends to "trust code, not the roadmap" too. Three minutes of
+   `grep` saves a PR's worth of phantom changes.
+3. **A roadmap entry should cite _which_ file/symbol still needs the
+   fix, not a generic description.** The PR-D entry said
+   "`host.cpp`'s `saveConfig` and `esp_init.cpp`'s `loadConfig`"
+   for #19. Two `loadConfig` symbols exist (`host.cpp`'s reads the
+   captive-portal RAM shadow, `esp_init.cpp`'s reads the production
+   `esp_config_t`); the roadmap named the wrong one. The actual
+   `<512>` sites were both in `host.cpp` — its `saveConfig` _and_
+   its own `loadConfig`. A symbol-form citation read against the
+   code at write time would have surfaced this — the same discipline
+   the "Drift sweep is not a substitute for a CI check" entry above
+   demands of `path:line` references in `docs/`.
+
+**Dead-weight discovery: `CAPTURE_INTERVAL` is written but never read.**
+No path in firmware reads `esp_config->CAPTURE_INTERVAL` for capture
+scheduling. `ESP32-CAM/ESP32-CAM.ino`'s `loop` schedules
+captures purely on the `firstCaptureDone` flag and the `tm_hour == 12
+&& tm_yday != lastCaptureDay` clock — once on boot, once daily at
+noon. The interval value moves through `host.cpp`'s captive-portal
+RAM shadow, SPIFFS, `esp_init.cpp`'s `loadConfig`, into
+`esp_config_t::CAPTURE_INTERVAL`, and stops there. Issue #20's
+filed-symptom ("300 ms means ~3 upload attempts per second") was
+based on an earlier version of `loop` (or anticipated behaviour) that
+never landed. **The PR-D fixes harden the read/write path of a value
+that is currently inert**, so when the field is eventually wired
+through, a silent-zero or near-zero default cannot drain a battery
+in the field. Follow-up [#65](https://github.com/schutera/highfive/issues/65)
+tracks wiring `CAPTURE_INTERVAL` through `loop` or removing the
+field entirely — either way, the form copy in `host.cpp` and the
+operator-facing callout in `docs/07-deployment-view/esp-flashing.md`
+should match the shipping behaviour.
+
+**ArduinoJson v6 `|` semantics — clearer than the original gloss.**
+`JsonVariant::operator|(T default)` returns the default **only** when
+the variant is unbound, `null`, or not convertible to `T`. For an int
+variant, a stored `0` is convertible to `int` and `|` returns `0`,
+not the default. Practical implications:
+
+- `host.cpp`'s `loadConfig` `| 60000` fires when the key is missing
+  from a pre-existing config — useful for older `config.json` files
+  that predate the form's `interval` field.
+- `esp_init.cpp`'s `loadConfig` `| 86400000` fires for the same
+  missing-key cases and for non-numeric corruption — defence-in-depth.
+- **Neither `|` rejects a stored `0`.** The load-bearing guard against
+  a stored zero is `host.cpp`'s `/save` POST handler's `< 10` floor
+  added in this PR — that is the only code path that prevents a
+  zero from ever reaching SPIFFS in the first place.
+
+**Dual-reader asymmetry (intentional, but flagged).** `host.cpp`'s
+`loadConfig` and `esp_init.cpp`'s `loadConfig` are two independent
+readers of the same `/config.json` file on SPIFFS, with two different
+`| <default>` fallbacks for the same key:
+
+- `host.cpp`'s `loadConfig` → `60000` (1 min) — captive-portal RAM
+  shadow, the value the form prefills when the operator opens it.
+- `esp_init.cpp`'s `loadConfig` → `86400000` (24 h) — production
+  `esp_config_t` reader, mirroring the "no config file at all"
+  assignment in the default-init block above the SPIFFS open.
+
+The defaults differ on purpose: the form prefills the operator-
+recommended cadence; the production reader picks "do nothing
+aggressive" when the key is absent. **Do not "fix" the asymmetry by
+aligning them to one value** without first deciding which intent
+each site is encoding — that re-enables an entire class of
+silent-misconfiguration bugs (a missing key in `esp_init.cpp` would
+then read as the form-recommended cadence rather than the doing-
+nothing fallback, defeating the safety-net intent). The right
+permanent fix is a shared `firmware_defaults.h` with named constants
+(`kCaptureIntervalFormDefaultMs = 60000`,
+`kCaptureIntervalProductionFallbackMs = 86400000`) each used at one
+site — tracked at follow-up
+[#66](https://github.com/schutera/highfive/issues/66) alongside the
+dead-weight discovery [#65](https://github.com/schutera/highfive/issues/65)
+above.

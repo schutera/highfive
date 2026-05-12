@@ -39,4 +39,19 @@ std::string urlDecode(const std::string& src);
 //   * The returned value is urlDecode()'d.
 std::string getParam(const std::string& query, const std::string& name);
 
+// Resolve a "keep current on empty submission" form field.
+//
+// Returns trim(submitted) if non-empty after trim; otherwise returns
+// current verbatim. Pins the captive-portal `/save` "blank means keep
+// current" contract — see docs/11-risks-and-technical-debt/README.md
+// "Captive-portal JS validator and /save handler are two halves of
+// one contract (issue #46)" for the load-bearing semantics. Extracted
+// into a host-testable helper at issue #57.
+//
+// Whitespace set: space, tab, CR, LF, VT, FF — matches Arduino
+// String::trim() so the behaviour is byte-compatible with the inline
+// code at host.cpp's runAccessPoint that this helper replaces.
+std::string resolveKeepCurrentField(const std::string& submitted,
+                                    const std::string& current);
+
 }  // namespace hf

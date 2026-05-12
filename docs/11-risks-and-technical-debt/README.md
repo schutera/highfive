@@ -364,10 +364,14 @@ working trigger today is the WiFi-fail auto-fallback at
 `ESP32-CAM.ino`'s `setup` (3 consecutive failed joins →
 `setESPConfigured(false)` → AP). PR-47 also replaced the misleading
 `-- ESP already configured. To reconfigure: hold the CONFIG button…`
-print with one that advertises the auto-fallback path; the broader
-fix (wire CONFIG to a non-strap GPIO, or remove the long-press path
-entirely) is tracked at
-[issue #56](https://github.com/schutera/highfive/issues/56).
+print with one that advertises the auto-fallback path.
+
+**Resolution status.** PR-47 shipped the prose fix (Option 2 in #56:
+replace the GPIO0 hint with auto-fallback advice). The hardware
+redesign (Option 3: wire CONFIG to a non-strap GPIO like GPIO13 or
+GPIO14) is **descoped indefinitely** — the WiFi-fail auto-fallback at
+`setup()`'s `WIFI_FAIL_AP_FALLBACK_THRESH` is the working trigger and
+meets the operator-onboarding requirement. Closed at PR E.
 
 ### Captive-portal JS validator and `/save` handler are two halves of one contract (issue #46)
 
@@ -396,14 +400,29 @@ specifically: when adding or modifying a field that can be empty,
 exercise the empty-submission path manually before declaring the
 fix done — the JS validator does not know about field-level
 "optional" semantics by default. The current keep-current contract
-is encoded in the `data-keep-current-on-empty` HTML attribute and
-its mirroring server-side check (`submitted.trim();
-if (submitted.length() > 0) cfg_X = submitted;`); both must move
-together. Extraction of the server-side half into a host-testable
-helper is tracked at
-[issue #57](https://github.com/schutera/highfive/issues/57); land
-that before adding a second keep-current field, or this lesson is
-paid for again.
+is encoded in the `data-keep-current-on-empty` HTML attribute, a
+matching client-side validator skip, and `hf::resolveKeepCurrentField`
+in `ESP32-CAM/lib/form_query/` as the server-side third half; all
+three must move together when adding a new keep-current field.
+
+**Server-side half now host-testable (issue #57, PR E).**
+`host.cpp`'s `runAccessPoint` no longer carries the inline
+trim-and-conditional-assign block; the logic moved into
+`hf::resolveKeepCurrentField` with 5 Unity tests pinning empty /
+whitespace-only / non-empty / both-empty / internal-whitespace-
+preserved. A future regression that re-introduces unconditional
+assignment (or strips internal whitespace incorrectly) now fails CI
+rather than waiting for hardware testing. The three-layer contract
+itself is unchanged; only the third layer's surface moved.
+
+**Adding a second keep-current field is now mechanical.** Tag the
+input in `sendConfigForm` with `data-keep-current-on-empty="1"`
+(the JS validator's `dataset.keepCurrentOnEmpty === '1'` check
+already generalises across fields), and route the `/save` assignment
+through `resolveKeepCurrentField(getParam(query, "<name>"),
+cfg_<name>)`. No new helper, no fresh inline check. Don't pre-abstract
+the form-side `pwKeepAttr` / `pwHint` strings until there are at
+least two such fields — there is no second field today.
 
 ### `auth.md` "open AP" claim — captive portal is WPA2-protected
 

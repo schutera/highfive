@@ -46,4 +46,17 @@ std::string getParam(const std::string& query, const std::string& name) {
     return urlDecode(value);
 }
 
+std::string resolveKeepCurrentField(const std::string& submitted,
+                                    const std::string& current) {
+    // Whitespace set matches Arduino String::trim() (space, tab, CR, LF,
+    // VT, FF). `find_first_not_of` is used over a loop with `std::isspace`
+    // because the std::string predicate-free APIs are simpler and avoid
+    // any <locale>-related surprises in the host-native build.
+    static const char* kWhitespace = " \t\n\r\v\f";
+    const std::size_t first = submitted.find_first_not_of(kWhitespace);
+    if (first == std::string::npos) return current;  // empty or all-whitespace
+    const std::size_t last = submitted.find_last_not_of(kWhitespace);
+    return submitted.substr(first, last - first + 1);
+}
+
 }  // namespace hf

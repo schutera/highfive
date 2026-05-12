@@ -159,16 +159,6 @@ Derived from the open issues as of 2026-05-10. Each section below maps to one pl
 
 ---
 
-### PR E — `fix/captive-portal-debt` (closes #56, #57)
-
-Two follow-ups from PR #47's captive-portal work. No new behaviour — UX clarification and test coverage only.
-
-**#56** — Replace the misleading GPIO0 reconfigure hint in `ESP32-CAM/ESP32-CAM.ino`'s `setup()` with text that advertises the auto-fallback trigger ("change WiFi credentials so the device fails to join — it will auto-fall-back to the captive portal after 3 attempts"). Update `docs/11-risks-and-technical-debt/README.md` lessons-learned entry.
-
-**#57** — Extract `resolveKeepCurrentField(submitted, current)` helper into `ESP32-CAM/lib/form_query/` (already host-testable). `runAccessPoint` calls it for the password field. Add 4 Unity tests in `test/test_native_form_query/`: empty submitted → returns current; whitespace-only → returns current; non-empty → returns trimmed submitted; both empty → returns empty.
-
----
-
 ### PR F — `feat/esp-ota` (later — closes #26)
 
 OTA firmware update support. Requires a one-time breaking partition table change (USB flash required to get the first OTA-capable binary onto hardware).

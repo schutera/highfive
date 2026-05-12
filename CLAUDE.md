@@ -176,20 +176,6 @@ Two independent backend/service correctness gaps — no ESP dependency.
 
 ---
 
-### PR D — `fix/esp-firmware-housekeeping` (closes #19, #20, #36)
-
-Four surgical ESP32 firmware fixes, all low-risk, no hardware required beyond cross-compile.
-
-- **#20** — Raise default `cfg_interval_ms` from 300 to 60 000 (1 min) in `ESP32-CAM/host.cpp`. Add a comment in the config form describing the battery-life tradeoff.
-- **#19** — `ESP32-CAM/host.cpp`'s `saveConfig` and `ESP32-CAM/esp_init.cpp`'s `loadConfig`: increase `StaticJsonDocument<512>` to `<1024>`. Add a guard that `serializeJson` returns > 0 before calling `setESPConfigured(true)`.
-- **#36 Bug 1** — Capture `fb->len` into a local variable before `esp_camera_fb_return(fb)` in `ESP32-CAM/ESP32-CAM.ino`'s warm-up frame loops (two symmetric blocks). Log the local, not the pointer.
-- **#36 Bug 2** — Wrap incoming `mac` in `ModuleId.model_validate(...).root` before the DB write in `duckdb-service/routes/heartbeats.py`, mirroring `upload_image` in `image-service/app.py`.
-- **#36 Bug 3** — Make `ESP32-CAM/VERSION` the sole firmware-version source via `platformio.ini` build flag (`-DFIRMWARE_VERSION=...`). Remove the `#define` guards in `esp_init.h` and `client.cpp`. `build.sh` continues to read `VERSION` directly.
-
-If Bug 3 proves fiddly (cross-file coordination across `platformio.ini`, `esp_init.h`, `client.cpp`, `build.sh`), split it into its own PR rather than blocking the other three.
-
----
-
 ### PR E — `fix/captive-portal-debt` (closes #56, #57)
 
 Two follow-ups from PR #47's captive-portal work. No new behaviour — UX clarification and test coverage only.

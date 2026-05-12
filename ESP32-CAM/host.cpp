@@ -4,7 +4,7 @@
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
 #include "esp_init.h"   // setESPConfigured
-#include "form_query.h" // hf::urlDecode, hf::getParam (host-testable)
+#include "form_query.h" // hf::urlDecode, hf::getParam, hf::resolveKeepCurrentField (host-testable)
 #include "led.h"        // ledTick during the AP server loop
 #include <string>
 
@@ -45,6 +45,20 @@ String urlDecode(const String& src) {
 String getParam(const String& query, const String& name) {
   return String(
       hf::getParam(std::string(query.c_str()), std::string(name.c_str())).c_str()
+  );
+}
+
+// Server-side half of the captive-portal "blank means keep current"
+// contract for the password field (#46/#57). See header notes on
+// `hf::resolveKeepCurrentField` for semantics. This wrapper exists so
+// `runAccessPoint` can use Arduino `String` call sites while the logic
+// stays host-testable in `lib/form_query/`.
+String resolveKeepCurrentField(const String& submitted, const String& current) {
+  return String(
+      hf::resolveKeepCurrentField(
+          std::string(submitted.c_str()),
+          std::string(current.c_str())
+      ).c_str()
   );
 }
 
@@ -311,9 +325,12 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   // or guessed the default can join and View Source. See #46.
   // First-boot vs. reconfigure: only hint at "keep current" when one is
   // saved, and tag the input data-keep-current-on-empty so validateForm
-  // permits empty submission. The /save handler mirrors the contract by
-  // assigning cfg_password only when getParam("password") is non-empty;
-  // if a future field also adopts this attribute, mirror it server-side.
+  // permits empty submission. The /save handler completes the contract
+  // by calling `hf::resolveKeepCurrentField` (whitespace-trim, blank-or-
+  // all-whitespace falls through to "keep current"); to add a second
+  // keep-current field, tag the input here and route its `/save`
+  // assignment through the same helper rather than writing a fresh
+  // inline check.
   String pwHint     = (cfg_password.length() > 0) ? "(leave blank to keep current password)" : "WiFi password";
   String pwKeepAttr = (cfg_password.length() > 0) ? " data-keep-current-on-empty=\"1\"" : "";
   client.println("<input type=\"password\" name=\"password\"" + pwKeepAttr + " value=\"\" placeholder=\"" + pwHint + "\">");
@@ -492,21 +509,16 @@ void runAccessPoint() {
                     // Empty submission means "keep current password" (#46): the
                     // form no longer pre-fills the field, so a user editing only
                     // the SSID would otherwise wipe their saved credential. The
-                    // client-side validator skips this field when the input is
-                    // tagged data-keep-current-on-empty (see sendConfigForm);
-                    // the server-side conditional below is the authoritative
-                    // half of the contract. Test-debt: this branch is inside
-                    // runAccessPoint and is not reachable from the native
-                    // unity tests; PR-47 verified it end-to-end on hardware
-                    // (View Source → blank submit → WiFi rejoin) but a
-                    // regression that re-introduces unconditional assignment
-                    // would only surface in hardware testing today. Tracked
-                    // for extraction into a host-testable helper at issue #57.
-                    String submittedPw = getParam(query, "password");
-                    submittedPw.trim();
-                    if (submittedPw.length() > 0) {
-                      cfg_password = submittedPw;
-                    }
+                    // HTML half (`pwKeepAttr` in `sendConfigForm` above) tags
+                    // the password input with `data-keep-current-on-empty="1"`
+                    // and the JS validator (also rendered by `sendConfigForm`)
+                    // skips validation when empty; this assignment honours the
+                    // same shape on the server. Logic lives in
+                    // `hf::resolveKeepCurrentField` (lib/form_query/) — host-
+                    // testable as of #57; whitespace-trim and blank-keep
+                    // semantics are pinned by 5 Unity tests in
+                    // test/test_native_form_query/.
+                    cfg_password = resolveKeepCurrentField(getParam(query, "password"), cfg_password);
 
                     // NEW: split URL fields
                     String uploadBase     = getParam(query, "upload_base");

@@ -1,4 +1,5 @@
-// Native (host) unit tests for hf::urlDecode and hf::getParam.
+// Native (host) unit tests for hf::urlDecode, hf::getParam, and
+// hf::resolveKeepCurrentField.
 //
 // Run with:  pio test -e native
 //
@@ -18,6 +19,7 @@
 #include "form_query.h"
 
 using hf::getParam;
+using hf::resolveKeepCurrentField;
 using hf::urlDecode;
 
 void setUp() {}
@@ -159,6 +161,43 @@ static void test_getparam_empty_query(void) {
     TEST_ASSERT_EQUAL_STRING("", getParam("", "foo").c_str());
 }
 
+// --- resolveKeepCurrentField ----------------------------------------------
+//
+// Pins the captive-portal /save "blank means keep current" contract for
+// the password field (issue #46/#57). The HTML half tags the input with
+// `data-keep-current-on-empty="1"` and the JS half skips validation when
+// empty; this helper is the server-side third half. A regression that
+// re-introduces unconditional assignment (or strips internal whitespace
+// incorrectly) now fails CI rather than waiting for hardware testing.
+
+static void test_resolvekeepcurrent_empty_submitted_returns_current(void) {
+    TEST_ASSERT_EQUAL_STRING("old-secret",
+        resolveKeepCurrentField("", "old-secret").c_str());
+}
+
+static void test_resolvekeepcurrent_whitespace_only_returns_current(void) {
+    TEST_ASSERT_EQUAL_STRING("old-secret",
+        resolveKeepCurrentField("   \t\n", "old-secret").c_str());
+}
+
+static void test_resolvekeepcurrent_nonempty_returns_trimmed_submitted(void) {
+    TEST_ASSERT_EQUAL_STRING("hunter2",
+        resolveKeepCurrentField("  hunter2  ", "old-secret").c_str());
+}
+
+static void test_resolvekeepcurrent_both_empty_returns_empty(void) {
+    // First-boot path: no saved password, operator submits blank.
+    TEST_ASSERT_EQUAL_STRING("",
+        resolveKeepCurrentField("", "").c_str());
+}
+
+static void test_resolvekeepcurrent_nonempty_with_internal_whitespace_preserved(void) {
+    // A WiFi password with internal spaces is legitimate; only leading
+    // and trailing whitespace is trimmed.
+    TEST_ASSERT_EQUAL_STRING("two words",
+        resolveKeepCurrentField("  two words  ", "old").c_str());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -184,6 +223,12 @@ int main(int, char**) {
     RUN_TEST(test_getparam_missing_key_returns_empty);
     RUN_TEST(test_getparam_empty_value);
     RUN_TEST(test_getparam_empty_query);
+
+    RUN_TEST(test_resolvekeepcurrent_empty_submitted_returns_current);
+    RUN_TEST(test_resolvekeepcurrent_whitespace_only_returns_current);
+    RUN_TEST(test_resolvekeepcurrent_nonempty_returns_trimmed_submitted);
+    RUN_TEST(test_resolvekeepcurrent_both_empty_returns_empty);
+    RUN_TEST(test_resolvekeepcurrent_nonempty_with_internal_whitespace_preserved);
 
     return UNITY_END();
 }

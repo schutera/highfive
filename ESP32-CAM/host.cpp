@@ -179,9 +179,14 @@ void saveConfig() {
   ----------------------------------
 */
 void sendConfigForm(WiFiClient &client, bool saved = false) {
-  // Optional: split cfg_upload_url into base + endpoint for pre-filling
+  // Split cfg_*_url into base + endpoint for pre-filling. When the URL is
+  // empty (first-boot / post-erase), prefill the endpoint with the wire-
+  // protocol constant so the operator doesn't have to retype "upload" /
+  // "new_module" on every fresh onboarding. These paths are pinned by
+  // `image-service/app.py`'s `upload_image` route and
+  // `duckdb-service/routes/modules.py`'s `add_module` route respectively.
   String uploadBase = cfg_upload_url;
-  String uploadEndpoint = "";
+  String uploadEndpoint = "upload";
   int lastSlash = uploadBase.lastIndexOf('/');
   if (lastSlash > 7) { // after "http://", "https://"
     uploadEndpoint = uploadBase.substring(lastSlash + 1);
@@ -189,7 +194,7 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   }
 
   String initBase = cfg_init_url;
-  String initEndpoint = "";
+  String initEndpoint = "new_module";
   int lastSlashInit = initBase.lastIndexOf('/');
   if (lastSlashInit > 7) { // after "http://", "https://"
     initEndpoint = initBase.substring(lastSlashInit + 1);

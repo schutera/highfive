@@ -266,18 +266,11 @@ def heartbeat(module_id):
 
     now = datetime.now().strftime("%Y-%m-%d")
     with write_transaction() as con:
-        # `first_online` is `COALESCE`-guarded so the per-upload heartbeat
-        # only fills it on the first call after a NULL — the column name
-        # then matches its behaviour ("the date the module was first
-        # online"). Before issue #75 the column was clobbered to today
-        # on every heartbeat, so a module onboarded in April started
-        # advertising itself as "first online today" on every fresh
-        # upload. Real `first_online` writes still happen at
-        # `add_module` (registration) where the column is unconditionally
-        # set to the date of first registration. Note: the schema declares
-        # `first_online DATE NOT NULL`, so the COALESCE branch is
-        # belt-and-braces — unreachable in current production but defensive
-        # against legacy / manually-inserted rows.
+        # COALESCE-guarded so the heartbeat fills `first_online` only
+        # on the first NULL — `add_module` is the real writer (on
+        # INSERT). The schema declares `NOT NULL`, so this branch is
+        # unreachable in production but defensive against legacy /
+        # manually-inserted rows. Background: issue #75.
         con.execute(
             """
             UPDATE module_configs

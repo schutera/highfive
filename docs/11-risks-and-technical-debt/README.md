@@ -1263,18 +1263,23 @@ from the contracts package.
 
 **Why it happened.** Two paths write to the same column —
 `add_module` at registration (legitimately "this is the
-registration date") and the per-upload heartbeat (where the
-write was never load-bearing for any consumer). The heartbeat
-inherited the write from an early iteration that conflated
-"first-online" with "last-online," and nobody re-examined the
-SQL when the column's semantic owner was clarified. The bug then
-hid in plain sight: the column had a believable value (today's
-date or some recent date) on every read, so no monitoring trip
-fired. It only surfaced as a side-bar finding in PR-G's
-senior-review, recorded as a docstring footnote in PR #76, and
-finally filed as [issue #75](https://github.com/schutera/highfive/issues/75)
-when the docstring footnote turned out to be load-bearing for
-the chapter-11 lesson here.
+registration date", written on the INSERT path; the `ON CONFLICT
+DO UPDATE` clause deliberately omits it on re-registration) and
+the per-upload heartbeat (where the write was never load-bearing
+for any consumer). The heartbeat inherited the write from an
+early iteration that conflated "first-online" with "last-online,"
+and nobody re-examined the SQL when the column's semantic owner
+was clarified. The bug then hid in plain sight: the column had a
+believable value (today's date or some recent date) on every
+read, so no monitoring trip fired. Discovery chain: PR #76's
+round-2 senior-reviewer flagged the unconditional `SET
+first_online` while reading the route to verify the dead-weight
+`status` column was actually gone; the author recorded it as a
+caveat in `image-service/services/upload_pipeline.py`'s
+`_record_heartbeat` docstring. PR #76's round-3 senior-reviewer
+caught the unticketed footnote as a tracking-debt issue and the
+author filed [#75](https://github.com/schutera/highfive/issues/75)
+in the same fixup commit. This PR closes it.
 
 **How to avoid it next time.**
 
@@ -1283,29 +1288,32 @@ the chapter-11 lesson here.
    write site must honour the contract the name asserts. The
    `COALESCE(first_online, ?)` fix encodes the contract in the
    SQL itself — "fill on first write, never overwrite." Apply
-   this discipline at code-review time: any `UPDATE ... SET
-<name_implies_invariant> = ?` should justify why the
-   invariant doesn't apply, or use COALESCE.
+   this discipline at code-review time: any
+   `UPDATE ... SET <name_implies_invariant> = ?` should justify
+   why the invariant doesn't apply, or use COALESCE.
 2. **Defensive branches against `NOT NULL` columns are
-   intentional, not redundant.** The schema declares `first_online
-DATE NOT NULL`, so the COALESCE-on-NULL branch is unreachable
-   in current production. It is shipped anyway — defensive against
-   legacy rows, manual SQL inserts, and any future migration that
-   relaxes the NOT NULL. Inline comments make this intent explicit
-   so a future reader doesn't "simplify" the SQL by removing the
-   COALESCE.
-3. **The docstring-footnote-to-tracking-issue arc is a real
-   workflow shape.** PR-G's reviewer found this bug, recorded
-   it as a footnote in the upload-pipeline docstring; PR #76's
-   reviewer caught the footnote as a tracking-debt issue; PR for
-   #75 closed it. The footnote-as-IOU pattern is fine as long as
-   someone files the issue before the footnote ages out. Add the
-   "file an issue before the merge that introduces the footnote"
-   step to the senior-reviewer's standard checklist.
-4. **Audit related sites in the same PR.** The fix had to touch
-   six docs (glossary in 2 places, building-block-view in 2
-   files, runtime-view, api-reference) plus the chapter-11 entry
-   you're reading now. The grep `grep -rn first_online docs/`
-   was the 5-second check that surfaced all the sites. The
-   senior-reviewer caught three of them on round 1; the right
-   move is to grep before pushing, not before reviewing.
+   intentional, not redundant.** The schema declares
+   `first_online DATE NOT NULL`, so the COALESCE-on-NULL branch
+   is unreachable in current production. It is shipped anyway —
+   defensive against legacy rows, manual SQL inserts, and any
+   future migration that relaxes the NOT NULL. Inline comments
+   make this intent explicit so a future reader doesn't
+   "simplify" the SQL by removing the COALESCE.
+3. **The docstring-footnote-to-tracking-issue arc must complete
+   before merge.** PR #76's round-2 introduced the footnote;
+   round-3 caught that no issue tracked it and filed #75 in the
+   same fixup commit. The footnote-as-IOU pattern is fine as long
+   as someone files the issue before the merge that ships the
+   footnote — if the chain breaks (footnote ships, no issue
+   filed), the bug ages out into the codebase until the next
+   reader stumbles over it. Worth a step in the senior-reviewer
+   checklist: "any docstring footnote naming a known bug must
+   cite a tracking issue."
+
+ADRs (`docs/09-architecture-decisions/adr-001` and
+`adr-004-heartbeat-snapshot-in-contracts`) still list the
+heartbeat as updating `battery_level/first_online/image_count`.
+That phrasing is intentionally left alone — ADRs record the
+decisions in force when written, not the running behaviour. The
+chapter-11 entry you're reading is where running-behaviour
+corrections live.

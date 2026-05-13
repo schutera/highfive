@@ -11,8 +11,8 @@ def _seed_module(fresh_db, module_id=TEST_MAC_1):
     con = fresh_db.connection.get_conn()
     try:
         con.execute(
-            "INSERT INTO module_configs (id, name, lat, lng, status, first_online) "
-            "VALUES (?, 'Seed', 47.8, 9.6, 'online', '2024-01-01')",
+            "INSERT INTO module_configs (id, name, lat, lng, first_online) "
+            "VALUES (?, 'Seed', 47.8, 9.6, '2024-01-01')",
             (module_id,),
         )
         con.commit()
@@ -41,8 +41,8 @@ def test_get_progress_field_names_use_progress_id_and_hatched(client, fresh_db):
     con = fresh_db.connection.get_conn()
     try:
         con.execute(
-            "INSERT INTO module_configs (id, name, lat, lng, status, first_online) "
-            f"VALUES ('{TEST_MAC_1}', 'Seed', 47.8, 9.6, 'online', '2024-01-01')"
+            "INSERT INTO module_configs (id, name, lat, lng, first_online) "
+            f"VALUES ('{TEST_MAC_1}', 'Seed', 47.8, 9.6, '2024-01-01')"
         )
         con.execute(
             "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES "

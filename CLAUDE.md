@@ -136,9 +136,9 @@ These are the most-violated rules from past incidents. Full list in [`docs/02-co
 - **Never let `sendHeartbeat` swallow non-2xx HTTP status.** It must return non-zero and call `logbufNoteHttpCode` (in `ESP32-CAM/client.cpp`'s `sendHeartbeat`) so admin telemetry surfaces failures. Fixed in commit `ea7dc73` (PR-17 review critical).
 - **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. — commit messages summarise intent, not what shipped. Prefer `path's <symbol>` or `path::symbol` over `path:line`; the latter drift silently. Run `make check-citations` before invoking the reviewer. Lesson recorded in [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned".
 
-## Standard end-of-implementation gate
+## Mandatory end-of-implementation gate
 
-Every non-trivial change — feature work, bug fix, doc restructure, refactor — runs through the [`senior-reviewer`](.claude/agents/senior-reviewer.md) subagent before it leaves the working tree. Invoke it via the Agent tool with `subagent_type: senior-reviewer`. It is harsh on purpose: a senior-staff-engineer persona that reads the actual diff, anchors every concrete claim to a path (preferring `` path's `symbol` `` over `path:line`), and ranks issues P0/P1/P2.
+Every non-trivial change — feature work, bug fix, doc restructure, refactor — MUST run through the [`senior-reviewer`](.claude/agents/senior-reviewer.md) subagent before it leaves the working tree. Invoke it via the Agent tool with `subagent_type: senior-reviewer`. It is harsh on purpose: a senior-staff-engineer persona that reads the actual diff, anchors every concrete claim to a path (preferring `` path's `symbol` `` over `path:line`), and ranks issues P0/P1/P2.
 
 When to run it:
 

@@ -82,15 +82,14 @@ Cardinality:
 
 Stores information about the registered **ESP32 modules**.
 
-| Attribute     | Data Type    | Required | Description                            |
-| ------------- | ------------ | -------- | -------------------------------------- |
-| id            | VARCHAR(20)  | Yes      | unique module-ID                       |
-| name          | VARCHAR(100) | Yes      | name of module                         |
-| lat           | DECIMAL(9,6) | Yes      | latitude of location                   |
-| lng           | DECIMAL(9,6) | Yes      | longitude of location                  |
-| status        | VARCHAR(10)  | Yes      | status of module (`online`, `offline`) |
-| first_online  | DATE         | Yes      | date of first registration             |
-| battery_level | INTEGER      | No       | current battery level                  |
+| Attribute     | Data Type    | Required | Description                |
+| ------------- | ------------ | -------- | -------------------------- |
+| id            | VARCHAR(20)  | Yes      | unique module-ID           |
+| name          | VARCHAR(100) | Yes      | name of module             |
+| lat           | DECIMAL(9,6) | Yes      | latitude of location       |
+| lng           | DECIMAL(9,6) | Yes      | longitude of location      |
+| first_online  | DATE         | Yes      | date of first registration |
+| battery_level | INTEGER      | No       | current battery level      |
 
 ---
 
@@ -141,8 +140,8 @@ Checks whether the service and the database are accessible.
 Registers a new module in the system.
 
 - Existing modules with the same ID will be overwritten
-- Status is automatically set to `online`
-- The time of registration is saved
+- The time of registration is saved (`first_online`); `updated_at` is bumped on every call via the `ON CONFLICT DO UPDATE` branch
+- The dashboard's `Module.status` is **derived** from `lastSeenAt` in `backend/src/database.ts`'s `fetchAndAssemble` (2 h offline threshold); duckdb-service does not store a `status` column (dropped in [#69](https://github.com/schutera/highfive/issues/69))
 
 ### GET /modules
 

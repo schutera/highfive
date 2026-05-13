@@ -27,7 +27,6 @@ interface ApiModule {
   name: string;
   lat: string;
   lng: string;
-  status: 'online' | 'offline';
   first_online: string;
   battery_level: number;
   image_count: number;

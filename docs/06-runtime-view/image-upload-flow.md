@@ -24,7 +24,7 @@ sequenceDiagram
     IMG->>DDB: POST /add_progress_for_module
     DDB->>DDB: insert/replace daily_progress row
     IMG->>DDB: POST /modules/&lt;mac&gt;/heartbeat<br/>(post-upload aggregate, body: {battery})
-    DDB->>DDB: update battery, image_count, first_online
+    DDB->>DDB: update battery, image_count (first_online COALESCE-guarded, #75)
     IMG-->>ESP: 200 OK
 
     Note over ESP,DDB: independently, hourly
@@ -97,8 +97,12 @@ sequenceDiagram
    - `POST /add_progress_for_module` — inserts or replaces a
      `daily_progress` row for today. Missing nests are auto-created.
    - `POST /modules/<mac>/heartbeat` — **post-upload aggregate**:
-     updates `battery_level`, `image_count`, and `first_online` on
-     `module_configs`. Body is `{battery}` only.
+     updates `battery_level` and `image_count` on `module_configs`.
+     `first_online` is `COALESCE`-guarded (issue
+     [#75](https://github.com/schutera/highfive/issues/75)) so the
+     heartbeat leaves a set value alone — the column means "date of
+     first registration" again, written by `add_module` at
+     registration. Body is `{battery}` only.
 
 4. **Read.** A browser polling `/api/modules` from the dashboard
    picks up the new row on its next request via the
@@ -124,7 +128,8 @@ sequenceDiagram
 
 All DuckDB writes flow through `duckdb-service`. `image-service` no
 longer opens its own DuckDB connection and has no `DUCKDB_PATH` env
-var — battery / `image_count` / `first_online` updates go through
+var — battery / `image_count` updates (and the rarely-fired
+`first_online` write under the COALESCE guard, #75) go through
 `POST /modules/<mac>/heartbeat` (the post-upload aggregate), and
 first-upload detection uses `GET /modules/<mac>/progress_count`.
 `image-service` still writes images and `.log.json` sidecars to the

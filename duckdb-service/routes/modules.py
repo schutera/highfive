@@ -274,7 +274,10 @@ def heartbeat(module_id):
         # advertising itself as "first online today" on every fresh
         # upload. Real `first_online` writes still happen at
         # `add_module` (registration) where the column is unconditionally
-        # set to the date of first registration.
+        # set to the date of first registration. Note: the schema declares
+        # `first_online DATE NOT NULL`, so the COALESCE branch is
+        # belt-and-braces — unreachable in current production but defensive
+        # against legacy / manually-inserted rows.
         con.execute(
             """
             UPDATE module_configs

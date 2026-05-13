@@ -471,8 +471,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.production ps
 The `duckdb_data` named volume persists across rebuilds — schema
 migrations and seeded data are not lost. Schema migrations live in
 `duckdb-service/db/schema.py`'s `init_db` and run on every container
-start; the typical shape is `try: ALTER TABLE ... ADD COLUMN ...
-except: pass` for additive changes.
+start. Additive `ADD COLUMN` migrations are gated on
+`PRAGMA table_info` so a healthy fresh boot is a clean no-op (no
+swallowed exceptions in the duckdb stack); destructive changes
+(DROP COLUMN, type changes on FK-referenced tables) use the
+transactional table-rebuild pattern described in the callout below.
 
 > **Back up `duckdb_data` before any deploy that ships a schema
 > rewrite.** DuckDB v1.4 cannot ALTER a table referenced by a foreign

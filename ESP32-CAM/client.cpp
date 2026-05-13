@@ -43,34 +43,6 @@ String createFileName() {
 }
 
 /*
-  Prints circle detection JSON response
-*/
-void printResponse(String response) {
-  DynamicJsonDocument doc(1024);
-  DeserializationError error = deserializeJson(doc, response);
-
-  if (error) {
-    Serial.print("------ JSON parse error: ");
-    Serial.println(error.c_str());
-    return;
-  }
-
-  Serial.println("----------------------------------------------------------------------");
-  Serial.printf("--------------------- %d circles found ---------------------\n", doc["circles"].size());
-  for (int i = 0; i < doc["circles"].size(); i++) {
-    int radius = doc["circles"][i]["radius"];
-    const char* status = doc["circles"][i]["status"];
-    int x = doc["circles"][i]["x"];
-    int y = doc["circles"][i]["y"];
-
-    Serial.printf("Circle[%d]: radius=%d, status=%s, pos=(%d,%d)\n", i+1, radius, status, x, y);
-  }
-
-  const char* message = doc["message"];
-  Serial.printf("Response message: %s\n", message);
-}
-
-/*
   POST image + mac + battery + telemetry logs to the Flask /upload endpoint
 */
 int postImage(esp_config_t *esp_config) {
@@ -209,13 +181,19 @@ int postImage(esp_config_t *esp_config) {
     esp_task_wdt_reset();
   }
 
+  // Drain the response body so the socket is properly cleared (keep-alive
+  // reuse expects an empty inbound buffer). The body's contents are not
+  // consumed — image-service's /upload response shape is informational and
+  // the HTTP status code below is what drives success/failure logic. An
+  // older debug helper (`printResponse`) attempted to parse the body for
+  // a now-defunct `circles` field and logged "JSON parse error:
+  // InvalidInput" on every successful upload; removed in favour of this
+  // honest drain.
   hf::breadcrumbSet("postImage:read_body");
-  String response = "";
   unsigned long start = millis();
   while (client.connected() || client.available()) {
     if (client.available()) {
-      char c = client.read();
-      response += c;
+      client.read();
       start = millis();
       esp_task_wdt_reset();
     } else if (millis() - start > 5000) {
@@ -224,8 +202,6 @@ int postImage(esp_config_t *esp_config) {
       delay(1);
     }
   }
-
-  printResponse(response);
 
   int code = -4;
   if (status.startsWith("HTTP/1.1 ")) {

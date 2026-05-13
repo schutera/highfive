@@ -99,28 +99,28 @@ def init_db():
             """
         )
 
-        # Add email column to existing databases
-        try:
+        # Additive column migrations for older DBs (gated on
+        # `PRAGMA table_info` rather than try/except so a healthy fresh
+        # boot does not throw three exceptions through the duckdb stack
+        # only to swallow them). The columns already exist on fresh DBs
+        # because `_MODULE_CONFIGS_DDL` declares them; the gates make
+        # this block a clean no-op there.
+        existing_cols = {
+            c[1] for c in con.execute("PRAGMA table_info(module_configs)").fetchall()
+        }
+        if "email" not in existing_cols:
             con.execute("ALTER TABLE module_configs ADD COLUMN email VARCHAR(255)")
-        except Exception:
-            pass  # column already exists
-
-        # Add updated_at column to existing databases
-        try:
+        if "updated_at" not in existing_cols:
             con.execute(
-                "ALTER TABLE module_configs ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                "ALTER TABLE module_configs ADD COLUMN updated_at TIMESTAMP "
+                "DEFAULT CURRENT_TIMESTAMP"
             )
-        except Exception:
-            pass  # column already exists
-
         # Track Discord-silence-alert state so we don't spam the channel.
         # Set to NOW() when a silence alert fires, cleared on recovery alert.
-        try:
+        if "last_silence_alert_at" not in existing_cols:
             con.execute(
                 "ALTER TABLE module_configs ADD COLUMN last_silence_alert_at TIMESTAMP"
             )
-        except Exception:
-            pass  # column already exists
 
         # Migration: drop the dead-weight `status` column from existing DBs
         # (issue #69). DuckDB v1.4 rejects every ALTER on `module_configs`

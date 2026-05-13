@@ -140,8 +140,8 @@ Checks whether the service and the database are accessible.
 Registers a new module in the system.
 
 - Existing modules with the same ID will be overwritten
-- Status is automatically set to `online`
-- The time of registration is saved
+- The time of registration is saved (`first_online`); `updated_at` is bumped on every call via the `ON CONFLICT DO UPDATE` branch
+- The dashboard's `Module.status` is **derived** from `lastSeenAt` in `backend/src/database.ts`'s `fetchAndAssemble` (2 h offline threshold); duckdb-service does not store a `status` column (dropped in [#69](https://github.com/schutera/highfive/issues/69))
 
 ### GET /modules
 

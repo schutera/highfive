@@ -166,13 +166,20 @@ and flags the synonyms, typos, and overloads that have caused bugs.
 
 ### Same name, two concepts
 
-- **`status`** — on `module_configs` it means reachability (`online`
-  / `offline`). It is _not_ used on nests or progress, but the word
-  is generic enough that it is at risk of being reintroduced for
-  classification state ("sealed status") or upload state ("upload
-  status"). **Recommendation:** reserve `status` for **Module**
-  reachability; use `cell_state` or `nest_progress_state` for any
-  future per-cell status.
+- **`status`** — at the dashboard/contract level it means **Module**
+  reachability and is derived as `'online' | 'offline' | 'unknown'`
+  by `backend/src/database.ts`'s `fetchAndAssemble` from a 2 h window
+  on `lastSeenAt` (see Module-state table above). It is **not** a
+  stored column anywhere — the historical `module_configs.status`
+  was dropped in [#69](https://github.com/schutera/highfive/issues/69)
+  precisely to remove the temptation to "update status" in some new
+  code path and discover at integration time that the dashboard
+  ignores stored writes. The word is generic enough that it is also
+  at risk of being reintroduced for classification state ("sealed
+  status") or upload state ("upload status"). **Recommendation:**
+  reserve `status` for the derived **Module** reachability enum
+  above; use `cell_state` or `nest_progress_state` for any future
+  per-cell status.
 - **`logs`** — at the wire level it is the multipart form field
   carrying ESP **Telemetry**. At the route level (`/api/modules/:id/logs`,
   `/modules/<mac>/logs`) it refers to the persisted **Log Sidecars**

@@ -173,11 +173,12 @@ class UploadPipeline:
         in `duckdb-service/routes/modules.py` writes three columns:
         `battery_level` (refreshed from the request), `image_count`
         (incremented by 1), and `first_online` (clobbered to today —
-        a pre-existing semantic-bug carried over from before this
-        helper existed; the column's name no longer matches its
-        behaviour). Silently tolerates failures: the upload itself
-        already succeeded, so a dropped aggregate is best-effort
-        metadata, not a regression in the user-facing wire path."""
+        a pre-existing semantic-bug where the column's name no longer
+        matches its behaviour; fix tracked at
+        https://github.com/schutera/highfive/issues/75). Silently
+        tolerates failures: the upload itself already succeeded, so a
+        dropped aggregate is best-effort metadata, not a regression in
+        the user-facing wire path."""
         try:
             self.duckdb_service.heartbeat(mac, battery)
         except RequestException:

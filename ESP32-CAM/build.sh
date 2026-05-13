@@ -164,6 +164,18 @@ if [ -d "${HOMEPAGE_PUBLIC}" ]; then
   cp "${BUILD_DIR}/ESP32-CAM.ino.bin" "${HOMEPAGE_PUBLIC}/firmware.app.bin"
   APP_MD5="$(md5sum "${HOMEPAGE_PUBLIC}/firmware.app.bin" | awk '{print $1}')"
   APP_SIZE="$(stat -c%s "${HOMEPAGE_PUBLIC}/firmware.app.bin")"
+  MERGED_SIZE="$(stat -c%s "${HOMEPAGE_PUBLIC}/firmware.bin")"
+  # Sanity invariant: the merged image (bootloader + partitions +
+  # boot_app0 + app) must strictly exceed the app-only image. If they
+  # cross — e.g. a future refactor swaps the two `cp` sources, or
+  # esptool's merge output changes — the OTA path would consume
+  # bootloader bytes as if they were the app and brick every module
+  # on its next OTA boot. Loud build failure is cheaper than a fleet
+  # bricking.
+  if [ "${APP_SIZE}" -ge "${MERGED_SIZE}" ]; then
+    echo "ERROR: firmware.app.bin (${APP_SIZE}) >= firmware.bin (${MERGED_SIZE}) — the two artifacts may be crossed" >&2
+    exit 1
+  fi
   BUILT_AT="$(date -Iseconds)"
   cat > "${HOMEPAGE_PUBLIC}/firmware.json" <<JSON
 {"version":"${VERSION}","md5":"${MD5}","built_at":"${BUILT_AT}","app_md5":"${APP_MD5}","app_size":${APP_SIZE}}

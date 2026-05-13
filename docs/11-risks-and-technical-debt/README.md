@@ -1374,11 +1374,22 @@ before it can participate in OTA. After that, no more USB visits.
    each with its own md5 in the shared `firmware.json` manifest. The
    filenames differ; the manifest fields differ
    (`md5`/`built_at` for web installer,
-   `app_md5`/`app_size` for OTA). A future contributor who tries to
-   point the OTA path at `firmware.bin` (the merged one) gets a
-   manifest-shape mismatch at parse time, not a successful flash that
-   silently bricks every module. The
-   [`ESP32-CAM/lib/ota_version/`](../../ESP32-CAM/lib/ota_version/)
-   parser rejects manifests missing `app_md5`/`app_size` for exactly
-   this reason — the native tests in
-   `test/test_native_ota_version/` pin the wire shape.
+   `app_md5`/`app_size` for OTA). Two complementary guards keep them
+   from crossing:
+   - **Manifest-shape guard.** The
+     [`ESP32-CAM/lib/ota_version/`](../../ESP32-CAM/lib/ota_version/)
+     parser rejects manifests missing `app_md5`/`app_size`; the
+     native tests in `test/test_native_ota_version/` pin the wire
+     shape. A future contributor who removes `app_md5` from the
+     manifest emit-side gets a loud parse failure on every module's
+     next boot, not a silent bricking.
+   - **Artifact-correspondence guard.**
+     [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh) asserts
+     `firmware.app.bin` is strictly smaller than `firmware.bin`
+     before writing the manifest. A refactor that crosses the two
+     `cp` sources (or a change to esptool merge that flips the
+     sizes) fails the build loudly. Without this assertion the
+     manifest's MD5 would happily match whatever bytes
+     `firmware.app.bin` contains — including, by accident, the
+     merged image — and the OTA path would write bootloader bytes
+     onto the app slot at flash time.

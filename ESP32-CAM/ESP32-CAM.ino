@@ -202,6 +202,13 @@ void setup() {
              hf::formatModuleId(esp_config.esp_ID).c_str());
     ArduinoOTA.setHostname(otaHost);
     ArduinoOTA.onStart([]() { logf("[OTA] LAN update start"); });
+    // Feed the task watchdog from inside the ArduinoOTA upload loop.
+    // ArduinoOTA.handle() is non-blocking on the no-upload path, but
+    // once an upload is in progress it stays inside `handle()` for the
+    // full transfer — at slow LAN speeds a 1 MB push can sit there
+    // past TASK_WDT_TIMEOUT_S=60. onProgress fires per chunk, so this
+    // is the canonical place to feed.
+    ArduinoOTA.onProgress([](unsigned int, unsigned int) { esp_task_wdt_reset(); });
     ArduinoOTA.onError([](ota_error_t e) { logf("[OTA] LAN update error %u", (unsigned)e); });
     ArduinoOTA.begin();
   }
@@ -249,20 +256,6 @@ void setup() {
     lastHeartbeatMs = millis();
   }
   logf("[STAGE] sendHeartbeat:boot took=%lums", millis() - stageStartMs);
-
-  // OTA rollback gate (#26). If this boot is the first boot after an
-  // OTA flash, the new slot is "pending verify" — the bootloader will
-  // revert to the previous slot on the next reset unless we mark this
-  // boot good. Gating on WiFi-up + registration succeeding means a
-  // binary that bricks either path auto-rolls back without manual
-  // intervention. On a non-OTA boot the call is a no-op
-  // (mark_valid_cancel_rollback is idempotent for ESP_OTA_IMG_VALID).
-  // Placed before camera init because a camera-init failure is
-  // recoverable in software (recoverCamera()) and shouldn't block the
-  // rollback decision.
-  hf::breadcrumbSet("setup:ota_mark_valid");
-  esp_ota_mark_app_valid_cancel_rollback();
-
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
   */
@@ -327,6 +320,24 @@ void setup() {
     }
     bootPrefs.end();
   }
+
+  // OTA rollback gate (#26). If this boot is the first boot after an
+  // OTA flash, the new slot is "pending verify" — the bootloader will
+  // revert to the previous slot on the next reset unless we mark this
+  // boot good. Placed at the very end of setup() — after WiFi,
+  // registration, camera init, AND the warm-up loop — so a binary
+  // that hard-faults in any setup stage auto-rolls back without
+  // manual intervention. (An earlier draft of this gate fired before
+  // camera init on the argument that recoverCamera() handles soft
+  // NULL-frame stalls; senior-review caught that recoverCamera does
+  // NOT recover from a driver-level panic or null-deref in
+  // initEspCamera/configure_camera_sensor, so a regression there
+  // would brick the slot permanently if mark-valid had already
+  // fired. The right threshold is "every stage that can panic has
+  // succeeded".) On a non-OTA boot the call is a no-op
+  // (mark_valid_cancel_rollback is idempotent for ESP_OTA_IMG_VALID).
+  hf::breadcrumbSet("setup:ota_mark_valid");
+  esp_ota_mark_app_valid_cancel_rollback();
 
   Serial.println("[ESP] SETUP COMPLETE");
 

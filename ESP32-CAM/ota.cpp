@@ -23,9 +23,11 @@ namespace {
 constexpr size_t kManifestMaxBytes = 1024;
 
 // Bytes per Update.write() call. Chosen to keep esp_task_wdt_reset()
-// fired at least every ~100 ms over a 10 KB/s WiFi link, well under
-// TASK_WDT_TIMEOUT_S=60. Matches the cadence postImage uses for the
-// multipart body write in client.cpp's postImage.
+// fired at least every ~400 ms over a 10 KB/s WiFi link, well under
+// TASK_WDT_TIMEOUT_S=60. `postImage` in client.cpp uses 16 KB
+// multipart chunks; OTA goes smaller because each Update.write() also
+// performs a flash-erase amortisation step and we'd rather keep the
+// WDT-feed cadence dense than save a few function-call boundaries.
 constexpr size_t kOtaChunkBytes = 4096;
 
 // Hard ceiling on the binary download wall-clock. Past this point a
@@ -40,6 +42,13 @@ bool readLine(WiFiClient& c, char* out, size_t outLen, unsigned long timeoutMs) 
     while (millis() < deadline) {
         if (!c.available()) {
             if (!c.connected()) break;
+            // Feed the WDT in the slow-poll branch. A header-read or
+            // status-line-read on a drip-feeding server could otherwise
+            // sit here for the full `timeoutMs` without feeding —
+            // safe today because every caller uses <60 s, but a future
+            // bump above TASK_WDT_TIMEOUT_S would silently watchdog-
+            // reset. Defensive feed mirrors the binary body loop.
+            esp_task_wdt_reset();
             delay(1);
             continue;
         }
@@ -118,17 +127,31 @@ bool sendGet(WiFiClient& c, const std::string& host, uint16_t port,
 void httpOtaCheckAndApply(const esp_config_t* config) {
     if (!config) return;
 
-    // Derive the homepage origin from the captive-portal-saved INIT_URL.
-    // Production: host-nginx fronts homepage and backend on the same
-    // hostname, port 80. Dev modules speak a different port and won't
-    // resolve the manifest path — those are USB-flashed anyway.
+    // Derive the homepage origin from the captive-portal-saved
+    // INIT_URL. Production: host-nginx fronts homepage and backend on
+    // the same hostname; the `location = /firmware.json` and
+    // `location = /firmware.app.bin` blocks in the port-80 vhost (see
+    // production-deployment.md) proxy to the homepage static. Dev /
+    // self-hosted topologies that put homepage on a different port can
+    // set INIT_URL with the explicit `:<port>` and that is honoured.
     hf::breadcrumbSet("ota:parse_url");
     hf::Url initParsed = hf::parseUrl(std::string(config->INIT_URL));
     if (initParsed.host.empty()) {
         logf("[OTA] no host in INIT_URL — skipping");
         return;
     }
-    const uint16_t port = 80;  // homepage is served on :80 by host-nginx
+    // The WiFiClient HTTP plumbing here does not do TLS — refuse https
+    // INIT_URLs loudly rather than silently downgrade to http and have
+    // the request 301 or fail mid-stream. The captive portal does not
+    // accept https INIT_URL today, but an operator pasting from a
+    // browser can introduce one. A signed-update / TLS story belongs
+    // in a follow-up ADR.
+    if (initParsed.scheme != "http" && !initParsed.scheme.empty()) {
+        logf("[OTA] non-http scheme '%s' in INIT_URL — skipping",
+             initParsed.scheme.c_str());
+        return;
+    }
+    const uint16_t port = initParsed.port ? initParsed.port : 80;
 
     // ---- Manifest fetch ----
     hf::breadcrumbSet("ota:manifest_fetch");

@@ -13,7 +13,12 @@ namespace {
 // match must be on a quoted-key boundary so a value that happens to
 // contain the key bytes (e.g. {"foo":"app_size"}) cannot false-match.
 // Only flat single-level objects are supported — sufficient for the
-// manifest shape this library is paired with.
+// manifest shape this library is paired with. If a future manifest
+// grows a nested object with a same-named field
+// (e.g. `{"meta":{"app_size":99},"app_size":1024}`) the parser
+// returns whichever appears first in the byte stream; that is a
+// loud-failure design choice (the manifest contract is "flat") rather
+// than a silent one (best-match heuristics).
 long long findValueStart(const char* json, const char* key) {
     if (!json || !key) return -1;
     const size_t keyLen = std::strlen(key);

@@ -80,14 +80,19 @@ Four coupled choices, made together so they actually compose:
    [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh) writes both
    `homepage/public/firmware.bin` (merged, for the web installer) and
    `homepage/public/firmware.app.bin` (app-only, for HTTP OTA). The
-   `homepage/public/firmware.json` manifest now carries five fields:
-   `version`, `md5` (merged bin), `built_at`, `app_md5`, `app_size`.
-   One source of truth, two consumers, no manifest drift risk. The
-   manifest parser in
+   `homepage/public/firmware.json` manifest was previously
+   `{version, md5, built_at}`; this PR **adds** two fields —
+   `app_md5` (MD5 of the app-only bin) and `app_size` (byte length
+   of the app-only bin) — to the same file. One source of truth, two
+   consumers. The manifest parser in
    [`ESP32-CAM/lib/ota_version/`](../../ESP32-CAM/lib/ota_version/)'s
    `parseOtaManifest` ignores fields it doesn't need, so the web
    installer can grow its own fields without affecting the OTA path
-   and vice versa.
+   and vice versa. `build.sh` also asserts `firmware.app.bin` is
+   strictly smaller than `firmware.bin` before writing the manifest,
+   so a refactor that crosses the two `cp` sources fails the build
+   loudly rather than producing a manifest that points at the wrong
+   bytes.
 
 4. **Public download endpoint, no API key in firmware.** The OTA
    firmware fetches `http://<homepage host>/firmware.json` and
@@ -115,10 +120,16 @@ watchdog feed.
   `pio run -e esp32cam -t upload --upload-port=<module-ip>`. No USB
   cable, no GPIO0 strap. Hostname is `hivehive-<12hex-module-id>` so
   `pio device list` distinguishes modules on the same LAN.
-- Remote OTA pull on every daily reboot (ADR-007). The cadence is
-  free — we already reboot once a day — so we don't carry an extra
-  hourly check in `loop()` and the cost is one extra HTTP GET per
-  module per day to `/firmware.json`.
+- Remote OTA pull at every boot. `httpOtaCheckAndApply` runs in
+  `setup()`, so the manifest fetch fires on every reset — the daily
+  reboot from ADR-007, the 5-consecutive-failure circuit breaker's
+  `ESP.restart()`, a WDT-induced reset, and power-on. The cost is one
+  HTTP GET per boot to `/firmware.json` (manifest body < 256 bytes
+  today); the binary fetch only happens when the manifest's `version`
+  differs from compiled-in `FIRMWARE_VERSION`. We deliberately do not
+  carry an extra in-`loop()` periodic check — that would add a
+  rate-limit concern to the backend that the boot-only cadence
+  doesn't.
 - Auto-rollback for bricked binaries. A bad firmware push that fails
   WiFi join or registration on the first boot reverts to the previous
   slot without an operator visit. The pre-mark-valid breadcrumb in
@@ -149,6 +160,31 @@ watchdog feed.
   means the OTA endpoints inherit the homepage's public surface.
   Acceptable for the threat model today (same as the merged bin);
   revisit if the homepage's security posture changes.
+
+**Implicit coupling to revisit:**
+
+- **`INIT_URL` host = OTA host.** `httpOtaCheckAndApply` derives the
+  manifest URL from `esp_config.INIT_URL`'s host. Today
+  `INIT_URL` (the backend endpoint, served on the same hostname as
+  the homepage via host-nginx) and the OTA origin coincide. The
+  captive portal stores `INIT_URL` and `UPLOAD_URL` as separate
+  fields, leaving room for a future split (e.g. `api.highfive.…` vs
+  `highfive.…`). If those ever diverge from the homepage's hostname,
+  this coupling breaks silently. A captive-portal-stored
+  "homepage / OTA origin" field is the right long-term fix; for now,
+  the coupling is documented here and called out by name in
+  [`ESP32-CAM/ota.cpp`](../../ESP32-CAM/ota.cpp)'s
+  `httpOtaCheckAndApply` so a future change to the captive-portal
+  schema doesn't lose this invariant.
+- **Plain HTTP, MD5 integrity, no signature.** The OTA download path
+  uses `WiFiClient` (not `WiFiClientSecure`) so it can only fetch
+  over HTTP — the threat model is therefore "anyone on the network
+  path between the homepage origin and the module can MITM the
+  firmware". Acceptable for a home / lab deployment where the
+  homepage and modules share the same LAN; not acceptable for a
+  module on a hostile guest network. A follow-up ADR (TLS +
+  code-signed updates) should be filed before the second deployment
+  topology lands, not after.
 
 **Forecloses:**
 

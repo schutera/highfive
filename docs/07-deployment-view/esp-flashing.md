@@ -235,6 +235,83 @@ pio run -e esp32cam --target upload --upload-port <port>
 
 Connect the module via USB, open **http://\<hivehive-server\>/web-installer** in **Chrome or Edge** (Web Serial API required), and follow the on-screen instructions.
 
+## Updating a deployed module (OTA)
+
+Once a module has been flashed once with an OTA-capable firmware
+(see "First-time OTA migration" below), subsequent updates need no
+USB cable. See
+[../06-runtime-view/ota-update-flow.md](../06-runtime-view/ota-update-flow.md)
+for the runtime sequence and
+[../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md)
+for the design.
+
+### LAN push (ArduinoOTA)
+
+Push from the developer's machine while on the same network as the
+module. The module advertises itself as `hivehive-<12hex-module-id>`
+via mDNS.
+
+```bash
+cd ESP32-CAM
+pio run -e esp32cam -t upload --upload-port=hivehive-aabbccddeeff.local
+# or by IP:
+pio run -e esp32cam -t upload --upload-port=192.168.1.50
+```
+
+If PlatformIO times out the module may be mid-loop — wait up to 30 s
+and retry (`loop()`'s `ArduinoOTA.handle()` is polled between the
+existing 30 s sleeps).
+
+### Boot-time HTTP pull
+
+Bump `ESP32-CAM/VERSION` (per [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)
+the value is the next bee-species name), then:
+
+```bash
+cd ESP32-CAM
+bash build.sh
+# Then deploy the updated homepage/public/* artifacts to the host.
+```
+
+`build.sh` writes both `homepage/public/firmware.bin` (merged, for
+the web installer) and `homepage/public/firmware.app.bin` (app-only,
+for the OTA fetch), plus a `firmware.json` manifest carrying both
+md5s. The next daily reboot of each module (ADR-007) picks up the
+new version from `/firmware.json`, downloads `/firmware.app.bin`,
+flashes the inactive OTA slot, and restarts. The dashboard's
+`Module.latestHeartbeat.fwVersion` reflects the new version once
+the post-flash boot's heartbeat completes.
+
+If the new firmware fails to reach the
+`esp_ota_mark_app_valid_cancel_rollback()` call (i.e. WiFi join or
+registration fails on the new slot), the ESP32 bootloader reverts
+to the previous slot on the next reset — no operator action needed.
+Operator-visible: the dashboard keeps reporting the **old** version
+on that module, and the next telemetry sidecar carries a breadcrumb
+naming which setup stage the new firmware died in.
+
+### First-time OTA migration (one-way, USB-only)
+
+A module that has never been flashed with an OTA-capable binary uses
+the ESP32 default partition table — single app slot, no OTA slots.
+That module **cannot** receive the new partition layout over the air,
+because the bootloader reads partition information from flash offset
+`0x8000` and the OTA path writes to the app slot only.
+
+The first flash of an OTA-capable binary must therefore arrive via:
+
+- USB + `pio run -t upload` (the "Via PlatformIO" path above), **or**
+- The web installer's merged `firmware.bin` (the "Via web installer"
+  path above) — which flashes bootloader + partitions + app together
+  and so includes the new partition table.
+
+After that one-time USB flash, every subsequent update can be OTA.
+Symptom of trying to OTA-push to an un-migrated module: the upload
+fails before the binary stream completes, or completes but the
+module fails to boot the new image and the bootloader reverts. See
+[../11-risks-and-technical-debt/README.md](../11-risks-and-technical-debt/README.md)
+"OTA migration is one-way".
+
 ---
 
 For the firmware design, file layout, and runtime behaviour see

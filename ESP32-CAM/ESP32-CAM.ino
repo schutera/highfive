@@ -5,11 +5,15 @@
 #include "led.h"
 #include "logbuf.h"
 #include "breadcrumb.h"
+#include "module_id.h"
+#include "ota.h"
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <SPIFFS.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
+#include <esp_ota_ops.h>
 
 
 #define HEARTBEAT_INTERVAL_MS (60UL * 60UL * 1000UL)  // 1 hour
@@ -186,6 +190,32 @@ void setup() {
   setupWifiConnection(&esp_config.wifi_config);
   logf("[STAGE] setupWifiConnection took=%lums", millis() - stageStartMs);
 
+  // ArduinoOTA (#26 phase 1). LAN push from PlatformIO via
+  // `pio run -t upload --upload-port=<module-ip>`. No auth — relies on
+  // the WiFi segment's physical security. Hostname includes the module
+  // ID so `pio device list` distinguishes modules on the same LAN.
+  hf::breadcrumbSet("setup:arduino_ota_begin");
+  stageStartMs = millis();
+  {
+    char otaHost[40];
+    snprintf(otaHost, sizeof(otaHost), "hivehive-%s",
+             hf::formatModuleId(esp_config.esp_ID).c_str());
+    ArduinoOTA.setHostname(otaHost);
+    ArduinoOTA.onStart([]() { logf("[OTA] LAN update start"); });
+    ArduinoOTA.onError([](ota_error_t e) { logf("[OTA] LAN update error %u", (unsigned)e); });
+    ArduinoOTA.begin();
+  }
+  logf("[STAGE] arduino_ota_begin took=%lums", millis() - stageStartMs);
+
+  // HTTP OTA (#26 phase 2). Runs before getGeolocation/register so a
+  // recovery binary lands without first having to survive the rest of
+  // setup(). On success this call ESP.restart()s and never returns; on
+  // any failure it logs and falls through.
+  hf::breadcrumbSet("setup:http_ota_check");
+  stageStartMs = millis();
+  hf::httpOtaCheckAndApply(&esp_config);
+  logf("[STAGE] http_ota_check took=%lums", millis() - stageStartMs);
+
   hf::breadcrumbSet("setup:getGeolocation");
   stageStartMs = millis();
   getGeolocation(&esp_config);
@@ -219,6 +249,19 @@ void setup() {
     lastHeartbeatMs = millis();
   }
   logf("[STAGE] sendHeartbeat:boot took=%lums", millis() - stageStartMs);
+
+  // OTA rollback gate (#26). If this boot is the first boot after an
+  // OTA flash, the new slot is "pending verify" — the bootloader will
+  // revert to the previous slot on the next reset unless we mark this
+  // boot good. Gating on WiFi-up + registration succeeding means a
+  // binary that bricks either path auto-rolls back without manual
+  // intervention. On a non-OTA boot the call is a no-op
+  // (mark_valid_cancel_rollback is idempotent for ESP_OTA_IMG_VALID).
+  // Placed before camera init because a camera-init failure is
+  // recoverable in software (recoverCamera()) and shouldn't block the
+  // rollback decision.
+  hf::breadcrumbSet("setup:ota_mark_valid");
+  esp_ota_mark_app_valid_cancel_rollback();
 
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
@@ -400,6 +443,11 @@ void loop() {
   // the watchdog fires and reboots the device.
   esp_task_wdt_reset();
   ledTick();
+
+  // ArduinoOTA poll (#26 phase 1). Non-blocking; the 30 s `delay` at
+  // the bottom of this loop caps the LAN-push responsiveness at 30 s,
+  // well within PlatformIO's default upload retry budget.
+  ArduinoOTA.handle();
 
   // Daily reboot safety net: prevents long-running drift (lwIP state, NVS
   // wear oddities, slow heap fragmentation). Triggers once at 24h uptime

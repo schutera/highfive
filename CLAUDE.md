@@ -153,23 +153,6 @@ How to run it:
 - Address every P0 before pushing for review. P1s should be fixed or have an explicit "out of scope, tracked in issue #N" justification. P2s are nits and may be deferred.
 - Treat its findings as input, not as a verdict. If it claims something is wrong, verify against the code yourself — but do not dismiss without checking.
 
-## Open-issue roadmap
-
-Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. (PR A — the issue-#42 / #53 WDT fix — and PR B — the issue-#18 hardcoded Google Geolocation key fix — were both opened and deleted from this section; the list now starts at PR C.) After completion / deletion of the last section, remove this open-issue roadmap section entirely.
-
----
-
-### PR F — `feat/esp-ota` (later — closes #26)
-
-OTA firmware update support. Requires a one-time breaking partition table change (USB flash required to get the first OTA-capable binary onto hardware).
-
-**Phase 1:** ArduinoOTA — update partition table to "Minimal SPIFFS with OTA", add `ArduinoOTA.begin()` in `setup()` and `ArduinoOTA.handle()` in the main loop. LAN-only.
-**Phase 2:** HTTP OTA — periodic version-check + self-update from a hosted `.bin` (e.g. GitHub Release asset). Enables remote updates without LAN access.
-
-Do after the WDT fix (closes #42 / #53) and firmware housekeeping (PR D) are merged, to ensure a stable firmware baseline.
-
----
-
 ## Branch model
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed prefix (`feat/`, `fix/`, `docs/`, `refactor/`, `chore/`, `test/`, `ci/`); first commit line `<type>: <imperative summary>` ≤ ~72 chars; PRs require all CI green.

@@ -1127,9 +1127,15 @@ The dashboard's `Module.status` is **derived** server-side in
 of three timestamps — `image_uploads.uploaded_at`,
 `module_configs.updated_at`, and the latest
 `module_heartbeats.received_at` — with a 2 h window.
-`module_configs.status` itself, despite the believable name, is
-never read by the dashboard (separate dead-weight issue tracked
-at [#69](https://github.com/schutera/highfive/issues/69)).
+A `module_configs.status` column once lived on the schema and,
+despite its name, was never read by the dashboard. It was the
+dead-weight twin of `CAPTURE_INTERVAL` and was dropped in the
+follow-up PR that closed
+[#69](https://github.com/schutera/highfive/issues/69) (see the
+"Stored-vs-derived state needs a named owner" sub-section below).
+Treat the rest of this entry's references to that column as
+historical context for the lesson, not a description of the
+current schema.
 
 The senior-reviewer of this PR caught a load-bearing factual
 error in the first draft of this entry **and** in the in-source
@@ -1137,10 +1143,12 @@ comment at `backend/src/database.ts`'s `fetchAndAssemble` (the
 "earlier draft gated `'unknown'` on `!m.updated_at`" note): both
 asserted that `updated_at` "never refreshes after registration."
 That is false. `duckdb-service/routes/modules.py`'s `add_module`
-contains an `ON CONFLICT (id) DO UPDATE SET ... status =
-EXCLUDED.status, ... updated_at = NOW()` branch that fires on
-every call. Firmware calls `initNewModuleOnServer` unconditionally
-in `setup()` on every boot, so both `status` and `updated_at` are
+contains an `ON CONFLICT (id) DO UPDATE SET ... updated_at =
+NOW()` branch (at the time the lesson was written, the same
+clause also rewrote a `status` column that has since been dropped
+— see [#69](https://github.com/schutera/highfive/issues/69)) that
+fires on every call. Firmware calls `initNewModuleOnServer`
+unconditionally in `setup()` on every boot, so `updated_at` is
 rewritten on every reflash and every daily reboot. That UPSERT
 plants a freshness signal in `module_configs.updated_at` long
 before the boot heartbeat fires, and the dashboard's `lastSeenAt`
@@ -1201,26 +1209,26 @@ none of them about `lastSeenAt` freshness:**
    refreshes" claim that the `ON CONFLICT` UPSERT directly
    contradicts.
 2. **Stored-vs-derived state needs a named owner.** The
-   `module_configs.status` column is currently dead weight — it
-   exists, it has a CHECK constraint (`'online' | 'offline'`),
-   it is written once, it is never read by the dashboard. Either
-   make it the authoritative source (with a writer at every
-   liveness-event seam) or remove it from the schema. Leaving it
-   in place encourages the next contributor to "update status"
-   in some new code path and discover only at integration time
-   that the dashboard ignores their writes. Tracked at
-   [#69](https://github.com/schutera/highfive/issues/69)
-   for resolution; recommended fix is dropping the column rather
-   than retrofitting writers (same shape as
+   `module_configs.status` column was dead weight at the time
+   this lesson was written — it had a CHECK constraint
+   (`'online' | 'offline'`), was rewritten `'online'` on every
+   registration, and was never read by the dashboard. Resolved
+   by [#69](https://github.com/schutera/highfive/issues/69) via
+   the "drop the column" route (recommended in the original entry
+   over retrofitting writers, same shape as
    [#65](https://github.com/schutera/highfive/issues/65)'s
-   `CAPTURE_INTERVAL` recommendation, filed during PR D's
-   senior-review).
+   `CAPTURE_INTERVAL` resolution in PR-G). The lesson stands:
+   leaving a stored-but-unread field in place encourages the next
+   contributor to "update status" in a new code path and discover
+   only at integration time that the dashboard ignores their
+   writes.
 
 When a field exists on a schema but no read path consults it, the
 design has a third party who left and didn't come back; either wire
 it through or remove it, but don't leave it in the table as a
-debugging hazard. Two such dead-weight fields are tracked today:
-[#65](https://github.com/schutera/highfive/issues/65) (`CAPTURE_INTERVAL`
-in `esp_config_t`) and
+debugging hazard. Two such dead-weight fields existed at the time
+this lesson was written; both have been dropped — see PR-G for
+[#65](https://github.com/schutera/highfive/issues/65)
+(`CAPTURE_INTERVAL` in `esp_config_t`) and the PR that closed
 [#69](https://github.com/schutera/highfive/issues/69)
 (`module_configs.status`).

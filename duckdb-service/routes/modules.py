@@ -71,13 +71,12 @@ def add_module():
             con.execute(
                 """
                 INSERT INTO module_configs
-                    (id, name, lat, lng, status, first_online, battery_level, email, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    (id, name, lat, lng, first_online, battery_level, email, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     lat = EXCLUDED.lat,
                     lng = EXCLUDED.lng,
-                    status = EXCLUDED.status,
                     battery_level = EXCLUDED.battery_level,
                     email = EXCLUDED.email,
                     updated_at = NOW()
@@ -87,7 +86,6 @@ def add_module():
                     data.module_name,
                     float(data.latitude),
                     float(data.longitude),
-                    "online",
                     now,
                     data.battery,
                     data.email,
@@ -239,7 +237,7 @@ def get_modules():
                    MAX(i.uploaded_at) AS last_image_at
             FROM module_configs m
             LEFT JOIN image_uploads i ON m.id = i.module_id
-            GROUP BY m.id, m.name, m.lat, m.lng, m.status, m.first_online,
+            GROUP BY m.id, m.name, m.lat, m.lng, m.first_online,
                      m.battery_level, m.image_count, m.email, m.updated_at,
                      m.last_silence_alert_at
             """

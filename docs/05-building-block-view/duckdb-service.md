@@ -82,15 +82,14 @@ Cardinality:
 
 Stores information about the registered **ESP32 modules**.
 
-| Attribute     | Data Type    | Required | Description                            |
-| ------------- | ------------ | -------- | -------------------------------------- |
-| id            | VARCHAR(20)  | Yes      | unique module-ID                       |
-| name          | VARCHAR(100) | Yes      | name of module                         |
-| lat           | DECIMAL(9,6) | Yes      | latitude of location                   |
-| lng           | DECIMAL(9,6) | Yes      | longitude of location                  |
-| status        | VARCHAR(10)  | Yes      | status of module (`online`, `offline`) |
-| first_online  | DATE         | Yes      | date of first registration             |
-| battery_level | INTEGER      | No       | current battery level                  |
+| Attribute     | Data Type    | Required | Description                |
+| ------------- | ------------ | -------- | -------------------------- |
+| id            | VARCHAR(20)  | Yes      | unique module-ID           |
+| name          | VARCHAR(100) | Yes      | name of module             |
+| lat           | DECIMAL(9,6) | Yes      | latitude of location       |
+| lng           | DECIMAL(9,6) | Yes      | longitude of location      |
+| first_online  | DATE         | Yes      | date of first registration |
+| battery_level | INTEGER      | No       | current battery level      |
 
 ---
 

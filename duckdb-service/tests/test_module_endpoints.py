@@ -18,9 +18,9 @@ def _seed_module(fresh_db, module_id=TEST_MAC_1, image_count=0, battery_level=No
     con = fresh_db.connection.get_conn()
     try:
         con.execute(
-            "INSERT INTO module_configs (id, name, lat, lng, status, first_online, "
+            "INSERT INTO module_configs (id, name, lat, lng, first_online, "
             "battery_level, image_count) "
-            "VALUES (?, 'Seed', 47.8, 9.6, 'online', '2024-01-01', ?, ?)",
+            "VALUES (?, 'Seed', 47.8, 9.6, '2024-01-01', ?, ?)",
             (module_id, battery_level, image_count),
         )
         con.commit()

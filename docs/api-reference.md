@@ -297,8 +297,7 @@ Returns the raw DB rows under `modules`:
       "id": "esp-9081726354",
       "lat": "48.52137",
       "lng": "9.05891",
-      "name": "Garden-Hive",
-      "status": "online"
+      "name": "Garden-Hive"
     }
   ]
 }

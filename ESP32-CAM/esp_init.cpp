@@ -360,7 +360,8 @@ framesize_t getResolutionFromString(String resolutionString) {
     if (resolutionString == "uxga") { return FRAMESIZE_UXGA; }
 
     /* fallback */
-    Serial.printf("------ Resolution '%s' is not supported. Using Default resolution VGA.\n", resolutionString);
+    Serial.printf("------ Resolution '%s' is not supported. Using Default resolution VGA.\n",
+                  resolutionString.c_str());
     return FRAMESIZE_VGA;
 }
 
@@ -368,7 +369,8 @@ bool loadConfig(esp_config_t *esp_config) {
 
   // ---- setting unique ID (esp mac address) ---- //
   esp_config->esp_ID = ESP.getEfuseMac();
-  Serial.printf("------ ESP module identifier: %u\n", esp_config->esp_ID);
+  Serial.printf("------ ESP module identifier: %llu\n",
+                (unsigned long long)esp_config->esp_ID);
 
   // ---- set initial battery level ---- //
   esp_config->battery_level = 90;

@@ -11,8 +11,8 @@ def _seed_module(fresh_db, module_id="hive-001"):
     con = fresh_db.connection.get_conn()
     try:
         con.execute(
-            "INSERT INTO module_configs (id, name, lat, lng, status, first_online) "
-            "VALUES (?, 'Seed', 47.8, 9.6, 'online', '2024-01-01')",
+            "INSERT INTO module_configs (id, name, lat, lng, first_online) "
+            "VALUES (?, 'Seed', 47.8, 9.6, '2024-01-01')",
             (module_id,),
         )
         con.commit()
@@ -60,8 +60,8 @@ def test_write_transaction_commits_on_success(fresh_db):
     repo = importlib.import_module("db.repository")
     with repo.write_transaction() as con:
         con.execute(
-            "INSERT INTO module_configs (id, name, lat, lng, status, first_online) "
-            "VALUES ('hive-tx', 'Txn', 47.8, 9.6, 'online', '2024-01-01')"
+            "INSERT INTO module_configs (id, name, lat, lng, first_online) "
+            "VALUES ('hive-tx', 'Txn', 47.8, 9.6, '2024-01-01')"
         )
     rows = repo.query_all("SELECT id FROM module_configs WHERE id = ?", ("hive-tx",))
     assert rows == [{"id": "hive-tx"}]

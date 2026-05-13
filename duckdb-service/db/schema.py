@@ -13,7 +13,6 @@ def init_db():
                 name VARCHAR(100) NOT NULL,
                 lat DECIMAL(9,6) NOT NULL,
                 lng DECIMAL(9,6) NOT NULL,
-                status VARCHAR(10) NOT NULL CHECK (status IN ('online', 'offline')),
                 first_online DATE NOT NULL,
                 battery_level INTEGER,
                 image_count INTEGER NOT NULL DEFAULT 0,
@@ -88,6 +87,21 @@ def init_db():
         except Exception:
             pass  # column already exists
 
+        # The `status` column was dropped from the CREATE TABLE above when
+        # issue #69 closed. No in-place migration is shipped: DuckDB v1.4
+        # rejects every ALTER TABLE on `module_configs` (DROP COLUMN, DROP
+        # CONSTRAINT, ALTER COLUMN ... SET DEFAULT) with `DependencyException
+        # Cannot alter entry "module_configs" because there are entries that
+        # depend on it` because of the `nest_data.module_id → module_configs.id`
+        # foreign key — the FK locks the whole table regardless of which
+        # column the ALTER targets. A multi-table rebuild migration was
+        # considered and rejected as too brittle for a dev-only DuckDB
+        # deployment with no production data; operators with an existing
+        # `duckdb_data` volume must run `docker compose down -v` once before
+        # pulling this change. Re-flashed ESP32-CAMs auto-re-register on next
+        # boot, so no real device-row data is lost — the wipe only discards
+        # the inert seed-module rows and any test fixtures.
+
         if os.getenv("SEED_DATA", "").lower() == "true":
             row_count = con.execute("SELECT COUNT(*) FROM module_configs").fetchone()[0]
             if row_count == 0:
@@ -98,12 +112,12 @@ def init_db():
                 # which always has manufacturer OUI bytes set.
                 con.execute(
                     """
-                    INSERT INTO module_configs (id, name, lat, lng, status, first_online, image_count) VALUES
-                    ('000000000001', 'Elias123',    47.8086, 9.6433, 'online',  '2023-04-15', 142),
-                    ('000000000002', 'Garten 12',   47.8100, 9.6450, 'offline', '2023-05-20', 87),
-                    ('000000000003', 'Waldrand',    47.7819, 9.6107, 'online',  '2024-03-10', 53),
-                    ('000000000004', 'Schussental', 47.7850, 9.6200, 'online',  '2024-06-01', 24),
-                    ('000000000005', 'Bergblick',   47.8050, 9.6350, 'online',  '2025-02-14', 3);
+                    INSERT INTO module_configs (id, name, lat, lng, first_online, image_count) VALUES
+                    ('000000000001', 'Elias123',    47.8086, 9.6433, '2023-04-15', 142),
+                    ('000000000002', 'Garten 12',   47.8100, 9.6450, '2023-05-20', 87),
+                    ('000000000003', 'Waldrand',    47.7819, 9.6107, '2024-03-10', 53),
+                    ('000000000004', 'Schussental', 47.7850, 9.6200, '2024-06-01', 24),
+                    ('000000000005', 'Bergblick',   47.8050, 9.6350, '2025-02-14', 3);
 
                     INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
                     ('nest-001', '000000000001', 'blackmasked'),

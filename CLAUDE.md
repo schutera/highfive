@@ -159,18 +159,6 @@ Derived from the open issues as of 2026-05-10. Each section below maps to one pl
 
 ---
 
-### PR G — `refactor/firmware-defaults` (closes #65, #66)
-
-Two PR-D senior-review fallouts that share the same surface: `CAPTURE_INTERVAL` is stored but never consumed by the capture scheduler (#65), and `host.cpp` + `esp_init.cpp` carry an intentional-but-fragile dual-reader asymmetry on the same SPIFFS keys (#66). Both cluster in the same firmware files, ship together.
-
-**#65 — recommended Option B (remove the dead form field).** The captive-portal "Capture Interval (ms)" knob has no runtime effect; `ESP32-CAM/ESP32-CAM.ino`'s `loop` schedules captures purely on `firstCaptureDone` + daily-noon clock. Drop the input from `host.cpp`'s `sendConfigForm`, the JSON read/write in `host.cpp`'s `loadConfig` and `saveConfig`, the `cfg_interval_ms` global and `/save` POST handler floor, and the `esp_config_t::CAPTURE_INTERVAL` load in `esp_init.cpp`'s `loadConfig`. Update `docs/07-deployment-view/esp-flashing.md`'s "Capture interval — currently informational only" callout to reflect the removal and update the chapter-11 entry's "Dead-weight discovery" paragraph. Option A (wire it through `loop` as a millis-based interval) is left open as a separate feature PR if the project later wants operator-configurable cadence — meaningful scheduler refactor that interacts with ADR-007's daily-reboot logic and should ship with hardware verification.
-
-**#66 — extract `ESP32-CAM/firmware_defaults.h`** with named constants for the remaining dual-read fields. After #65 removes the `CAPTURE_INTERVAL` pair, the asymmetry surface shrinks; sweep `RESOLUTION`, `VFLIP`, `BRIGHTNESS`, `SATURATION` (currently asymmetric or absent `|` fallbacks) and unify each at its form-prefill / production-fallback sites. References from `host.cpp` (form prefill defaults) and `esp_init.cpp` (production fallbacks) drop bare literals in favour of named constants. Kills the dual-reader-asymmetry bug class the codebase has paid for once already (chapter-11 "Telemetry sidecar envelope drift").
-
-Order relative to PR F is open.
-
----
-
 ### PR F — `feat/esp-ota` (later — closes #26)
 
 OTA firmware update support. Requires a one-time breaking partition table change (USB flash required to get the first OTA-capable binary onto hardware).

@@ -1,0 +1,10 @@
+{
+  "name": "hf_firmware_defaults",
+  "version": "0.1.0",
+  "description": "Named constants for the dual-reader SPIFFS-config fallbacks (form prefill vs production default). One name per (field, intent) pair so the asymmetry between host.cpp and esp_init.cpp can't drift back into bare literals. Header-only, pure C++17, host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

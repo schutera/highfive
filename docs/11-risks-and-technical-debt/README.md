@@ -1043,67 +1043,71 @@ left the roadmap section behind.
    the "Drift sweep is not a substitute for a CI check" entry above
    demands of `path:line` references in `docs/`.
 
-**Dead-weight discovery: `CAPTURE_INTERVAL` is written but never read.**
-No path in firmware reads `esp_config->CAPTURE_INTERVAL` for capture
-scheduling. `ESP32-CAM/ESP32-CAM.ino`'s `loop` schedules
-captures purely on the `firstCaptureDone` flag and the `tm_hour == 12
-&& tm_yday != lastCaptureDay` clock — once on boot, once daily at
-noon. The interval value moves through `host.cpp`'s captive-portal
-RAM shadow, SPIFFS, `esp_init.cpp`'s `loadConfig`, into
-`esp_config_t::CAPTURE_INTERVAL`, and stops there. Issue #20's
+**Dead-weight discovery: `CAPTURE_INTERVAL` was written but never
+read — removed in PR-G.** When PR-D landed, no firmware path read
+`esp_config->CAPTURE_INTERVAL` for capture scheduling.
+`ESP32-CAM/ESP32-CAM.ino`'s `loop` schedules captures purely on the
+`firstCaptureDone` flag and the `tm_hour == 12 && tm_yday !=
+lastCaptureDay` clock — once on boot, once daily at noon. The
+interval value moved through `host.cpp`'s captive-portal RAM
+shadow, SPIFFS, `esp_init.cpp`'s `loadConfig`, into
+`esp_config_t::CAPTURE_INTERVAL`, and stopped there. Issue #20's
 filed-symptom ("300 ms means ~3 upload attempts per second") was
-based on an earlier version of `loop` (or anticipated behaviour) that
-never landed. **The PR-D fixes harden the read/write path of a value
-that is currently inert**, so when the field is eventually wired
-through, a silent-zero or near-zero default cannot drain a battery
-in the field. Follow-up [#65](https://github.com/schutera/highfive/issues/65)
-tracks wiring `CAPTURE_INTERVAL` through `loop` or removing the
-field entirely — either way, the form copy in `host.cpp` and the
-operator-facing callout in `docs/07-deployment-view/esp-flashing.md`
-should match the shipping behaviour.
+based on an earlier version of `loop` (or anticipated behaviour)
+that never landed. PR-D hardened the read/write path of a value
+that was inert; the surface itself was removed in PR-G via Option B
+from
+[#65](https://github.com/schutera/highfive/issues/65) (remove the
+field) — the form, the SPIFFS key, the `esp_config_t` member, and
+the `/save` handler floor are all gone. Operator-configurable
+cadence is left to a future feature PR that would interact with
+ADR-007's daily-reboot logic and ship with hardware-cadence
+verification.
 
-**ArduinoJson v6 `|` semantics — clearer than the original gloss.**
-`JsonVariant::operator|(T default)` returns the default **only** when
-the variant is unbound, `null`, or not convertible to `T`. For an int
-variant, a stored `0` is convertible to `int` and `|` returns `0`,
-not the default. Practical implications:
+**ArduinoJson v6 `|` semantics — load-bearing for the missing-key
+path.** `JsonVariant::operator|(T default)` returns the default
+**only** when the variant is unbound, `null`, or not convertible to
+`T`. For an int variant, a stored `0` is convertible to `int` and
+`|` returns `0`, not the default. This is why PR-G adds explicit
+`| hf::defaults::k*ProductionFallback` to every camera-field read
+in `esp_init.cpp`'s `loadConfig` — without it, a missing
+`VERTICAL_FLIP` / `BRIGHTNESS` / `SATURATION` key returned 0 from
+the framework, silently overwriting the default-init's documented
+production fallback (`1` / `1` / `-1`). A stored `0` for these
+fields is still a legitimate operator choice and reads through
+unchanged; the `|` only fires for the missing-key case.
 
-- `host.cpp`'s `loadConfig` `| 60000` fires when the key is missing
-  from a pre-existing config — useful for older `config.json` files
-  that predate the form's `interval` field.
-- `esp_init.cpp`'s `loadConfig` `| 86400000` fires for the same
-  missing-key cases and for non-numeric corruption — defence-in-depth.
-- **Neither `|` rejects a stored `0`.** The load-bearing guard against
-  a stored zero is `host.cpp`'s `/save` POST handler's `< 10` floor
-  added in this PR — that is the only code path that prevents a
-  zero from ever reaching SPIFFS in the first place.
+**Dual-reader asymmetry (resolved in PR-G via named constants).**
+`host.cpp`'s `loadConfig` and `esp_init.cpp`'s `loadConfig` are
+two independent readers of the same `/config.json` keys, with
+intentionally different fallbacks per site:
 
-**Dual-reader asymmetry (intentional, but flagged).** `host.cpp`'s
-`loadConfig` and `esp_init.cpp`'s `loadConfig` are two independent
-readers of the same `/config.json` file on SPIFFS, with two different
-`| <default>` fallbacks for the same key:
+- `host.cpp`'s `loadConfig` → form-prefill values (what the
+  captive-portal form shows the operator on first boot).
+- `esp_init.cpp`'s `loadConfig` → production fallbacks (what the
+  device runs when the key is missing or no config file exists).
 
-- `host.cpp`'s `loadConfig` → `60000` (1 min) — captive-portal RAM
-  shadow, the value the form prefills when the operator opens it.
-- `esp_init.cpp`'s `loadConfig` → `86400000` (24 h) — production
-  `esp_config_t` reader, mirroring the "no config file at all"
-  assignment in the default-init block above the SPIFFS open.
+The defaults differ on purpose. The form prefills the operator-
+facing default; the production reader picks the value the device
+should actually run with when nothing is configured. Aligning the
+two to one value would re-enable an entire class of silent-
+misconfiguration bugs (a missing key in `esp_init.cpp` would then
+read as the form-prefill default rather than the production
+fallback, defeating the safety-net intent).
 
-The defaults differ on purpose: the form prefills the operator-
-recommended cadence; the production reader picks "do nothing
-aggressive" when the key is absent. **Do not "fix" the asymmetry by
-aligning them to one value** without first deciding which intent
-each site is encoding — that re-enables an entire class of
-silent-misconfiguration bugs (a missing key in `esp_init.cpp` would
-then read as the form-recommended cadence rather than the doing-
-nothing fallback, defeating the safety-net intent). The right
-permanent fix is a shared `firmware_defaults.h` with named constants
-(`kCaptureIntervalFormDefaultMs = 60000`,
-`kCaptureIntervalProductionFallbackMs = 86400000`) each used at one
-site — tracked at follow-up
-[#66](https://github.com/schutera/highfive/issues/66) alongside the
-dead-weight discovery [#65](https://github.com/schutera/highfive/issues/65)
-above.
+The permanent fix recommended here — a shared
+`firmware_defaults.h` with **named** constants per
+`(field, intent)` pair — shipped in PR-G as
+[`ESP32-CAM/lib/firmware_defaults/firmware_defaults.h`](../../ESP32-CAM/lib/firmware_defaults/firmware_defaults.h).
+Each pair is now `hf::defaults::k<Field>FormFallback` and
+`hf::defaults::k<Field>ProductionFallback`, used at exactly one
+site each. A future contributor staring at `host.cpp` and
+`esp_init.cpp` cannot mistake the form-prefill default for the
+production fallback just by looking at the literal — the names
+distinguish them. The bug class behind PR-42's "Telemetry sidecar
+envelope drift" lesson is now structurally harder to reintroduce
+for this set of fields, closing
+[#66](https://github.com/schutera/highfive/issues/66).
 
 ### Post-reflash dashboard latency: status is derived, not stored (#15)
 

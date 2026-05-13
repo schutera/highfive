@@ -58,10 +58,12 @@ class DuckDBService:
         return r.json()
 
     def heartbeat(self, module_id: str, battery: int) -> bool:
-        """Record a module heartbeat (battery + first_online + image_count++).
+        """Record a module heartbeat (battery + image_count++).
 
-        Returns True on 2xx, False on 404 (unknown module). Raises on other
-        non-success statuses.
+        `first_online` is `COALESCE`-guarded on the upstream handler
+        (issue #75) so a set value is never rewritten; it's only filled
+        on the first call after a NULL. Returns True on 2xx, False on
+        404 (unknown module). Raises on other non-success statuses.
         """
         r = requests.post(
             f"{self.base_url}/modules/{module_id}/heartbeat",

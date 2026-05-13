@@ -266,11 +266,20 @@ def heartbeat(module_id):
 
     now = datetime.now().strftime("%Y-%m-%d")
     with write_transaction() as con:
+        # `first_online` is `COALESCE`-guarded so the per-upload heartbeat
+        # only fills it on the first call after a NULL — the column name
+        # then matches its behaviour ("the date the module was first
+        # online"). Before issue #75 the column was clobbered to today
+        # on every heartbeat, so a module onboarded in April started
+        # advertising itself as "first online today" on every fresh
+        # upload. Real `first_online` writes still happen at
+        # `add_module` (registration) where the column is unconditionally
+        # set to the date of first registration.
         con.execute(
             """
             UPDATE module_configs
             SET battery_level = ?,
-                first_online = ?,
+                first_online = COALESCE(first_online, ?),
                 image_count = image_count + 1
             WHERE id = ?
             """,

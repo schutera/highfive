@@ -1104,3 +1104,68 @@ site — tracked at follow-up
 [#66](https://github.com/schutera/highfive/issues/66) alongside the
 dead-weight discovery [#65](https://github.com/schutera/highfive/issues/65)
 above.
+
+### OTA migration is one-way: partition table change blocks the first OTA (issue #26)
+
+**What happened.** Issue #26 (closed by PR F) introduced OTA firmware
+updates for ESP32-CAM modules. The change required flipping the
+partition layout from the ESP32 default (single ~1.9 MB app slot, no
+OTA slots) to `min_spiffs` (two ~1.9 MB app slots — `app0`/`app1`
+— plus a smaller SPIFFS). The catch: **a module running the old
+partition layout cannot install the new partition layout via OTA**.
+The first OTA-capable binary still has to arrive via USB or the web
+installer's merged-bin flash; every subsequent update can then be
+wireless.
+
+**Why it happened.** The bootloader reads the partition table from
+flash offset `0x8000` at every boot. The OTA write path
+(`Update.write()` / `esp_ota_write()`) targets the inactive
+application slot — at offset `0x10000` or `0x1F0000` for the
+`min_spiffs` layout — and does **not** touch the partition-table
+region. So an OTA push to a module on the old single-slot layout has
+no second slot to write to; `Update.begin()` fails. Even if you
+contrived a way to write the new partition table directly to
+`0x8000`, you'd be doing an unsafe live edit of the bootloader's
+read source under a running application — there's a reason the OTA
+abstraction doesn't expose that surface. The clean answer is "first
+flash via USB; all subsequent flashes OTA".
+
+This makes the partition flip a **one-way migration gate**. Every
+module currently deployed in the field needs one final USB visit
+before it can participate in OTA. After that, no more USB visits.
+
+**How to avoid it next time.** Two complementary rules:
+
+1. **When introducing a feature whose enablement requires changing
+   a region that the feature itself does not control, document the
+   one-way migration explicitly — runtime view + deployment view +
+   ADR all at once.** A reader who finds only the runtime-view doc
+   ("here is how OTA works") will draft a "push the new firmware to
+   every field unit" plan without realising the first push to each
+   unit cannot succeed. The one-way step has to be impossible to
+   miss when planning a rollout.
+   [`docs/06-runtime-view/ota-update-flow.md`](../06-runtime-view/ota-update-flow.md),
+   [`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md)'s
+   "First-time OTA migration" subsection, and
+   [ADR-008](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md)'s
+   "Consequences" section all carry the warning so a future operator
+   coming in from any entry point hits it.
+
+2. **When the merged-bin web installer and the OTA fetch path
+   diverge in what they expect, make the divergence loud in the
+   build artifact, not in operator memory.**
+   [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh) publishes both
+   `homepage/public/firmware.bin` (merged: bootloader + partitions +
+   app, for the web installer) **and**
+   `homepage/public/firmware.app.bin` (app-only, for the OTA fetch),
+   each with its own md5 in the shared `firmware.json` manifest. The
+   filenames differ; the manifest fields differ
+   (`md5`/`built_at` for web installer,
+   `app_md5`/`app_size` for OTA). A future contributor who tries to
+   point the OTA path at `firmware.bin` (the merged one) gets a
+   manifest-shape mismatch at parse time, not a successful flash that
+   silently bricks every module. The
+   [`ESP32-CAM/lib/ota_version/`](../../ESP32-CAM/lib/ota_version/)
+   parser rejects manifests missing `app_md5`/`app_size` for exactly
+   this reason — the native tests in
+   `test/test_native_ota_version/` pin the wire shape.

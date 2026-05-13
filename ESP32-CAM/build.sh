@@ -60,11 +60,16 @@ else
 fi
 echo ""
 
+# OTA partition layout (#26). min_spiffs gives two ~1.9 MB app slots
+# (app0/app1) so ArduinoOTA/HTTPUpdate have somewhere to write the new
+# binary. Mirrors platformio.ini's board_build.partitions = min_spiffs
+# so both build paths emit byte-identical partitions.bin.
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --output-dir "${BUILD_DIR}" \
   --libraries "${SKETCH_DIR}/lib" \
   --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\"" \
+  --build-property "build.partitions=min_spiffs" \
   "${SKETCH_DIR}"
 
 # Post-compile guard. The contract: FIRMWARE_VERSION must land in the
@@ -151,11 +156,20 @@ HOMEPAGE_PUBLIC="${SKETCH_DIR}/../homepage/public"
 if [ -d "${HOMEPAGE_PUBLIC}" ]; then
   cp "${BUILD_DIR}/ESP32-CAM.ino.merged.bin" "${HOMEPAGE_PUBLIC}/firmware.bin"
   MD5="$(md5sum "${HOMEPAGE_PUBLIC}/firmware.bin" | awk '{print $1}')"
+  # App-only binary for HTTP OTA (#26). HTTPUpdate / Update.write
+  # expects the application image alone — not the merged bootloader +
+  # partitions + app blob the web installer flashes. Publish both so
+  # one manifest serves both consumers; the OTA fetch path reads
+  # `app_md5`/`app_size`, the web installer keeps reading `md5`.
+  cp "${BUILD_DIR}/ESP32-CAM.ino.bin" "${HOMEPAGE_PUBLIC}/firmware.app.bin"
+  APP_MD5="$(md5sum "${HOMEPAGE_PUBLIC}/firmware.app.bin" | awk '{print $1}')"
+  APP_SIZE="$(stat -c%s "${HOMEPAGE_PUBLIC}/firmware.app.bin")"
   BUILT_AT="$(date -Iseconds)"
   cat > "${HOMEPAGE_PUBLIC}/firmware.json" <<JSON
-{"version":"${VERSION}","md5":"${MD5}","built_at":"${BUILT_AT}"}
+{"version":"${VERSION}","md5":"${MD5}","built_at":"${BUILT_AT}","app_md5":"${APP_MD5}","app_size":${APP_SIZE}}
 JSON
   echo ""
-  echo "Copied firmware.bin to ${HOMEPAGE_PUBLIC}/"
-  echo "Wrote manifest:    ${HOMEPAGE_PUBLIC}/firmware.json (version=${VERSION})"
+  echo "Copied firmware.bin     to ${HOMEPAGE_PUBLIC}/ (${MD5})"
+  echo "Copied firmware.app.bin to ${HOMEPAGE_PUBLIC}/ (${APP_MD5}, ${APP_SIZE} bytes)"
+  echo "Wrote manifest:           ${HOMEPAGE_PUBLIC}/firmware.json (version=${VERSION})"
 fi

@@ -1,6 +1,7 @@
 #include "esp_camera.h"
 #include "esp_wifi.h"
 #include "esp_init.h"
+#include "firmware_defaults.h" // hf::defaults::k*ProductionFallback (issue #66)
 #include "led.h"
 #include "module_id.h"
 #include "wifi_diag.h"
@@ -373,12 +374,14 @@ bool loadConfig(esp_config_t *esp_config) {
   esp_config->battery_level = 90;
   esp_config->email[0] = '\0';
 
-  /* DEFAULTS */
-  esp_config->RESOLUTION = FRAMESIZE_UXGA;
-  esp_config->CAPTURE_INTERVAL = 86400000; // 24 hours (used as fallback)
-  esp_config->vertical_flip = 1;
-  esp_config->brightness = 1;
-  esp_config->saturation = -1;
+  /* DEFAULTS — production fallbacks for the "no config file at all" path.
+     Same named constants are reused below as the `|` fallbacks for the
+     "config file present but key missing" path, so both paths produce the
+     same value per field. See lib/firmware_defaults/firmware_defaults.h. */
+  esp_config->RESOLUTION    = static_cast<framesize_t>(hf::defaults::kResolutionProductionFallback);
+  esp_config->vertical_flip = hf::defaults::kVerticalFlipProductionFallback;
+  esp_config->brightness    = hf::defaults::kBrightnessProductionFallback;
+  esp_config->saturation    = hf::defaults::kSaturationProductionFallback;
 
   esp_config->geolocation.latitude  = 0.0f;
   esp_config->geolocation.longitude = 0.0f;
@@ -437,22 +440,25 @@ bool loadConfig(esp_config_t *esp_config) {
   //Serial.printf("SSID: %s\n", esp_config->wifi_config.SSID);
   //Serial.printf("PASSWORD: %s\n", esp_config->wifi_config.PASSWORD);
 
-  esp_config->RESOLUTION =getResolutionFromString(esp_config_doc["CAMERA"]["RESOLUTION"]);
-  // Mirror the "no config file" fallback (the 86400000 ms = 24 h assignment
-  // in the default-init block above the SPIFFS open) when the key is missing
-  // or non-numeric. ArduinoJson v6 `|` does NOT fire for a stored 0 — a 0
-  // reads as 0. The load-bearing guard against a stored 0 is the server-side
-  // floor in `host.cpp`'s `/save` POST handler; this `|` is defence-in-depth
-  // for missing-key cases (older configs predating the form's `interval`
-  // field, partial writes from a pre-truncation-gate `saveConfig`). Note
-  // that no firmware path currently reads `esp_config->CAPTURE_INTERVAL` —
-  // capture cadence is hardcoded in `ESP32-CAM.ino`'s `loop` as
-  // once-per-boot + daily-noon. Issue #20 hardens the read/write path;
-  // wiring or removal is tracked at issue #65.
-  esp_config->CAPTURE_INTERVAL = esp_config_doc["CAMERA"]["CAPTURE_INTERVAL_IN_MS"] | 86400000;
-  esp_config->vertical_flip = esp_config_doc["CAMERA"]["VERTICAL_FLIP"];
-  esp_config->brightness = esp_config_doc["CAMERA"]["BRIGHTNESS"];
-  esp_config->saturation = esp_config_doc["CAMERA"]["SATURATION"];
+  // RESOLUTION uses an enum on the production side and a string in SPIFFS,
+  // so the `| <fallback>` shorthand the other camera fields use isn't a
+  // clean fit (the conversion fn would have to accept the string fallback
+  // and produce a different enum than the no-JSON-at-all path uses). Branch
+  // on key presence so missing-key reads land on the same production
+  // fallback the default-init block applies — see firmware_defaults.h.
+  if (esp_config_doc["CAMERA"].containsKey("RESOLUTION")) {
+    esp_config->RESOLUTION = getResolutionFromString(esp_config_doc["CAMERA"]["RESOLUTION"]);
+  } else {
+    esp_config->RESOLUTION = static_cast<framesize_t>(hf::defaults::kResolutionProductionFallback);
+  }
+
+  // Missing-key fallbacks for the three integer camera fields. Without the
+  // `|` ArduinoJson silently returns 0 for a missing key, which would
+  // overwrite the production fallback set in the default-init block above
+  // — exactly the dual-reader-asymmetry trap chapter-11 warned about.
+  esp_config->vertical_flip = esp_config_doc["CAMERA"]["VERTICAL_FLIP"] | hf::defaults::kVerticalFlipProductionFallback;
+  esp_config->brightness    = esp_config_doc["CAMERA"]["BRIGHTNESS"]    | hf::defaults::kBrightnessProductionFallback;
+  esp_config->saturation    = esp_config_doc["CAMERA"]["SATURATION"]    | hf::defaults::kSaturationProductionFallback;
   
   if (strlen(esp_config->wifi_config.SSID) == 0) {
     Serial.println("------ Could not read SSID from config file.");

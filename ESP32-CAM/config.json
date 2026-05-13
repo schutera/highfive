@@ -7,7 +7,6 @@
     "INIT_URL": "http://highfive.schutera.com/new_module"
   },
   "CAMERA": {
-    "CAPTURE_INTERVAL_IN_MS": 86400000,
     "RESOLUTION": "VGA",
     "VERTICAL_FLIP": 1,
     "BRIGHTNESS": 1,

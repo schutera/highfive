@@ -45,7 +45,6 @@ typedef struct {
 
   /* camera setup */
   framesize_t RESOLUTION;
-  int CAPTURE_INTERVAL;
   int vertical_flip;
   int brightness;
   int saturation;

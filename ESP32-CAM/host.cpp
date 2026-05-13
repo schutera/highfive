@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
 #include "esp_init.h"   // setESPConfigured
+#include "firmware_defaults.h" // hf::defaults::k*FormFallback (issue #66)
 #include "form_query.h" // hf::urlDecode, hf::getParam, hf::resolveKeepCurrentField (host-testable)
 #include "led.h"        // ledTick during the AP server loop
 #include <string>
@@ -22,11 +23,10 @@ String cfg_ssid           = "";
 String cfg_password       = "";
 String cfg_upload_url     = "";
 String cfg_init_url       = "";
-String cfg_resolution     = "VGA";
-int    cfg_interval_ms    = 60000;
-int    cfg_vflip          = 0;
-int    cfg_brightness     = 0;
-int    cfg_saturation     = 0;
+String cfg_resolution     = hf::defaults::kResolutionFormFallback;
+int    cfg_vflip          = hf::defaults::kVerticalFlipFormFallback;
+int    cfg_brightness     = hf::defaults::kBrightnessFormFallback;
+int    cfg_saturation     = hf::defaults::kSaturationFormFallback;
 
 
 /*
@@ -96,21 +96,17 @@ void loadConfig() {
   cfg_upload_url  = doc["NETWORK"]["UPLOAD_URL"]     | "";
   cfg_init_url  = doc["NETWORK"]["INIT_URL"]     | "";
 
-  // Form-prefill fallback (issue #20). Asymmetric on purpose with the
-  // production reader in `esp_init.cpp`'s `loadConfig` (which falls back to
-  // 86400000 / 24 h — the "do nothing aggressive when unconfigured" value).
-  // This reader's job is to render a sensible operator-facing default in the
-  // captive-portal form when the key is missing from a pre-existing config.
-  // ArduinoJson v6 `|` fires only on missing or non-numeric values — a
-  // stored 0 reads as 0 and would still appear in the form; the `/save`
-  // POST handler's `< 10` floor is what keeps a 0 from being saved in the
-  // first place. The two-defaults dance is tracked at issue #66 — a shared
-  // `firmware_defaults.h` with named constants is the permanent fix.
-  cfg_interval_ms = doc["CAMERA"]["CAPTURE_INTERVAL_IN_MS"] | 60000;
-  cfg_resolution  = doc["CAMERA"]["RESOLUTION"]              | "VGA";
-  cfg_vflip       = doc["CAMERA"]["VERTICAL_FLIP"]          | 0;
-  cfg_brightness  = doc["CAMERA"]["BRIGHTNESS"]             | 0;
-  cfg_saturation  = doc["CAMERA"]["SATURATION"]             | 0;
+  // Form-prefill fallbacks. Asymmetric on purpose with the production
+  // reader in `esp_init.cpp`'s `loadConfig` (form prefills the operator-
+  // facing default; the production side picks the conservative "do
+  // nothing surprising" value when the key is missing). Each pair lives
+  // in `lib/firmware_defaults/firmware_defaults.h` as a named constant
+  // so the asymmetry survives future "deduplicate the literals"
+  // refactors — see chapter-11 "Dual-reader asymmetry" for the lesson.
+  cfg_resolution  = doc["CAMERA"]["RESOLUTION"]     | hf::defaults::kResolutionFormFallback;
+  cfg_vflip       = doc["CAMERA"]["VERTICAL_FLIP"]  | hf::defaults::kVerticalFlipFormFallback;
+  cfg_brightness  = doc["CAMERA"]["BRIGHTNESS"]     | hf::defaults::kBrightnessFormFallback;
+  cfg_saturation  = doc["CAMERA"]["SATURATION"]    | hf::defaults::kSaturationFormFallback;
 }
 
 /*
@@ -130,7 +126,6 @@ void saveConfig() {
   net["UPLOAD_URL"]  = cfg_upload_url;
   net["INIT_URL"]    = cfg_init_url;
 
-  cam["CAPTURE_INTERVAL_IN_MS"] = cfg_interval_ms;
   cam["RESOLUTION"]             = cfg_resolution;
   cam["VERTICAL_FLIP"]          = cfg_vflip;
   cam["BRIGHTNESS"]             = cfg_brightness;
@@ -370,12 +365,6 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<div class=\"section-desc\">Image capture and quality settings.</div>");
 
   client.println("<div class=\"field\">");
-  client.println("<label>Capture Interval (ms)</label>");
-  client.println("<input type=\"number\" name=\"interval\" min=\"10\" value=\"" + String(cfg_interval_ms) + "\">");
-  client.println("<div class=\"description\">Stored for forward compatibility. Current firmware schedules captures on a hardcoded cadence (once on boot plus once daily at noon local time, CET/CEST per TZ_EU_CENTRAL) and does not yet read this field at runtime. The 60000 ms default is preserved against the eventual wiring; tracked at issue #65.</div>");
-  client.println("</div>");
-
-  client.println("<div class=\"field\">");
   client.println("<label>Resolution</label>");
   client.println("<select name=\"res\">");
   client.println("<option value=\"qvga\""  + String(cfg_resolution.equalsIgnoreCase("qvga")  ? " selected" : "") + ">QVGA - 320x240</option>");
@@ -570,24 +559,6 @@ void runAccessPoint() {
                       cfg_init_url = initBase;
                     }
 
-                    cfg_interval_ms = getParam(query, "interval").toInt();
-                    // Server-side floor (issue #20). The form's `min="10"` is
-                    // client-side only and trivially bypassed by curl, an
-                    // empty submit, or a non-numeric value (which `toInt()`
-                    // coerces to 0). Clamp to the safe default so SPIFFS can
-                    // never hold a near-zero interval. The threshold of 10 ms
-                    // mirrors the form's stated minimum and rejects only the
-                    // pathological values (0 / negative). TODO when
-                    // CAPTURE_INTERVAL is wired through the capture scheduler
-                    // (issue #65), raise this to
-                    // the form-recommended default (60000 ms) so the lower
-                    // bound matches the operational tradeoff the form copy
-                    // and `esp-flashing.md` advertise — there is no honest
-                    // reason to silently accept a 5 s interval when we tell
-                    // the operator 60 s is the field default.
-                    if (cfg_interval_ms < 10) {
-                      cfg_interval_ms = 60000;
-                    }
                     cfg_resolution  = getParam(query, "res");
                     cfg_vflip       = getParam(query, "vflip").toInt();
                     cfg_brightness  = getParam(query, "bright").toInt();

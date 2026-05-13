@@ -168,11 +168,16 @@ class UploadPipeline:
             pass
 
     def _record_heartbeat(self, mac: str, battery: int) -> None:
-        """Bump the post-upload aggregate on `module_configs` — refreshes
-        `battery_level` and increments `image_count`. Silently tolerates
-        failures: the upload itself already succeeded, so a dropped
-        aggregate is best-effort metadata, not a regression in the user-
-        facing wire path."""
+        """Bump post-upload aggregates on `module_configs` via
+        duckdb-service's `/modules/<id>/heartbeat`. The upstream handler
+        in `duckdb-service/routes/modules.py` writes three columns:
+        `battery_level` (refreshed from the request), `image_count`
+        (incremented by 1), and `first_online` (clobbered to today —
+        a pre-existing semantic-bug carried over from before this
+        helper existed; the column's name no longer matches its
+        behaviour). Silently tolerates failures: the upload itself
+        already succeeded, so a dropped aggregate is best-effort
+        metadata, not a regression in the user-facing wire path."""
         try:
             self.duckdb_service.heartbeat(mac, battery)
         except RequestException:

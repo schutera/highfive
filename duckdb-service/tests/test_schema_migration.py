@@ -171,6 +171,93 @@ def test_migration_reinstates_fk_constraint(fresh_db):
         con.close()
 
 
+def test_migration_rolls_back_on_failure(fresh_db, monkeypatch):
+    """If any step inside the migration's `BEGIN..COMMIT` raises, the
+    transaction must `ROLLBACK` and `init_db` must re-raise as
+    `RuntimeError` so the container refuses to start. The DB must be
+    left exactly in its pre-migration state — i.e. the `status` column
+    is still present, every row survives.
+
+    Mechanism: patch the migration's `CREATE TABLE module_configs`
+    statement (the destination CREATE inside the transaction) so it
+    raises on the first call. Any of the migration's `con.execute`
+    sites would work; this one is chosen because it sits *after* the
+    drops, so a botched rollback would leave the DB without any of the
+    three tables — the most visible failure mode.
+    """
+    con = fresh_db.connection.get_conn()
+    try:
+        _stage_old_schema_with_data(con)
+    finally:
+        con.close()
+
+    # Wrap `con.execute` so the migration's `CREATE TABLE module_configs
+    # (id VARCHAR(20) PRIMARY KEY, ...)` after the DROP raises. The
+    # top-of-file CREATE uses `CREATE TABLE IF NOT EXISTS` which does
+    # NOT match our predicate (so only the migration's recreate is
+    # intercepted). The migration is mid-transaction at this point:
+    # `module_configs`/`nest_data`/`daily_progress` are already dropped,
+    # so a successful ROLLBACK must put them back from the transaction's
+    # undo log. The post-condition checks below pin that behaviour.
+    real_get_conn = fresh_db.connection.get_conn
+    sentinel = RuntimeError("simulated DDL failure mid-rebuild")
+
+    class _FailingConn:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def execute(self, sql, *args, **kwargs):
+            first_line = sql.strip().splitlines()[0].strip() if sql.strip() else ""
+            # Trigger only on the migration's recreate-after-drop, not
+            # on the idempotent top-of-file `CREATE TABLE IF NOT EXISTS`.
+            if first_line.startswith("CREATE TABLE module_configs"):
+                raise sentinel
+            return self._inner.execute(sql, *args, **kwargs)
+
+    def _wrapped_get_conn():
+        return _FailingConn(real_get_conn())
+
+    monkeypatch.setattr(fresh_db.connection, "get_conn", _wrapped_get_conn)
+    # `db.schema` imports `get_conn` by name at module load — patch the
+    # binding inside the module the migration code actually uses.
+    monkeypatch.setattr(fresh_db.schema, "get_conn", _wrapped_get_conn)
+
+    # init_db must re-raise.
+    try:
+        fresh_db.schema.init_db()
+    except RuntimeError as e:
+        assert "module_configs status-drop migration failed" in str(e), (
+            f"unexpected RuntimeError message: {e!r}"
+        )
+    else:
+        raise AssertionError(
+            "init_db should have re-raised after rollback; nothing was raised"
+        )
+
+    # Pre-migration state should be intact: status column still present,
+    # data still readable through the original tables.
+    con = real_get_conn()
+    try:
+        cols = [
+            c[1] for c in con.execute("PRAGMA table_info(module_configs)").fetchall()
+        ]
+        assert "status" in cols, (
+            f"rollback failed — status column should still exist; columns: {cols}"
+        )
+        rows = con.execute("SELECT id, status FROM module_configs").fetchall()
+        assert rows == [("mod-test", "online")], (
+            f"rollback failed — row data should be intact; got: {rows}"
+        )
+        # FK chain still intact too.
+        nest_rows = con.execute("SELECT nest_id FROM nest_data").fetchall()
+        assert nest_rows == [("nest-test",)]
+    finally:
+        con.close()
+
+
 def test_migration_is_idempotent_on_fresh_db(fresh_db):
     """init_db on a DB that never had the `status` column must be a no-op
     (the column-presence check short-circuits before any DDL fires)."""

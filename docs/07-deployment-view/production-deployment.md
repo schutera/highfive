@@ -488,7 +488,7 @@ except: pass` for additive changes.
 > ```bash
 > # Before pulling a schema-change deploy:
 > docker compose -f docker-compose.prod.yml --env-file .env.production exec \
->   duckdb-service cp /data/highfive.duckdb /data/highfive.duckdb.bak.$(date +%Y%m%d)
+>   duckdb-service cp /data/app.duckdb /data/app.duckdb.bak.$(date +%Y%m%d)
 > ```
 >
 > Lessons learned from each migration shipped to date live in

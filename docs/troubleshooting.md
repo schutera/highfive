@@ -47,7 +47,7 @@ with lock:
 
 # 2. Back up the volume before any further attempt.
 docker compose -f docker-compose.prod.yml --env-file .env.production exec duckdb-service \
-  cp /data/highfive.duckdb /data/highfive.duckdb.bak.$(date +%Y%m%d-%H%M%S)
+  cp /data/app.duckdb /data/app.duckdb.bak.$(date +%Y%m%d-%H%M%S)
 
 # 3. Read the original error from `docker compose logs duckdb-service`,
 #    address the root cause (disk space, schema drift, etc.), restart.
@@ -247,7 +247,7 @@ A successfully registering module produces a `POST /new_module` line in `duckdb-
 curl http://localhost:8002/modules
 ```
 
-Your module should appear with its MAC-derived ID, name, battery level, and `"status": "online"`.
+Your module should appear with its MAC-derived ID, name, and battery level. The dashboard-derived `Module.status` (`'online' | 'offline' | 'unknown'`) only exists on the **backend's** `/api/modules` response — duckdb-service's direct `/modules` response does not carry a `status` field after [#69](https://github.com/schutera/highfive/issues/69); status is computed from `lastSeenAt` in `backend/src/database.ts`'s `fetchAndAssemble`.
 
 ---
 

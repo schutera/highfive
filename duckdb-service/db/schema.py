@@ -3,38 +3,73 @@ import os
 from db.connection import lock, get_conn
 
 
+# Single source of truth for the three FK-chained table DDLs. Referenced by
+# both the top-of-`init_db` `CREATE TABLE IF NOT EXISTS` block (for fresh
+# DBs) and the issue-#69 migration's recreate-after-drop block (for
+# existing DBs whose `module_configs.status` column must be retired). The
+# dedup is load-bearing: a future column edit that only touched one site
+# would silently break the other deploy path. Column lists in
+# `_MODULE_CONFIGS_COLUMNS` are also referenced from the migration's
+# explicit `INSERT ... SELECT ...` so ordinal drift can't corrupt data.
+_MODULE_CONFIGS_DDL = """
+    CREATE TABLE module_configs (
+        id VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        lat DECIMAL(9,6) NOT NULL,
+        lng DECIMAL(9,6) NOT NULL,
+        first_online DATE NOT NULL,
+        battery_level INTEGER,
+        image_count INTEGER NOT NULL DEFAULT 0,
+        email VARCHAR(255),
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_silence_alert_at TIMESTAMP
+    )
+"""
+
+_MODULE_CONFIGS_COLUMNS = (
+    "id, name, lat, lng, first_online, battery_level, "
+    "image_count, email, updated_at, last_silence_alert_at"
+)
+
+_NEST_DATA_DDL = """
+    CREATE TABLE nest_data (
+        nest_id VARCHAR(20) NOT NULL PRIMARY KEY,
+        module_id VARCHAR(20) NOT NULL REFERENCES module_configs(id),
+        beeType VARCHAR(20) CHECK (
+            beeType IN ('blackmasked', 'resin', 'leafcutter', 'orchard')
+        )
+    )
+"""
+
+_NEST_DATA_COLUMNS = "nest_id, module_id, beeType"
+
+_DAILY_PROGRESS_DDL = """
+    CREATE TABLE daily_progress (
+        progress_id VARCHAR(20) PRIMARY KEY,
+        nest_id VARCHAR(20) NOT NULL REFERENCES nest_data(nest_id),
+        date DATE NOT NULL,
+        empty INTEGER NOT NULL,
+        sealed INTEGER NOT NULL,
+        hatched INTEGER NOT NULL
+    )
+"""
+
+_DAILY_PROGRESS_COLUMNS = "progress_id, nest_id, date, empty, sealed, hatched"
+
+
 def init_db():
     with lock:
         con = get_conn()
+
+        # FK-chained tables share their DDL with the issue-#69 migration
+        # block below — derive the idempotent `IF NOT EXISTS` form from
+        # the same constant so a future column edit on one site can't
+        # silently break the other deploy path.
+        for ddl in (_MODULE_CONFIGS_DDL, _NEST_DATA_DDL, _DAILY_PROGRESS_DDL):
+            con.execute(ddl.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1))
+
         con.execute(
             """
-            CREATE TABLE IF NOT EXISTS module_configs (
-                id VARCHAR(20) PRIMARY KEY,
-                name VARCHAR(100) NOT NULL,
-                lat DECIMAL(9,6) NOT NULL,
-                lng DECIMAL(9,6) NOT NULL,
-                first_online DATE NOT NULL,
-                battery_level INTEGER,
-                image_count INTEGER NOT NULL DEFAULT 0,
-                email VARCHAR(255),
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS nest_data (
-                nest_id VARCHAR(20) NOT NULL PRIMARY KEY,
-                module_id VARCHAR(20) NOT NULL REFERENCES module_configs(id),
-                beeType VARCHAR(20) CHECK (beeType IN ('blackmasked', 'resin', 'leafcutter', 'orchard'))
-            );
-
-            CREATE TABLE IF NOT EXISTS daily_progress (
-                progress_id VARCHAR(20) PRIMARY KEY,
-                nest_id VARCHAR(20) NOT NULL REFERENCES nest_data(nest_id),
-                date DATE NOT NULL,
-                empty INTEGER NOT NULL,
-                sealed INTEGER NOT NULL,
-                hatched INTEGER NOT NULL
-            );
-
             CREATE SEQUENCE IF NOT EXISTS image_uploads_seq START 1;
             CREATE TABLE IF NOT EXISTS image_uploads (
                 id INTEGER PRIMARY KEY DEFAULT nextval('image_uploads_seq'),
@@ -105,19 +140,20 @@ def init_db():
                 con.execute("BEGIN")
                 try:
                     # Stage all dependent + target table data in TEMP tables.
+                    # The column-list is spelled out everywhere so a future
+                    # column reorder on either side surfaces as a SQL error,
+                    # not silent data misplacement.
                     con.execute(
-                        "CREATE TEMP TABLE _mig_nest_data AS SELECT * FROM nest_data"
+                        f"CREATE TEMP TABLE _mig_nest_data AS "
+                        f"SELECT {_NEST_DATA_COLUMNS} FROM nest_data"
                     )
                     con.execute(
-                        "CREATE TEMP TABLE _mig_daily_progress AS SELECT * FROM daily_progress"
+                        f"CREATE TEMP TABLE _mig_daily_progress AS "
+                        f"SELECT {_DAILY_PROGRESS_COLUMNS} FROM daily_progress"
                     )
                     con.execute(
-                        """
-                        CREATE TEMP TABLE _mig_module_configs AS
-                        SELECT id, name, lat, lng, first_online, battery_level,
-                               image_count, email, updated_at, last_silence_alert_at
-                        FROM module_configs
-                        """
+                        f"CREATE TEMP TABLE _mig_module_configs AS "
+                        f"SELECT {_MODULE_CONFIGS_COLUMNS} FROM module_configs"
                     )
 
                     # Drop the FK chain in reverse dependency order.
@@ -125,56 +161,25 @@ def init_db():
                     con.execute("DROP TABLE nest_data")
                     con.execute("DROP TABLE module_configs")
 
-                    # Recreate with cleaned schema (must match the CREATE TABLE
-                    # statements above; the duplication is the cost of DuckDB's
-                    # missing ALTER support).
+                    # Recreate with the cleaned DDL — shares the constants
+                    # used at the top of `init_db` so the two deploy paths
+                    # (fresh vs migrated) cannot drift apart.
+                    con.execute(_MODULE_CONFIGS_DDL)
                     con.execute(
-                        """
-                        CREATE TABLE module_configs (
-                            id VARCHAR(20) PRIMARY KEY,
-                            name VARCHAR(100) NOT NULL,
-                            lat DECIMAL(9,6) NOT NULL,
-                            lng DECIMAL(9,6) NOT NULL,
-                            first_online DATE NOT NULL,
-                            battery_level INTEGER,
-                            image_count INTEGER NOT NULL DEFAULT 0,
-                            email VARCHAR(255),
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            last_silence_alert_at TIMESTAMP
-                        )
-                        """
-                    )
-                    con.execute(
-                        "INSERT INTO module_configs SELECT * FROM _mig_module_configs"
+                        f"INSERT INTO module_configs ({_MODULE_CONFIGS_COLUMNS}) "
+                        f"SELECT {_MODULE_CONFIGS_COLUMNS} FROM _mig_module_configs"
                     )
 
+                    con.execute(_NEST_DATA_DDL)
                     con.execute(
-                        """
-                        CREATE TABLE nest_data (
-                            nest_id VARCHAR(20) NOT NULL PRIMARY KEY,
-                            module_id VARCHAR(20) NOT NULL REFERENCES module_configs(id),
-                            beeType VARCHAR(20) CHECK (
-                                beeType IN ('blackmasked', 'resin', 'leafcutter', 'orchard')
-                            )
-                        )
-                        """
+                        f"INSERT INTO nest_data ({_NEST_DATA_COLUMNS}) "
+                        f"SELECT {_NEST_DATA_COLUMNS} FROM _mig_nest_data"
                     )
-                    con.execute("INSERT INTO nest_data SELECT * FROM _mig_nest_data")
 
+                    con.execute(_DAILY_PROGRESS_DDL)
                     con.execute(
-                        """
-                        CREATE TABLE daily_progress (
-                            progress_id VARCHAR(20) PRIMARY KEY,
-                            nest_id VARCHAR(20) NOT NULL REFERENCES nest_data(nest_id),
-                            date DATE NOT NULL,
-                            empty INTEGER NOT NULL,
-                            sealed INTEGER NOT NULL,
-                            hatched INTEGER NOT NULL
-                        )
-                        """
-                    )
-                    con.execute(
-                        "INSERT INTO daily_progress SELECT * FROM _mig_daily_progress"
+                        f"INSERT INTO daily_progress ({_DAILY_PROGRESS_COLUMNS}) "
+                        f"SELECT {_DAILY_PROGRESS_COLUMNS} FROM _mig_daily_progress"
                     )
 
                     # Re-create the indexes the CREATE block above declared.

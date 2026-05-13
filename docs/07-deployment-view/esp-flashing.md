@@ -164,7 +164,7 @@ Click **Save Configuration**. The module reboots, joins your Wi-Fi, registers it
 curl http://localhost:8002/modules
 ```
 
-Your module should appear with its MAC address as ID, the name you gave it, battery level, and `"status": "online"`.
+Your module should appear with its MAC address as ID, the name you gave it, and a battery level. (The 3-valued `Module.status` enum that the dashboard renders is computed by the backend from `lastSeenAt` — duckdb-service's direct `/modules` does not surface a `status` field; see `docs/08-crosscutting-concepts/api-contracts.md` for the derivation rule.)
 
 ---
 

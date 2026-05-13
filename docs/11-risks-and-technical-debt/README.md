@@ -1213,15 +1213,30 @@ none of them about `lastSeenAt` freshness:**
    this lesson was written — it had a CHECK constraint
    (`'online' | 'offline'`), was rewritten `'online'` on every
    registration, and was never read by the dashboard. Resolved
-   by [#69](https://github.com/schutera/highfive/issues/69) via
-   the "drop the column" route (recommended in the original entry
-   over retrofitting writers, same shape as
+   by [#69](https://github.com/schutera/highfive/issues/69):
+   removed from the `CREATE TABLE` for fresh DBs and migrated
+   off existing DBs via a transactional table-rebuild in
+   `duckdb-service/db/schema.py`'s `init_db`. The rebuild was
+   necessary because DuckDB v1.4 rejects every `ALTER TABLE` on
+   `module_configs` (DROP COLUMN, DROP CONSTRAINT, SET DEFAULT)
+   with `DependencyException` due to the
+   `nest_data.module_id → module_configs.id` foreign key — the
+   FK locks the whole table regardless of which column the ALTER
+   targets, so the rebuild copies dependents into TEMP tables,
+   drops the FK chain in reverse order, recreates each table
+   with the cleaned schema, and restores data. Same shape as
    [#65](https://github.com/schutera/highfive/issues/65)'s
-   `CAPTURE_INTERVAL` resolution in PR-G). The lesson stands:
-   leaving a stored-but-unread field in place encourages the next
+   `CAPTURE_INTERVAL` resolution in PR-G (drop rather than
+   retrofit writers). The lesson stands: leaving a
+   stored-but-unread field in place encourages the next
    contributor to "update status" in a new code path and discover
    only at integration time that the dashboard ignores their
-   writes.
+   writes. **Operational corollary**: dropping a column from a
+   DuckDB table referenced by a foreign key is not a one-liner —
+   plan for a multi-table rebuild migration, a regression test
+   (see `duckdb-service/tests/test_schema_migration.py`), and a
+   backup step in the production-deploy runbook when the next
+   such column surfaces.
 
 When a field exists on a schema but no read path consults it, the
 design has a third party who left and didn't come back; either wire

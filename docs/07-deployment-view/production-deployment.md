@@ -469,7 +469,33 @@ docker compose -f docker-compose.prod.yml --env-file .env.production ps
 ```
 
 The `duckdb_data` named volume persists across rebuilds — schema
-migrations and seeded data are not lost.
+migrations and seeded data are not lost. Schema migrations live in
+`duckdb-service/db/schema.py`'s `init_db` and run on every container
+start; the typical shape is `try: ALTER TABLE ... ADD COLUMN ...
+except: pass` for additive changes.
+
+> **Back up `duckdb_data` before any deploy that ships a schema
+> rewrite.** DuckDB v1.4 cannot ALTER a table referenced by a foreign
+> key, so destructive schema changes (DROP COLUMN, type changes on
+> FK-referenced tables) ship as **transactional table-rebuild
+> migrations** that copy data through TEMP tables, drop the FK chain
+> in dependency order, recreate each table, and restore data. The
+> migration in `init_db` is wrapped in `BEGIN / COMMIT / ROLLBACK` and
+> raises `RuntimeError` on failure so the container refuses to start
+> rather than serving a half-migrated DB — but a manual backup means a
+> recovery path that doesn't depend on the WAL.
+>
+> ```bash
+> # Before pulling a schema-change deploy:
+> docker compose -f docker-compose.prod.yml --env-file .env.production exec \
+>   duckdb-service cp /data/highfive.duckdb /data/highfive.duckdb.bak.$(date +%Y%m%d)
+> ```
+>
+> Lessons learned from each migration shipped to date live in
+> `docs/11-risks-and-technical-debt/README.md`. The current PR adds
+> the [#69](https://github.com/schutera/highfive/issues/69) entry
+> (drop `module_configs.status`); its regression test lives at
+> `duckdb-service/tests/test_schema_migration.py`.
 
 ## Stop / restart
 

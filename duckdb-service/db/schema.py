@@ -87,20 +87,127 @@ def init_db():
         except Exception:
             pass  # column already exists
 
-        # The `status` column was dropped from the CREATE TABLE above when
-        # issue #69 closed. No in-place migration is shipped: DuckDB v1.4
-        # rejects every ALTER TABLE on `module_configs` (DROP COLUMN, DROP
-        # CONSTRAINT, ALTER COLUMN ... SET DEFAULT) with `DependencyException
-        # Cannot alter entry "module_configs" because there are entries that
-        # depend on it` because of the `nest_data.module_id → module_configs.id`
-        # foreign key — the FK locks the whole table regardless of which
-        # column the ALTER targets. A multi-table rebuild migration was
-        # considered and rejected as too brittle for a dev-only DuckDB
-        # deployment with no production data; operators with an existing
-        # `duckdb_data` volume must run `docker compose down -v` once before
-        # pulling this change. Re-flashed ESP32-CAMs auto-re-register on next
-        # boot, so no real device-row data is lost — the wipe only discards
-        # the inert seed-module rows and any test fixtures.
+        # Migration: drop the dead-weight `status` column from existing DBs
+        # (issue #69). DuckDB v1.4 rejects every ALTER on `module_configs`
+        # (DROP COLUMN, DROP CONSTRAINT, ALTER COLUMN SET DEFAULT) with
+        # `DependencyException Cannot alter entry "module_configs"` because
+        # `nest_data.module_id → module_configs.id` is a foreign key that
+        # locks the whole table for any ALTER, regardless of which column
+        # is targeted. Workaround is a transactional table-rebuild: copy
+        # data to temp tables, drop the FK chain in dependency order
+        # (`daily_progress` → `nest_data` → `module_configs`), recreate
+        # each table with the cleaned schema, restore data. A column-
+        # existence check makes this a one-shot no-op for already-migrated
+        # DBs and for fresh DBs (which never had the column).
+        try:
+            cols = con.execute("PRAGMA table_info(module_configs)").fetchall()
+            if any(c[1] == "status" for c in cols):
+                con.execute("BEGIN")
+                try:
+                    # Stage all dependent + target table data in TEMP tables.
+                    con.execute(
+                        "CREATE TEMP TABLE _mig_nest_data AS SELECT * FROM nest_data"
+                    )
+                    con.execute(
+                        "CREATE TEMP TABLE _mig_daily_progress AS SELECT * FROM daily_progress"
+                    )
+                    con.execute(
+                        """
+                        CREATE TEMP TABLE _mig_module_configs AS
+                        SELECT id, name, lat, lng, first_online, battery_level,
+                               image_count, email, updated_at, last_silence_alert_at
+                        FROM module_configs
+                        """
+                    )
+
+                    # Drop the FK chain in reverse dependency order.
+                    con.execute("DROP TABLE daily_progress")
+                    con.execute("DROP TABLE nest_data")
+                    con.execute("DROP TABLE module_configs")
+
+                    # Recreate with cleaned schema (must match the CREATE TABLE
+                    # statements above; the duplication is the cost of DuckDB's
+                    # missing ALTER support).
+                    con.execute(
+                        """
+                        CREATE TABLE module_configs (
+                            id VARCHAR(20) PRIMARY KEY,
+                            name VARCHAR(100) NOT NULL,
+                            lat DECIMAL(9,6) NOT NULL,
+                            lng DECIMAL(9,6) NOT NULL,
+                            first_online DATE NOT NULL,
+                            battery_level INTEGER,
+                            image_count INTEGER NOT NULL DEFAULT 0,
+                            email VARCHAR(255),
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            last_silence_alert_at TIMESTAMP
+                        )
+                        """
+                    )
+                    con.execute(
+                        "INSERT INTO module_configs SELECT * FROM _mig_module_configs"
+                    )
+
+                    con.execute(
+                        """
+                        CREATE TABLE nest_data (
+                            nest_id VARCHAR(20) NOT NULL PRIMARY KEY,
+                            module_id VARCHAR(20) NOT NULL REFERENCES module_configs(id),
+                            beeType VARCHAR(20) CHECK (
+                                beeType IN ('blackmasked', 'resin', 'leafcutter', 'orchard')
+                            )
+                        )
+                        """
+                    )
+                    con.execute("INSERT INTO nest_data SELECT * FROM _mig_nest_data")
+
+                    con.execute(
+                        """
+                        CREATE TABLE daily_progress (
+                            progress_id VARCHAR(20) PRIMARY KEY,
+                            nest_id VARCHAR(20) NOT NULL REFERENCES nest_data(nest_id),
+                            date DATE NOT NULL,
+                            empty INTEGER NOT NULL,
+                            sealed INTEGER NOT NULL,
+                            hatched INTEGER NOT NULL
+                        )
+                        """
+                    )
+                    con.execute(
+                        "INSERT INTO daily_progress SELECT * FROM _mig_daily_progress"
+                    )
+
+                    # Re-create the indexes the CREATE block above declared.
+                    con.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_nest_module ON nest_data(module_id)"
+                    )
+                    con.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_progress_nest "
+                        "ON daily_progress(nest_id)"
+                    )
+                    con.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_progress_date "
+                        "ON daily_progress(date)"
+                    )
+
+                    con.execute("COMMIT")
+                    print(
+                        "✅ Migrated module_configs schema "
+                        "(dropped dead-weight `status` column, issue #69)"
+                    )
+                except Exception:
+                    con.execute("ROLLBACK")
+                    raise  # surface; better to refuse to serve than mid-migrate.
+        except Exception as e:
+            # Re-raise so the container fails to start rather than running
+            # against a half-migrated DB. CHECK constraint failures on the
+            # subsequent add_module INSERT would be a much harder symptom
+            # to root-cause than a refusal-to-start.
+            raise RuntimeError(
+                f"module_configs status-drop migration failed: {e!r}. "
+                "DB state is unchanged (transaction rolled back). Restore from "
+                "a backup before re-running."
+            ) from e
 
         if os.getenv("SEED_DATA", "").lower() == "true":
             row_count = con.execute("SELECT COUNT(*) FROM module_configs").fetchone()[0]

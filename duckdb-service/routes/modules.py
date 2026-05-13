@@ -155,33 +155,6 @@ def record_image():
         return jsonify({"error": str(e)}), 500
 
 
-@modules_bp.post("/update_module_status")
-def update_module_upload():
-    data = request.get_json()
-    module_id = data.get("module_id")
-    battery = data.get("battery")
-    if not module_id or battery is None:
-        return jsonify({"error": "module_id and battery required"}), 400
-    with lock:
-        con = get_conn()
-        try:
-            con.execute(
-                """
-                UPDATE module_configs
-                SET battery_level = ?,
-                    image_count = image_count + 1
-                WHERE id = ?
-                """,
-                (int(battery), module_id),
-            )
-            con.commit()
-            return jsonify({"message": "Module updated"}), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-        finally:
-            con.close()
-
-
 @modules_bp.delete("/image_uploads/<filename>")
 def delete_image_upload(filename):
     with lock:

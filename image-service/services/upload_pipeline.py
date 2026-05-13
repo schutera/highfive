@@ -168,7 +168,11 @@ class UploadPipeline:
             pass
 
     def _record_heartbeat(self, mac: str, battery: int) -> None:
-        """Update module battery + online status. Silently tolerates failures."""
+        """Bump the post-upload aggregate on `module_configs` — refreshes
+        `battery_level` and increments `image_count`. Silently tolerates
+        failures: the upload itself already succeeded, so a dropped
+        aggregate is best-effort metadata, not a regression in the user-
+        facing wire path."""
         try:
             self.duckdb_service.heartbeat(mac, battery)
         except RequestException:

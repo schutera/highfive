@@ -30,6 +30,31 @@ DEBUG=true
 DUCKDB_SERVICE_URL=http://duckdb-service:8000
 ```
 
+### `duckdb-service` exits with `RuntimeError: module_configs status-drop migration failed`
+
+**Symptom.** Container restart loop with a `RuntimeError: module_configs status-drop migration failed: ...` traceback in `docker compose logs duckdb-service`. The transactional rebuild migration (issue #69) refused to mid-state the DB and rolled back; the container is refusing to serve a half-migrated schema.
+
+**Why it happens.** The migration in `duckdb-service/db/schema.py`'s `init_db` rebuilds three tables (`module_configs`, `nest_data`, `daily_progress`) in a single transaction to drop the dead-weight `status` column on existing volumes. If any step inside the transaction raises — disk full, lock contention, an unexpected column type drift — the whole rebuild rolls back to leave the original DB intact. The container then re-raises rather than serving the un-migrated schema (the next `add_module` would 500 on the `NOT NULL CHECK` constraint).
+
+**Fix.**
+
+```bash
+# 1. Inspect the rolled-back state — `status` column should still be present.
+docker compose -f docker-compose.prod.yml --env-file .env.production exec duckdb-service \
+  python -c "from db.connection import lock, get_conn
+with lock:
+    print([c[1] for c in get_conn().execute('PRAGMA table_info(module_configs)').fetchall()])"
+
+# 2. Back up the volume before any further attempt.
+docker compose -f docker-compose.prod.yml --env-file .env.production exec duckdb-service \
+  cp /data/highfive.duckdb /data/highfive.duckdb.bak.$(date +%Y%m%d-%H%M%S)
+
+# 3. Read the original error from `docker compose logs duckdb-service`,
+#    address the root cause (disk space, schema drift, etc.), restart.
+```
+
+If the migration repeatedly fails for a reason that isn't immediately obvious, restore from the backup and open an issue with the full traceback — do **not** manually `ALTER TABLE ... DROP COLUMN` in the duckdb CLI; DuckDB v1.4 refuses that operation when a foreign key references the table, which is exactly why the rebuild migration exists.
+
 ---
 
 ## ESP32-CAM hardware

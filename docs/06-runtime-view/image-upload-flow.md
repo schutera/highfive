@@ -111,7 +111,14 @@ sequenceDiagram
    surfaced on `Module.latestHeartbeat`
    ([ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md)).
    This path does not run on every upload and is not gated by image
-   uploads succeeding.
+   uploads succeeding. A **boot-time heartbeat** also fires from
+   `ESP32-CAM/ESP32-CAM.ino`'s `setup` immediately after
+   `initNewModuleOnServer` returns (fail-quiet — fires regardless of
+   the registration call's outcome, defence-in-depth for the case
+   where registration's HTTP POST failed), before the slow camera
+   init — the #15 fix that lets the dashboard reflect a reflashed or
+   daily-rebooted module within seconds rather than after the next
+   capture.
 
 ## Persistence invariant
 

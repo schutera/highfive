@@ -102,15 +102,6 @@ int postImage(esp_config_t *esp_config) {
 
   hf::Url url = hf::parseUrl(std::string(UPLOAD_URL));
 
-  // Initialize client
-  static bool clientInitialized = false;
-  if (!clientInitialized) {
- //   client.setInsecure();
-    client.setNoDelay(true);
-    client.setTimeout(8000);
-    clientInitialized = true;
-  }
-
   Serial.printf("---- trying to send image to: %s:%u\n",
                 url.host.c_str(), (unsigned)url.port);
   // Issue #42 instrumentation: breadcrumb at each section boundary
@@ -130,6 +121,13 @@ int postImage(esp_config_t *esp_config) {
       logbufNoteHttpCode(-2);
       return -2;
     }
+    // Set socket options AFTER connect so the underlying fd exists.
+    // Setting them on a not-yet-connected WiFiClient triggers a
+    // harmless but noisy "[E] WiFiClient.cpp:320 setSocketOption():
+    // fail on -1, errno: 9, Bad file number" from the Arduino-ESP32
+    // framework — the previous code paid that cost on every boot.
+    client.setNoDelay(true);
+    client.setTimeout(8000);
   }
 
   // POST headers

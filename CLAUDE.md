@@ -163,6 +163,16 @@ The user's shell is **PowerShell 5.1** on Windows. When providing manual testing
 - No `&&` chaining — use `;` or `if ($?) { ... }`.
 - Bash scripts (`build.sh`, `make`) run via `bash <script>` from PowerShell.
 
+## Dev helper scripts
+
+[`scripts/`](scripts/) holds repeatable dev utilities. Notable for OTA / firmware iteration:
+
+- `scripts/esp_reset.py` — reset the ESP32-CAM via the CH340's RTS line (no physical button press needed).
+- `scripts/esp_capture.py` — reset + capture N seconds of serial in one process, useful when `pio device monitor` flakes on the ESP32-CAM-MB.
+- `scripts/esp_monitor.py` — passive serial capture (no reset), for observing an in-progress OTA cycle without disturbing setup() state.
+
+See [`scripts/README.md`](scripts/README.md) for the full list and prerequisites.
+
 ## Branch model
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed prefix (`feat/`, `fix/`, `docs/`, `refactor/`, `chore/`, `test/`, `ci/`); first commit line `<type>: <imperative summary>` ≤ ~72 chars; PRs require all CI green.

@@ -153,6 +153,16 @@ How to run it:
 - Address every P0 before pushing for review. P1s should be fixed or have an explicit "out of scope, tracked in issue #N" justification. P2s are nits and may be deferred.
 - Treat its findings as input, not as a verdict. If it claims something is wrong, verify against the code yourself — but do not dismiss without checking.
 
+## Shell environment
+
+The user's shell is **PowerShell 5.1** on Windows. When providing manual testing commands or setup instructions:
+
+- Always give **exact, copy-paste-ready commands** — no prose like "run the serial monitor", give the full command.
+- Set ports/hosts as variables first: `$PORT = "COM9"` — never use angle-bracket placeholders like `<COMx>` (PowerShell parses `<` as a redirection operator).
+- Write files with explicit encoding: `"value" | Out-File -NoNewline -Encoding ascii path\to\file` — PowerShell's default `>` redirect writes UTF-16 LE with BOM, which breaks Python `read_text(encoding="utf-8")`.
+- No `&&` chaining — use `;` or `if ($?) { ... }`.
+- Bash scripts (`build.sh`, `make`) run via `bash <script>` from PowerShell.
+
 ## Branch model
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed prefix (`feat/`, `fix/`, `docs/`, `refactor/`, `chore/`, `test/`, `ci/`); first commit line `<type>: <imperative summary>` ≤ ~72 chars; PRs require all CI green.

@@ -90,6 +90,36 @@ build step, step 2 of the wizard 404s on the OTA URL. If you've never
 flashed firmware on this checkout, run `build.sh` first; on shared
 checkouts, regenerate after every firmware change.
 
+### ArduinoOTA LAN push fails on Windows ("No response from the ESP")
+
+**Symptom.** `pio run -e esp32cam -t upload --upload-port <module-ip>` prints `Sending invitation to <IP> ..........` for ~100 s then exits with `No response from the ESP`. The serial monitor meanwhile shows `[OTA] LAN update start` and then immediately `[OTA] LAN update error 2/3/4` — the ESP received the invitation but the TCP data transfer fails.
+
+**Root cause.** espota picks a random ephemeral port each run (e.g. 10090, 44920, 45064) for its callback TCP server. Windows Firewall blocks these random inbound TCP connections. The ESP connects to the port from the invitation packet, but espota's TCP server is unreachable so the connection drops with 0 bytes transferred.
+
+**Fix — two parts, done once per developer machine.**
+
+**Part 1 — permanent firewall rule** (admin PowerShell, one time):
+
+```powershell
+# Remove any previous narrow rule first
+Remove-NetFirewallRule -DisplayName "HiveHive ArduinoOTA" -ErrorAction SilentlyContinue
+
+# Allow the fixed espota callback port
+New-NetFirewallRule -DisplayName "HiveHive ArduinoOTA" -Direction Inbound -Protocol TCP -LocalPort 55555 -Action Allow -Profile Any
+```
+
+**Part 2 — platformio.ini** (already committed, no action needed):
+
+`ESP32-CAM/platformio.ini` has `upload_protocol = espota` and `upload_flags = --host_port=55555`. This pins espota to port 55555 on every run, so the single firewall rule above always applies.
+
+**Verify the rules are in place:**
+
+```powershell
+Get-NetFirewallRule -DisplayName "HiveHive*" | Select-Object DisplayName, Enabled, Action
+```
+
+Expected output includes all three HiveHive rules (image-service 8000, duckdb-service 8002, ArduinoOTA 55555) with `Action = Allow`.
+
 ### PlatformIO not found / "No module named platformio"
 
 Multiple Python versions on the same machine can cause this. Find where PlatformIO was installed:

@@ -251,16 +251,25 @@ Push from the developer's machine while on the same network as the
 module. The module advertises itself as `hivehive-<12hex-module-id>`
 via mDNS.
 
-```bash
+```powershell
+$MODULE = "192.168.1.50"   # your module's IP
+
 cd ESP32-CAM
-pio run -e esp32cam -t upload --upload-port=hivehive-aabbccddeeff.local
-# or by IP:
-pio run -e esp32cam -t upload --upload-port=192.168.1.50
+pio run -e esp32cam -t upload --upload-port $MODULE
 ```
 
 If PlatformIO times out the module may be mid-loop — wait up to 30 s
 and retry (`loop()`'s `ArduinoOTA.handle()` is polled between the
 existing 30 s sleeps).
+
+> **Windows + Docker:** if the upload fails with "No response from the
+> ESP" even though the serial monitor shows `[OTA] LAN update start`,
+> Windows Firewall is blocking espota's callback port. Run the two
+> commands in the **"ArduinoOTA LAN push fails on Windows"** entry of
+> [docs/troubleshooting.md](../troubleshooting.md) once per developer
+> machine. `platformio.ini` is already configured with a fixed callback
+> port (`upload_flags = --host_port=55555`) so the single firewall rule
+> covers every subsequent push.
 
 ### Boot-time HTTP pull
 

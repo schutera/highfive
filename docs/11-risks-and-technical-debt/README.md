@@ -1393,3 +1393,67 @@ before it can participate in OTA. After that, no more USB visits.
      `firmware.app.bin` contains — including, by accident, the
      merged image — and the OTA path would write bootloader bytes
      onto the app slot at flash time.
+
+### OTA rollback isn't bootloader-driven on Arduino-ESP32 (PR-F manual T4)
+
+**What happened.** ADR-008's first cut described OTA rollback as ROM-
+bootloader work: "If the firmware crashes, watchdog-fires, or panics
+before reaching the gate, the bootloader reverts to the previous
+`ESP_OTA_IMG_VALID` slot on the next reset." Round-1 review accepted
+the design and the round-1 implementation gated an app-side
+forceRollback on `esp_ota_get_state_partition(running) ==
+ESP_OTA_IMG_NEW || ESP_OTA_IMG_PENDING_VERIFY`. Manual T4 (mining
+firmware with `abort()` before mark-valid) then reproduced an
+unrecoverable mining-boot loop — 4+ panic-reboot cycles, no rollback
+ever firing.
+
+**Why.** Two facts the IDF docs imply but don't make obvious to a
+reader of one chapter at a time:
+
+1. Arduino-ESP32 ships a **prebuilt** bootloader with
+   `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n`. Without that config the
+   ROM does not transition a new slot into `ESP_OTA_IMG_PENDING_VERIFY`
+   on first boot and does not roll back on subsequent panics — the
+   slot just keeps booting. So `esp_ota_mark_app_valid_cancel_rollback()`
+   in our setup() flow is **load-bearing for nothing** unless the app
+   itself takes action.
+2. `esp_ota_set_boot_partition()` in the IDF version arduino-esp32 v2
+   uses can in practice leave the new slot reporting
+   `ESP_OTA_IMG_VALID` immediately after `Update.end()`. Gating an
+   app-side check on "state != VALID" therefore also skips bad slots.
+   Round-2 of T4 reproduced this by widening the check; the loop
+   continued.
+
+The fix that actually fires is state-free: every faulty reboot
+(reset_reason ∈ {PANIC, TASK_WDT, INT_WDT, BROWNOUT}) increments an
+NVS counter, mark-valid at end of setup() resets it, threshold of 3
+forces `esp_ota_mark_app_invalid_rollback_and_reboot()`. Senior-
+review caught one more bug in this design: the early state-free
+draft incremented on **every** boot, which collided with
+`WIFI_FAIL_AP_FALLBACK_THRESH = 3` and would have triggered false
+rollback to old firmware on three consecutive transient WiFi outages.
+The reset-reason gate fixed that.
+
+**How to avoid next time.**
+
+- **Verify safety nets on hardware, not in IDF docs.** Anything that
+  claims "the bootloader will recover this" needs to be exercised by
+  deliberately bricking a slot on the same firmware build path that
+  ships. The unit-test surface for partition-state transitions is
+  essentially nil; what looks correct on a screen passes review and
+  still doesn't fire.
+- **Trust code, not the IDF version table.** arduino-esp32's
+  bootloader config differs from `idf.py menuconfig` defaults; the
+  prebuilt `bootloader.bin` is checked into the framework package and
+  is what ships, regardless of what the IDF version's docs imply.
+- **When a "transient failure" threshold and a "permanent failure"
+  threshold both default to 3 boots, they will collide.** Search
+  for other thresholds the new threshold could clash with before
+  declaring victory. Manual T4 surfaced this only because round-1
+  testing happened to retry WiFi connect at the same time the
+  forceRollback counter was incrementing — easy to miss otherwise.
+
+**Trail of the fix.** Commit `0ed2537` introduced the state-gated
+version (didn't fire); commit `9ad1658` rewrote it state-free (fires,
+but with the WIFI_FAIL collision); the reset-reason gate landed
+post-review on the same branch (`fix/esp-ota-round1-fixes`).

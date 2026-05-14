@@ -63,9 +63,29 @@ def main() -> int:
     app_md5 = hashlib.md5(app_bytes).hexdigest()
     app_size = len(app_bytes)
 
+    # Delete any pre-existing merged `firmware.bin` left over from a
+    # previous `build.sh` run. The web installer reads `firmware.bin`
+    # (merged: bootloader + partitions + boot_app0 + app) and trusts
+    # the manifest's `md5` field to integrity-check it. We do NOT
+    # produce a merged binary from PIO output, so if we left a stale
+    # release-built `firmware.bin` on disk paired with this dev
+    # manifest, the wizard would happily flash old bootloader bytes
+    # onto a fresh module. Removing the file forces a loud 404 in the
+    # wizard instead. Re-run `build.sh` if you need a real merged
+    # release artifact.
+    merged = HOMEPAGE_PUBLIC / "firmware.bin"
+    if merged.exists():
+        merged.unlink()
+        print(f"Removed stale {merged} (release path needs `bash ESP32-CAM/build.sh`)")
+
+    # Manifest omits the `md5` field that points at the merged image.
+    # `app_md5` is the OTA-path integrity check; the web installer
+    # path is not exercised by this dev script. The wizard reads
+    # `md5` to verify the merged download — leaving it absent makes
+    # the failure mode "wizard reports missing field" rather than
+    # "wizard silently flashes the wrong bytes against a fake hash".
     manifest = {
         "version": version,
-        "md5": app_md5,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "app_md5": app_md5,
         "app_size": app_size,
@@ -77,6 +97,7 @@ def main() -> int:
     print(f"Wrote {dst_app} ({app_size} bytes)")
     print(f"Wrote {HOMEPAGE_PUBLIC / 'firmware.json'}")
     print(f"  version={version} app_md5={app_md5} app_size={app_size}")
+    print("  (dev manifest — no merged firmware.bin; web installer disabled)")
     return 0
 
 

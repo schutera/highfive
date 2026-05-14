@@ -75,22 +75,36 @@ sequenceDiagram
 
 ## Rollback
 
-ESP32 OTA partitions are managed by the ROM bootloader. A freshly-
-flashed slot enters `ESP_OTA_IMG_NEW` state and the bootloader runs
-it exactly once. If the firmware reaches the
-`esp_ota_mark_app_valid_cancel_rollback()` call at the very end of
-`setup()` — every setup stage is inside the gate — the slot
-transitions to `ESP_OTA_IMG_VALID`. If the firmware crashes,
-watchdog-fires, or panics before reaching the gate, the bootloader
-reverts to the previous `ESP_OTA_IMG_VALID` slot on the next reset.
+Rollback is **app-initiated**, not ROM-bootloader-initiated. Arduino-
+ESP32's prebuilt bootloader ships with
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n`, so the ROM does not
+transition slots out of `ESP_OTA_IMG_NEW` on panic and does not
+auto-revert on the next reset — a bad slot would otherwise reboot
+forever. Verified empirically during manual T4 of #26 (see
+[`docs/10-quality-requirements/manual-tests-ota.md`](../10-quality-requirements/manual-tests-ota.md)).
 
-The boot heartbeat
-fires before mark-valid, so a new-`fwVersion` heartbeat may briefly
-appear on the server while the slot is still pending verify. If
-camera init then panics and the slot rolls back, the next boot's
-heartbeat will correct the reported version. This brief flicker is
-intentional — planting the heartbeat early keeps the "boot latency →
-dashboard refresh" benefit described in the image-upload-flow doc.
+`ESP32-CAM/ESP32-CAM.ino`'s `forceRollbackIfPendingTooLong`, called
+near the top of `setup()`, owns the recovery. On any boot whose
+previous run died via panic/WDT/brownout (gated by
+`esp_reset_reason()`), it increments an NVS counter
+(`Preferences("ota").pv_boots`). When the counter crosses
+`HF_OTA_MAX_PENDING_BOOTS = 3`, the app calls
+`esp_ota_mark_app_invalid_rollback_and_reboot()`, which marks the
+running slot invalid and asks the bootloader to boot the previous
+valid one. Reaching `esp_ota_mark_app_valid_cancel_rollback()` at
+the end of `setup()` resets the counter to 0. Clean reboots
+(POWERON, SW from AP-fallback, daily reboot, OTA post-flash) do not
+increment, so transient WiFi flakes that trip `WIFI_FAIL_AP_FALLBACK_THRESH`
+do not also trip rollback. Full reasoning lives in
+[`docs/09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md`](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md).
+
+The boot heartbeat fires before mark-valid, so a new-`fwVersion`
+heartbeat may briefly appear on the server while the slot is still
+pending verify. If camera init then panics and the slot rolls back,
+the next boot's heartbeat (from the previous slot) will correct the
+reported version. This brief flicker is intentional — planting the
+heartbeat early keeps the "boot latency → dashboard refresh" benefit
+described in the image-upload-flow doc.
 
 Operator-observable: a bricked OTA shows up on the dashboard as a
 module that keeps reporting the **old** `fwVersion` in its
@@ -98,7 +112,8 @@ module that keeps reporting the **old** `fwVersion` in its
 breadcrumb in the next telemetry sidecar naming which stage of the
 new firmware's setup() failed
 (e.g. `setup:initEspCamera`, `setup:initNewModuleOnServer`).
-No manual intervention needed — the unit recovers on its own.
+No manual intervention needed — the unit recovers on its own after
+~3 panic-reboot cycles ≈ 30–60 s.
 
 ## Partition layout migration
 

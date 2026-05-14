@@ -33,7 +33,10 @@ HOMEPAGE_DEV_URL = os.getenv("HOMEPAGE_DEV_URL", "http://homepage:5173")
 
 @dev_ota_proxy_bp.get("/firmware.json")
 def firmware_json():
-    upstream = requests.get(f"{HOMEPAGE_DEV_URL}/firmware.json", timeout=5)
+    try:
+        upstream = requests.get(f"{HOMEPAGE_DEV_URL}/firmware.json", timeout=5)
+    except requests.RequestException as exc:
+        return (f"upstream homepage unreachable: {exc}", 502)
     return Response(
         upstream.content,
         status=upstream.status_code,
@@ -43,14 +46,22 @@ def firmware_json():
 
 @dev_ota_proxy_bp.get("/firmware.app.bin")
 def firmware_app_bin():
-    upstream = requests.get(
-        f"{HOMEPAGE_DEV_URL}/firmware.app.bin", timeout=30, stream=True
-    )
+    try:
+        upstream = requests.get(
+            f"{HOMEPAGE_DEV_URL}/firmware.app.bin", timeout=30, stream=True
+        )
+    except requests.RequestException as exc:
+        return (f"upstream homepage unreachable: {exc}", 502)
+    # Pass through Content-Length only if the upstream actually sent one;
+    # an empty-string header is a malformed framing field that future
+    # Vite (or a chunked-transfer upstream) would land on.
+    headers = {}
+    cl = upstream.headers.get("Content-Length")
+    if cl:
+        headers["Content-Length"] = cl
     return Response(
         stream_with_context(upstream.iter_content(chunk_size=8192)),
         status=upstream.status_code,
         content_type=upstream.headers.get("Content-Type", "application/octet-stream"),
-        headers={
-            "Content-Length": upstream.headers.get("Content-Length", ""),
-        },
+        headers=headers,
     )

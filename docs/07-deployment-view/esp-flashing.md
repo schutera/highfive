@@ -305,8 +305,16 @@ heartbeat corrects the displayed version automatically.
 If the new firmware fails to reach the
 `esp_ota_mark_app_valid_cancel_rollback()` call at the very end of
 `setup()` — because any setup stage panics or watchdog-fires — the
-ESP32 bootloader reverts to the previous slot on the next reset. No
-operator action needed.
+app-side counter in `forceRollbackIfPendingTooLong` (top of `setup()`)
+accumulates one tick per faulty reboot and, after
+`HF_OTA_MAX_PENDING_BOOTS = 3` consecutive panic/WDT/brownout cycles,
+calls `esp_ota_mark_app_invalid_rollback_and_reboot()` to force the
+bootloader to revert to the previous slot. Total recovery latency
+≈ 30–60 s. No operator action needed. Arduino-ESP32's prebuilt
+bootloader does NOT perform this rollback on its own (see
+[ADR-008](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md)
+for the full story); the app-side check is what's load-bearing.
+
 Operator-visible: the dashboard keeps reporting the **old** version
 on that module, and the next telemetry sidecar carries a breadcrumb
 naming which setup stage the new firmware died in.
@@ -326,10 +334,21 @@ The first flash of an OTA-capable binary must therefore arrive via:
   path above) — which flashes bootloader + partitions + app together
   and so includes the new partition table.
 
+**The one-time migration also re-formats SPIFFS.** The default and
+the `min_spiffs` partition tables put SPIFFS at different offsets, so
+the firmware's `SPIFFS.begin(true)` auto-formats on the mismatch.
+Result: `/config.json` is wiped, the module boots into AP mode after
+the migration flash, and the operator has to re-onboard via the
+captive portal (Wi-Fi SSID/password, server URLs). Plan for this on
+deployed modules — schedule the migration during an onboarding visit
+rather than from a remote office.
+
 After that one-time USB flash, every subsequent update can be OTA.
 Symptom of trying to OTA-push to an un-migrated module: the upload
-fails before the binary stream completes, or completes but the
-module fails to boot the new image and the bootloader reverts. See
+fails before the binary stream completes, or `Update.begin()` rejects
+the image because there is no OTA slot to write to. The module
+keeps booting the old firmware and the dashboard's `fwVersion`
+panel never advances. See
 [../11-risks-and-technical-debt/README.md](../11-risks-and-technical-debt/README.md)
 "OTA migration is one-way".
 

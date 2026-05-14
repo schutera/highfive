@@ -7,7 +7,11 @@ testing without disturbing the rest of the dev stack. Compatible with
 `platformio.ini`'s `monitor_rts = 0 / monitor_dtr = 0` setting.
 
 Usage:
-    python scripts/esp_reset.py [PORT]      # default PORT = COM9
+    python scripts/esp_reset.py [PORT] [--wait-for-monitor]
+    # default PORT = COM9
+    # --wait-for-monitor sleeps 2 s before opening the port, useful
+    # when you just Ctrl-C'd `pio device monitor` and pyserial needs
+    # a moment for the OS handle to clear.
 """
 
 import sys
@@ -15,17 +19,18 @@ import time
 
 import serial
 
-port = sys.argv[1] if len(sys.argv) > 1 else "COM9"
+args = [a for a in sys.argv[1:]]
+wait_for_monitor = "--wait-for-monitor" in args
+positional = [a for a in args if not a.startswith("--")]
+port = positional[0] if positional else "COM9"
 
-# Brief delay so a concurrent monitor process can release its port handle
-# if the user called us right after Ctrl-C'ing pio device monitor.
-time.sleep(2)
+if wait_for_monitor:
+    time.sleep(2)
 
-s = serial.Serial(port, 115200, timeout=0.1, rtscts=False, dsrdtr=False)
-s.setDTR(False)
-s.setRTS(True)  # EN low — hold reset
-time.sleep(0.15)
-s.setRTS(False)  # release — chip runs
-s.close()
+with serial.Serial(port, 115200, timeout=0.1, rtscts=False, dsrdtr=False) as s:
+    s.setDTR(False)
+    s.setRTS(True)  # EN low — hold reset
+    time.sleep(0.15)
+    s.setRTS(False)  # release — chip runs
 
 print(f"reset {port}")

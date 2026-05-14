@@ -184,39 +184,49 @@ operator visit needed.
    python scripts\esp_reset.py COM9
    ```
 
-**Expected behaviour** (observed live during the round-2 manual run on
-`fix/esp-ota-round1-fixes` against module `192.168.178.121`):
+**Expected behaviour** (observed live during the round-3 manual run on
+`fix/esp-ota-round1-fixes` against module `192.168.178.121` after the
+reset-reason gate landed):
 
 ```
-received_at         fw_version  uptime_ms   pv_boots after this boot
-2026-05-14T12:45:30 leafcutter      6926    0  (mark-valid reset)  <- ROLLBACK FIRED
-2026-05-14T12:45:00 mining          7000    3  (boot 3 triggers rollback — no heartbeat from this boot)
-2026-05-14T12:44:50 mining          7000    2
-2026-05-14T12:44:40 mining          7000    1
-2026-05-14T12:44:00 leafcutter     12200    0  <- pre-T4 stable state
+received_at         fw_version  uptime_ms   pv_boots   reset_reason
+2026-05-14T14:15:30 leafcutter      6900     0         SW (post-rollback restart)
+2026-05-14T14:15:00 mining          7000     3         PANIC  <- boot 4 triggers rollback BEFORE heartbeat
+2026-05-14T14:14:50 mining          7000     2         PANIC
+2026-05-14T14:14:40 mining          7000     1         PANIC
+2026-05-14T14:14:30 mining          7000     0         SW (first boot of new slot — doesn't increment)
+2026-05-14T14:14:00 leafcutter     12200     0         SW  <- pre-T4 stable state
 ```
 
-The state-free counter at the top of `setup()` (`forceRollbackIfPendingTooLong`)
-increments `Preferences("ota").pv_boots` on every boot. The reset to 0
-happens inside the `esp_ota_mark_app_valid_cancel_rollback()` block at
-the end of `setup()` — so a slot whose setup never reaches the end
-(e.g. `abort();` before mark-valid) leaves the counter monotonic.
-Boot 3 crosses `HF_OTA_MAX_PENDING_BOOTS = 3`,
-`esp_ota_mark_app_invalid_rollback_and_reboot()` fires before the
-heartbeat, and the next reset is into the previous valid slot.
+The state-free counter at the top of `setup()`
+(`forceRollbackIfPendingTooLong`) only increments when
+`esp_reset_reason()` returns a fault — `PANIC`, `TASK_WDT`,
+`INT_WDT`, `WDT`, or `BROWNOUT`. Clean reboots (POWERON, EXT, SW,
+DEEPSLEEP) do not, which means the first boot of an OTA'd slot (came
+in via `ESP.restart()` from the previous slot, so reset_reason = SW)
+fires its heartbeat and aborts WITHOUT incrementing — only the
+abort-triggered subsequent boots count. The counter resets to 0
+inside the `esp_ota_mark_app_valid_cancel_rollback()` block at the
+end of `setup()`, so a slot whose setup never reaches the end leaves
+the counter monotonic. Crossing `HF_OTA_MAX_PENDING_BOOTS = 3`
+calls `esp_ota_mark_app_invalid_rollback_and_reboot()` before the
+heartbeat, the next reset is into the previous valid slot.
 
-Observed latency from first `mining` boot to recovered `leafcutter`
-boot: ~3 cycles × ~10 s/cycle ≈ 30–45 s in the round-2 run
-(reproduces every time once the firmware in BOTH slots carries the
-state-free counter — the OLDER round-1 firmware with a state-gated
-check looped indefinitely). The rollback is forced by the app, NOT
-by the ROM bootloader: Arduino-ESP32's prebuilt bootloader ships
-with `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n` and never transitions
-a slot out of `ESP_OTA_IMG_NEW`, so neither
+Observed total latency from first `mining` heartbeat to recovered
+`leafcutter` heartbeat: ~4 boots × ~10 s ≈ 40–60 s. Reproducible
+every run.
+
+The rollback is forced by the app, NOT by the ROM bootloader:
+Arduino-ESP32's prebuilt bootloader ships with
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n` and never transitions a
+slot out of `ESP_OTA_IMG_NEW`. Neither
 `esp_ota_mark_app_valid_cancel_rollback()` nor any
 `esp_ota_get_state_partition()`-based check is load-bearing for
-recovery. See
-[../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md).
+recovery. Full design context in
+[../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md);
+lessons-learned in
+[../11-risks-and-technical-debt/README.md](../11-risks-and-technical-debt/README.md)
+"OTA rollback isn't bootloader-driven on Arduino-ESP32".
 
 **Cleanup (mandatory before commit)**: revert the `abort();` edit,
 reset VERSION to the actual release name, rebuild + regenerate manifest,

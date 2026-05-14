@@ -155,22 +155,33 @@ watchdog feed.
 
   The firmware therefore uses a **state-free counter** at the top of
   `setup()` (`forceRollbackIfPendingTooLong` in
-  `ESP32-CAM/ESP32-CAM.ino`): every boot increments an NVS counter
+  `ESP32-CAM/ESP32-CAM.ino`): every boot whose reset_reason indicates
+  a fault (`ESP_RST_PANIC`, `ESP_RST_TASK_WDT`, `ESP_RST_INT_WDT`,
+  `ESP_RST_WDT`, `ESP_RST_BROWNOUT`) increments an NVS counter
   (`Preferences` namespace `ota`, key `pv_boots`); reaching
   `esp_ota_mark_app_valid_cancel_rollback()` at end-of-`setup()`
-  resets it. A healthy slot's setup completes and the counter
-  cycles 0→1→0 per boot; a bricked slot's setup never reaches the
-  reset and the counter accumulates monotonically. Once it crosses
-  `HF_OTA_MAX_PENDING_BOOTS` (3), the app calls
+  resets it. A healthy slot's setup completes and the counter stays
+  at 0; a bricked slot's setup never reaches the reset and each
+  panic/WDT-rebooted cycle increments it monotonically. Once it
+  crosses `HF_OTA_MAX_PENDING_BOOTS` (3), the app calls
   `esp_ota_mark_app_invalid_rollback_and_reboot()`, which forces the
   bootloader to mark the running slot invalid and revert to the
   previous valid one on the next reset. Verified end-to-end on
-  hardware in manual T4: ~3 incomplete-setup boots ≈ 30–60 s.
+  hardware in manual T4 (round 3): ~3 PANIC reboots ≈ 30–60 s.
+
+  **Reset-reason gate is load-bearing**: the round-2 version
+  incremented on every boot and would have collided with the
+  AP-fallback path. `setup()`'s `if (wifiFails >= WIFI_FAIL_AP_FALLBACK_THRESH)`
+  branch and `setupWifiConnection` both `ESP.restart()` (reset_reason
+  = `ESP_RST_SW`) on three consecutive WiFi-join failures. Without
+  the gate, three transient WiFi outages would push `pv_boots` to 3
+  on slots that have ever OTA'd, silently downgrading them to the
+  previous firmware. Senior-review caught this before merge.
+
   Switching to a custom Arduino-IDF bootloader with
   `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` would let us gate on
-  partition state instead of incomplete-setup count, but the
-  state-free design is robust to bootloader-config drift and is
-  good enough for #26.
+  partition state instead, but the state-free design is robust to
+  bootloader-config drift and is good enough for #26.
 
 **Costs:**
 

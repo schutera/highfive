@@ -35,29 +35,31 @@ duration = int(sys.argv[2]) if len(sys.argv) > 2 else 25
 log_dir = os.environ.get("TEMP") or "/tmp"
 log_path = os.path.join(log_dir, "esp_log.txt")
 
-s = serial.Serial(port, 115200, timeout=0.2, rtscts=False, dsrdtr=False)
-# Reset via RTS toggle. Same sequence as scripts/esp_reset.py.
-# `monitor_rts = 0` in `platformio.ini` means `setRTS(False)` = run.
-s.setDTR(False)
-s.setRTS(True)  # EN low — reset
-time.sleep(0.1)
-s.setRTS(False)  # EN released — boot
-
-print(f"--- capturing {duration}s of serial from {port} after reset ---", flush=True)
-deadline = time.time() + duration
 buf = b""
-while time.time() < deadline:
-    x = s.read(1024)
-    if x:
-        buf += x
-s.close()
+with serial.Serial(port, 115200, timeout=0.2, rtscts=False, dsrdtr=False) as s:
+    # Reset via RTS toggle. Same sequence as scripts/esp_reset.py.
+    # `monitor_rts = 0` in `platformio.ini` means `setRTS(False)` = run.
+    s.setDTR(False)
+    s.setRTS(True)  # EN low — reset
+    time.sleep(0.1)
+    s.setRTS(False)  # EN released — boot
+
+    print(
+        f"--- capturing {duration}s of serial from {port} after reset ---",
+        flush=True,
+    )
+    deadline = time.time() + duration
+    while time.time() < deadline:
+        x = s.read(1024)
+        if x:
+            buf += x
 
 with open(log_path, "wb") as f:
     f.write(buf)
 
-# Print decoded form. Use surrogateescape to avoid a UnicodeEncodeError
-# on Windows' default cp1252 console when the buffer contains bytes that
-# decode to replacement characters U+FFFD.
+# Print decoded form. Encode-then-write through stdout.buffer avoids a
+# UnicodeEncodeError on Windows' default cp1252 console when the buffer
+# contains bytes that decode to replacement characters U+FFFD.
 text = buf.decode("utf-8", errors="replace")
 sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
 sys.stdout.buffer.write(

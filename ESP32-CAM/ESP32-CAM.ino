@@ -56,25 +56,38 @@ static void forceRollbackIfPendingTooLong() {
   // reproduced (mining slot heartbeat→abort→heartbeat→abort with no
   // rollback ever firing).
   //
-  // State-free design instead: count every boot since the last
-  // successful mark-valid. The reset path at the end of setup() runs
-  // *only* if the rest of setup() did not panic/WDT/abort. A healthy
-  // slot therefore stays at 0–1; a slot that crashes between this
-  // check and mark-valid accumulates monotonically until the
-  // threshold trips, at which point we force a bootloader-side
-  // rollback to the previous slot.
+  // State-free design instead: count consecutive faulty reboots
+  // (panic/WDT/brownout) since the last successful mark-valid. A
+  // healthy slot's setup reaches the reset path at end-of-setup() and
+  // the counter cycles 0→0–1; a slot that crashes between this check
+  // and mark-valid accumulates monotonically until the threshold
+  // trips, at which point we force a bootloader-side rollback to the
+  // previous slot.
   //
-  // Threshold = 3: allows two retries for transient WiFi / network
-  // flakes during setup. Total wall-clock time to rollback is
-  // ~3 × (boot + WiFi + heartbeat + abort) ≈ 30–60 s.
+  // Reset-reason gate: count only boots whose previous run died
+  // ungracefully (PANIC/TASK_WDT/INT_WDT/BROWNOUT). Clean reboots
+  // (POWERON, EXT, SW, DEEPSLEEP) do NOT increment, because the
+  // existing AP-fallback path in `setup()` and `setupWifiConnection`
+  // already calls `ESP.restart()` (reset_reason=SW) on three
+  // consecutive WiFi-join failures, and three of those in a row
+  // would otherwise hit `HF_OTA_MAX_PENDING_BOOTS = 3` and trigger a
+  // false rollback to old firmware on a transient WiFi outage. The
+  // collision was caught by senior-review of this PR before merge;
+  // see lessons-learned in chapter-11.
+  esp_reset_reason_t rr = esp_reset_reason();
+  const bool faulty = (rr == ESP_RST_PANIC) || (rr == ESP_RST_TASK_WDT) ||
+                      (rr == ESP_RST_INT_WDT) || (rr == ESP_RST_WDT) ||
+                      (rr == ESP_RST_BROWNOUT);
+  if (!faulty) return;
+
   Preferences p;
   p.begin("ota", false);
   uint32_t attempts = p.getUInt("pv_boots", 0) + 1;
   p.putUInt("pv_boots", attempts);
   p.end();
 
-  logf("[OTA] unverified-boot %u/%u",
-       (unsigned)attempts, (unsigned)HF_OTA_MAX_PENDING_BOOTS);
+  logf("[OTA] faulty-boot %u/%u (reset_reason=%d)",
+       (unsigned)attempts, (unsigned)HF_OTA_MAX_PENDING_BOOTS, (int)rr);
 
   if (attempts >= HF_OTA_MAX_PENDING_BOOTS) {
     logf("[OTA] threshold reached — forcing rollback");
@@ -177,18 +190,17 @@ void setup() {
   // will just keep booting the broken slot forever. Manual T4 verified
   // this: a setup()-time panic was retried 4+ times with no rollback.
   //
-  // App-side fix: at every boot, if the running slot is still in
-  // PENDING_VERIFY state, increment a counter in NVS. If the counter
-  // crosses HF_OTA_MAX_PENDING_BOOTS, call
+  // App-side fix: at the top of setup(), if the previous boot died
+  // ungracefully (panic/WDT/brownout), increment an NVS counter. When
+  // the counter crosses HF_OTA_MAX_PENDING_BOOTS, call
   // esp_ota_mark_app_invalid_rollback_and_reboot() — this is an
   // app-initiated rollback (works regardless of bootloader config). The
-  // counter is reset to 0 inside the mark_valid call at the end of
-  // setup() (so a healthy slot's next boot starts fresh).
-  //
-  // Threshold is 3: we allow this slot two retries (WiFi flake, transient
-  // network failure during init) before giving up. Any panic-on-setup
-  // failure mode reaches the threshold in <90 s of wall-clock time, well
-  // before an operator would notice and intervene.
+  // counter is reset to 0 at the end of setup() (so a healthy slot's
+  // next boot starts fresh) and the fault gate prevents the counter
+  // from incrementing on clean ESP.restart() paths (AP-fallback, daily
+  // reboot, OTA post-flash boot) — see senior-review fix in the
+  // function body for why the bare "increment every boot" was a
+  // regression vector against transient WiFi outages.
   forceRollbackIfPendingTooLong();
 
   Serial.println("------ ESP STARTED ------");

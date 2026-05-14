@@ -99,19 +99,20 @@ do not also trip rollback. Full reasoning lives in
 [`docs/09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md`](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md).
 
 The boot heartbeat fires before mark-valid, so a new-`fwVersion`
-heartbeat may briefly appear on the server while the slot is still
-pending verify. If camera init then panics and the slot rolls back,
-the next boot's heartbeat (from the previous slot) will correct the
-reported version. This brief flicker is intentional — planting the
-heartbeat early keeps the "boot latency → dashboard refresh" benefit
-described in the image-upload-flow doc.
+heartbeat may briefly appear on the server (and in the dashboard's
+**Firmware** pill — see `homepage/src/components/ModulePanel.tsx`)
+while the slot is still pending verify. If camera init then panics
+and the slot rolls back, the next boot's heartbeat (from the
+previous slot) will correct the reported version. This brief
+flicker is intentional — planting the heartbeat early keeps the
+"boot latency → dashboard refresh" benefit described in the
+image-upload-flow doc.
 
 Operator-observable: a bricked OTA shows up on the dashboard as a
-module that keeps reporting the **old** `fwVersion` in its
-`latestHeartbeat` panel (the flicker corrects itself), with a
-breadcrumb in the next telemetry sidecar naming which stage of the
-new firmware's setup() failed
-(e.g. `setup:initEspCamera`, `setup:initNewModuleOnServer`).
+module whose **Firmware** pill keeps showing the **old** bee-name
+(the flicker corrects itself), with a breadcrumb in the next
+telemetry sidecar naming which stage of the new firmware's setup()
+failed (e.g. `setup:initEspCamera`, `setup:initNewModuleOnServer`).
 No manual intervention needed — the unit recovers on its own after
 ~3 panic-reboot cycles ≈ 30–60 s.
 

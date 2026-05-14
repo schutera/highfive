@@ -175,9 +175,16 @@ Side effects (single `UPDATE` on `module_configs`, see
 `routes/modules.py`'s `heartbeat`):
 
 - Sets `battery_level` to the supplied value.
-- Sets `first_online` to today's date (overwrites — this is the
-  documented `first_online` ambiguity, see [glossary](../12-glossary/README.md#flagged-ambiguities)).
 - Increments `image_count` by 1.
+- `first_online` is `COALESCE`-guarded — left intact when already
+  set (the common path; `add_module` writes it on registration),
+  filled with today's date only on the first call after a NULL
+  (defensive against legacy / manually-inserted rows; the schema
+  declares `NOT NULL` so the branch is unreachable in current
+  production). Resolved in
+  [#75](https://github.com/schutera/highfive/issues/75) — the
+  previous unconditional write was the source of the "first
+  online today" drift this column used to advertise.
 
 Does **not** insert into `module_heartbeats` and does **not** touch
 the telemetry-heartbeat path. Despite the shared name, the two

@@ -6,9 +6,6 @@ Covers:
 * POST /record_image
 """
 
-from datetime import date
-
-
 # Canonical 12-hex-char ModuleId test fixtures.
 TEST_MAC_1 = "aabbccddeeff"
 TEST_MAC_2 = "001122334455"
@@ -165,7 +162,7 @@ def test_heartbeat_unknown_module_returns_404(client):
 # ---------- heartbeat: success ----------
 
 
-def test_heartbeat_updates_battery_first_online_and_image_count(client, fresh_db):
+def test_heartbeat_updates_battery_and_image_count(client, fresh_db):
     _seed_module(fresh_db, TEST_MAC_1, image_count=0, battery_level=10)
 
     resp = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={"battery": 77})
@@ -176,8 +173,28 @@ def test_heartbeat_updates_battery_first_online_and_image_count(client, fresh_db
     assert row is not None
     assert row["battery_level"] == 77
     assert row["image_count"] == 1
-    # first_online stored as DATE — normalise to ISO string for comparison.
-    assert str(row["first_online"]) == date.today().isoformat()
+
+
+def test_heartbeat_does_not_clobber_existing_first_online(client, fresh_db):
+    """Issue #75: the per-upload heartbeat must NOT overwrite
+    `first_online` on every call. Before the COALESCE fix the column
+    was rewritten to today's date on every heartbeat, so a module
+    onboarded in 2024-01-01 ended up advertising itself as "first
+    online today" on every fresh upload. The seed fixture writes
+    `'2024-01-01'`; the heartbeat must leave that value intact."""
+    _seed_module(fresh_db, TEST_MAC_1, image_count=0, battery_level=10)
+    seeded = _fetch_module(fresh_db, TEST_MAC_1)["first_online"]
+    assert str(seeded) == "2024-01-01", (
+        f"fixture changed under us — _seed_module no longer writes 2024-01-01: {seeded!r}"
+    )
+
+    resp = client.post(f"/modules/{TEST_MAC_1}/heartbeat", json={"battery": 77})
+    assert resp.status_code == 200
+
+    row = _fetch_module(fresh_db, TEST_MAC_1)
+    assert str(row["first_online"]) == "2024-01-01", (
+        f"heartbeat clobbered first_online (issue #75 regression): {row['first_online']!r}"
+    )
 
 
 def test_heartbeat_increments_image_count_idempotently(client, fresh_db):
@@ -192,7 +209,8 @@ def test_heartbeat_increments_image_count_idempotently(client, fresh_db):
     assert row["image_count"] == 7
     # Most recent battery is what stuck.
     assert row["battery_level"] == 55
-    assert str(row["first_online"]) == date.today().isoformat()
+    # first_online untouched by either heartbeat (issue #75).
+    assert str(row["first_online"]) == "2024-01-01"
 
 
 # ---------- record_image ----------

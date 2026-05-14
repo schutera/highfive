@@ -425,9 +425,11 @@ module returns `{ "error": "Module not found" }`, `404`.
 Side effect (single `UPDATE` on `module_configs`):
 
 - `battery_level` ← supplied value
-- `first_online` ← today's date (overwritten — see glossary
-  "Flagged ambiguities")
 - `image_count` ← `image_count + 1`
+- `first_online` ← `COALESCE(first_online, today)` — only filled
+  on the first call after a NULL; in practice the column is
+  written by `add_module` at registration and the heartbeat
+  leaves it alone (issue [#75](https://github.com/schutera/highfive/issues/75))
 
 Does **not** insert into `module_heartbeats`. Called by `image-service`
 after every accepted upload (`image-service/services/duckdb.py`'s

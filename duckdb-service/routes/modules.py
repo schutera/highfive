@@ -266,11 +266,16 @@ def heartbeat(module_id):
 
     now = datetime.now().strftime("%Y-%m-%d")
     with write_transaction() as con:
+        # COALESCE-guarded so the heartbeat fills `first_online` only
+        # on the first NULL — `add_module` is the real writer (on
+        # INSERT). The schema declares `NOT NULL`, so this branch is
+        # unreachable in production but defensive against legacy /
+        # manually-inserted rows. Background: issue #75.
         con.execute(
             """
             UPDATE module_configs
             SET battery_level = ?,
-                first_online = ?,
+                first_online = COALESCE(first_online, ?),
                 image_count = image_count + 1
             WHERE id = ?
             """,

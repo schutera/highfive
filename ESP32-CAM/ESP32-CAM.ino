@@ -23,6 +23,11 @@
 // the worst case. 60 s gives a safety margin while still rebooting on
 // genuine deadlocks within ~1 minute.
 #define TASK_WDT_TIMEOUT_S    60
+// Max consecutive boots a slot can stay in ESP_OTA_IMG_PENDING_VERIFY
+// before this firmware forces an app-side rollback. See
+// `forceRollbackIfPendingTooLong()` below and the comment that calls
+// it in setup() for the design context.
+#define HF_OTA_MAX_PENDING_BOOTS 3
 // FACTORY_RESET_SETTLE_MS and WIFI_FAIL_AP_FALLBACK_THRESH live in
 // esp_init.h alongside the NVS helpers they gate on.
 
@@ -32,6 +37,50 @@ int counter = 0;
 bool firstCaptureDone = false;
 int lastCaptureDay = -1;
 unsigned long lastHeartbeatMs = 0;
+
+// App-side OTA rollback (#26 / manual T4). Counts consecutive boots in
+// PENDING_VERIFY state. Once the threshold is exceeded, calls
+// esp_ota_mark_app_invalid_rollback_and_reboot() which forces the
+// bootloader to revert to the previously-valid slot. Required because
+// arduino-esp32's prebuilt bootloader does NOT enable
+// CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE — without this app-side check,
+// a setup()-panicking slot would reboot forever.
+static void forceRollbackIfPendingTooLong() {
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  if (!running) return;
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  if (esp_ota_get_state_partition(running, &state) != ESP_OK) return;
+  // Trigger on either NEW (arduino-esp32's bootloader doesn't auto-transition
+  // to PENDING_VERIFY because CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is off in
+  // the prebuilt loader) or PENDING_VERIFY (if a future bootloader build does
+  // enable that path). A slot that's UNDEFINED, INVALID, ABORTED, or already
+  // VALID does not need our intervention.
+  if (state != ESP_OTA_IMG_NEW && state != ESP_OTA_IMG_PENDING_VERIFY) return;
+
+  Preferences p;
+  p.begin("ota", false);
+  uint32_t attempts = p.getUInt("pv_boots", 0) + 1;
+  p.putUInt("pv_boots", attempts);
+  p.end();
+
+  logf("[OTA] pending-verify boot %u/%u",
+       (unsigned)attempts, (unsigned)HF_OTA_MAX_PENDING_BOOTS);
+
+  if (attempts >= HF_OTA_MAX_PENDING_BOOTS) {
+    logf("[OTA] PENDING_VERIFY for %u boots — forcing rollback",
+         (unsigned)attempts);
+    // Reset the counter so the slot we roll back TO (which will boot
+    // next) starts fresh — otherwise a legitimate future OTA would
+    // see a stale counter and roll back prematurely.
+    Preferences q;
+    q.begin("ota", false);
+    q.putUInt("pv_boots", 0);
+    q.end();
+    delay(200);  // flush serial before reboot
+    esp_ota_mark_app_invalid_rollback_and_reboot();
+    // does not return
+  }
+}
 
 
 
@@ -104,6 +153,29 @@ void setup() {
   // reboot. host.cpp's runAccessPoint() also feeds it; loop() resets at top.
   esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
   esp_task_wdt_add(NULL);
+
+  // OTA rollback (#26) — app-side recovery for failed slots.
+  //
+  // Why this is here, not in the bootloader: arduino-esp32's prebuilt
+  // bootloader does NOT enable CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE,
+  // so a slot that fails to call esp_ota_mark_app_valid_cancel_rollback()
+  // will NOT be automatically rolled back by the ROM bootloader — it
+  // will just keep booting the broken slot forever. Manual T4 verified
+  // this: a setup()-time panic was retried 4+ times with no rollback.
+  //
+  // App-side fix: at every boot, if the running slot is still in
+  // PENDING_VERIFY state, increment a counter in NVS. If the counter
+  // crosses HF_OTA_MAX_PENDING_BOOTS, call
+  // esp_ota_mark_app_invalid_rollback_and_reboot() — this is an
+  // app-initiated rollback (works regardless of bootloader config). The
+  // counter is reset to 0 inside the mark_valid call at the end of
+  // setup() (so a healthy slot's next boot starts fresh).
+  //
+  // Threshold is 3: we allow this slot two retries (WiFi flake, transient
+  // network failure during init) before giving up. Any panic-on-setup
+  // failure mode reaches the threshold in <90 s of wall-clock time, well
+  // before an operator would notice and intervene.
+  forceRollbackIfPendingTooLong();
 
   Serial.println("------ ESP STARTED ------");
 
@@ -348,6 +420,15 @@ void setup() {
   // (mark_valid_cancel_rollback is idempotent for ESP_OTA_IMG_VALID).
   hf::breadcrumbSet("setup:ota_mark_valid");
   esp_ota_mark_app_valid_cancel_rollback();
+  // Slot confirmed good — clear the pending-verify boot counter so the
+  // next OTA's first boot starts at 0. Paired with the check at the top
+  // of setup() (see `forceRollbackIfPendingTooLong()`).
+  {
+    Preferences p;
+    p.begin("ota", false);
+    p.putUInt("pv_boots", 0);
+    p.end();
+  }
 
   Serial.println("[ESP] SETUP COMPLETE");
 

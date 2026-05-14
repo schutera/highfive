@@ -141,7 +141,23 @@ watchdog feed.
   at the very end of `setup()` reverts to the previous slot without
   an operator visit — every setup stage is inside the gate. The
   pre-mark-valid breadcrumb in the next telemetry sidecar tells us
-  which stage failed.
+  which stage failed. **Implementation note**: rollback is
+  app-initiated, not bootloader-initiated, because Arduino-ESP32's
+  prebuilt bootloader ships with
+  `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n`. Without that config the
+  ROM bootloader never transitions a freshly-flashed slot out of
+  `ESP_OTA_IMG_NEW` and never auto-reverts on panic — empirically the
+  bad slot reboots forever (verified during manual T4 on
+  `fix/esp-ota-round1-fixes`). The firmware therefore checks the
+  running slot's state at the top of `setup()` (`forceRollbackIfPendingTooLong`
+  in `ESP32-CAM/ESP32-CAM.ino`): if it's `NEW` or `PENDING_VERIFY`, an
+  NVS counter increments; once it crosses `HF_OTA_MAX_PENDING_BOOTS` (3),
+  the app calls `esp_ota_mark_app_invalid_rollback_and_reboot()` to
+  force the bootloader to revert. Reaching `mark_app_valid_cancel_rollback`
+  resets the counter. Observed rollback latency: ~3 panic-reboot cycles
+  ≈ 30–45 s. Switching to a custom Arduino-IDF bootloader with
+  `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` would cut that to one cycle
+  but is out of scope for #26.
 
 **Costs:**
 

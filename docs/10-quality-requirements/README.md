@@ -54,6 +54,16 @@ drives it with `tools/mock_esp.py`. Asserts:
 
 Run: `make test-e2e` (after `make test-e2e-deps`).
 
+### Manual hardware-in-the-loop tests (OTA)
+
+Four OTA flows cannot be exercised on CI because they require a real
+ESP32-CAM on the LAN. Procedures and observed-output reference for
+T2 (HTTP boot-pull), T3 (boot-heartbeat flicker), T4 (rollback), and
+T6 (ArduinoOTA LAN push) live in
+[manual-tests-ota.md](manual-tests-ota.md). Re-run them after any
+firmware change that touches `ota.cpp`, `ESP32-CAM.ino`'s `setup()`,
+`loop()`, or `platformio.ini`'s OTA env split.
+
 ## Repo-level wrappers
 
 ```bash

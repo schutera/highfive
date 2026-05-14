@@ -58,7 +58,7 @@ cd backend        && npm ci && npm test                       # vitest + superte
 cd homepage       && npm ci && npm test                       # vitest + jsdom, 8 smoke tests
 cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 24 tests
 cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 31 tests
-cd ESP32-CAM      && pio test -e native                       # Unity host tests, 38 tests
+cd ESP32-CAM      && pio test -e native                       # Unity host tests, 114 tests
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware
 ```
 
@@ -153,22 +153,25 @@ How to run it:
 - Address every P0 before pushing for review. P1s should be fixed or have an explicit "out of scope, tracked in issue #N" justification. P2s are nits and may be deferred.
 - Treat its findings as input, not as a verdict. If it claims something is wrong, verify against the code yourself — but do not dismiss without checking.
 
-## Open-issue roadmap
+## Shell environment
 
-Derived from the open issues as of 2026-05-10. Each section below maps to one planned PR. **Delete the section when the PR is opened** — that is the signal that the issues are in review and no longer need to live here. (PR A — the issue-#42 / #53 WDT fix — and PR B — the issue-#18 hardcoded Google Geolocation key fix — were both opened and deleted from this section; the list now starts at PR C.) After completion / deletion of the last section, remove this open-issue roadmap section entirely.
+The user's shell is **PowerShell 5.1** on Windows. When providing manual testing commands or setup instructions:
 
----
+- Always give **exact, copy-paste-ready commands** — no prose like "run the serial monitor", give the full command.
+- Set ports/hosts as variables first: `$PORT = "COM9"` — never use angle-bracket placeholders like `<COMx>` (PowerShell parses `<` as a redirection operator).
+- Write files with explicit encoding: `"value" | Out-File -NoNewline -Encoding ascii path\to\file` — PowerShell's default `>` redirect writes UTF-16 LE with BOM, which breaks Python `read_text(encoding="utf-8")`.
+- No `&&` chaining — use `;` or `if ($?) { ... }`.
+- Bash scripts (`build.sh`, `make`) run via `bash <script>` from PowerShell.
 
-### PR F — `feat/esp-ota` (later — closes #26)
+## Dev helper scripts
 
-OTA firmware update support. Requires a one-time breaking partition table change (USB flash required to get the first OTA-capable binary onto hardware).
+[`scripts/`](scripts/) holds repeatable dev utilities. Notable for OTA / firmware iteration:
 
-**Phase 1:** ArduinoOTA — update partition table to "Minimal SPIFFS with OTA", add `ArduinoOTA.begin()` in `setup()` and `ArduinoOTA.handle()` in the main loop. LAN-only.
-**Phase 2:** HTTP OTA — periodic version-check + self-update from a hosted `.bin` (e.g. GitHub Release asset). Enables remote updates without LAN access.
+- `scripts/esp_reset.py` — reset the ESP32-CAM via the CH340's RTS line (no physical button press needed).
+- `scripts/esp_capture.py` — reset + capture N seconds of serial in one process, useful when `pio device monitor` flakes on the ESP32-CAM-MB.
+- `scripts/esp_monitor.py` — passive serial capture (no reset), for observing an in-progress OTA cycle without disturbing setup() state.
 
-Do after the WDT fix (closes #42 / #53) and firmware housekeeping (PR D) are merged, to ensure a stable firmware baseline.
-
----
+See [`scripts/README.md`](scripts/README.md) for the full list and prerequisites.
 
 ## Branch model
 

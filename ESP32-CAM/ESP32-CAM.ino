@@ -5,11 +5,15 @@
 #include "led.h"
 #include "logbuf.h"
 #include "breadcrumb.h"
+#include "module_id.h"
+#include "ota.h"
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <SPIFFS.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
+#include <esp_ota_ops.h>
 
 
 #define HEARTBEAT_INTERVAL_MS (60UL * 60UL * 1000UL)  // 1 hour
@@ -19,6 +23,11 @@
 // the worst case. 60 s gives a safety margin while still rebooting on
 // genuine deadlocks within ~1 minute.
 #define TASK_WDT_TIMEOUT_S    60
+// Max consecutive boots a slot can stay in ESP_OTA_IMG_PENDING_VERIFY
+// before this firmware forces an app-side rollback. See
+// `forceRollbackIfPendingTooLong()` below and the comment that calls
+// it in setup() for the design context.
+#define HF_OTA_MAX_PENDING_BOOTS 3
 // FACTORY_RESET_SETTLE_MS and WIFI_FAIL_AP_FALLBACK_THRESH live in
 // esp_init.h alongside the NVS helpers they gate on.
 
@@ -28,6 +37,77 @@ int counter = 0;
 bool firstCaptureDone = false;
 int lastCaptureDay = -1;
 unsigned long lastHeartbeatMs = 0;
+
+// App-side OTA rollback (#26 / manual T4). Counts consecutive boots in
+// PENDING_VERIFY state. Once the threshold is exceeded, calls
+// esp_ota_mark_app_invalid_rollback_and_reboot() which forces the
+// bootloader to revert to the previously-valid slot. Required because
+// arduino-esp32's prebuilt bootloader does NOT enable
+// CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE — without this app-side check,
+// a setup()-panicking slot would reboot forever.
+static void forceRollbackIfPendingTooLong() {
+  // Manual T4 showed that gating on `esp_ota_get_state_partition()`
+  // does not work here: arduino-esp32's prebuilt loader leaves the
+  // ROM `app_state` field untouched, and `esp_ota_set_boot_partition`
+  // in the IDF version we ship can in practice leave a newly-flashed
+  // slot reporting ESP_OTA_IMG_VALID immediately. A check that
+  // returns early when state == VALID therefore silently skips every
+  // bricked OTA, which is what round-1 + round-2 of manual T4
+  // reproduced (mining slot heartbeat→abort→heartbeat→abort with no
+  // rollback ever firing).
+  //
+  // State-free design instead: count consecutive faulty reboots
+  // (panic/WDT/brownout) since the last successful mark-valid. A
+  // healthy slot's setup reaches the reset path at end-of-setup() and
+  // the counter cycles 0→0–1; a slot that crashes between this check
+  // and mark-valid accumulates monotonically until the threshold
+  // trips, at which point we force a bootloader-side rollback to the
+  // previous slot.
+  //
+  // Reset-reason gate: count only boots whose previous run died
+  // ungracefully (PANIC/TASK_WDT/INT_WDT/BROWNOUT). Clean reboots
+  // (POWERON, EXT, SW, DEEPSLEEP) do NOT increment, because the
+  // existing AP-fallback path in `setup()` and `setupWifiConnection`
+  // already calls `ESP.restart()` (reset_reason=SW) on three
+  // consecutive WiFi-join failures, and three of those in a row
+  // would otherwise hit `HF_OTA_MAX_PENDING_BOOTS = 3` and trigger a
+  // false rollback to old firmware on a transient WiFi outage. The
+  // collision was caught by senior-review of this PR before merge;
+  // see lessons-learned in chapter-11.
+  esp_reset_reason_t rr = esp_reset_reason();
+  const bool faulty = (rr == ESP_RST_PANIC) || (rr == ESP_RST_TASK_WDT) ||
+                      (rr == ESP_RST_INT_WDT) || (rr == ESP_RST_WDT) ||
+                      (rr == ESP_RST_BROWNOUT);
+  if (!faulty) return;
+
+  Preferences p;
+  p.begin("ota", false);
+  uint32_t attempts = p.getUInt("pv_boots", 0) + 1;
+  p.putUInt("pv_boots", attempts);
+  p.end();
+
+  logf("[OTA] faulty-boot %u/%u (reset_reason=%d)",
+       (unsigned)attempts, (unsigned)HF_OTA_MAX_PENDING_BOOTS, (int)rr);
+
+  if (attempts >= HF_OTA_MAX_PENDING_BOOTS) {
+    logf("[OTA] threshold reached — forcing rollback");
+    // Reset the counter so the slot we roll back TO (which will boot
+    // next) starts fresh — otherwise a legitimate future OTA would
+    // see a stale counter and roll back prematurely.
+    Preferences q;
+    q.begin("ota", false);
+    q.putUInt("pv_boots", 0);
+    q.end();
+    delay(200);  // flush serial before reboot
+    // App-initiated rollback works regardless of bootloader's
+    // CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE setting. Returns ESP_FAIL
+    // if there is no previous valid slot to roll back to — in that
+    // case we fall through and continue setup as usual (we have no
+    // better option; the slot will keep retrying until an operator
+    // intervenes via USB).
+    esp_ota_mark_app_invalid_rollback_and_reboot();
+  }
+}
 
 
 
@@ -100,6 +180,43 @@ void setup() {
   // reboot. host.cpp's runAccessPoint() also feeds it; loop() resets at top.
   esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
   esp_task_wdt_add(NULL);
+
+  // OTA rollback (#26) — app-side recovery for failed slots.
+  //
+  // Why this is here, not in the bootloader: arduino-esp32's prebuilt
+  // bootloader does NOT enable CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE,
+  // so a slot that fails to call esp_ota_mark_app_valid_cancel_rollback()
+  // will NOT be automatically rolled back by the ROM bootloader — it
+  // will just keep booting the broken slot forever. Manual T4 verified
+  // this: a setup()-time panic was retried 4+ times with no rollback.
+  //
+  // App-side fix: at the top of setup(), if the previous boot died
+  // ungracefully (panic/WDT/brownout), increment an NVS counter. When
+  // the counter crosses HF_OTA_MAX_PENDING_BOOTS, call
+  // esp_ota_mark_app_invalid_rollback_and_reboot() — this is an
+  // app-initiated rollback (works regardless of bootloader config). The
+  // counter is reset to 0 at the end of setup() (so a healthy slot's
+  // next boot starts fresh) and the fault gate prevents the counter
+  // from incrementing on clean ESP.restart() paths (AP-fallback, daily
+  // reboot, OTA post-flash boot) — see senior-review fix in the
+  // function body for why the bare "increment every boot" was a
+  // regression vector against transient WiFi outages.
+  //
+  // Hardware-faulty camera caveat: `initEspCamera`'s `abort()` on
+  // `esp_camera_init` failure (after the round-2 senior-review fix)
+  // also feeds this counter. A module with a physically broken camera
+  // module — independent of any OTA — will therefore appear to
+  // "spontaneously roll back" to its previous firmware after 3 boots.
+  // The end-state panic-loop is the same as before, but the
+  // operator-visible signals (fwVersion regression on the dashboard,
+  // `[OTA] faulty-boot N/3` + `[OTA] threshold reached — forcing
+  // rollback` on serial, even when no OTA was involved) may misdirect
+  // a field-debug session into hunting an OTA issue. Disambiguate via
+  // `esp_reset_reason()` value + the breadcrumb in the next telemetry
+  // sidecar — a camera-init crash sets the breadcrumb to
+  // `setup:initEspCamera`, an OTA-bricked slot to whichever stage
+  // panicked.
+  forceRollbackIfPendingTooLong();
 
   Serial.println("------ ESP STARTED ------");
 
@@ -186,6 +303,39 @@ void setup() {
   setupWifiConnection(&esp_config.wifi_config);
   logf("[STAGE] setupWifiConnection took=%lums", millis() - stageStartMs);
 
+  // ArduinoOTA (#26 phase 1). LAN push from PlatformIO via
+  // `pio run -t upload --upload-port=<module-ip>`. No auth — relies on
+  // the WiFi segment's physical security. Hostname includes the module
+  // ID so `pio device list` distinguishes modules on the same LAN.
+  hf::breadcrumbSet("setup:arduino_ota_begin");
+  stageStartMs = millis();
+  {
+    char otaHost[40];
+    snprintf(otaHost, sizeof(otaHost), "hivehive-%s",
+             hf::formatModuleId(esp_config.esp_ID).c_str());
+    ArduinoOTA.setHostname(otaHost);
+    ArduinoOTA.onStart([]() { logf("[OTA] LAN update start"); });
+    // Feed the task watchdog from inside the ArduinoOTA upload loop.
+    // ArduinoOTA.handle() is non-blocking on the no-upload path, but
+    // once an upload is in progress it stays inside `handle()` for the
+    // full transfer — at slow LAN speeds a 1 MB push can sit there
+    // past TASK_WDT_TIMEOUT_S=60. onProgress fires per chunk, so this
+    // is the canonical place to feed.
+    ArduinoOTA.onProgress([](unsigned int, unsigned int) { esp_task_wdt_reset(); });
+    ArduinoOTA.onError([](ota_error_t e) { logf("[OTA] LAN update error %u", (unsigned)e); });
+    ArduinoOTA.begin();
+  }
+  logf("[STAGE] arduino_ota_begin took=%lums", millis() - stageStartMs);
+
+  // HTTP OTA (#26 phase 2). Runs before getGeolocation/register so a
+  // recovery binary lands without first having to survive the rest of
+  // setup(). On success this call ESP.restart()s and never returns; on
+  // any failure it logs and falls through.
+  hf::breadcrumbSet("setup:http_ota_check");
+  stageStartMs = millis();
+  hf::httpOtaCheckAndApply(&esp_config);
+  logf("[STAGE] http_ota_check took=%lums", millis() - stageStartMs);
+
   hf::breadcrumbSet("setup:getGeolocation");
   stageStartMs = millis();
   getGeolocation(&esp_config);
@@ -213,13 +363,22 @@ void setup() {
   // falls through to the loop's `lastHeartbeatMs == 0` retry branch.
   // `sendHeartbeat` fails quiet — chapter-11 "Post-reflash dashboard
   // latency" carries the full rationale.
+  //
+  // OTA interaction: this heartbeat fires BEFORE camera init and BEFORE
+  // the mark-valid call at end-of-setup. On a first post-OTA boot, the
+  // new slot's fwVersion briefly appears on the dashboard while the slot
+  // is still pending-verify. If camera init then panics the slot rolls
+  // back, and the NEXT boot's heartbeat corrects the displayed version.
+  // Moving the heartbeat after mark-valid would fix the flicker but
+  // defeat the "freshness before slow camera init" benefit — keep both
+  // calls where they are and accept the cosmetic flicker as documented
+  // in docs/06-runtime-view/ota-update-flow.md's Rollback section.
   hf::breadcrumbSet("setup:sendHeartbeat:boot");
   stageStartMs = millis();
   if (sendHeartbeat(&esp_config) == 0) {
     lastHeartbeatMs = millis();
   }
   logf("[STAGE] sendHeartbeat:boot took=%lums", millis() - stageStartMs);
-
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
   */
@@ -283,6 +442,33 @@ void setup() {
       bootPrefs.putBool("daily_reboot", false);
     }
     bootPrefs.end();
+  }
+
+  // OTA rollback gate (#26). If this boot is the first boot after an
+  // OTA flash, the new slot is "pending verify" — the bootloader will
+  // revert to the previous slot on the next reset unless we mark this
+  // boot good. Placed at the very end of setup() — after WiFi,
+  // registration, camera init, AND the warm-up loop — so a binary
+  // that hard-faults in any setup stage auto-rolls back without
+  // manual intervention. (An earlier draft of this gate fired before
+  // camera init on the argument that recoverCamera() handles soft
+  // NULL-frame stalls; senior-review caught that recoverCamera does
+  // NOT recover from a driver-level panic or null-deref in
+  // initEspCamera/configure_camera_sensor, so a regression there
+  // would brick the slot permanently if mark-valid had already
+  // fired. The right threshold is "every stage that can panic has
+  // succeeded".) On a non-OTA boot the call is a no-op
+  // (mark_valid_cancel_rollback is idempotent for ESP_OTA_IMG_VALID).
+  hf::breadcrumbSet("setup:ota_mark_valid");
+  esp_ota_mark_app_valid_cancel_rollback();
+  // Slot confirmed good — clear the pending-verify boot counter so the
+  // next OTA's first boot starts at 0. Paired with the check at the top
+  // of setup() (see `forceRollbackIfPendingTooLong()`).
+  {
+    Preferences p;
+    p.begin("ota", false);
+    p.putUInt("pv_boots", 0);
+    p.end();
   }
 
   Serial.println("[ESP] SETUP COMPLETE");
@@ -401,6 +587,11 @@ void loop() {
   esp_task_wdt_reset();
   ledTick();
 
+  // ArduinoOTA poll (#26 phase 1). Non-blocking; the 30 s `delay` at
+  // the bottom of this loop caps the LAN-push responsiveness at 30 s,
+  // well within PlatformIO's default upload retry budget.
+  ArduinoOTA.handle();
+
   // Daily reboot safety net: prevents long-running drift (lwIP state, NVS
   // wear oddities, slow heap fragmentation). Triggers once at 24h uptime
   // and never again until the next boot resets millis(). Sets an NVS flag
@@ -454,13 +645,22 @@ void loop() {
     }
   }
 
-  // Feed the watchdog one more time before the long sleep so the 30 s
-  // delay starts the timer fresh. Combined with TASK_WDT_TIMEOUT_S=60,
-  // this guarantees the next loop iteration's work has at least 30 s
-  // of slack before the watchdog can fire.
-  // Set "loop:sleep" so a stuck delay() (impossible in practice but
-  // included for completeness) is identifiable post-reboot.
+  // The 30 s inter-capture sleep is implemented as a polling loop that
+  // calls ArduinoOTA.handle() once per second instead of a single
+  // delay(30000). Required for #26: espota.py opens a fresh UDP socket
+  // per invitation retry and only waits 10 s for the OK reply, so if
+  // handle() were called only once every 30 s the ESP's reply would
+  // land on a socket espota had already closed — exactly what made
+  // round-1 manual T6 fail with "No response from the ESP" even though
+  // the serial log showed `[OTA] LAN update start` firing. Polling at
+  // 1 Hz keeps the ESP responsive within espota's window; the loop
+  // also feeds the watchdog each second so TASK_WDT_TIMEOUT_S=60 stays
+  // valid. Set "loop:sleep" so a stuck poll (impossible in practice
+  // but included for completeness) is identifiable post-reboot.
   hf::breadcrumbSet("loop:sleep");
-  esp_task_wdt_reset();
-  delay(30000);  // check every 30 seconds
+  for (int i = 0; i < 30; ++i) {
+    ArduinoOTA.handle();
+    esp_task_wdt_reset();
+    delay(1000);
+  }
 }

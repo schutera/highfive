@@ -18,6 +18,15 @@ app.register_blueprint(nests_bp)
 app.register_blueprint(progress_bp)
 app.register_blueprint(heartbeats_bp)
 
+# Dev-only: /firmware.json + /firmware.app.bin proxy to homepage:5173.
+# In prod, host-nginx serves these directly from homepage static; this
+# blueprint stays unregistered. See routes/dev_ota_proxy.py for the
+# rationale and the env-var contract.
+if os.getenv("HIGHFIVE_DEV_OTA_PROXY", "false").lower() == "true":
+    from routes.dev_ota_proxy import dev_ota_proxy_bp
+
+    app.register_blueprint(dev_ota_proxy_bp)
+
 init_db()
 
 scheduler = BackgroundScheduler()

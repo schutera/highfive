@@ -1,0 +1,10 @@
+{
+  "name": "hf_ota_version",
+  "version": "0.1.0",
+  "description": "OTA manifest parsing and version comparison for HiveHive ESP32-CAM firmware. Pure C++17, host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

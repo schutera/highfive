@@ -1317,3 +1317,158 @@ That phrasing is intentionally left alone — ADRs record the
 decisions in force when written, not the running behaviour. The
 chapter-11 entry you're reading is where running-behaviour
 corrections live.
+
+### OTA migration is one-way: partition table change blocks the first OTA (issue #26)
+
+**What happened.** Issue #26 (closed by this PR) introduced OTA firmware
+updates for ESP32-CAM modules. The change required flipping the
+partition layout from the ESP32 default (single ~1.9 MB app slot, no
+OTA slots) to `min_spiffs` (two ~1.9 MB app slots — `app0`/`app1`
+— plus a smaller SPIFFS). The catch: **a module running the old
+partition layout cannot install the new partition layout via OTA**.
+The first OTA-capable binary still has to arrive via USB or the web
+installer's merged-bin flash; every subsequent update can then be
+wireless.
+
+**Why it happened.** The bootloader reads the partition table from
+flash offset `0x8000` at every boot. The OTA write path
+(`Update.write()` / `esp_ota_write()`) targets the inactive
+application slot — at offset `0x10000` or `0x1F0000` for the
+`min_spiffs` layout — and does **not** touch the partition-table
+region. So an OTA push to a module on the old single-slot layout has
+no second slot to write to; `Update.begin()` fails. Even if you
+contrived a way to write the new partition table directly to
+`0x8000`, you'd be doing an unsafe live edit of the bootloader's
+read source under a running application — there's a reason the OTA
+abstraction doesn't expose that surface. The clean answer is "first
+flash via USB; all subsequent flashes OTA".
+
+This makes the partition flip a **one-way migration gate**. Every
+module currently deployed in the field needs one final USB visit
+before it can participate in OTA. After that, no more USB visits.
+
+**How to avoid it next time.** Two complementary rules:
+
+1. **When introducing a feature whose enablement requires changing
+   a region that the feature itself does not control, document the
+   one-way migration explicitly — runtime view + deployment view +
+   ADR all at once.** A reader who finds only the runtime-view doc
+   ("here is how OTA works") will draft a "push the new firmware to
+   every field unit" plan without realising the first push to each
+   unit cannot succeed. The one-way step has to be impossible to
+   miss when planning a rollout.
+   [`docs/06-runtime-view/ota-update-flow.md`](../06-runtime-view/ota-update-flow.md),
+   [`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md)'s
+   "First-time OTA migration" subsection, and
+   [ADR-008](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md)'s
+   "Consequences" section all carry the warning so a future operator
+   coming in from any entry point hits it.
+
+2. **When the merged-bin web installer and the OTA fetch path
+   diverge in what they expect, make the divergence loud in the
+   build artifact, not in operator memory.**
+   [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh) publishes both
+   `homepage/public/firmware.bin` (merged: bootloader + partitions +
+   app, for the web installer) **and**
+   `homepage/public/firmware.app.bin` (app-only, for the OTA fetch),
+   each with its own md5 in the shared `firmware.json` manifest. The
+   filenames differ; the manifest fields differ
+   (`md5`/`built_at` for web installer,
+   `app_md5`/`app_size` for OTA). Two complementary guards keep them
+   from crossing:
+   - **Manifest-shape guard.** The
+     [`ESP32-CAM/lib/ota_version/`](../../ESP32-CAM/lib/ota_version/)
+     parser rejects manifests missing `app_md5`/`app_size`; the
+     native tests in `test/test_native_ota_version/` pin the wire
+     shape. A future contributor who removes `app_md5` from the
+     manifest emit-side gets a loud parse failure on every module's
+     next boot, not a silent bricking.
+   - **Artifact-correspondence guard.**
+     [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh) asserts
+     `firmware.app.bin` is strictly smaller than `firmware.bin`
+     before writing the manifest. A refactor that crosses the two
+     `cp` sources (or a change to esptool merge that flips the
+     sizes) fails the build loudly. Without this assertion the
+     manifest's MD5 would happily match whatever bytes
+     `firmware.app.bin` contains — including, by accident, the
+     merged image — and the OTA path would write bootloader bytes
+     onto the app slot at flash time.
+
+### OTA rollback isn't bootloader-driven on Arduino-ESP32 (PR-F manual T4)
+
+**What happened.** ADR-008's first cut described OTA rollback as ROM-
+bootloader work: "If the firmware crashes, watchdog-fires, or panics
+before reaching the gate, the bootloader reverts to the previous
+`ESP_OTA_IMG_VALID` slot on the next reset." Round-1 review accepted
+the design and the round-1 implementation gated an app-side
+forceRollback on `esp_ota_get_state_partition(running) ==
+ESP_OTA_IMG_NEW || ESP_OTA_IMG_PENDING_VERIFY`. Manual T4 (mining
+firmware with `abort()` before mark-valid) then reproduced an
+unrecoverable mining-boot loop — 4+ panic-reboot cycles, no rollback
+ever firing.
+
+**Why.** Two facts the IDF docs imply but don't make obvious to a
+reader of one chapter at a time:
+
+1. Arduino-ESP32 ships a **prebuilt** bootloader with
+   `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n`. Without that config the
+   ROM does not transition a new slot into `ESP_OTA_IMG_PENDING_VERIFY`
+   on first boot and does not roll back on subsequent panics — the
+   slot just keeps booting. So `esp_ota_mark_app_valid_cancel_rollback()`
+   in our setup() flow is **load-bearing for nothing** unless the app
+   itself takes action.
+2. `esp_ota_set_boot_partition()` in the IDF version arduino-esp32 v2
+   uses can in practice leave the new slot reporting
+   `ESP_OTA_IMG_VALID` immediately after `Update.end()`. Gating an
+   app-side check on "state != VALID" therefore also skips bad slots.
+   Round-2 of T4 reproduced this by widening the check; the loop
+   continued.
+
+The fix that actually fires is state-free: every faulty reboot
+(reset_reason ∈ {PANIC, TASK_WDT, INT_WDT, WDT, BROWNOUT}) increments an
+NVS counter, mark-valid at end of setup() resets it, threshold of 3
+forces `esp_ota_mark_app_invalid_rollback_and_reboot()`. Senior-
+review caught one more bug in this design: the early state-free
+draft incremented on **every** boot, which collided with
+`WIFI_FAIL_AP_FALLBACK_THRESH = 3` and would have triggered false
+rollback to old firmware on three consecutive transient WiFi outages.
+The reset-reason gate fixed that.
+
+**How to avoid next time.**
+
+- **Verify safety nets on hardware, not in IDF docs.** Anything that
+  claims "the bootloader will recover this" needs to be exercised by
+  deliberately bricking a slot on the same firmware build path that
+  ships. The unit-test surface for partition-state transitions is
+  essentially nil; what looks correct on a screen passes review and
+  still doesn't fire.
+- **Trust code, not the IDF version table.** arduino-esp32's
+  bootloader config differs from `idf.py menuconfig` defaults; the
+  prebuilt `bootloader.bin` is checked into the framework package and
+  is what ships, regardless of what the IDF version's docs imply.
+- **When a "transient failure" threshold and a "permanent failure"
+  threshold both default to 3 boots, they will collide.** Search
+  for other thresholds the new threshold could clash with before
+  declaring victory. Manual T4 surfaced this only because round-1
+  testing happened to retry WiFi connect at the same time the
+  forceRollback counter was incrementing — easy to miss otherwise.
+- **`ESP.restart()` from inside `setup()` is invisible to the
+  reset-reason gate.** Round-3 senior-review caught
+  `ESP32-CAM/esp_init.cpp`'s `initEspCamera` calling `ESP.restart()`
+  on `esp_camera_init` failure — producing `reset_reason=SW`, which
+  the gate treats as a clean reboot. A bricked OTA whose camera
+  driver fails to init would have reboot-looped forever without
+  triggering rollback. Use `abort()` (or `esp_system_abort()`) for
+  fatal-this-slot-is-broken signals in setup; reserve `ESP.restart()`
+  for "operator-initiated clean reboot" paths (AP-fallback,
+  captive-portal factory-reset, daily-reboot, upload-circuit-breaker
+  in `loop()`). Any future `ESP.restart()` added inside `setup()` is
+  a regression vector for this design.
+
+**Trail of the fix.** Commit `0ed2537` introduced the state-gated
+version (didn't fire); commit `9ad1658` rewrote it state-free (fires,
+but with the WIFI_FAIL collision); commit `deec615` added the
+reset-reason gate (closes WIFI_FAIL collision); a follow-up commit
+on the same branch changes `initEspCamera`'s `ESP.restart()` to
+`abort()` (closes the `ESP.restart()`-in-setup blind spot caught by
+senior-review round 2).

@@ -80,6 +80,11 @@ services:
       - .env
     environment:
       SEED_DATA: 'true'
+      # Dev-only: register /firmware.json + /firmware.app.bin proxy to
+      # homepage:5173 so the ESP can fetch OTA artifacts in dev. In
+      # prod, host-nginx serves these directly from homepage static.
+      HIGHFIVE_DEV_OTA_PROXY: 'true'
+      HOMEPAGE_DEV_URL: 'http://homepage:5173'
     restart: unless-stopped
     healthcheck:
       test:

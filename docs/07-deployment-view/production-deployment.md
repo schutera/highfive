@@ -251,6 +251,30 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
     }
 
+    # OTA firmware artifacts (#26). The ESP firmware fetches both files
+    # over plain HTTP because its WiFiClient does not do TLS. Pinned
+    # to exact-match locations (`location =`) so they take precedence
+    # over the catch-all 301-to-HTTPS below. Without these, every OTA
+    # check would land on the 301 and the device would log
+    # `[OTA] manifest HTTP 301` and skip. Tracked in ADR-008.
+    location = /firmware.json {
+        proxy_pass http://127.0.0.1:8081/firmware.json;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location = /firmware.app.bin {
+        proxy_pass http://127.0.0.1:8081/firmware.app.bin;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # The app-only binary is ~1 MB; a slow LAN client may take a
+        # while to drain it, so give nginx enough time to serve the
+        # full body without dropping the connection mid-stream.
+        proxy_read_timeout 120s;
+    }
+
     # Browser traffic for everything else: redirect to HTTPS.
     location / {
         return 301 https://$server_name$request_uri;
@@ -351,11 +375,19 @@ ESP firmware paths (HTTP, no `-f` because /upload returns 405 for HEAD):
 # a 301 to HTTPS. Pipe through grep so the test passes when 405 lands.
 curl -sSI http://highfive.schutera.com/upload | head -1
 curl -sSI http://highfive.schutera.com/heartbeat | head -1
+# OTA artifacts (#26). Both must return HTTP/1.1 200 (NOT 301) — see
+# ADR-008. The first time these are deployed, `firmware.app.bin` may
+# 404 until ESP32-CAM/build.sh has run; that's fine for the
+# infrastructure smoke-test but blocks Phase-2 OTA until the asset is
+# in place.
+curl -sSI http://highfive.schutera.com/firmware.json    | head -1
+curl -sSI http://highfive.schutera.com/firmware.app.bin | head -1
 ```
 
-If either returns `HTTP/1.1 301 Moved Permanently` with a `Location:
-https://...` header, the firmware-proxy `location =` blocks aren't
-matching — check `nginx -t` and the order of server blocks.
+If any of these returns `HTTP/1.1 301 Moved Permanently` with a
+`Location: https://...` header, the firmware-proxy `location =`
+blocks aren't matching — check `nginx -t` and the order of server
+blocks.
 
 The cert lineage on disk uses the first `-d` value as the directory
 name. Confirm with:

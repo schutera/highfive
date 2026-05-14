@@ -52,6 +52,14 @@ export default defineConfig({
   // `?url` and Vite will emit them with content hashes.
   assetsInclude: ['**/*.bin', '**/*.FCStd'],
   server: {
+    // Allow sibling containers on the docker-compose `net` bridge to
+    // fetch firmware.json / firmware.app.bin from this Vite dev server.
+    // Vite 5+ rejects requests whose `Host` header isn't explicitly
+    // allowed; without this, duckdb-service's dev OTA proxy (see
+    // duckdb-service/routes/dev_ota_proxy.py) gets 403 instead of the
+    // artifact. Dev-only impact: production homepage runs nginx, not
+    // Vite, so this setting is inert in prod.
+    allowedHosts: ['homepage', 'localhost'],
     proxy: {
       // Proxy requests to the ESP module's config portal (bypasses CORS in dev)
       '/esp-api': {

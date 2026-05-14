@@ -287,10 +287,10 @@ verify. If camera init panics and the slot rolls back, the next boot's
 heartbeat corrects the displayed version automatically.
 
 If the new firmware fails to reach the
-`esp_ota_mark_app_valid_cancel_rollback()` call at the end of
-`setup()` — because any stage (WiFi join, registration, camera init)
-panics or watchdog-fires — the ESP32 bootloader reverts to the
-previous slot on the next reset. No operator action needed.
+`esp_ota_mark_app_valid_cancel_rollback()` call at the very end of
+`setup()` — because any setup stage panics or watchdog-fires — the
+ESP32 bootloader reverts to the previous slot on the next reset. No
+operator action needed.
 Operator-visible: the dashboard keeps reporting the **old** version
 on that module, and the next telemetry sidecar carries a breadcrumb
 naming which setup stage the new firmware died in.

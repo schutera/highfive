@@ -70,9 +70,8 @@ Four coupled choices, made together so they actually compose:
 
 2. **Two-slot rollback enabled, gated on full setup completion.** The
    firmware calls `esp_ota_mark_app_valid_cancel_rollback()` at the
-   very end of `setup()` — after WiFi join, OTA check, registration,
-   boot heartbeat, camera init, and the camera warm-up loop. An
-   earlier draft (round 1) fired the call immediately after
+   very end of `setup()` — every setup stage is inside the gate.
+   An earlier draft (round 1) fired the call immediately after
    `initNewModuleOnServer`, on the argument that `recoverCamera()`
    (per ADR-007) handles camera-init failures in software. Round-2
    review caught that `recoverCamera()` only addresses soft NULL-frame
@@ -139,10 +138,10 @@ watchdog feed.
   doesn't.
 - Auto-rollback for bricked binaries. A bad firmware push that panics
   or watchdog-fires before `esp_ota_mark_app_valid_cancel_rollback()`
-  at the end of `setup()` reverts to the previous slot without an
-  operator visit. The gate covers WiFi join, registration, camera
-  init, and the camera warm-up loop. The pre-mark-valid breadcrumb in
-  the next telemetry sidecar tells us which stage failed.
+  at the very end of `setup()` reverts to the previous slot without
+  an operator visit — every setup stage is inside the gate. The
+  pre-mark-valid breadcrumb in the next telemetry sidecar tells us
+  which stage failed.
 
 **Costs:**
 

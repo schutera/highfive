@@ -146,18 +146,31 @@ watchdog feed.
   prebuilt bootloader ships with
   `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n`. Without that config the
   ROM bootloader never transitions a freshly-flashed slot out of
-  `ESP_OTA_IMG_NEW` and never auto-reverts on panic — empirically the
-  bad slot reboots forever (verified during manual T4 on
-  `fix/esp-ota-round1-fixes`). The firmware therefore checks the
-  running slot's state at the top of `setup()` (`forceRollbackIfPendingTooLong`
-  in `ESP32-CAM/ESP32-CAM.ino`): if it's `NEW` or `PENDING_VERIFY`, an
-  NVS counter increments; once it crosses `HF_OTA_MAX_PENDING_BOOTS` (3),
-  the app calls `esp_ota_mark_app_invalid_rollback_and_reboot()` to
-  force the bootloader to revert. Reaching `mark_app_valid_cancel_rollback`
-  resets the counter. Observed rollback latency: ~3 panic-reboot cycles
-  ≈ 30–45 s. Switching to a custom Arduino-IDF bootloader with
-  `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` would cut that to one cycle
-  but is out of scope for #26.
+  `ESP_OTA_IMG_NEW`, and `esp_ota_set_boot_partition()` may in
+  practice leave the slot reporting `ESP_OTA_IMG_VALID`
+  immediately — so neither the ROM nor any state-based check can
+  distinguish "this slot has not been verified to work" from "this
+  slot is the long-known-good one". Manual T4 reproduced this twice
+  on `fix/esp-ota-round1-fixes`: the bad slot rebooted indefinitely.
+
+  The firmware therefore uses a **state-free counter** at the top of
+  `setup()` (`forceRollbackIfPendingTooLong` in
+  `ESP32-CAM/ESP32-CAM.ino`): every boot increments an NVS counter
+  (`Preferences` namespace `ota`, key `pv_boots`); reaching
+  `esp_ota_mark_app_valid_cancel_rollback()` at end-of-`setup()`
+  resets it. A healthy slot's setup completes and the counter
+  cycles 0→1→0 per boot; a bricked slot's setup never reaches the
+  reset and the counter accumulates monotonically. Once it crosses
+  `HF_OTA_MAX_PENDING_BOOTS` (3), the app calls
+  `esp_ota_mark_app_invalid_rollback_and_reboot()`, which forces the
+  bootloader to mark the running slot invalid and revert to the
+  previous valid one on the next reset. Verified end-to-end on
+  hardware in manual T4: ~3 incomplete-setup boots ≈ 30–60 s.
+  Switching to a custom Arduino-IDF bootloader with
+  `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` would let us gate on
+  partition state instead of incomplete-setup count, but the
+  state-free design is robust to bootloader-config drift and is
+  good enough for #26.
 
 **Costs:**
 

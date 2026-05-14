@@ -46,29 +46,38 @@ unsigned long lastHeartbeatMs = 0;
 // CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE — without this app-side check,
 // a setup()-panicking slot would reboot forever.
 static void forceRollbackIfPendingTooLong() {
-  const esp_partition_t* running = esp_ota_get_running_partition();
-  if (!running) return;
-  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
-  if (esp_ota_get_state_partition(running, &state) != ESP_OK) return;
-  // Trigger on either NEW (arduino-esp32's bootloader doesn't auto-transition
-  // to PENDING_VERIFY because CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is off in
-  // the prebuilt loader) or PENDING_VERIFY (if a future bootloader build does
-  // enable that path). A slot that's UNDEFINED, INVALID, ABORTED, or already
-  // VALID does not need our intervention.
-  if (state != ESP_OTA_IMG_NEW && state != ESP_OTA_IMG_PENDING_VERIFY) return;
-
+  // Manual T4 showed that gating on `esp_ota_get_state_partition()`
+  // does not work here: arduino-esp32's prebuilt loader leaves the
+  // ROM `app_state` field untouched, and `esp_ota_set_boot_partition`
+  // in the IDF version we ship can in practice leave a newly-flashed
+  // slot reporting ESP_OTA_IMG_VALID immediately. A check that
+  // returns early when state == VALID therefore silently skips every
+  // bricked OTA, which is what round-1 + round-2 of manual T4
+  // reproduced (mining slot heartbeat→abort→heartbeat→abort with no
+  // rollback ever firing).
+  //
+  // State-free design instead: count every boot since the last
+  // successful mark-valid. The reset path at the end of setup() runs
+  // *only* if the rest of setup() did not panic/WDT/abort. A healthy
+  // slot therefore stays at 0–1; a slot that crashes between this
+  // check and mark-valid accumulates monotonically until the
+  // threshold trips, at which point we force a bootloader-side
+  // rollback to the previous slot.
+  //
+  // Threshold = 3: allows two retries for transient WiFi / network
+  // flakes during setup. Total wall-clock time to rollback is
+  // ~3 × (boot + WiFi + heartbeat + abort) ≈ 30–60 s.
   Preferences p;
   p.begin("ota", false);
   uint32_t attempts = p.getUInt("pv_boots", 0) + 1;
   p.putUInt("pv_boots", attempts);
   p.end();
 
-  logf("[OTA] pending-verify boot %u/%u",
+  logf("[OTA] unverified-boot %u/%u",
        (unsigned)attempts, (unsigned)HF_OTA_MAX_PENDING_BOOTS);
 
   if (attempts >= HF_OTA_MAX_PENDING_BOOTS) {
-    logf("[OTA] PENDING_VERIFY for %u boots — forcing rollback",
-         (unsigned)attempts);
+    logf("[OTA] threshold reached — forcing rollback");
     // Reset the counter so the slot we roll back TO (which will boot
     // next) starts fresh — otherwise a legitimate future OTA would
     // see a stale counter and roll back prematurely.
@@ -77,8 +86,13 @@ static void forceRollbackIfPendingTooLong() {
     q.putUInt("pv_boots", 0);
     q.end();
     delay(200);  // flush serial before reboot
+    // App-initiated rollback works regardless of bootloader's
+    // CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE setting. Returns ESP_FAIL
+    // if there is no previous valid slot to roll back to — in that
+    // case we fall through and continue setup as usual (we have no
+    // better option; the slot will keep retrying until an operator
+    // intervenes via USB).
     esp_ota_mark_app_invalid_rollback_and_reboot();
-    // does not return
   }
 }
 

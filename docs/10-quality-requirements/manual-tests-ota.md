@@ -110,11 +110,11 @@ ADR-007 daily reboot exercises it.
    ```
 4. Trigger a module reset:
    ```powershell
-   python c:\tmp\esp_reset.py COM9
+   python scripts\esp_reset.py COM9
    ```
-   (`esp_reset.py` toggles RTS to drive EN low briefly. The same
-   logic is inline in `c:\tmp\esp_capture.py` for combined
-   reset-and-capture runs.)
+   (`scripts/esp_reset.py` toggles RTS to drive EN low briefly. The
+   same logic is inline in `scripts/esp_capture.py` for combined
+   reset-and-capture runs. See `scripts/README.md`.)
 
 **Expected output**:
 
@@ -181,35 +181,41 @@ operator visit needed.
    ```
 5. Trigger module reset:
    ```powershell
-   python c:\tmp\esp_reset.py COM9
+   python scripts\esp_reset.py COM9
    ```
 
-**Expected behaviour** (observed in heartbeat history — newest first):
+**Expected behaviour** (observed live during the round-2 manual run on
+`fix/esp-ota-round1-fixes` against module `192.168.178.121`):
 
 ```
-received_at         fw_version  uptime_ms
-2026-05-14T11:45:30 leafcutter      9700   <-- app-initiated rollback fired, mark-valid passed
-2026-05-14T11:45:00 mining          8000   <-- mining boot #2 (pv_boots NVS counter = 2), aborts
-2026-05-14T11:44:35 mining          8000   <-- mining boot #1 (pv_boots = 1), aborts
-2026-05-14T11:44:00 leafcutter     12700   <-- pre-T4 stable state
+received_at         fw_version  uptime_ms   pv_boots after this boot
+2026-05-14T12:45:30 leafcutter      6926    0  (mark-valid reset)  <- ROLLBACK FIRED
+2026-05-14T12:45:00 mining          7000    3  (boot 3 triggers rollback — no heartbeat from this boot)
+2026-05-14T12:44:50 mining          7000    2
+2026-05-14T12:44:40 mining          7000    1
+2026-05-14T12:44:00 leafcutter     12200    0  <- pre-T4 stable state
 ```
 
-The third mining boot crosses `HF_OTA_MAX_PENDING_BOOTS = 3`,
-`forceRollbackIfPendingTooLong()` calls
-`esp_ota_mark_app_invalid_rollback_and_reboot()`, and that boot
-never reaches the heartbeat — instead the bootloader reverts and
-the next heartbeat is from the leafcutter slot.
+The state-free counter at the top of `setup()` (`forceRollbackIfPendingTooLong`)
+increments `Preferences("ota").pv_boots` on every boot. The reset to 0
+happens inside the `esp_ota_mark_app_valid_cancel_rollback()` block at
+the end of `setup()` — so a slot whose setup never reaches the end
+(e.g. `abort();` before mark-valid) leaves the counter monotonic.
+Boot 3 crosses `HF_OTA_MAX_PENDING_BOOTS = 3`,
+`esp_ota_mark_app_invalid_rollback_and_reboot()` fires before the
+heartbeat, and the next reset is into the previous valid slot.
 
 Observed latency from first `mining` boot to recovered `leafcutter`
-boot: ~3 panic-reboot cycles ≈ 30–45 s. The rollback is forced by
-the app-side `forceRollbackIfPendingTooLong()` check at the top of
-`setup()` in `ESP32-CAM/ESP32-CAM.ino`, NOT by the ROM bootloader.
-Without the app-side check the slot would reboot indefinitely
-(verified empirically on the same hardware before adding the check):
-Arduino-ESP32's prebuilt bootloader ships with
-`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n` and never auto-transitions
-a slot out of `ESP_OTA_IMG_NEW`, so `esp_ota_mark_app_valid_cancel_rollback()`
-alone is not load-bearing for recovery. See
+boot: ~3 cycles × ~10 s/cycle ≈ 30–45 s in the round-2 run
+(reproduces every time once the firmware in BOTH slots carries the
+state-free counter — the OLDER round-1 firmware with a state-gated
+check looped indefinitely). The rollback is forced by the app, NOT
+by the ROM bootloader: Arduino-ESP32's prebuilt bootloader ships
+with `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n` and never transitions
+a slot out of `ESP_OTA_IMG_NEW`, so neither
+`esp_ota_mark_app_valid_cancel_rollback()` nor any
+`esp_ota_get_state_partition()`-based check is load-bearing for
+recovery. See
 [../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md).
 
 **Cleanup (mandatory before commit)**: revert the `abort();` edit,
@@ -229,6 +235,7 @@ release name with full uptime growing past 30 s.
 - `ESP32-CAM/build_dev_artifact.py` — generates `firmware.app.bin` +
   `firmware.json` from PIO output without invoking `arduino-cli`. Use
   for T2/T4 dev iteration. The release path stays `build.sh`.
-- `c:\tmp\esp_reset.py` / `esp_capture.py` — pyserial helpers that
-  toggle RTS to reset the chip without a physical button press. Lives
-  in the dev's tmp folder; not checked in.
+- `scripts/esp_reset.py` / `esp_capture.py` / `esp_monitor.py` —
+  pyserial helpers for resetting the chip and capturing serial output
+  without a physical button press or the interactive `pio device monitor`.
+  See [`scripts/README.md`](../../scripts/README.md).

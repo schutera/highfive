@@ -78,14 +78,13 @@ sequenceDiagram
 ESP32 OTA partitions are managed by the ROM bootloader. A freshly-
 flashed slot enters `ESP_OTA_IMG_NEW` state and the bootloader runs
 it exactly once. If the firmware reaches the
-`esp_ota_mark_app_valid_cancel_rollback()` call — placed at the very
-end of `setup()`, after WiFi join, registration, boot heartbeat,
-camera init, and camera warm-up — the slot transitions to
-`ESP_OTA_IMG_VALID`. If the firmware crashes, watchdog-fires, or
-panics before reaching the gate, the bootloader reverts to the
-previous `ESP_OTA_IMG_VALID` slot on the next reset.
+`esp_ota_mark_app_valid_cancel_rollback()` call at the very end of
+`setup()` — every setup stage is inside the gate — the slot
+transitions to `ESP_OTA_IMG_VALID`. If the firmware crashes,
+watchdog-fires, or panics before reaching the gate, the bootloader
+reverts to the previous `ESP_OTA_IMG_VALID` slot on the next reset.
 
-The gate covers every setup stage that can panic: the boot heartbeat
+The boot heartbeat
 fires before mark-valid, so a new-`fwVersion` heartbeat may briefly
 appear on the server while the slot is still pending verify. If
 camera init then panics and the slot rolls back, the next boot's

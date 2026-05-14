@@ -69,7 +69,9 @@ arduino-cli compile \
   --output-dir "${BUILD_DIR}" \
   --libraries "${SKETCH_DIR}/lib" \
   --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\"" \
-  --build-property "build.partitions=min_spiffs" \  # no .csv — arduino-cli takes the preset name, not a filename
+  # no .csv here — arduino-cli takes the preset name; platformio.ini
+  # uses min_spiffs.csv because PIO's lookup requires the .csv suffix.
+  --build-property "build.partitions=min_spiffs" \
   "${SKETCH_DIR}"
 
 # Post-compile guard. The contract: FIRMWARE_VERSION must land in the

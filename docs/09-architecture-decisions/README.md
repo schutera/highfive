@@ -17,6 +17,7 @@ and link backwards.
 | [006](adr-006-bee-name-firmware-versioning.md)             | ESP firmware uses bee-species names as version identifiers              | Accepted |
 | [007](adr-007-esp-reliability-breaker-and-daily-reboot.md) | ESP reliability — circuit breaker + daily reboot + camera PWDN recovery | Accepted |
 | [008](adr-008-firmware-ota-partition-and-rollback.md)      | Firmware OTA — partition layout, two-slot rollback, dual-binary publish | Accepted |
+| [010](adr-010-esp-firmware-tls-trust-model.md)             | ESP firmware TLS — CA-pinned trust anchors for highfive.schutera.com    | Accepted |
 
 ## When to create an ADR
 

@@ -10,11 +10,17 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
+#include "tls_roots.h" // hf::tls::kIsrgRootX1Pem — issue #79
 
-static WiFiClient client;
+// Module-level keep-alive client for /upload. WiFiClientSecure rather
+// than WiFiClient since #79 — TLS handshake is paid on the first
+// connect, subsequent uploads reuse the session. setCACert is called
+// inside the !connected() reuse branch in postImage, before connect.
+static WiFiClientSecure client;
 
 /*
   Creates unique filename of format: esp_capture_YYYYMMDDhhmmss.jpg
@@ -113,6 +119,13 @@ int postImage(esp_config_t *esp_config) {
   hf::breadcrumbSet("postImage:connect");
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
+    // Pin against ISRG Root X1 (Let's Encrypt) before every fresh
+    // connect — setCACert just stores the pointer and is cheap, but
+    // it MUST run on a non-connected client (calling it on an open
+    // socket is undefined behaviour in mbedTLS). The PEM lives in
+    // .rodata via [lib/tls_roots/tls_roots.h], program lifetime, so
+    // the pointer outlives every reuse. Issue #79.
+    client.setCACert(hf::tls::kIsrgRootX1Pem);
     if (!client.connect(url.host.c_str(), url.port)) {
       logf("[HTTP] connect failed to %s:%u",
            url.host.c_str(), (unsigned)url.port);
@@ -122,7 +135,7 @@ int postImage(esp_config_t *esp_config) {
       return -2;
     }
     // Set socket options AFTER connect so the underlying fd exists.
-    // Setting them on a not-yet-connected WiFiClient triggers a
+    // Setting them on a not-yet-connected WiFiClientSecure triggers a
     // harmless but noisy "[E] WiFiClient.cpp:320 setSocketOption():
     // fail on -1, errno: 9, Bad file number" from the Arduino-ESP32
     // framework — the previous code paid that cost on every boot.
@@ -236,7 +249,11 @@ int sendHeartbeat(esp_config_t *esp_config) {
   // Canonical 12-char lowercase-hex module ID (same as /upload + /new_module).
   String macStr = String(hf::formatModuleId(esp_config->esp_ID).c_str());
 
-  WiFiClient hbClient;
+  // Fresh TLS connection per heartbeat — no keep-alive in this path,
+  // so the handshake cost is paid each hour. Pin against ISRG Root X1
+  // (Let's Encrypt). Issue #79.
+  WiFiClientSecure hbClient;
+  hbClient.setCACert(hf::tls::kIsrgRootX1Pem);
   hbClient.setTimeout(5000);
   // Issue #42 instrumentation: breadcrumb at each section boundary
   // inside sendHeartbeat — the per-issue suspect list calls heartbeat

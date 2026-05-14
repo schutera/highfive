@@ -59,4 +59,104 @@ std::string resolveKeepCurrentField(const std::string& submitted,
     return submitted.substr(first, last - first + 1);
 }
 
+FormUrlParts splitUrlForForm(const std::string& url) {
+    FormUrlParts out;
+    if (url.empty()) return out;
+
+    const std::size_t schemeEnd = url.find("://");
+    if (schemeEnd == std::string::npos) return out;  // not a URL
+
+    const std::size_t hostStart = schemeEnd + 3;
+    if (hostStart >= url.size()) {
+        // Just `scheme://` with no host — treat as malformed; pass
+        // through to base so the operator sees what they entered.
+        out.base = url;
+        return out;
+    }
+
+    // End of host is either ':' (explicit port follows) or '/' (path
+    // follows) or end-of-string.
+    const std::size_t hostEnd = url.find_first_of(":/", hostStart);
+    if (hostEnd == std::string::npos) {
+        // `scheme://host` — no port, no path.
+        out.base = url;
+        return out;
+    }
+
+    out.base = url.substr(0, hostEnd);
+
+    std::size_t pathStart;
+    if (url[hostEnd] == ':') {
+        const std::size_t portStart = hostEnd + 1;
+        pathStart = url.find('/', portStart);
+        const std::size_t portEnd =
+            (pathStart == std::string::npos) ? url.size() : pathStart;
+        out.port = url.substr(portStart, portEnd - portStart);
+    } else {
+        // url[hostEnd] == '/' — path starts here, no explicit port.
+        pathStart = hostEnd;
+    }
+
+    if (pathStart != std::string::npos && pathStart < url.size()) {
+        // Strip the leading '/' on the path so it renders as an
+        // endpoint name (e.g. "upload") rather than "/upload".
+        const std::size_t endpointStart =
+            (url[pathStart] == '/') ? pathStart + 1 : pathStart;
+        if (endpointStart < url.size()) {
+            out.endpoint = url.substr(endpointStart);
+        }
+    }
+    return out;
+}
+
+namespace {
+
+bool portMatchesSchemeDefault(const std::string& base,
+                              const std::string& port) {
+    if (port == "80" && base.rfind("http://", 0) == 0) return true;
+    if (port == "443" && base.rfind("https://", 0) == 0) return true;
+    return false;
+}
+
+void rtrimSlash(std::string& s) {
+    while (!s.empty() && s.back() == '/') s.pop_back();
+}
+
+void ltrimSlash(std::string& s) {
+    std::size_t i = 0;
+    while (i < s.size() && s[i] == '/') ++i;
+    if (i > 0) s.erase(0, i);
+}
+
+}  // namespace
+
+std::string rewriteLegacyHighfiveUrl(const std::string& url) {
+    static const char* kLegacyPrefix = "http://highfive.schutera.com";
+    static const std::size_t kLegacyPrefixLen = 28;  // strlen above
+    if (url.size() < kLegacyPrefixLen) return url;
+    if (url.compare(0, kLegacyPrefixLen, kLegacyPrefix) != 0) return url;
+    // Match. Compose the migrated value: "https://" + remainder.
+    return std::string("https://") + url.substr(7);
+}
+
+std::string joinUrlFromForm(const std::string& base,
+                            const std::string& port,
+                            const std::string& endpoint) {
+    std::string normBase = base;
+    std::string normEndpoint = endpoint;
+    rtrimSlash(normBase);
+    ltrimSlash(normEndpoint);
+
+    std::string out = normBase;
+    if (!port.empty() && !portMatchesSchemeDefault(normBase, port)) {
+        out += ":";
+        out += port;
+    }
+    if (!normEndpoint.empty()) {
+        if (!out.empty()) out += "/";
+        out += normEndpoint;
+    }
+    return out;
+}
+
 }  // namespace hf

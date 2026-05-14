@@ -137,15 +137,34 @@ Navigate to **http://192.168.4.1**
 
 ### 3. Fill in the configuration form
 
-| Field                   | Value                                                                 |
-| ----------------------- | --------------------------------------------------------------------- |
-| Module Name             | Any label, e.g. `hive-01`                                             |
-| Wi-Fi SSID              | Your 2.4 GHz network name (case-sensitive — copy-paste, don't retype) |
-| Wi-Fi Password          | Your network password                                                 |
-| Initialization Base URL | `http://<LAN-IP>:8002`                                                |
-| Initialization Endpoint | `/new_module`                                                         |
-| Upload Base URL         | `http://<LAN-IP>:8000`                                                |
-| Upload Endpoint         | `/upload`                                                             |
+| Field                   | LAN dev value                                                         | Production value                       |
+| ----------------------- | --------------------------------------------------------------------- | -------------------------------------- |
+| Module Name             | Any label, e.g. `hive-01`                                             | Any label, e.g. `hive-01`              |
+| Wi-Fi SSID              | Your 2.4 GHz network name (case-sensitive — copy-paste, don't retype) | Same                                   |
+| Wi-Fi Password          | Your network password                                                 | Same                                   |
+| Initialization Base URL | `http://<LAN-IP>`                                                     | `https://highfive.schutera.com`        |
+| Initialization Port     | `8002`                                                                | (leave empty — implicit 443 for HTTPS) |
+| Initialization Endpoint | `new_module`                                                          | `new_module`                           |
+| Upload Base URL         | `http://<LAN-IP>`                                                     | `https://highfive.schutera.com`        |
+| Upload Port             | `8000`                                                                | (leave empty)                          |
+| Upload Endpoint         | `upload`                                                              | `upload`                               |
+
+The captive-portal form splits each URL into three inputs since #79
+([ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)):
+**Base URL** (scheme + host, no port, no trailing slash), **Port**
+(numeric, empty means the scheme default — 80 for http, 443 for https),
+and **Endpoint** (path with no leading slash). The port-as-separate-field
+shape exists so a production module on `https://highfive.schutera.com`
+and a LAN-dev module on `http://10.0.0.5:8002` use the same form
+without the operator having to retype the protocol-and-colon-and-port
+substring.
+
+> **Modules onboarded before firmware version `mason`** will auto-migrate
+> their saved URL from `http://highfive.schutera.com/...` to
+> `https://highfive.schutera.com/...` on the first boot after the OTA.
+> The migration is idempotent and re-saves SPIFFS once. LAN-dev URLs
+> (`http://10.0.0.5:8002/...`) are not touched — they keep using plain
+> HTTP because there is no TLS endpoint on the dev box.
 
 > **2.4 GHz only.** The ESP32 does not support 5 GHz. If your router shows a single SSID for both bands (band steering), the ESP32 should be assigned to 2.4 GHz automatically — but if it fails to connect, check your router's band-steering settings.
 

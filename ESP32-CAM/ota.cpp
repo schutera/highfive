@@ -9,7 +9,9 @@
 #include <Update.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
+#include "tls_roots.h" // hf::tls::kIsrgRootX1Pem — issue #79
 
 #include <cstring>
 #include <string>
@@ -114,7 +116,11 @@ bool sendGet(WiFiClient& c, const std::string& host, uint16_t port,
     c.print(path.c_str());
     c.print(" HTTP/1.1\r\nHost: ");
     c.print(host.c_str());
-    if (port != 80) {
+    // Omit the explicit ":<port>" when it matches the scheme default
+    // (80 for HTTP, 443 for HTTPS) — RFC 7230 §5.4 says the Host header
+    // SHOULD omit a default-port specifier, and some upstreams normalise
+    // virthost lookup on the literal Host string.
+    if (port != 80 && port != 443) {
         c.print(":");
         c.print(port);
     }
@@ -140,22 +146,30 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
         logf("[OTA] no host in INIT_URL — skipping");
         return;
     }
-    // The WiFiClient HTTP plumbing here does not do TLS — refuse https
-    // INIT_URLs loudly rather than silently downgrade to http and have
-    // the request 301 or fail mid-stream. The captive portal does not
-    // accept https INIT_URL today, but an operator pasting from a
-    // browser can introduce one. A signed-update / TLS story belongs
-    // in a follow-up ADR.
-    if (initParsed.scheme != "http" && !initParsed.scheme.empty()) {
-        logf("[OTA] non-http scheme '%s' in INIT_URL — skipping",
-             initParsed.scheme.c_str());
-        return;
-    }
-    const uint16_t port = initParsed.port ? initParsed.port : 80;
+    // OTA traffic uses verified TLS to the same host as the rest of
+    // the firmware's calls (highfive.schutera.com). #79 added the
+    // server-trust infrastructure and migrated the heartbeat / upload
+    // / registration paths; this fetch piggybacks on the same trust
+    // anchor (ISRG Root X1). LAN-dev topologies that put the homepage
+    // on a different port / host are still honoured — the operator's
+    // INIT_URL is parsed as-is and the same scheme+port are used here.
+    // Originally tracked separately as issue #81; folded in.
+    const bool useTls = (initParsed.scheme == "https");
+    const uint16_t port = initParsed.port ? initParsed.port :
+                          (useTls ? 443 : 80);
 
     // ---- Manifest fetch ----
+    // The TLS handshake heap (~30 KB transient) is in scope of the
+    // function — only one of `client` / `binClient` is alive at a
+    // time, so we don't double-pay the BearSSL context cost.
     hf::breadcrumbSet("ota:manifest_fetch");
-    WiFiClient client;
+    WiFiClientSecure tlsClient;
+    WiFiClient plainClient;
+    WiFiClient& client = useTls ? static_cast<WiFiClient&>(tlsClient)
+                                : plainClient;
+    if (useTls) {
+        tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
+    }
     client.setTimeout(10);  // seconds, applies to read
 
     if (!sendGet(client, initParsed.host, port, "/firmware.json")) {
@@ -231,8 +245,18 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
          (unsigned)manifest.app_size, manifest.app_md5);
 
     // ---- Binary fetch + Update.write streaming ----
+    // Fresh client for the second hop. The manifest's `client` went
+    // out of scope (Connection: close), freeing its TLS context, so
+    // this BearSSL handshake re-pays the heap cost — still cheaper
+    // than holding two TLS contexts open simultaneously.
     hf::breadcrumbSet("ota:binary_fetch");
-    WiFiClient binClient;
+    WiFiClientSecure tlsBinClient;
+    WiFiClient plainBinClient;
+    WiFiClient& binClient = useTls ? static_cast<WiFiClient&>(tlsBinClient)
+                                   : plainBinClient;
+    if (useTls) {
+        tlsBinClient.setCACert(hf::tls::kIsrgRootX1Pem);
+    }
     binClient.setTimeout(15);
 
     if (!sendGet(binClient, initParsed.host, port, "/firmware.app.bin")) {

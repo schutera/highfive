@@ -31,6 +31,8 @@ Accepted in any of these forms:
 
 Applied to all `/api/modules*` routes.
 
+Since [ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md) the ESP32-CAM firmware speaks verified TLS (CA-pinned to ISRG Root X1) to `highfive.schutera.com`, so the API key no longer appears in clear-text on any LAN hop between a module and the server. The shared-secret authorization model is otherwise unchanged.
+
 ## Admin gate
 
 Defined inline in [`backend/src/app.ts`](../../backend/src/app.ts)

@@ -73,6 +73,45 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Plaintext API key on the wire was the default for months (issue #79)
+
+**What happened.** The shipped `ESP32-CAM/config.json` baked
+`http://highfive.schutera.com/upload` and `.../new_module` as the
+factory defaults. Every flashed module sent the `HIGHFIVE_API_KEY`,
+operator email, image bodies, and hourly telemetry in clear-text
+over WiFi. A single passive `tcpdump` on any LAN segment between a
+module and the server captured the shared admin secret and granted
+full server compromise — the same key gates `/api/modules*` and the
+admin telemetry surface. The production server was already serving
+HTTPS on every relevant path (Let's Encrypt R13 → ISRG Root X1,
+HSTS set on the API + upload responses); the firmware was the
+sole HTTP consumer because nobody had checked.
+
+**Why it happened.** The firmware predated the production deployment.
+The early-development URLs were LAN dev (`http://10.0.0.5:8002/...`)
+where TLS is unavailable and not worth setting up. When the project
+moved to a Mark-hosted box, the LAN-dev shape persisted in
+`config.json` as `http://highfive.schutera.com/...` — same scheme,
+new host, same lack of TLS — because nobody probed the new server's
+HTTPS capability before committing the defaults. The
+`HTTPClient` calls already had `https://` support via the framework's
+`WiFiClientSecure`; no firmware change was needed to start using
+TLS, only a URL-scheme flip and CA-pinning.
+
+**How to avoid it next time.** Probe the production server's TLS
+capability the first time the firmware points at it, not after
+n months of shipping plaintext. A two-line `curl.exe -sI
+https://prod.example.com/upload` is enough to discover whether
+HTTPS is already served — and if it is, the firmware-side migration
+is purely a URL-scheme flip plus a CA root embed. The
+`getGeolocation` path in `ESP32-CAM/esp_init.cpp` was a second
+silent leak: it already used `https://googleapis.com` but with no
+`setCACert`, so the WiFi-fingerprint payload was encrypted but
+unauthenticated to the peer. Both lessons collapse into a single
+rule: when a firmware call site is `https://`, it must also be
+CA-pinned. See [ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)
+for the trust-model decision and the embedded-roots design.
+
 ### Setup wizard shipped two silent-success bugs (issues #43, #44)
 
 **What happened.** Two failure modes in the setup wizard were

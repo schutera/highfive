@@ -5,7 +5,7 @@
 #include <esp_task_wdt.h>
 #include "esp_init.h"   // setESPConfigured
 #include "firmware_defaults.h" // hf::defaults::k*FormFallback (issue #66)
-#include "form_query.h" // hf::urlDecode, hf::getParam, hf::resolveKeepCurrentField (host-testable)
+#include "form_query.h" // hf::urlDecode, hf::getParam, hf::resolveKeepCurrentField, hf::splitUrlForForm, hf::joinUrlFromForm (host-testable)
 #include "led.h"        // ledTick during the AP server loop
 #include <string>
 
@@ -94,7 +94,20 @@ void loadConfig() {
   cfg_ssid        = doc["NETWORK"]["SSID"]           | "";
   cfg_password    = doc["NETWORK"]["PASSWORD"]       | "";
   cfg_upload_url  = doc["NETWORK"]["UPLOAD_URL"]     | "";
-  cfg_init_url  = doc["NETWORK"]["INIT_URL"]     | "";
+  cfg_init_url    = doc["NETWORK"]["INIT_URL"]       | "";
+
+  // Mirror the legacy-http migration esp_init.cpp::loadConfig applies
+  // on the main-firmware boot path. host.cpp::loadConfig runs on the
+  // captive-portal entry, which is after WiFi-auth has failed three
+  // times (auto-AP fallback) or on an explicit factory reset — in the
+  // common case esp_init.cpp will have already migrated SPIFFS, so
+  // this is a defensive in-memory rewrite. The captive portal does
+  // NOT re-save on read; the operator must click Save to persist.
+  // See lib/firmware_defaults/firmware_defaults.h for the dual-reader
+  // contract this honours, and rewriteLegacyHighfiveUrl in
+  // lib/form_query/ for the prefix-match rule. Issue #79.
+  cfg_upload_url = String(hf::rewriteLegacyHighfiveUrl(std::string(cfg_upload_url.c_str())).c_str());
+  cfg_init_url   = String(hf::rewriteLegacyHighfiveUrl(std::string(cfg_init_url.c_str())).c_str());
 
   // Form-prefill fallbacks. Asymmetric on purpose with the production
   // reader in `esp_init.cpp`'s `loadConfig` (form prefills the operator-
@@ -174,27 +187,35 @@ void saveConfig() {
   ----------------------------------
 */
 void sendConfigForm(WiFiClient &client, bool saved = false) {
-  // Split cfg_*_url into base + endpoint for pre-filling. When the URL is
-  // empty (first-boot / post-erase), prefill the endpoint with the wire-
-  // protocol constant so the operator doesn't have to retype "upload" /
-  // "new_module" on every fresh onboarding. These paths are pinned by
-  // `image-service/app.py`'s `upload_image` route and
-  // `duckdb-service/routes/modules.py`'s `add_module` route respectively.
-  String uploadBase = cfg_upload_url;
-  String uploadEndpoint = "upload";
-  int lastSlash = uploadBase.lastIndexOf('/');
-  if (lastSlash > 7) { // after "http://", "https://"
-    uploadEndpoint = uploadBase.substring(lastSlash + 1);
-    uploadBase = uploadBase.substring(0, lastSlash);
-  }
+  // Three-fields-per-URL pre-fill (issue #79). Logic lives in
+  // hf::splitUrlForForm (lib/form_query/) so test_native_form_query
+  // pins the split shape. Port defaults to the LAN-dev convention
+  // (8002 for init, 8000 for upload) ONLY when no URL is saved —
+  // first-boot. On reconfigure the stored URL's port (which may be
+  // empty for production https://highfive.schutera.com) wins so the
+  // operator doesn't see a phantom "8002" appear on a production
+  // module. Endpoint defaults likewise — first-boot prefills the
+  // wire-protocol constants (`upload` / `new_module`) pinned by
+  // `image-service/app.py::upload_image` and
+  // `duckdb-service/routes/modules.py::add_module`.
+  hf::FormUrlParts uploadParts = hf::splitUrlForForm(std::string(cfg_upload_url.c_str()));
+  hf::FormUrlParts initParts   = hf::splitUrlForForm(std::string(cfg_init_url.c_str()));
 
-  String initBase = cfg_init_url;
-  String initEndpoint = "new_module";
-  int lastSlashInit = initBase.lastIndexOf('/');
-  if (lastSlashInit > 7) { // after "http://", "https://"
-    initEndpoint = initBase.substring(lastSlashInit + 1);
-    initBase = initBase.substring(0, lastSlashInit);
-  }
+  String uploadBase     = String(uploadParts.base.c_str());
+  String uploadPort     = (cfg_upload_url.length() == 0)
+                              ? "8000"
+                              : String(uploadParts.port.c_str());
+  String uploadEndpoint = uploadParts.endpoint.empty()
+                              ? "upload"
+                              : String(uploadParts.endpoint.c_str());
+
+  String initBase       = String(initParts.base.c_str());
+  String initPort       = (cfg_init_url.length() == 0)
+                              ? "8002"
+                              : String(initParts.port.c_str());
+  String initEndpoint   = initParts.endpoint.empty()
+                              ? "new_module"
+                              : String(initParts.endpoint.c_str());
 
 
   client.println("HTTP/1.1 200 OK");
@@ -266,6 +287,22 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   "      f.classList.remove('error-field');"
   "      return;"
   "    }"
+  // data-keep-empty (issue #79) — port fields are legitimately
+  // empty when the URL uses an implicit scheme-default port
+  // (e.g. 443 for https). Numeric range is enforced by the
+  // input's min/max plus a defensive parseInt check below.
+  "    if(f.dataset.keepEmpty==='1' && f.value===''){"
+  "      f.classList.remove('error-field');"
+  "      return;"
+  "    }"
+  "    if(f.type==='number' && f.value!==''){"
+  "      const n=parseInt(f.value,10);"
+  "      if(isNaN(n)||n<(parseInt(f.min,10)||0)||n>(parseInt(f.max,10)||0x7fffffff)){"
+  "        f.classList.add('error-field');"
+  "        valid=false;"
+  "        return;"
+  "      }"
+  "    }"
   "    if(f.type!=='hidden' && f.value.trim()===''){"
   "      f.classList.add('error-field');"
   "      valid=false;"
@@ -336,24 +373,39 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<input type=\"password\" name=\"password\"" + pwKeepAttr + " value=\"\" placeholder=\"" + pwHint + "\">");
   client.println("</div>");
 
+  // Three fields per URL since #79: base, port, endpoint. Port is
+  // its own input so production (`https://highfive.schutera.com`,
+  // implicit :443) and LAN dev (`http://10.0.0.5:8002`) share the
+  // same shape — the operator only types numbers in one place. Flex
+  // sizes intentionally non-uniform: base is the widest input, port
+  // is the narrowest. Empty port is permitted (data-keep-empty="1")
+  // so production submissions don't fail validation.
   client.println("<div class=\"row\">");
-  client.println("<div class=\"field\">");
+  client.println("<div class=\"field\" style=\"flex:3\">");
   client.println("<label>Initialization Base URL</label>");
   client.println("<input type=\"text\" name=\"init_base\" value=\"" + initBase + "\">");
   client.println("</div>");
-  client.println("<div class=\"field\">");
-  client.println("<label>Initialization Endpoint</label>");
+  client.println("<div class=\"field\" style=\"flex:1\">");
+  client.println("<label>Port</label>");
+  client.println("<input type=\"number\" name=\"init_port\" min=\"1\" max=\"65535\" data-keep-empty=\"1\" value=\"" + initPort + "\">");
+  client.println("</div>");
+  client.println("<div class=\"field\" style=\"flex:1\">");
+  client.println("<label>Endpoint</label>");
   client.println("<input type=\"text\" name=\"init_endpoint\" value=\"" + initEndpoint + "\">");
   client.println("</div>");
   client.println("</div>");
 
   client.println("<div class=\"row\">");
-  client.println("<div class=\"field\">");
+  client.println("<div class=\"field\" style=\"flex:3\">");
   client.println("<label>Upload Base URL</label>");
   client.println("<input type=\"text\" name=\"upload_base\" value=\"" + uploadBase + "\">");
   client.println("</div>");
-  client.println("<div class=\"field\">");
-  client.println("<label>Upload Endpoint</label>");
+  client.println("<div class=\"field\" style=\"flex:1\">");
+  client.println("<label>Port</label>");
+  client.println("<input type=\"number\" name=\"upload_port\" min=\"1\" max=\"65535\" data-keep-empty=\"1\" value=\"" + uploadPort + "\">");
+  client.println("</div>");
+  client.println("<div class=\"field\" style=\"flex:1\">");
+  client.println("<label>Endpoint</label>");
   client.println("<input type=\"text\" name=\"upload_endpoint\" value=\"" + uploadEndpoint + "\">");
   client.println("</div>");
   client.println("</div>");
@@ -514,50 +566,42 @@ void runAccessPoint() {
                     // test/test_native_form_query/.
                     cfg_password = resolveKeepCurrentField(getParam(query, "password"), cfg_password);
 
-                    // NEW: split URL fields
+                    // Three-fields-per-URL form (issue #79). Read base, port,
+                    // endpoint; trim each; recombine via hf::joinUrlFromForm so
+                    // the slash-normalisation + scheme-default-port-stripping
+                    // is pinned by test_native_form_query rather than inlined
+                    // here. Empty port submissions are normal (production
+                    // https://highfive.schutera.com on implicit :443) — the
+                    // joiner omits ":port" for empty values.
                     String uploadBase     = getParam(query, "upload_base");
+                    String uploadPort     = getParam(query, "upload_port");
                     String uploadEndpoint = getParam(query, "upload_endpoint");
 
+                    String initBase       = getParam(query, "init_base");
+                    String initPort       = getParam(query, "init_port");
+                    String initEndpoint   = getParam(query, "init_endpoint");
 
-                    // initURL
-                    String initBase     = getParam(query, "init_base");
-                    String initEndpoint = getParam(query, "init_endpoint");
-
-                    // Normalise and combine into cfg_upload_url
                     uploadBase.trim();
+                    uploadPort.trim();
                     uploadEndpoint.trim();
                     initBase.trim();
+                    initPort.trim();
                     initEndpoint.trim();
 
-                    // upload
-                    if (uploadBase.endsWith("/")) {
-                      uploadBase.remove(uploadBase.length() - 1);
-                    }
-                    if (uploadEndpoint.startsWith("/")) {
-                      uploadEndpoint = uploadEndpoint.substring(1);
-                    }
-
-                    if (uploadBase.length() > 0 && uploadEndpoint.length() > 0) {
-                      cfg_upload_url = uploadBase + "/" + uploadEndpoint;
-                    } else {
-                      // if no endpoint, just store base
-                      cfg_upload_url = uploadBase;
-                    }
-
-                    // init
-                    if (initBase.endsWith("/")) {
-                      initBase.remove(initBase.length() - 1);
-                    }
-                    if (initEndpoint.startsWith("/")) {
-                      initEndpoint = initEndpoint.substring(1);
-                    }
-
-                    if (initBase.length() > 0 && initEndpoint.length() > 0) {
-                      cfg_init_url = initBase + "/" + initEndpoint;
-                    } else {
-                      // if no endpoint, just store base
-                      cfg_init_url = initBase;
-                    }
+                    cfg_upload_url = String(
+                        hf::joinUrlFromForm(
+                            std::string(uploadBase.c_str()),
+                            std::string(uploadPort.c_str()),
+                            std::string(uploadEndpoint.c_str())
+                        ).c_str()
+                    );
+                    cfg_init_url = String(
+                        hf::joinUrlFromForm(
+                            std::string(initBase.c_str()),
+                            std::string(initPort.c_str()),
+                            std::string(initEndpoint.c_str())
+                        ).c_str()
+                    );
 
                     cfg_resolution  = getParam(query, "res");
                     cfg_vflip       = getParam(query, "vflip").toInt();

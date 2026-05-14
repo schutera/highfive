@@ -1,26 +1,37 @@
 """Dev-only firmware-artifact generator.
 
-`build.sh` is the canonical release path: it uses `arduino-cli` to produce
-both the merged `firmware.bin` (web installer) and the app-only
-`firmware.app.bin` (OTA), and writes the `firmware.json` manifest with
-md5 + size for both.
+`build.sh` is the canonical release path: it uses `arduino-cli` to
+produce both the merged `firmware.bin` (web installer) and the
+app-only `firmware.app.bin` (OTA), and writes a `firmware.json`
+manifest carrying md5 + size for both.
 
-In a dev environment without `arduino-cli` installed, this script takes
-the PIO build's existing `firmware.bin` (which IS the app-only image —
-PIO does not produce a merged binary) and writes JUST the OTA-relevant
-artifacts: `homepage/public/firmware.app.bin` and a `firmware.json`
-manifest carrying `version`, `app_md5`, `app_size`. The merged
-`firmware.bin` field is left empty / matched to the app binary; the
-web installer path is not exercised by this script. T2 (HTTP boot-pull
-OTA) is the only flow this serves.
+In a dev environment without `arduino-cli` installed, this script
+takes the PIO build's existing `firmware.bin` (which IS the app-only
+image — PIO does not produce a merged binary) and writes JUST the
+OTA-relevant artifacts:
+
+  - `homepage/public/firmware.app.bin` — copy of the PIO app binary.
+  - `homepage/public/firmware.json` — manifest with `version`,
+    `built_at`, `app_md5`, `app_size`. NO `md5` field (which would
+    integrity-check the merged binary), because we don't have a
+    merged binary to point at.
+  - `homepage/public/firmware.bin` — DELETED if it existed. The web
+    installer downloads this path to flash a fresh module; leaving
+    a stale release-built merged binary on disk paired with our dev
+    manifest would silently flash old bootloader bytes onto a fresh
+    module. Deleting forces a visible 404 at download time.
+
+Net result: only the T2 (HTTP boot-pull OTA) flow is exercised by
+artifacts this script produces. The web installer is disabled until
+the next `bash ESP32-CAM/build.sh` regenerates the merged binary
+plus a full release manifest.
 
 Usage (from repo root or ESP32-CAM/):
     python ESP32-CAM/build_dev_artifact.py
 
 Reads VERSION from `ESP32-CAM/VERSION`. Reads PIO output from
-`ESP32-CAM/.pio/build/esp32cam/firmware.bin` (run `pio run -e esp32cam`
-first if missing). Writes `homepage/public/firmware.app.bin` and
-`homepage/public/firmware.json`.
+`ESP32-CAM/.pio/build/esp32cam/firmware.bin` (run `pio run -e
+esp32cam` first if missing).
 """
 
 from __future__ import annotations

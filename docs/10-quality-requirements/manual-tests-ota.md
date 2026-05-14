@@ -184,40 +184,55 @@ operator visit needed.
    python scripts\esp_reset.py COM9
    ```
 
-**Expected behaviour — heartbeat schema** (what `duckdb-service`'s
-`/heartbeats/<id>` actually records: `module_id`, `battery`, `rssi`,
-`uptime_ms`, `free_heap`, `fw_version`). The pattern of `fw_version`
-across consecutive heartbeats during a T4 cycle, observed live on
-`192.168.178.121` against `fix/esp-ota-round1-fixes` after the
-reset-reason gate landed:
+**Expected behaviour — heartbeat schema.** `duckdb-service`'s
+`module_heartbeats` table stores `module_id, battery, rssi,
+uptime_ms, free_heap, fw_version` and `received_at` (set by
+`duckdb-service/routes/heartbeats.py`'s `post_heartbeat`). The
+`/heartbeats/<id>` GET returns the same fields minus `module_id`
+(it's in the URL). The table below is copy-paste from
+`Invoke-RestMethod -Uri http://localhost:8002/heartbeats/e89fa9f23a08
+?limit=10` during the round-3 manual run on `192.168.178.121` —
+nothing inferred:
 
 ```
 received_at         fw_version  uptime_ms
-14:15:29 UTC        mining          6998   <- mining boot (post-rollback cycle 2)
-14:15:20 UTC        mining          7106
-14:15:10 UTC        mining          6888   <- ~26 s gap before this — rollback + leafcutter OTA-restart-before-heartbeat
-14:14:44 UTC        mining          7109   <- mining boot 4 (counter crosses 3 here, NO heartbeat from this boot in cycle 1)
-14:14:34 UTC        mining          7184
-14:14:24 UTC        mining          8162
+14:15:29 UTC        mining          6998   <- cycle 2 boot 3 — heartbeat fired
+14:15:20 UTC        mining          7106   <- cycle 2 boot 2 — heartbeat fired
+14:15:10 UTC        mining          6888   <- cycle 2 boot 1 — heartbeat fired
+14:14:44 UTC        mining          7109   <- cycle 1 boot 3 — heartbeat fired
+14:14:34 UTC        mining          7184   <- cycle 1 boot 2 — heartbeat fired
+14:14:24 UTC        mining          8162   <- cycle 1 boot 1 — heartbeat fired
 ```
 
-The 3-then-gap-then-3 cadence is the rollback signal: cycle 1 fires 3
-mining heartbeats from boots whose `esp_reset_reason()` was either SW
-(first boot of new slot) or PANIC (abort). Boot 4's `forceRollbackIfPendingTooLong`
-crosses `HF_OTA_MAX_PENDING_BOOTS = 3`, calls
-`esp_ota_mark_app_invalid_rollback_and_reboot()` BEFORE the
-heartbeat fires, and reboots into the previous (leafcutter) slot. The
-leafcutter slot then fetches the still-mining manifest in
-`httpOtaCheckAndApply`, downloads it, and `ESP.restart()`s into the
-new mining slot — also before the leafcutter slot can fire its own
-boot heartbeat. The 26 s gap captures the entire
-rollback+leafcutter+OTA+restart sequence; the next heartbeat is the
-new mining slot's boot heartbeat, starting cycle 2.
+Annotations are derived, not from the table: each visible row IS a
+heartbeat (boots that fired their boot-heartbeat call). The boot
+that triggers rollback fires `esp_ota_mark_app_invalid_rollback_and_reboot()`
+at the top of `setup()` BEFORE the heartbeat path runs, so it
+produces no row at all — those "phantom" boots are inferred from
+the gap timing, not visible in the table. Same for the leafcutter
+slot's brief life between rollback and the next OTA download: its
+`httpOtaCheckAndApply` runs before `sendHeartbeat:boot`, so the
+re-OTA happens without ever surfacing a leafcutter heartbeat.
 
-**Expected behaviour — serial log** (what `python scripts\esp_capture.py
-COM9 90` shows; this is the ground-truth evidence for the rollback
-firing — heartbeats alone cannot confirm whether the counter actually
-crossed the threshold):
+The 3-then-gap-then-3 cadence is the rollback signal: each cycle
+shows three mining heartbeats whose `esp_reset_reason()` was SW
+(boot 1, first boot of new OTA slot — clean SW reboot from
+`Update.end()`'s `ESP.restart()`) followed by PANIC (boots 2 and 3,
+after `abort()`). Boot 4 of each cycle (not visible) crosses
+`HF_OTA_MAX_PENDING_BOOTS = 3`, fires the rollback, and the
+~26 s wall-clock gap captures the rollback + leafcutter boot +
+re-OTA + new mining slot boot — only that new boot's heartbeat is
+recorded, starting the next cycle.
+
+**Expected behaviour — serial log.** This block predicts the
+patterns `python scripts\esp_capture.py COM9 90` will emit during a
+T4 cycle — the exact log strings come from the `Serial` /
+`logf` calls in `ESP32-CAM/ESP32-CAM.ino`'s `forceRollbackIfPendingTooLong`
+and the surrounding setup() flow. A run that does NOT show
+`[OTA] faulty-boot N/3` followed eventually by
+`[OTA] threshold reached — forcing rollback` is a regression
+(rollback isn't firing). Capture verbatim during your own bench run
+if you want a literal trace; the strings to grep for are:
 
 ```
 [BOOT] fw=mining reset_reason=3 boot_count=N  <- first mining boot; rr=3 = ESP_RST_SW, doesn't count

@@ -183,6 +183,38 @@ watchdog feed.
   partition state instead, but the state-free design is robust to
   bootloader-config drift and is good enough for #26.
 
+  **Invariants for future maintainers.** The rollback gate's
+  correctness depends on two constraints; both were surfaced by
+  senior-review of this PR and the trail of failures is in chapter 11
+  ([`docs/11-risks-and-technical-debt/README.md`](../11-risks-and-technical-debt/README.md)'s
+  "OTA rollback isn't bootloader-driven on Arduino-ESP32" entry).
+  Future changes to firmware setup() or NVS keys must preserve them:
+  1. **No setup-time `ESP.restart()` for fatal-this-slot-is-broken
+     signals.** `esp_reset_reason()` returns `ESP_RST_SW` after an
+     `ESP.restart()` call, which the gate deliberately treats as a
+     clean reboot (so AP-fallback doesn't trip the rollback counter).
+     A fatal init failure that uses `ESP.restart()` therefore bypasses
+     the counter entirely and the slot reboots forever with no
+     recovery. Use `abort()` or `esp_system_abort()` instead — the
+     panic handler produces `reset_reason=ESP_RST_PANIC`, which the
+     gate counts. The four existing `ESP.restart()` sites
+     (`ESP32-CAM/esp_init.cpp`'s `setupWifiConnection`, the
+     AP-fallback branch in `ESP32-CAM/ESP32-CAM.ino`'s `setup()`, the
+     daily-reboot and upload-circuit-breaker branches in
+     `ESP32-CAM/ESP32-CAM.ino`'s `loop()`, and the captive-portal
+     factory-reset path in `ESP32-CAM/host.cpp`) are all intentional
+     clean reboots — they don't violate this invariant. New ones
+     in `setup()` would.
+
+  2. **`HF_OTA_MAX_PENDING_BOOTS` cannot collide with another
+     setup-fault threshold.** Currently `WIFI_FAIL_AP_FALLBACK_THRESH`
+     is also 3 boots, but it uses clean `ESP.restart()` so the gate
+     filters it out. Any new threshold added to setup() that counts
+     boots and reboots via panic/WDT — or any decrease in the
+     reset-reason gate's filter — risks the same collision the
+     round-2 reviewer found. Search for other "after N boots
+     restart" patterns before changing either constant.
+
 **Costs:**
 
 - **One-way migration.** Every existing module in the field must be

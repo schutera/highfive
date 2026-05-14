@@ -201,6 +201,17 @@ void setup() {
   // reboot, OTA post-flash boot) — see senior-review fix in the
   // function body for why the bare "increment every boot" was a
   // regression vector against transient WiFi outages.
+  //
+  // Hardware-faulty camera caveat: `initEspCamera`'s `abort()` on
+  // `esp_camera_init` failure (after the round-2 senior-review fix)
+  // also feeds this counter. A module with a physically broken camera
+  // module — independent of any OTA — will therefore appear to
+  // "spontaneously roll back" to its previous firmware after 3 boots.
+  // The end-state panic-loop is the same as before, but the
+  // operator-visible signal (fwVersion regression on the dashboard)
+  // may misdirect a field-debug session into hunting an OTA issue.
+  // Look at `esp_reset_reason()` and the breadcrumb in the next
+  // telemetry sidecar to disambiguate.
   forceRollbackIfPendingTooLong();
 
   Serial.println("------ ESP STARTED ------");

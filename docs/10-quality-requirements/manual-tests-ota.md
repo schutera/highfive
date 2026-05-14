@@ -189,10 +189,12 @@ operator visit needed.
 uptime_ms, free_heap, fw_version` and `received_at` (set by
 `duckdb-service/routes/heartbeats.py`'s `post_heartbeat`). The
 `/heartbeats/<id>` GET returns the same fields minus `module_id`
-(it's in the URL). The table below is copy-paste from
-`Invoke-RestMethod -Uri http://localhost:8002/heartbeats/e89fa9f23a08
-?limit=10` during the round-3 manual run on `192.168.178.121` —
-nothing inferred:
+(it's in the URL). The table below is excerpted from
+`Invoke-RestMethod -Uri http://localhost:8002/heartbeats/e89fa9f23a08?limit=10`
+during the round-3 manual run on `192.168.178.121`; the
+`received_at` ISO timestamps are abbreviated to time-only and only
+the six T4-cycle rows are shown — the actual response carries full
+`2026-05-14T14:15:29.xxxxxx` and ten rows by default:
 
 ```
 received_at         fw_version  uptime_ms
@@ -216,9 +218,11 @@ re-OTA happens without ever surfacing a leafcutter heartbeat.
 
 The 3-then-gap-then-3 cadence is the rollback signal: each cycle
 shows three mining heartbeats whose `esp_reset_reason()` was SW
-(boot 1, first boot of new OTA slot — clean SW reboot from
-`Update.end()`'s `ESP.restart()`) followed by PANIC (boots 2 and 3,
-after `abort()`). Boot 4 of each cycle (not visible) crosses
+(boot 1, first boot of new OTA slot — clean SW reboot from the
+explicit `ESP.restart()` after `Update.end()` in
+`ESP32-CAM/ota.cpp`'s `httpOtaCheckAndApply`) followed by PANIC
+(boots 2 and 3, after `abort()`). Boot 4 of each cycle (not visible)
+crosses
 `HF_OTA_MAX_PENDING_BOOTS = 3`, fires the rollback, and the
 ~26 s wall-clock gap captures the rollback + leafcutter boot +
 re-OTA + new mining slot boot — only that new boot's heartbeat is

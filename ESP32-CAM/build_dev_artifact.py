@@ -3,7 +3,8 @@
 `build.sh` is the canonical release path: it uses `arduino-cli` to
 produce both the merged `firmware.bin` (web installer) and the
 app-only `firmware.app.bin` (OTA), and writes a `firmware.json`
-manifest carrying md5 + size for both.
+manifest carrying `version`, `md5` (of the merged binary), `built_at`,
+`app_md5`, and `app_size`.
 
 In a dev environment without `arduino-cli` installed, this script
 takes the PIO build's existing `firmware.bin` (which IS the app-only

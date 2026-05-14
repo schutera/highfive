@@ -197,14 +197,31 @@ watchdog feed.
      the counter entirely and the slot reboots forever with no
      recovery. Use `abort()` or `esp_system_abort()` instead — the
      panic handler produces `reset_reason=ESP_RST_PANIC`, which the
-     gate counts. The four existing `ESP.restart()` sites
-     (`ESP32-CAM/esp_init.cpp`'s `setupWifiConnection`, the
-     AP-fallback branch in `ESP32-CAM/ESP32-CAM.ino`'s `setup()`, the
-     daily-reboot and upload-circuit-breaker branches in
-     `ESP32-CAM/ESP32-CAM.ino`'s `loop()`, and the captive-portal
-     factory-reset path in `ESP32-CAM/host.cpp`) are all intentional
-     clean reboots — they don't violate this invariant. New ones
-     in `setup()` would.
+     gate counts. The six existing `ESP.restart()` sites in the
+     firmware (per `git grep "ESP\.restart()" ESP32-CAM/`) are all
+     intentional clean reboots, none of which violate this invariant:
+     - `ESP32-CAM/esp_init.cpp`'s `setupWifiConnection` — WiFi-join
+       timeout, intentional retry.
+     - `ESP32-CAM/ESP32-CAM.ino`'s `setup()` AP-fallback branch —
+       operator-triggered reconfigure.
+     - `ESP32-CAM/ESP32-CAM.ino`'s `loop()` daily-reboot — ADR-007
+       drift safety net.
+     - `ESP32-CAM/ESP32-CAM.ino`'s `loop()` upload circuit-breaker —
+       fires only after setup() already completed (mark-valid done,
+       counter at 0); rollback wouldn't help network failures anyway.
+     - `ESP32-CAM/host.cpp`'s captive-portal `/factory_reset` handler
+       — operator action.
+     - `ESP32-CAM/ota.cpp`'s `httpOtaCheckAndApply` — boot into the
+       just-flashed slot. THIS one IS in setup() but it's a clean
+       reboot ON SUCCESS (Update.end() returned ok); the new slot
+       then runs and decides whether to count itself as faulty. If
+       OTA fails before this point, `httpOtaCheckAndApply` returns
+       without rebooting and setup() continues normally — no counter
+       impact.
+
+     New `ESP.restart()` in setup() for a "this slot is bad" signal
+     would silently bypass the gate. The `initEspCamera` change in
+     this PR (was `ESP.restart()`, now `abort()`) is the precedent.
 
   2. **`HF_OTA_MAX_PENDING_BOOTS` cannot collide with another
      setup-fault threshold.** Currently `WIFI_FAIL_AP_FALLBACK_THRESH`
@@ -214,6 +231,17 @@ watchdog feed.
      reset-reason gate's filter — risks the same collision the
      round-2 reviewer found. Search for other "after N boots
      restart" patterns before changing either constant.
+
+  3. **NVS namespace `"ota"` / key `"pv_boots"` is the hidden contract
+     between increment and reset.** The counter is incremented in
+     `forceRollbackIfPendingTooLong()` at the top of setup() and
+     reset to 0 inside the `esp_ota_mark_app_valid_cancel_rollback()`
+     block at the end of setup(). Renaming either site without the
+     other (or claiming a different NVS namespace) silently breaks
+     the contract: the counter will increment but never reset, every
+     module rolls back to its previous slot on the third boot. If
+     the NVS shape needs to change, change both sites in the same
+     commit.
 
 **Costs:**
 

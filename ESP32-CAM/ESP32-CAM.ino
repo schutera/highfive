@@ -208,10 +208,14 @@ void setup() {
   // module — independent of any OTA — will therefore appear to
   // "spontaneously roll back" to its previous firmware after 3 boots.
   // The end-state panic-loop is the same as before, but the
-  // operator-visible signal (fwVersion regression on the dashboard)
-  // may misdirect a field-debug session into hunting an OTA issue.
-  // Look at `esp_reset_reason()` and the breadcrumb in the next
-  // telemetry sidecar to disambiguate.
+  // operator-visible signals (fwVersion regression on the dashboard,
+  // `[OTA] faulty-boot N/3` + `[OTA] threshold reached — forcing
+  // rollback` on serial, even when no OTA was involved) may misdirect
+  // a field-debug session into hunting an OTA issue. Disambiguate via
+  // `esp_reset_reason()` value + the breadcrumb in the next telemetry
+  // sidecar — a camera-init crash sets the breadcrumb to
+  // `setup:initEspCamera`, an OTA-bricked slot to whichever stage
+  // panicked.
   forceRollbackIfPendingTooLong();
 
   Serial.println("------ ESP STARTED ------");

@@ -287,6 +287,47 @@ reset VERSION to the actual release name, rebuild + regenerate manifest,
 restart Vite, reset the module. Confirm the heartbeat returns to the
 release name with full uptime growing past 30 s.
 
+### T4 alternative: USB-bypass for marginal-RSSI bench runs
+
+If the module's WiFi RSSI is weaker than ~-75 dBm, the 1.16 MB OTA
+download in step 5 above is unreliable — TCP timeouts mid-stream
+leave the inactive slot unwritten and the test never gets past
+`leafcutter`. The state-free counter can still be exercised
+without depending on the OTA pipe by USB-flashing the
+abort-instrumented binary directly:
+
+```powershell
+"bumblebee" | Out-File -NoNewline -Encoding ascii c:\Users\<you>\VSCode\highfive\ESP32-CAM\VERSION
+cd c:\Users\<you>\VSCode\highfive\ESP32-CAM
+# (with `abort();` already inserted before mark-valid in setup())
+pio run -e esp32cam -t upload --upload-port COM##
+python $env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py --chip esp32 --port COM## erase_region 0xe000 0x2000
+```
+
+The `erase_region` call clears the `otadata` partition so the
+bootloader picks the freshly-flashed `app0`. Watch with
+`python scripts\esp_capture.py COM## 60` and grep for `faulty-boot N/3`
+and `threshold reached — forcing rollback`. This proves the
+**firmware-side rollback logic** (reset-reason gate, NVS counter,
+threshold check, and `esp_ota_mark_app_invalid_rollback_and_reboot()`
+call). It does NOT prove the bootloader actually flips slots,
+because the `erase_region` step wipes the OTA-validity record —
+in this test setup the rollback call returns `ESP_FAIL` ("no
+previously-valid slot to roll back to"), the firmware falls through
+per its commented behaviour, and the bricked slot keeps cycling.
+A production-deployed module retains the previous slot's VALID
+record and the call therefore completes the bootloader flip.
+
+Verified on `fix/esp-ota-round1-fixes`, round-2 manual test run
+on `192.168.178.121`. Serial excerpt:
+
+```
+[BOOT] fw=bumblebee reset_reason=4 boot_count=152
+[BOOT] last_stage_before_reboot=setup:ota_mark_valid
+[OTA] faulty-boot 3/3 (reset_reason=4)
+[OTA] threshold reached — forcing rollback
+```
+
 ## Dev-only infrastructure used by T2/T3/T4
 
 - `duckdb-service/routes/dev_ota_proxy.py` — registers `/firmware.json`

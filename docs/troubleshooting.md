@@ -55,6 +55,27 @@ docker compose -f docker-compose.prod.yml --env-file .env.production exec duckdb
 
 If the migration repeatedly fails for a reason that isn't immediately obvious, restore from the backup and open an issue with the full traceback — do **not** manually `ALTER TABLE ... DROP COLUMN` in the duckdb CLI; DuckDB v1.4 refuses that operation when a foreign key references the table, which is exactly why the rebuild migration exists.
 
+### Dashboard map opens on Lake Constance instead of near me
+
+**Symptom.** You loaded the dashboard fresh (no module selected) and the map opened on Lake Constance / central Europe rather than around your region. You expected the "first-paint near you" behaviour from [issue #14](https://github.com/schutera/highfive/issues/14).
+
+**Why it happens.** `GET /api/user-location` returned a non-200 — either:
+
+- **204 No Content** — your IP resolved to a loopback or private range. Common when developing against `localhost`, behind a VPN that exits to a private network, or on a corporate NAT that strips X-Forwarded-For.
+- **503 Service Unavailable** — the upstream IP-geolocation provider (ipapi.co) was rate-limited or unreachable. Free tier is 30 k requests/month/IP.
+
+The frontend treats both as "no hint" and falls back to the default centre — by design, see [ADR-009](09-architecture-decisions/adr-009-dashboard-ip-geo-hint.md).
+
+**Fix.** Click the GPS-crosshair button in the map's top-right corner. The browser will prompt for location permission; allow once and the map will fly to your precise position. The permission grant is remembered per origin, so subsequent dashboard loads still need an explicit click but skip the prompt.
+
+If you want to verify the backend path:
+
+```powershell
+curl -H "X-API-Key: hf_dev_key_2026" http://localhost:3002/api/user-location -i
+```
+
+Status `204` confirms private-IP short-circuit; status `503` confirms the upstream is down; status `200` with a JSON body means the hint should be reaching the map — file an issue with the request/response.
+
 ---
 
 ## ESP32-CAM hardware

@@ -172,6 +172,54 @@ The telemetry section in the dashboard is hidden unless the URL has
 `?admin=1`; see [06-runtime-view/esp-reliability.md](06-runtime-view/esp-reliability.md) for the
 end-to-end admin flow.
 
+## 1.5 User location hint (dashboard map)
+
+```
+GET /api/user-location
+Headers: X-API-Key: <key>
+```
+
+Returns a coarse, IP-based location guess used by the dashboard to
+centre the map near the visitor on first load (issue #14). Accuracy is
+~10–50 km — city-level, not GPS-precise. Precise location still comes
+from the in-map "show my location" button which calls
+`navigator.geolocation.getCurrentPosition()` in the browser.
+
+The visitor's IP is resolved from `req.ip`, honouring `X-Forwarded-For`
+only when the immediate hop comes from a trusted private network range
+(Express `trust proxy = 'loopback, linklocal, uniquelocal'`).
+
+On success:
+
+```json
+{ "lat": 52.52, "lng": 13.405 }
+```
+
+Accuracy is implicitly city-level (~10–50 km — the documented IP-geo
+band). The wire shape deliberately does not include a precision
+field: ipapi.co does not publish a per-IP accuracy number, and no
+consumer currently renders one. If a future view needs to surface an
+explicit "± N km" annotation, add a field then; don't pre-allocate
+constant-shaped metadata.
+
+Non-success status codes are part of the contract; the homepage treats
+both as "no hint" and falls back to the default centre:
+
+- **204 No Content** — the visitor's IP resolved to a loopback,
+  RFC-1918, or IPv6 ULA address. Common in dev. No upstream call was
+  made.
+- **503 Service Unavailable** — the upstream IP-geolocation provider
+  (ipapi.co, free tier) returned a non-2xx or a 200-with-error-flag
+  rate-limit response. The endpoint deliberately does NOT swallow the
+  failure to a 200-with-null body; see [ADR-009](09-architecture-decisions/adr-009-dashboard-ip-geo-hint.md).
+
+Successful lookups are cached in-process per IP for 1 hour. The cache
+is per-replica — multi-replica deployments amortise to one upstream
+call per replica per visitor per hour.
+
+Why a backend proxy rather than reusing `GEO_API_KEY` directly:
+[ADR-009](09-architecture-decisions/adr-009-dashboard-ip-geo-hint.md).
+
 <br>
 
 # 2. Image Service API

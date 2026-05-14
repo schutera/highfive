@@ -65,6 +65,15 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 - **Stub classifier.** `stub_classify()` ships in production today.
   The data-flow contract is what MaskRCNN will fill — replacing the
   classifier doesn't change the persistence layer.
+- **Dashboard visitor IPs leave HiveHive infra to reach ipapi.co.**
+  `GET /api/user-location` (issue #14, [ADR-009](../09-architecture-decisions/adr-009-dashboard-ip-geo-hint.md))
+  forwards the visitor's IP to a free third-party IP-geolocation
+  service to compute the "first-paint near you" map centre. The IP is
+  not logged on our side and not joined to any HiveHive identifier,
+  but it does briefly leave our infrastructure. The current Impressum
+  / data-protection notice does not mention this; if HiveHive ever
+  reaches an audience that warrants a real GDPR posture, this flow
+  needs to surface there. Tracked here, not as a bug.
 
 ## Lessons learned
 

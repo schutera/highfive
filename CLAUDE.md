@@ -157,7 +157,12 @@ How to run it:
 
 The user's shell is **PowerShell 5.1** on Windows. When providing manual testing commands or setup instructions:
 
-- Always give **exact, copy-paste-ready commands** — no prose like "run the serial monitor", give the full command.
+- **Every step in a test plan, walkthrough, or setup list is a copy-paste command** — including prep, verification, browser-launch, and regression checks. No imperative-mood prose without a backticked command. Substitutions:
+  - "open DevTools" → `Start-Process chrome -ArgumentList '--incognito','--auto-open-devtools-for-tabs','http://localhost:5173/'`
+  - "bring the stack up" → `docker compose up --build -d`
+  - "confirm services are healthy" → `curl.exe http://localhost:3002/api/health` (one line per port)
+  - "edit your hosts file" → the actual `Add-Content` invocation with the literal path
+  - For GUI-only actions (clicking a rendered button, allowing a permission prompt), spell out the literal UI step **and** a CLI equivalent that exercises the same code path where one exists (e.g. a `curl` against the route the button would call). The user does not derive commands; if you catch yourself writing an imperative bullet without a command, rewrite it.
 - Set ports/hosts as variables first: `$PORT = "COM9"` — never use angle-bracket placeholders like `<COMx>` (PowerShell parses `<` as a redirection operator).
 - Write files with explicit encoding: `"value" | Out-File -NoNewline -Encoding ascii path\to\file` — PowerShell's default `>` redirect writes UTF-16 LE with BOM, which breaks Python `read_text(encoding="utf-8")`.
 - No `&&` chaining — use `;` or `if ($?) { ... }`.

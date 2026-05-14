@@ -58,6 +58,9 @@ const translations = {
       onlineCount: '{online}/{total}',
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
+      locateMe: 'Show my location',
+      locateMeDenied: 'Location blocked — allow in browser site settings',
+      locateMeUnsupported: 'Geolocation not supported in this browser',
     },
 
     // ---- Module Panel ----
@@ -441,6 +444,9 @@ const translations = {
       onlineCount: '{online}/{total}',
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
+      locateMe: 'Meinen Standort anzeigen',
+      locateMeDenied: 'Standortzugriff blockiert \u2014 in den Browser-Einstellungen erlauben',
+      locateMeUnsupported: 'Geolokalisierung in diesem Browser nicht unterst\u00FCtzt',
     },
 
     // ---- Module Panel ----

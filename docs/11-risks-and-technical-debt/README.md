@@ -65,6 +65,15 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 - **Stub classifier.** `stub_classify()` ships in production today.
   The data-flow contract is what MaskRCNN will fill — replacing the
   classifier doesn't change the persistence layer.
+- **Dashboard visitor IPs leave HiveHive infra to reach ipapi.co.**
+  `GET /api/user-location` (issue #14, [ADR-009](../09-architecture-decisions/adr-009-dashboard-ip-geo-hint.md))
+  forwards the visitor's IP to a free third-party IP-geolocation
+  service to compute the "first-paint near you" map centre. The IP is
+  not logged on our side and not joined to any HiveHive identifier,
+  but it does briefly leave our infrastructure. The current Impressum
+  / data-protection notice does not mention this; if HiveHive ever
+  reaches an audience that warrants a real GDPR posture, this flow
+  needs to surface there. Tracked here, not as a bug.
 
 ## Lessons learned
 
@@ -1472,3 +1481,48 @@ reset-reason gate (closes WIFI_FAIL collision); a follow-up commit
 on the same branch changes `initEspCamera`'s `ESP.restart()` to
 `abort()` (closes the `ESP.restart()`-in-setup blind spot caught by
 senior-review round 2).
+
+### Locate-button felt dead after the first permission deny (issue #14, PR #78, manual-test step T6)
+
+**What happened.** PR #78 added a Google-Maps-style "show my
+location" button to the dashboard map
+(`homepage/src/components/MapView.tsx`'s `LocateControl`). During in-browser testing, the maintainer found
+that after denying the geolocation permission once, subsequent
+clicks on the button produced **no visible feedback** — no
+network request, no new permission prompt, no UI state change.
+The button felt broken.
+
+**Why it happened.** Chrome (and most modern browsers) remember
+the permission deny for the origin. On the second click,
+`navigator.geolocation.getCurrentPosition()` invokes its **error
+callback synchronously** with `PERMISSION_DENIED`, with no
+re-prompt. Our code did call the error callback path — which sets
+`busy = true → false` and updates the button's `title` attribute —
+but the `busy` flip happens in microseconds (so the spinner CSS
+animation never visibly starts), and `title` is only rendered by
+the browser on hover (so the user clicking-but-not-hovering sees
+nothing). The visible-feedback contract was implicit; the synchronous
+deny path violated it.
+
+**How to avoid next time.** Before calling any UX-critical
+`navigator.geolocation.getCurrentPosition()` (or any other
+permission-gated API where a denied state collapses the call to a
+synchronous error), pre-query `navigator.permissions.query({...})`
+to detect the `'denied'` state and short-circuit to an explicit,
+hover-independent UI state. `homepage/src/components/MapView.tsx`'s
+`LocateControl::onClick` does this now; the fix is the canonical
+example for the next permission-gated button. Two collateral
+gotchas the fix exposed:
+
+- **The async pre-check opens a synchronous-double-click race.**
+  Once `onClick` is `async`, the `if (busy) return` guard must claim
+  the `busy` flag _before_ the first `await`, not after — otherwise
+  two rapid clicks both pass the guard and double-invoke
+  `getCurrentPosition`. A `busy` flag set only after the await is
+  decoration, not a guard. Caught by senior-review round 3.
+- **The browser `title` attribute is not a substitute for a
+  visible UI state.** It works for screen readers and on-hover, but
+  not for a click-and-move user who never hovers. Permanent-on-deny
+  UX (e.g. a small badge / colour shift, or a snackbar) would be
+  the next iteration if a future review finds the tooltip
+  insufficient.

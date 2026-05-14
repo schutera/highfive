@@ -4,10 +4,19 @@ import { tryParseModuleId } from '@highfive/contracts';
 import { db } from './database';
 import { apiKeyAuth, getApiKey } from './auth';
 import { DUCKDB_URL } from './duckdbClient';
+import { lookupUserLocation } from './userLocation';
 
 const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://image-service:4444';
 
 export const app = express();
+
+// Honour X-Forwarded-For when the immediate connection is from a private
+// network range (typical reverse-proxy topology). Without this, `req.ip`
+// is always the reverse-proxy's address in prod, and ipapi.co looks up
+// our datacenter instead of the visitor. The 'loopback, linklocal,
+// uniquelocal' preset specifically does NOT trust public-IP clients to
+// spoof X-F-F. See https://expressjs.com/en/guide/behind-proxies.html.
+app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
 // Middleware - Configure CORS for production. The `exposedHeaders` field
 // is load-bearing: production runs `highfive.schutera.com` ↔
@@ -69,6 +78,48 @@ app.get('/api/modules', async (req, res) => {
   } catch (error) {
     console.error('[GET /api/modules]', { error: String(error) });
     res.status(500).json({ error: 'Failed to fetch modules' });
+  }
+});
+
+// Coarse IP-based user-location hint for the dashboard map (issue #14).
+// Permissionless, ~city accuracy. 204 for private/loopback IPs (dev), 503
+// when ipapi.co is unreachable. The frontend treats both as "no hint" and
+// falls back to the default centre — see userLocation.ts for the rationale.
+app.get('/api/user-location', async (req, res) => {
+  // `req.ip` honours the trust-proxy setting above. Fall back to the raw
+  // socket address only if Express somehow couldn't determine one.
+  const ip = req.ip ?? req.socket.remoteAddress ?? '';
+  if (!ip) {
+    res.status(204).end();
+    return;
+  }
+  try {
+    const result = await lookupUserLocation(ip);
+    // Exhaustive switch — adding a fifth `source` to UserLocationLookup
+    // becomes a TypeScript compile error in the default branch rather
+    // than silently falling through to a 503.
+    switch (result.source) {
+      case 'hit':
+      case 'miss':
+        res.json(result.data);
+        return;
+      case 'private':
+        res.status(204).end();
+        return;
+      case 'unavailable':
+        console.error('[GET /api/user-location]', { ip, source: result.source });
+        res.status(503).json({ error: 'user-location unavailable' });
+        return;
+      default: {
+        const _exhaustive: never = result.source;
+        throw new Error(`unhandled user-location source: ${String(_exhaustive)}`);
+      }
+    }
+  } catch (error) {
+    // lookupUserLocation is written to never throw, but a future refactor
+    // could; we'd rather emit a clean 503 than a 500 traceback.
+    console.error('[GET /api/user-location]', { ip, error: String(error) });
+    res.status(503).json({ error: 'user-location unavailable' });
   }
 });
 

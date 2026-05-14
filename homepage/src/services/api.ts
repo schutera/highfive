@@ -1,4 +1,4 @@
-import type { Module, ModuleDetail, TelemetryEntry } from '@highfive/contracts';
+import type { Module, ModuleDetail, TelemetryEntry, UserLocation } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
 // Fail loudly on production builds with empty/missing build-args - the
@@ -148,6 +148,30 @@ class ApiService {
       throw new Error('Health check failed');
     }
     return response.json();
+  }
+
+  /**
+   * Coarse IP-based user-location hint for the dashboard map (issue #14).
+   * Returns null when the backend cannot resolve a useful location — 204
+   * for private/loopback IPs (dev), 503 when the upstream IP-geo provider
+   * is rate-limited or down, or a network failure reaching the backend
+   * itself (e.g. dev stack not running, CORS error). Callers MUST treat
+   * null as "no hint" and fall back to the default map centre; this is
+   * deliberately not an error path because the dashboard still works
+   * without it, and the "backend unreachable" case is the most common
+   * failure in dev — letting it bubble as an unhandled rejection would
+   * spam the console for no benefit.
+   */
+  async getUserLocation(): Promise<UserLocation | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/user-location`, {
+        headers: this.getHeaders(),
+      });
+      if (response.status === 204 || !response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    }
   }
 }
 

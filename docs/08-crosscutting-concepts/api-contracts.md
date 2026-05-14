@@ -103,6 +103,39 @@ construction) — same data, different name on the wire vs. the DTO.
 If the Python side renames any of the three source columns, the e2e
 test in `tests/e2e/test_upload_pipeline.py` is the canary.
 
+## `UserLocation` — visitor IP-geo hint
+
+Added by issue #14 to centre the dashboard map near the visitor on
+first paint (rather than on the default Lake Constance view). The
+type lives in `contracts/src/index.ts`'s `UserLocation`; the wire
+shape is served by `GET /api/user-location`:
+
+```ts
+export interface UserLocation {
+  lat: number;
+  lng: number;
+}
+```
+
+Accuracy is implicitly city-level (~10–50 km — the documented IP-geo
+band). The wire shape deliberately does not include a precision
+field: ipapi.co does not publish a per-IP accuracy number, and no
+consumer currently renders one. Add a field when a view actually
+needs to surface an explicit "± N km" annotation; don't pre-allocate
+constant-shaped metadata.
+
+This is **not** the same concept as `Module.location`:
+
+- `Module.location` is the _module's_ GPS coordinates from Google
+  Geolocation API at first boot. Per-module, stored in DuckDB,
+  displayed fuzzed on the map.
+- `UserLocation` is the _dashboard visitor's_ approximate position.
+  Not stored anywhere, not joined to any module, lives entirely in
+  the browser after the fetch resolves.
+
+Why we don't ship the existing `GEO_API_KEY` to the homepage to make
+the same call directly: [ADR-009](../09-architecture-decisions/adr-009-dashboard-ip-geo-hint.md).
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing

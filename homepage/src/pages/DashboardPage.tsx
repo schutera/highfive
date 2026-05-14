@@ -5,7 +5,7 @@ import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
 import { useTranslation } from '../i18n/LanguageContext';
 import { api } from '../services/api';
-import type { Module } from '@highfive/contracts';
+import type { Module, UserLocation } from '@highfive/contracts';
 
 export default function DashboardPage() {
   const { t } = useTranslation();
@@ -20,9 +20,27 @@ export default function DashboardPage() {
   // a banner explaining the degradation.
   const [heartbeatsIncomplete, setHeartbeatsIncomplete] = useState(false);
   const [mobileListExpanded, setMobileListExpanded] = useState(false);
+  // Coarse IP-based location hint for the map (issue #14). Null until the
+  // request resolves — and stays null on 5xx or private/loopback IPs. The
+  // map handles null by keeping its default centre, so this never gates
+  // the rest of the dashboard.
+  const [userLocationHint, setUserLocationHint] = useState<UserLocation | null>(null);
 
   useEffect(() => {
     loadModules();
+  }, []);
+
+  useEffect(() => {
+    // Race in parallel with loadModules — neither blocks the other. If the
+    // backend returns null (private IP / upstream down) we silently skip
+    // the flyTo and keep the default centre.
+    let cancelled = false;
+    api.getUserLocation().then((loc) => {
+      if (!cancelled && loc) setUserLocationHint(loc);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const loadModules = async () => {
@@ -163,6 +181,7 @@ export default function DashboardPage() {
                 selectedModule={selectedModule}
                 onModuleSelect={handleModuleSelect}
                 onVisibleModulesChange={setVisibleModules}
+                userLocationHint={userLocationHint}
               />
             )}
 

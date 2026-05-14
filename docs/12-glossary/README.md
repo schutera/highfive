@@ -208,6 +208,20 @@ and flags the synonyms, typos, and overloads that have caused bugs.
   module). They are unrelated. **Recommendation:** never use bare
   `count` in domain prose; always qualify (`Image Count`,
   `Progress Count`).
+- **`location`** — two **completely different** things on the wire.
+  `Module.location` is the _module's_ GPS coordinates, resolved by the
+  ESP firmware via Google's Geolocation API from nearby Wi-Fi BSSIDs
+  at registration time. It is per-module, stored in DuckDB, displayed
+  fuzzed on the dashboard map. The new `UserLocation` (contracts
+  `src/index.ts`'s `UserLocation`, served by `GET /api/user-location`)
+  is the _dashboard visitor's_ approximate position — IP-derived
+  city-level for the first-paint centre, or precise browser
+  `navigator.geolocation` data when the user clicks the locate
+  button. It is not stored, not joined to any module, and lives
+  entirely client-side after retrieval. **Recommendation:** never
+  refer to either as just "location" in cross-service prose; say
+  **Module Location** or **User Location** to keep the source clear.
+  See [ADR-009](../09-architecture-decisions/adr-009-dashboard-ip-geo-hint.md).
 
 ### Drift risk — fields that bit us in the past
 

@@ -141,3 +141,17 @@ export interface TelemetryEntry {
   image: string; // filename, image-service-injected
   payload: TelemetryPayload;
 }
+
+// ---- User-location hint (issue #14) ----
+//
+// Returned by `backend GET /api/user-location`. Permissionless, IP-based
+// guess used solely as a "first paint" centre for the dashboard map so a
+// visitor lands roughly near home instead of on the default Lake Constance
+// view. Accuracy is city-level (~10–50 km); precise GPS still comes from
+// `navigator.geolocation.getCurrentPosition()` triggered by the map's
+// locate button.
+
+export interface UserLocation {
+  lat: number;
+  lng: number;
+}

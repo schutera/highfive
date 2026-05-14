@@ -59,7 +59,7 @@ const translations = {
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
       locateMe: 'Show my location',
-      locateMeDenied: 'Location permission denied',
+      locateMeDenied: 'Location blocked — allow in browser site settings',
       locateMeUnsupported: 'Geolocation not supported in this browser',
     },
 
@@ -445,7 +445,7 @@ const translations = {
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
       locateMe: 'Meinen Standort anzeigen',
-      locateMeDenied: 'Standortzugriff verweigert',
+      locateMeDenied: 'Standortzugriff blockiert \u2014 in den Browser-Einstellungen erlauben',
       locateMeUnsupported: 'Geolokalisierung in diesem Browser nicht unterst\u00FCtzt',
     },
 

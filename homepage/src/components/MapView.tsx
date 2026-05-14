@@ -277,19 +277,56 @@ function LocateControl() {
       button.setAttribute('aria-label', label);
     };
 
-    const onClick = (e: Event) => {
+    // Show a transient state on the button — title/aria + a short reset
+    // back to idle. Used for every non-success path so the user gets
+    // visible feedback on hover.
+    const flashState = (label: string) => {
+      setTitle(label);
+      clearTimeout(resetTitle);
+      resetTitle = window.setTimeout(() => {
+        if (aborted) return;
+        setTitle(idleTitle);
+      }, 3000);
+    };
+
+    const onClick = async (e: Event) => {
       e.stopPropagation();
       if (busy) return;
       if (!('geolocation' in navigator)) {
-        setTitle(unsupportedTitle);
-        clearTimeout(resetTitle);
-        resetTitle = window.setTimeout(() => {
-          if (aborted) return;
-          setTitle(idleTitle);
-        }, 3000);
+        flashState(unsupportedTitle);
         return;
       }
+      // Claim the guard BEFORE the first await — a synchronous second
+      // click while the Permissions API query is in flight would
+      // otherwise sail past `if (busy)` and double-invoke. Every early
+      // return below this line MUST clear `busy`, UNLESS the cleanup
+      // already fired (`aborted` paths skip restoration because the
+      // button DOM is being removed anyway).
       busy = true;
+
+      // Permissions API short-circuit: once the user has denied geolocation
+      // for the origin, `getCurrentPosition()` fires its error callback
+      // synchronously with no re-prompt and no visible state change — the
+      // button feels dead. Detect that state up front and skip straight
+      // to the actionable tooltip. Safari support is iffy; the try/catch
+      // falls through to the original code path on unsupported browsers.
+      if ('permissions' in navigator) {
+        try {
+          const status = await navigator.permissions.query({ name: 'geolocation' });
+          if (aborted) return;
+          if (status.state === 'denied') {
+            busy = false;
+            flashState(deniedTitle);
+            return;
+          }
+        } catch {
+          // Permissions API unavailable or rejected our query — fall
+          // through to getCurrentPosition's own error handling.
+        }
+      }
+
+      // Spinner only goes on for the actual geolocation fetch, not the
+      // microsecond-fast Permissions API query.
       button.classList.add('hf-locate-btn--busy');
       button.setAttribute('aria-busy', 'true');
       navigator.geolocation.getCurrentPosition(
@@ -305,12 +342,7 @@ function LocateControl() {
           busy = false;
           button.classList.remove('hf-locate-btn--busy');
           button.removeAttribute('aria-busy');
-          setTitle(deniedTitle);
-          clearTimeout(resetTitle);
-          resetTitle = window.setTimeout(() => {
-            if (aborted) return;
-            setTitle(idleTitle);
-          }, 3000);
+          flashState(deniedTitle);
         },
         { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
       );

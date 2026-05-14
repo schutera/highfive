@@ -16,9 +16,10 @@ Lake Constance centre. Two layers of geolocation are needed:
    Lake Constance for a visitor in Berlin.
 2. **Precise location on user request** — `navigator.geolocation.getCurrentPosition()`
    triggered by an explicit click on the in-map "show my location"
-   control, gated by the browser's permission prompt. This layer is
-   not architecturally interesting (the browser handles it) and is
-   covered here only for completeness.
+   control, gated by the browser's permission prompt. The browser
+   handles the permission machinery, but the UX correctness of this
+   path is **not** automatic — see "Update: Permissions API pre-check"
+   below.
 
 The interesting question is the first layer. We already ship a Google
 Geolocation API key (`GEO_API_KEY`) — the ESP firmware sends nearby
@@ -132,3 +133,35 @@ deliberate user action and always wins.
   `senior-reviewer` agent rejects on sight; the route distinguishes
   "we cannot help" (503) from "we explicitly decline to help"
   (204 for private IPs).
+
+## Update: Permissions API pre-check (added during senior-review round 3 on issue #14)
+
+The original framing of point 2 above — "the browser handles it" —
+turned out to be load-bearing wrong. During in-browser testing the
+maintainer found that after the first permission deny, subsequent
+clicks on the locate button produced **no visible feedback** —
+`navigator.geolocation.getCurrentPosition()` resolves to the error
+callback synchronously after a prior deny, fast enough that the
+busy-spinner CSS animation never visibly starts and the `title`
+attribute update is invisible to a user who isn't hovering. Full
+post-mortem is logged in [chapter 11](../11-risks-and-technical-debt/README.md)
+under "Locate-button felt dead after the first permission deny".
+
+The fix in `homepage/src/components/MapView.tsx`'s
+`LocateControl::onClick` is a `navigator.permissions.query({name:
+'geolocation'})` pre-check: if the API reports `'denied'`, the
+button short-circuits to an explicit "Location blocked — allow in
+browser site settings" tooltip and skips the silent
+`getCurrentPosition` call entirely. The Permissions API call is
+gated by a `'permissions' in navigator` feature-test plus a
+try/catch (Safari's geolocation-permission query is historically
+flaky), so unsupported browsers fall through to the original code
+path.
+
+The pre-check is therefore **load-bearing UX** for the precise-location
+layer; do not remove it without replacing it with an equivalent
+mechanism that guarantees a visible, hover-independent state change
+on the second-click-after-deny path. If this guarantee weakens,
+`homepage/src/__tests__/MapView.test.tsx`'s
+`short-circuits via Permissions API when geolocation was previously
+denied` test will fail.

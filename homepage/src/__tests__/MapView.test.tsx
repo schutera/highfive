@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { LanguageProvider } from '../i18n/LanguageContext';
 
 // One shared mock map per test file — vi.mock factories cannot reference
@@ -100,6 +100,18 @@ function stubGeolocation(impl: Partial<Geolocation>) {
   });
 }
 
+// Stub the Permissions API the same way. jsdom doesn't ship it, so leaving
+// it undefined makes the `'permissions' in navigator` check short-circuit
+// to the legacy getCurrentPosition path (existing tests rely on this).
+function stubPermissions(state: PermissionState) {
+  Object.defineProperty(globalThis.navigator, 'permissions', {
+    configurable: true,
+    value: {
+      query: vi.fn().mockResolvedValue({ state }),
+    },
+  });
+}
+
 beforeEach(() => {
   mockMap.flyTo.mockReset();
   mockMap.addControl.mockReset();
@@ -114,9 +126,13 @@ beforeEach(() => {
 
 afterEach(() => {
   document.body.innerHTML = '';
-  // Drop the geolocation override so later tests see the jsdom default
-  // (no geolocation at all).
+  // Drop the geolocation + permissions overrides so later tests see the
+  // jsdom default (neither API available).
   Object.defineProperty(globalThis.navigator, 'geolocation', {
+    configurable: true,
+    value: undefined,
+  });
+  Object.defineProperty(globalThis.navigator, 'permissions', {
     configurable: true,
     value: undefined,
   });
@@ -206,7 +222,99 @@ describe('MapView locate control', () => {
 
     expect(getCurrentPosition).toHaveBeenCalledTimes(1);
     expect(mockMap.flyTo).not.toHaveBeenCalled();
-    expect(btn.title).toBe('Location permission denied');
+    expect(btn.title).toBe('Location blocked — allow in browser site settings');
+  });
+
+  it('short-circuits via Permissions API when geolocation was previously denied', async () => {
+    // Reproduces the T6 manual-test bug: after a prior deny, the browser
+    // rejects getCurrentPosition synchronously with no UI feedback. The
+    // Permissions API pre-check catches this and flashes the actionable
+    // tooltip without spinning the busy indicator on/off invisibly.
+    const getCurrentPosition = vi.fn();
+    stubGeolocation({ getCurrentPosition });
+    stubPermissions('denied');
+
+    renderMap();
+    const btn = screen.getByLabelText('Show my location');
+    fireEvent.click(btn);
+
+    // The handler is async — wait for the pre-check microtask to flush
+    // before asserting the tooltip transitioned.
+    await waitFor(() => {
+      expect(btn.title).toBe('Location blocked — allow in browser site settings');
+    });
+    expect(getCurrentPosition).not.toHaveBeenCalled();
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+    expect(btn.classList.contains('hf-locate-btn--busy')).toBe(false);
+  });
+
+  it('guards against a synchronous double-click during the Permissions API query', async () => {
+    // The Permissions API query is async — without a busy guard claimed
+    // *before* the await, a fast second click sails past the `if (busy)`
+    // check and double-invokes getCurrentPosition. We control when the
+    // query resolves so the race window is wide open during the second
+    // click.
+    const getCurrentPosition = vi.fn((ok: PositionCallback) => {
+      ok({
+        coords: {
+          latitude: 1,
+          longitude: 2,
+          accuracy: 10,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        timestamp: Date.now(),
+      } as GeolocationPosition);
+    });
+    stubGeolocation({ getCurrentPosition });
+
+    let resolveQuery!: (status: { state: PermissionState }) => void;
+    const queryPromise = new Promise<{ state: PermissionState }>((r) => {
+      resolveQuery = r;
+    });
+    Object.defineProperty(globalThis.navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockReturnValue(queryPromise) },
+    });
+
+    renderMap();
+    const btn = screen.getByLabelText('Show my location');
+    fireEvent.click(btn);
+    fireEvent.click(btn); // race: second click while the first query is in flight
+
+    resolveQuery({ state: 'prompt' });
+    await waitFor(() => {
+      expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('proceeds to getCurrentPosition when Permissions API reports prompt state', async () => {
+    const getCurrentPosition = vi.fn((ok: PositionCallback) => {
+      ok({
+        coords: {
+          latitude: 1,
+          longitude: 2,
+          accuracy: 10,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        timestamp: Date.now(),
+      } as GeolocationPosition);
+    });
+    stubGeolocation({ getCurrentPosition });
+    stubPermissions('prompt');
+
+    renderMap();
+    fireEvent.click(screen.getByLabelText('Show my location'));
+
+    await waitFor(() => {
+      expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    });
+    expect(mockMap.flyTo).toHaveBeenCalledWith([1, 2], 14, { duration: 1.5 });
   });
 });
 

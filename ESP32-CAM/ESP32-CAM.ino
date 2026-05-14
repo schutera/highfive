@@ -523,13 +523,22 @@ void loop() {
     }
   }
 
-  // Feed the watchdog one more time before the long sleep so the 30 s
-  // delay starts the timer fresh. Combined with TASK_WDT_TIMEOUT_S=60,
-  // this guarantees the next loop iteration's work has at least 30 s
-  // of slack before the watchdog can fire.
-  // Set "loop:sleep" so a stuck delay() (impossible in practice but
-  // included for completeness) is identifiable post-reboot.
+  // The 30 s inter-capture sleep is implemented as a polling loop that
+  // calls ArduinoOTA.handle() once per second instead of a single
+  // delay(30000). Required for #26: espota.py opens a fresh UDP socket
+  // per invitation retry and only waits 10 s for the OK reply, so if
+  // handle() were called only once every 30 s the ESP's reply would
+  // land on a socket espota had already closed — exactly what made
+  // round-1 manual T6 fail with "No response from the ESP" even though
+  // the serial log showed `[OTA] LAN update start` firing. Polling at
+  // 1 Hz keeps the ESP responsive within espota's window; the loop
+  // also feeds the watchdog each second so TASK_WDT_TIMEOUT_S=60 stays
+  // valid. Set "loop:sleep" so a stuck poll (impossible in practice
+  // but included for completeness) is identifiable post-reboot.
   hf::breadcrumbSet("loop:sleep");
-  esp_task_wdt_reset();
-  delay(30000);  // check every 30 seconds
+  for (int i = 0; i < 30; ++i) {
+    ArduinoOTA.handle();
+    esp_task_wdt_reset();
+    delay(1000);
+  }
 }

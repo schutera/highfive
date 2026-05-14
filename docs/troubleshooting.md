@@ -92,11 +92,11 @@ checkouts, regenerate after every firmware change.
 
 ### ArduinoOTA LAN push fails on Windows ("No response from the ESP")
 
-**Symptom.** `pio run -e esp32cam -t upload --upload-port <module-ip>` prints `Sending invitation to <IP> ..........` for ~100 s then exits with `No response from the ESP`. The serial monitor meanwhile shows `[OTA] LAN update start` and then immediately `[OTA] LAN update error 2/3/4` — the ESP received the invitation but the TCP data transfer fails.
+**Symptom.** `pio run -e esp32cam_ota -t upload --upload-port <module-ip>` prints `Sending invitation to <IP> ..........` for ~100 s then exits with `No response from the ESP`. The serial monitor meanwhile shows `[OTA] LAN update start` and then immediately `[OTA] LAN update error 2/3/4` — the ESP received the invitation but the TCP data transfer fails.
 
 **Root cause.** espota picks a random ephemeral port each run (e.g. 10090, 44920, 45064) for its callback TCP server. Windows Firewall blocks these random inbound TCP connections. The ESP connects to the port from the invitation packet, but espota's TCP server is unreachable so the connection drops with 0 bytes transferred.
 
-**Fix — two parts, done once per developer machine.**
+**Fix — three parts, done once per developer machine.**
 
 **Part 1 — permanent firewall rule** (admin PowerShell, one time):
 
@@ -108,9 +108,15 @@ Remove-NetFirewallRule -DisplayName "HiveHive ArduinoOTA" -ErrorAction SilentlyC
 New-NetFirewallRule -DisplayName "HiveHive ArduinoOTA" -Direction Inbound -Protocol TCP -LocalPort 55555 -Action Allow -Profile Any
 ```
 
-**Part 2 — platformio.ini** (already committed, no action needed):
+**Part 2 — switch the WLAN profile to Private** (admin PowerShell, one time per home network — Public-profile WiFi silently drops inbound TCP from LAN devices even with explicit Allow rules):
 
-`ESP32-CAM/platformio.ini` has `upload_protocol = espota` and `upload_flags = --host_port=55555`. This pins espota to port 55555 on every run, so the single firewall rule above always applies.
+```powershell
+Set-NetConnectionProfile -InterfaceAlias "WLAN" -NetworkCategory Private
+```
+
+**Part 3 — platformio.ini** (already committed, no action needed):
+
+`ESP32-CAM/platformio.ini` defines a separate `[env:esp32cam_ota]` that sets `upload_protocol = espota` and `upload_flags = --host_port=55555`. This pins espota to port 55555 on every run, so the single firewall rule above always applies. The default `[env:esp32cam]` deliberately keeps no upload-protocol pin so `pio run -e esp32cam -t upload --upload-port COM9` continues to USB-flash without override — dev iteration over USB stays unaffected.
 
 **Verify the rules are in place:**
 

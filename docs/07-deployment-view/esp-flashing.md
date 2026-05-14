@@ -255,8 +255,15 @@ via mDNS.
 $MODULE = "192.168.1.50"   # your module's IP
 
 cd ESP32-CAM
-pio run -e esp32cam -t upload --upload-port $MODULE
+pio run -e esp32cam_ota -t upload --upload-port $MODULE
 ```
+
+Note the `_ota` env suffix — `[env:esp32cam]` itself stays USB-only so
+`pio run -e esp32cam -t upload --upload-port COM9` keeps working for
+rapid dev iteration. The OTA-specific `upload_flags` (fixed callback
+port for the Windows Firewall rule) live only on `[env:esp32cam_ota]`,
+which inherits everything else from `esp32cam` via PlatformIO's
+`extends`.
 
 If PlatformIO times out the module may be mid-loop — wait up to 30 s
 and retry (`loop()`'s `ArduinoOTA.handle()` is polled between the

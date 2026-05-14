@@ -155,9 +155,22 @@ void initEspCamera(framesize_t resolution) {
   Serial.println("-- initializing ESP camera");
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("---- camera init failed: 0x%x. Restarting in 5s...\n", err);
+    // Was `ESP.restart()` — but that produces reset_reason=SW on the
+    // next boot, which `ESP32-CAM/ESP32-CAM.ino`'s
+    // `forceRollbackIfPendingTooLong` deliberately ignores so transient
+    // WiFi flakes (AP-fallback also uses SW) don't trip the rollback
+    // threshold. The cost was that camera-init failures of a freshly
+    // OTA'd slot also looked "clean" to the gate and would never
+    // trigger rollback — module just reboot-loops with no recovery.
+    // `abort()` runs the panic handler instead → reset_reason=PANIC →
+    // the rollback counter sees this for what it is (a real failure of
+    // this slot) and reverts to the previous slot after
+    // HF_OTA_MAX_PENDING_BOOTS retries. Caught by senior-review of
+    // PR-F #26. The 5 s delay + Serial.printf are preserved so the
+    // operator-visible UX (error message + LED) is unchanged.
+    Serial.printf("---- camera init failed: 0x%x. Aborting in 5s...\n", err);
     delay(5000);
-    ESP.restart();
+    abort();
   } else {
     initialized = 1;
     Serial.println("---- camera initialized");

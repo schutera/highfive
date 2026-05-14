@@ -184,37 +184,68 @@ operator visit needed.
    python scripts\esp_reset.py COM9
    ```
 
-**Expected behaviour** (observed live during the round-3 manual run on
-`fix/esp-ota-round1-fixes` against module `192.168.178.121` after the
-reset-reason gate landed):
+**Expected behaviour — heartbeat schema** (what `duckdb-service`'s
+`/heartbeats/<id>` actually records: `module_id`, `battery`, `rssi`,
+`uptime_ms`, `free_heap`, `fw_version`). The pattern of `fw_version`
+across consecutive heartbeats during a T4 cycle, observed live on
+`192.168.178.121` against `fix/esp-ota-round1-fixes` after the
+reset-reason gate landed:
 
 ```
-received_at         fw_version  uptime_ms   pv_boots   reset_reason
-2026-05-14T14:15:30 leafcutter      6900     0         SW (post-rollback restart)
-2026-05-14T14:15:00 mining          7000     3         PANIC  <- boot 4 triggers rollback BEFORE heartbeat
-2026-05-14T14:14:50 mining          7000     2         PANIC
-2026-05-14T14:14:40 mining          7000     1         PANIC
-2026-05-14T14:14:30 mining          7000     0         SW (first boot of new slot — doesn't increment)
-2026-05-14T14:14:00 leafcutter     12200     0         SW  <- pre-T4 stable state
+received_at         fw_version  uptime_ms
+14:15:29 UTC        mining          6998   <- mining boot (post-rollback cycle 2)
+14:15:20 UTC        mining          7106
+14:15:10 UTC        mining          6888   <- ~26 s gap before this — rollback + leafcutter OTA-restart-before-heartbeat
+14:14:44 UTC        mining          7109   <- mining boot 4 (counter crosses 3 here, NO heartbeat from this boot in cycle 1)
+14:14:34 UTC        mining          7184
+14:14:24 UTC        mining          8162
 ```
 
-The state-free counter at the top of `setup()`
-(`forceRollbackIfPendingTooLong`) only increments when
-`esp_reset_reason()` returns a fault — `PANIC`, `TASK_WDT`,
-`INT_WDT`, `WDT`, or `BROWNOUT`. Clean reboots (POWERON, EXT, SW,
-DEEPSLEEP) do not, which means the first boot of an OTA'd slot (came
-in via `ESP.restart()` from the previous slot, so reset_reason = SW)
-fires its heartbeat and aborts WITHOUT incrementing — only the
-abort-triggered subsequent boots count. The counter resets to 0
-inside the `esp_ota_mark_app_valid_cancel_rollback()` block at the
-end of `setup()`, so a slot whose setup never reaches the end leaves
-the counter monotonic. Crossing `HF_OTA_MAX_PENDING_BOOTS = 3`
-calls `esp_ota_mark_app_invalid_rollback_and_reboot()` before the
-heartbeat, the next reset is into the previous valid slot.
+The 3-then-gap-then-3 cadence is the rollback signal: cycle 1 fires 3
+mining heartbeats from boots whose `esp_reset_reason()` was either SW
+(first boot of new slot) or PANIC (abort). Boot 4's `forceRollbackIfPendingTooLong`
+crosses `HF_OTA_MAX_PENDING_BOOTS = 3`, calls
+`esp_ota_mark_app_invalid_rollback_and_reboot()` BEFORE the
+heartbeat fires, and reboots into the previous (leafcutter) slot. The
+leafcutter slot then fetches the still-mining manifest in
+`httpOtaCheckAndApply`, downloads it, and `ESP.restart()`s into the
+new mining slot — also before the leafcutter slot can fire its own
+boot heartbeat. The 26 s gap captures the entire
+rollback+leafcutter+OTA+restart sequence; the next heartbeat is the
+new mining slot's boot heartbeat, starting cycle 2.
+
+**Expected behaviour — serial log** (what `python scripts\esp_capture.py
+COM9 90` shows; this is the ground-truth evidence for the rollback
+firing — heartbeats alone cannot confirm whether the counter actually
+crossed the threshold):
+
+```
+[BOOT] fw=mining reset_reason=3 boot_count=N  <- first mining boot; rr=3 = ESP_RST_SW, doesn't count
+[STAGE] sendHeartbeat:boot took=...
+abort() was called at PC ... on core 1
+Rebooting...
+[BOOT] fw=mining reset_reason=4 boot_count=N+1  <- rr=4 = ESP_RST_PANIC, counts
+[OTA] faulty-boot 1/3 (reset_reason=4)
+...
+[BOOT] fw=mining reset_reason=4 boot_count=N+2
+[OTA] faulty-boot 2/3 (reset_reason=4)
+...
+[BOOT] fw=mining reset_reason=4 boot_count=N+3
+[OTA] faulty-boot 3/3 (reset_reason=4)
+[OTA] threshold reached — forcing rollback
+Rebooting...
+[BOOT] fw=leafcutter reset_reason=3  <- rolled back; SW because it's the rollback's ESP.restart
+```
+
+The `[OTA] faulty-boot N/3 (reset_reason=N)` line is emitted by
+`forceRollbackIfPendingTooLong`'s `logf` in
+`ESP32-CAM/ESP32-CAM.ino`; the `[OTA] threshold reached` line
+immediately precedes the rollback call. A run that does NOT show
+both lines is a regression — the counter is not incrementing.
 
 Observed total latency from first `mining` heartbeat to recovered
-`leafcutter` heartbeat: ~4 boots × ~10 s ≈ 40–60 s. Reproducible
-every run.
+`leafcutter` slot: ~4 boots × ~10 s ≈ 40–60 s. Reproducible every
+run.
 
 The rollback is forced by the app, NOT by the ROM bootloader:
 Arduino-ESP32's prebuilt bootloader ships with

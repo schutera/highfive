@@ -1425,7 +1425,7 @@ reader of one chapter at a time:
    continued.
 
 The fix that actually fires is state-free: every faulty reboot
-(reset_reason ∈ {PANIC, TASK_WDT, INT_WDT, BROWNOUT}) increments an
+(reset_reason ∈ {PANIC, TASK_WDT, INT_WDT, WDT, BROWNOUT}) increments an
 NVS counter, mark-valid at end of setup() resets it, threshold of 3
 forces `esp_ota_mark_app_invalid_rollback_and_reboot()`. Senior-
 review caught one more bug in this design: the early state-free
@@ -1452,8 +1452,23 @@ The reset-reason gate fixed that.
   declaring victory. Manual T4 surfaced this only because round-1
   testing happened to retry WiFi connect at the same time the
   forceRollback counter was incrementing — easy to miss otherwise.
+- **`ESP.restart()` from inside `setup()` is invisible to the
+  reset-reason gate.** Round-3 senior-review caught
+  `ESP32-CAM/esp_init.cpp`'s `initEspCamera` calling `ESP.restart()`
+  on `esp_camera_init` failure — producing `reset_reason=SW`, which
+  the gate treats as a clean reboot. A bricked OTA whose camera
+  driver fails to init would have reboot-looped forever without
+  triggering rollback. Use `abort()` (or `esp_system_abort()`) for
+  fatal-this-slot-is-broken signals in setup; reserve `ESP.restart()`
+  for "operator-initiated clean reboot" paths (AP-fallback,
+  captive-portal factory-reset, daily-reboot, upload-circuit-breaker
+  in `loop()`). Any future `ESP.restart()` added inside `setup()` is
+  a regression vector for this design.
 
 **Trail of the fix.** Commit `0ed2537` introduced the state-gated
 version (didn't fire); commit `9ad1658` rewrote it state-free (fires,
-but with the WIFI_FAIL collision); the reset-reason gate landed
-post-review on the same branch (`fix/esp-ota-round1-fixes`).
+but with the WIFI_FAIL collision); commit `deec615` added the
+reset-reason gate (closes WIFI_FAIL collision); a follow-up commit
+on the same branch changes `initEspCamera`'s `ESP.restart()` to
+`abort()` (closes the `ESP.restart()`-in-setup blind spot caught by
+senior-review round 2).

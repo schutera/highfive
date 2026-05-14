@@ -64,34 +64,39 @@ def main() -> int:
     app_size = len(app_bytes)
 
     # Delete any pre-existing merged `firmware.bin` left over from a
-    # previous `build.sh` run. The web installer reads `firmware.bin`
-    # (merged: bootloader + partitions + boot_app0 + app) and trusts
-    # the manifest's `md5` field to integrity-check it. We do NOT
-    # produce a merged binary from PIO output, so if we left a stale
-    # release-built `firmware.bin` on disk paired with this dev
-    # manifest, the wizard would happily flash old bootloader bytes
-    # onto a fresh module. Removing the file forces a loud 404 in the
-    # wizard instead. Re-run `build.sh` if you need a real merged
+    # previous `build.sh` run. The web installer downloads
+    # `firmware.bin` (merged: bootloader + partitions + boot_app0 +
+    # app) to flash a fresh module. We do NOT produce a merged binary
+    # from PIO output here, so if we left a stale release-built
+    # `firmware.bin` on disk, the wizard would happily flash old
+    # bootloader + partition bytes onto a fresh module. Removing it
+    # forces a visible 404 at download time and stops the flash.
+    # Re-run `bash ESP32-CAM/build.sh` if you need a real merged
     # release artifact.
     merged = HOMEPAGE_PUBLIC / "firmware.bin"
     if merged.exists():
         merged.unlink()
         print(f"Removed stale {merged} (release path needs `bash ESP32-CAM/build.sh`)")
 
-    # Manifest omits the `md5` field that points at the merged image.
-    # `app_md5` is the OTA-path integrity check; the web installer
-    # path is not exercised by this dev script. The wizard reads
-    # `md5` to verify the merged download — leaving it absent makes
-    # the failure mode "wizard reports missing field" rather than
-    # "wizard silently flashes the wrong bytes against a fake hash".
+    # `md5` would be the integrity hash of the merged `firmware.bin`
+    # the web installer flashes. Since we don't have a merged binary
+    # in dev, we omit the field entirely rather than pair a dangling
+    # `md5` with a missing `firmware.bin`. The OTA path uses
+    # `app_md5` against `firmware.app.bin`, which IS what we produced
+    # — that's the field this script populates. Note: the current
+    # wizard implementation (`homepage/src/components/setup/`) does
+    # not read `md5` from the manifest, so this is mostly future-
+    # proofing against the wizard adding integrity checks later.
     manifest = {
         "version": version,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "app_md5": app_md5,
         "app_size": app_size,
     }
+    # Trailing newline — `cat firmware.json` shouldn't smush into the
+    # next prompt, and most JSON-handling tooling expects one.
     (HOMEPAGE_PUBLIC / "firmware.json").write_text(
-        json.dumps(manifest), encoding="utf-8"
+        json.dumps(manifest) + "\n", encoding="utf-8"
     )
 
     print(f"Wrote {dst_app} ({app_size} bytes)")

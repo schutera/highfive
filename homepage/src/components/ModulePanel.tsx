@@ -274,7 +274,11 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
                 when the module has never heartbeated (latestHeartbeat null)
                 or when the firmware didn't bake a release version into the
                 binary (`FIRMWARE_VERSION="dev-unset"` — Arduino-IDE-only
-                path that build.sh / extra_scripts.py both refuse to ship). */}
+                path that build.sh / extra_scripts.py both refuse to ship).
+                Note: AdminPage.tsx deliberately renders `dev-unset` literally
+                for the diagnostic view; the dashboard hides it so operators
+                aren't shown a sentinel they can't act on. Do not "unify"
+                these two policies — the asymmetry is intentional. */}
             {moduleDetail.latestHeartbeat?.fwVersion &&
               moduleDetail.latestHeartbeat.fwVersion !== 'dev-unset' && (
                 <div

@@ -1,0 +1,107 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import type { ModuleDetail } from '@highfive/contracts';
+
+import { LanguageProvider } from '../i18n/LanguageContext';
+
+// Pins the firmware-pill rendering against the actual wire shape that
+// duckdb-service emits and that backend/src/database.ts's fetchAndAssemble
+// passes through to the homepage. The pill is the dashboard's only
+// surface for fwVersion (admin telemetry has its own row, but operators
+// don't see that), so a regression where latestHeartbeat.fwVersion stops
+// rendering would make manual T2/T3 evidence invisible — exactly the
+// PR-42 trap CLAUDE.md "Verifying UI claims" was written to catch.
+//
+// Three branches matter:
+//   - latestHeartbeat null         → pill hidden (new / never-heartbeated module)
+//   - fwVersion === 'dev-unset'    → pill hidden (Arduino-IDE escape hatch sentinel,
+//                                    documented in esp_init.h's FIRMWARE_VERSION default)
+//   - fwVersion === '<bee-name>'   → pill rendered with "Firmware <bee-name>"
+
+// Per-test mutable mock — set before each render() call.
+let nextModuleDetail: ModuleDetail | null = null;
+
+vi.mock('../services/api', () => ({
+  api: {
+    getModuleById: vi.fn(() => Promise.resolve(nextModuleDetail)),
+    getModuleLogs: vi.fn().mockResolvedValue([]),
+  },
+  hasAdminKey: () => false,
+  isAdminMode: () => false,
+}));
+
+// Static import after the vi.mock above (vitest hoists vi.mock).
+import ModulePanel from '../components/ModulePanel';
+
+const baseModule: ModuleDetail = {
+  id: 'e89fa9f23a08',
+  name: 'fierce-apricot-specht',
+  location: { lat: 48.2, lng: 11.77 },
+  status: 'online',
+  lastApiCall: '2026-05-14T16:00:00.000Z',
+  batteryLevel: 90,
+  firstOnline: '2026-05-14',
+  totalHatches: 0,
+  imageCount: 12,
+  email: null,
+  updatedAt: '2026-05-14T16:00:00.000Z',
+  lastSeenAt: '2026-05-14T16:00:00.000Z',
+  latestHeartbeat: {
+    receivedAt: '2026-05-14T16:00:00.000Z',
+    battery: 90,
+    rssi: -75,
+    uptimeMs: 9999,
+    freeHeap: 210000,
+    fwVersion: 'leafcutter',
+  },
+  nests: [],
+};
+
+const renderPanel = () =>
+  render(
+    <LanguageProvider>
+      <ModulePanel
+        module={{ id: baseModule.id, name: baseModule.name, status: baseModule.status }}
+        onClose={() => undefined}
+        onError={() => undefined}
+      />
+    </LanguageProvider>,
+  );
+
+describe('ModulePanel firmware pill', () => {
+  beforeEach(() => {
+    nextModuleDetail = null;
+  });
+
+  it('renders "Firmware <bee-name>" when latestHeartbeat.fwVersion is a release name', async () => {
+    nextModuleDetail = {
+      ...baseModule,
+      latestHeartbeat: { ...baseModule.latestHeartbeat!, fwVersion: 'leafcutter' },
+    };
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText(/Firmware leafcutter/)).toBeInTheDocument();
+    });
+  });
+
+  it('hides the firmware pill when latestHeartbeat is null (module never heartbeated)', async () => {
+    nextModuleDetail = { ...baseModule, latestHeartbeat: null };
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText(baseModule.name)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Firmware /)).not.toBeInTheDocument();
+  });
+
+  it('hides the firmware pill when fwVersion is the "dev-unset" sentinel', async () => {
+    nextModuleDetail = {
+      ...baseModule,
+      latestHeartbeat: { ...baseModule.latestHeartbeat!, fwVersion: 'dev-unset' },
+    };
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText(baseModule.name)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Firmware /)).not.toBeInTheDocument();
+  });
+});

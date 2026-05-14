@@ -297,16 +297,18 @@ without depending on the OTA pipe by USB-flashing the
 abort-instrumented binary directly:
 
 ```powershell
+$PORT = "COM11"   # substitute your CH340's actual port — find it via
+                  # `Get-PnpDevice -Class Ports -Status OK | Where-Object FriendlyName -Match "CH340"`
 "bumblebee" | Out-File -NoNewline -Encoding ascii c:\Users\<you>\VSCode\highfive\ESP32-CAM\VERSION
 cd c:\Users\<you>\VSCode\highfive\ESP32-CAM
 # (with `abort();` already inserted before mark-valid in setup())
-pio run -e esp32cam -t upload --upload-port COM##
-python $env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py --chip esp32 --port COM## erase_region 0xe000 0x2000
+pio run -e esp32cam -t upload --upload-port $PORT
+python $env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py --chip esp32 --port $PORT erase_region 0xe000 0x2000
 ```
 
 The `erase_region` call clears the `otadata` partition so the
 bootloader picks the freshly-flashed `app0`. Watch with
-`python scripts\esp_capture.py COM## 60` and grep for `faulty-boot N/3`
+`python scripts\esp_capture.py $PORT 60` and grep for `faulty-boot N/3`
 and `threshold reached — forcing rollback`. This proves the
 **firmware-side rollback logic** (reset-reason gate, NVS counter,
 threshold check, and `esp_ota_mark_app_invalid_rollback_and_reboot()`

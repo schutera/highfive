@@ -17,10 +17,10 @@ namespace hf {
 // Host derived from `config->INIT_URL` (the captive-portal-saved
 // backend URL — in production the host-nginx fronts homepage and
 // backend on the same hostname, port 80, so this works without a
-// second config field). Manifest fetch uses a 10 s timeout; the app
-// binary fetch uses a 60 s connection timeout but feeds the task
-// watchdog every 4 KB during the body read, so the wall-clock
-// download budget is bounded only by network speed.
+// second config field). Manifest fetch uses a 10 s read timeout; the
+// app binary fetch uses a 15 s per-read timeout and a 120 s wall-clock
+// deadline (kOtaBinaryDeadlineMs), with the task watchdog fed every
+// 4 KB during the body read.
 //
 // Safe to call once WiFi is connected and esp_config has been loaded.
 // On a non-OTA-capable boot (default partition table), Update.begin()

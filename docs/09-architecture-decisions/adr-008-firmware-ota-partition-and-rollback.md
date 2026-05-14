@@ -137,9 +137,11 @@ watchdog feed.
   carry an extra in-`loop()` periodic check — that would add a
   rate-limit concern to the backend that the boot-only cadence
   doesn't.
-- Auto-rollback for bricked binaries. A bad firmware push that fails
-  WiFi join or registration on the first boot reverts to the previous
-  slot without an operator visit. The pre-mark-valid breadcrumb in
+- Auto-rollback for bricked binaries. A bad firmware push that panics
+  or watchdog-fires before `esp_ota_mark_app_valid_cancel_rollback()`
+  at the end of `setup()` reverts to the previous slot without an
+  operator visit. The gate covers WiFi join, registration, camera
+  init, and the camera warm-up loop. The pre-mark-valid breadcrumb in
   the next telemetry sidecar tells us which stage failed.
 
 **Costs:**
@@ -151,7 +153,7 @@ watchdog feed.
   and OTA writes to the app slot, not there. The chapter-11 entry
   ["OTA migration is one-way"](../11-risks-and-technical-debt/README.md)
   exists to keep the next person from forgetting this.
-- **Tighter SPIFFS.** ~192 KB instead of ~1.4 MB. Fine today
+- **Tighter SPIFFS.** ~128 KB instead of ~1.4 MB. Fine today
   (`/config.json` < 1 KB) but caps any future use of SPIFFS for
   larger fixtures or sample images. If we ever need more, the next
   step is `min_spiffs (large APPS)` or a custom partitions.csv.

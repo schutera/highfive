@@ -62,7 +62,7 @@ echo ""
 
 # OTA partition layout (#26). min_spiffs gives two ~1.9 MB app slots
 # (app0/app1) so ArduinoOTA/HTTPUpdate have somewhere to write the new
-# binary. Mirrors platformio.ini's board_build.partitions = min_spiffs
+# binary. Mirrors platformio.ini's board_build.partitions = min_spiffs.csv
 # so both build paths emit byte-identical partitions.bin.
 arduino-cli compile \
   --fqbn "${FQBN}" \

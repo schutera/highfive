@@ -63,14 +63,14 @@ echo ""
 # OTA partition layout (#26). min_spiffs gives two ~1.9 MB app slots
 # (app0/app1) so ArduinoOTA/HTTPUpdate have somewhere to write the new
 # binary. Mirrors platformio.ini's board_build.partitions = min_spiffs.csv
-# so both build paths emit byte-identical partitions.bin.
+# so both build paths emit byte-identical partitions.bin. arduino-cli
+# takes the preset name without .csv; platformio.ini needs the .csv suffix
+# because PIO resolves the framework's built-in from tools/partitions/.
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --output-dir "${BUILD_DIR}" \
   --libraries "${SKETCH_DIR}/lib" \
   --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\"" \
-  # no .csv here — arduino-cli takes the preset name; platformio.ini
-  # uses min_spiffs.csv because PIO's lookup requires the .csv suffix.
   --build-property "build.partitions=min_spiffs" \
   "${SKETCH_DIR}"
 

@@ -58,7 +58,7 @@ cd backend        && npm ci && npm test                       # vitest + superte
 cd homepage       && npm ci && npm test                       # vitest + jsdom, 8 smoke tests
 cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 24 tests
 cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 31 tests
-cd ESP32-CAM      && pio test -e native                       # Unity host tests, 103 tests
+cd ESP32-CAM      && pio test -e native                       # Unity host tests, 114 tests
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware
 ```
 

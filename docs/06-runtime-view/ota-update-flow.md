@@ -64,10 +64,12 @@ sequenceDiagram
         MOD->>FL: Update.setMD5() + Update.end(true)
         MOD->>MOD: ESP.restart()
         Note over MOD: bootloader runs new slot (pending verify)
-        MOD->>MOD: setup() proceeds normally
+        MOD->>MOD: setup() — WiFi, OTA check (already current, skip)
         MOD->>DB: initNewModuleOnServer (registration)
+        MOD->>DB: POST /heartbeat (boot heartbeat, before camera init)
+        MOD->>MOD: initEspCamera + warm-up loop
         MOD->>MOD: esp_ota_mark_app_valid_cancel_rollback()
-        Note over MOD: slot now confirmed good
+        Note over MOD: slot confirmed good (all panicking stages passed)
     end
 ```
 
@@ -76,17 +78,27 @@ sequenceDiagram
 ESP32 OTA partitions are managed by the ROM bootloader. A freshly-
 flashed slot enters `ESP_OTA_IMG_NEW` state and the bootloader runs
 it exactly once. If the firmware reaches the
-`esp_ota_mark_app_valid_cancel_rollback()` call (gated on
-`setupWifiConnection` + `initNewModuleOnServer` succeeding) the slot
-transitions to `ESP_OTA_IMG_VALID`. If the firmware crashes,
-watchdog-fires, or panics before reaching the gate, the bootloader
-reverts to the previous `ESP_OTA_IMG_VALID` slot on the next reset.
+`esp_ota_mark_app_valid_cancel_rollback()` call — placed at the very
+end of `setup()`, after WiFi join, registration, boot heartbeat,
+camera init, and camera warm-up — the slot transitions to
+`ESP_OTA_IMG_VALID`. If the firmware crashes, watchdog-fires, or
+panics before reaching the gate, the bootloader reverts to the
+previous `ESP_OTA_IMG_VALID` slot on the next reset.
+
+The gate covers every setup stage that can panic: the boot heartbeat
+fires before mark-valid, so a new-`fwVersion` heartbeat may briefly
+appear on the server while the slot is still pending verify. If
+camera init then panics and the slot rolls back, the next boot's
+heartbeat will correct the reported version. This brief flicker is
+intentional — planting the heartbeat early keeps the "boot latency →
+dashboard refresh" benefit described in the image-upload-flow doc.
 
 Operator-observable: a bricked OTA shows up on the dashboard as a
 module that keeps reporting the **old** `fwVersion` in its
-`latestHeartbeat` panel, with a breadcrumb in the next telemetry
-sidecar naming which stage of the new firmware's setup() failed
-(e.g. `setup:setupWifiConnection`, `setup:initNewModuleOnServer`).
+`latestHeartbeat` panel (the flicker corrects itself), with a
+breadcrumb in the next telemetry sidecar naming which stage of the
+new firmware's setup() failed
+(e.g. `setup:initEspCamera`, `setup:initNewModuleOnServer`).
 No manual intervention needed — the unit recovers on its own.
 
 ## Partition layout migration

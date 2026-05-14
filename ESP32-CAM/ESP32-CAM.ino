@@ -250,6 +250,16 @@ void setup() {
   // falls through to the loop's `lastHeartbeatMs == 0` retry branch.
   // `sendHeartbeat` fails quiet — chapter-11 "Post-reflash dashboard
   // latency" carries the full rationale.
+  //
+  // OTA interaction: this heartbeat fires BEFORE camera init and BEFORE
+  // the mark-valid call at end-of-setup. On a first post-OTA boot, the
+  // new slot's fwVersion briefly appears on the dashboard while the slot
+  // is still pending-verify. If camera init then panics the slot rolls
+  // back, and the NEXT boot's heartbeat corrects the displayed version.
+  // Moving the heartbeat after mark-valid would fix the flicker but
+  // defeat the "freshness before slow camera init" benefit — keep both
+  // calls where they are and accept the cosmetic flicker as documented
+  // in docs/06-runtime-view/ota-update-flow.md's Rollback section.
   hf::breadcrumbSet("setup:sendHeartbeat:boot");
   stageStartMs = millis();
   if (sendHeartbeat(&esp_config) == 0) {

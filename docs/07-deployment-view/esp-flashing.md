@@ -280,7 +280,11 @@ md5s. The next daily reboot of each module (ADR-007) picks up the
 new version from `/firmware.json`, downloads `/firmware.app.bin`,
 flashes the inactive OTA slot, and restarts. The dashboard's
 `Module.latestHeartbeat.fwVersion` reflects the new version once
-the post-flash boot's heartbeat completes.
+the post-flash boot's heartbeat completes — the boot heartbeat fires
+before camera init and before the rollback gate, so the new version
+briefly appears on the dashboard even while the slot is still pending
+verify. If camera init panics and the slot rolls back, the next boot's
+heartbeat corrects the displayed version automatically.
 
 If the new firmware fails to reach the
 `esp_ota_mark_app_valid_cancel_rollback()` call (i.e. WiFi join or

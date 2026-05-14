@@ -53,28 +53,35 @@ Four coupled questions had to be answered together:
 Four coupled choices, made together so they actually compose:
 
 1. **Partition layout: `min_spiffs`.** Two ~1.9 MB OTA app slots
-   (`app0`, `app1`) plus ~192 KB SPIFFS. SPIFFS holds only
+   (`app0`, `app1`) plus a smaller SPIFFS. SPIFFS holds only
    `/config.json` (a few hundred bytes), so the smaller filesystem
-   is harmless. The directive is set in two places — `board_build.partitions = min_spiffs`
-   in [`ESP32-CAM/platformio.ini`](../../ESP32-CAM/platformio.ini)'s
-   `[env:esp32cam]` for the PlatformIO path, and a second
+   is harmless. The directive is set in two places —
+   `board_build.partitions = min_spiffs.csv` in
+   [`ESP32-CAM/platformio.ini`](../../ESP32-CAM/platformio.ini)'s
+   `[env:esp32cam]` for the PlatformIO path (the `.csv` suffix causes
+   PlatformIO to resolve the framework's built-in `min_spiffs.csv`
+   from `tools/partitions/`; without the suffix the lookup fails in CI
+   where the framework directory is not pre-cached), and a second
    `--build-property "build.partitions=min_spiffs"` argument to
    `arduino-cli compile` in [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh)
-   for the release path. The two must match byte-for-byte; CI's
-   `pio run -e esp32cam` and the release builder both produce the
-   same partition table.
+   for the release path. Both resolve to the same framework partition
+   table; CI's `pio run -e esp32cam` and the release builder produce
+   the same `partitions.bin`.
 
-2. **Two-slot rollback enabled, gated on WiFi + registration.** The
-   firmware calls `esp_ota_mark_app_valid_cancel_rollback()` once
-   `setupWifiConnection` has returned and `initNewModuleOnServer`
-   has succeeded — the two pieces the device cannot recover from on
-   its own. Camera-init failures are deliberately not in the gate
-   because `recoverCamera()` (per ADR-007) handles them in software;
-   blocking the rollback decision on a recoverable failure mode would
-   bounce the unit between two equally-broken slots. The call is a
-   no-op on non-OTA boots (the bootloader's `ESP_OTA_IMG_VALID` state)
-   so we can call it unconditionally without branching on partition
-   state.
+2. **Two-slot rollback enabled, gated on full setup completion.** The
+   firmware calls `esp_ota_mark_app_valid_cancel_rollback()` at the
+   very end of `setup()` — after WiFi join, OTA check, registration,
+   boot heartbeat, camera init, and the camera warm-up loop. An
+   earlier draft (round 1) fired the call immediately after
+   `initNewModuleOnServer`, on the argument that `recoverCamera()`
+   (per ADR-007) handles camera-init failures in software. Round-2
+   review caught that `recoverCamera()` only addresses soft NULL-frame
+   stalls; a driver-level panic or null-deref in
+   `initEspCamera`/`configure_camera_sensor` would brick the slot
+   permanently if mark-valid had already fired. The threshold is "every
+   stage that can panic has succeeded." The call is a no-op on non-OTA
+   boots (bootloader's `ESP_OTA_IMG_VALID` state) so we can call it
+   unconditionally without branching on partition state.
 
 3. **Dual-binary publish, single manifest.** Each build of
    [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh) writes both
@@ -156,6 +163,15 @@ watchdog feed.
   the deployment topology where the homepage is on the same LAN as
   the modules. A signed-update story belongs in a follow-up ADR if
   we ever expose modules to networks we don't control.
+- **Firmware-side DoS bounds.** `httpOtaCheckAndApply` in
+  [`ESP32-CAM/ota.cpp`](../../ESP32-CAM/ota.cpp) caps the manifest
+  body at `kManifestMaxBytes = 1024` bytes and the binary at
+  `manifest.app_size` bytes (rejected if it doesn't match the
+  `Content-Length` response header, and `Content-Length: 0` causes an
+  immediate skip). A malicious or runaway server cannot force the device
+  to allocate unbounded heap or spin in a download loop — the
+  `kOtaBinaryDeadlineMs = 120 s` wall-clock deadline is the secondary
+  bound against a drip-feeding connection.
 - **No API key in firmware.** Keeps the rotation story simple but
   means the OTA endpoints inherit the homepage's public surface.
   Acceptable for the threat model today (same as the merged bin);

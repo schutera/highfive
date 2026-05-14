@@ -184,6 +184,11 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
         client.stop();
         return;
     }
+    // manifestLen is 0 if the server sends chunked transfer-encoding
+    // (no Content-Length header). nginx serves static files with a
+    // Content-Length, so this is expected to be always set in
+    // production. A chunked response is silently treated as "out of
+    // range" and skipped — safe fallback, better than guessing the body.
     if (manifestLen == 0 || manifestLen > kManifestMaxBytes) {
         logf("[OTA] manifest length %u out of range", (unsigned)manifestLen);
         client.stop();

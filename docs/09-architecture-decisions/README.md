@@ -20,6 +20,7 @@ and link backwards.
 | [009](adr-009-node-22-baseline.md)                         | Node 22.12+ baseline for `backend` and `homepage`, enforced via `engine-strict` | Accepted |
 | [010](adr-010-esp-firmware-tls-trust-model.md)             | ESP firmware TLS — CA-pinned trust anchors for highfive.schutera.com            | Accepted |
 | [011](adr-011-module-display-name-override.md)             | Two-column module naming — firmware `name` + admin-settable `display_name`      | Accepted |
+| [012](adr-012-dashboard-ip-geo-hint.md)                    | Dashboard map IP-geo hint via backend proxy (not `GEO_API_KEY`)                 | Accepted |
 
 ## When to create an ADR
 

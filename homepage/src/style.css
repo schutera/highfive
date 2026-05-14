@@ -499,6 +499,50 @@ button:focus-visible,
   background: var(--hf-line-soft);
 }
 
+/* "Show my location" control — sits in the map's top-right corner.
+   Same visual language as the Google Maps locate button: round, white,
+   subtle shadow, GPS-crosshair glyph. Lives outside the React DOM tree
+   (Leaflet appends it to .leaflet-control-container) so it can't use
+   Tailwind classes set via the JSX bundler — keep it plain CSS here. */
+.hf-locate-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  background: var(--hf-surface);
+  color: var(--hf-fg-soft);
+  border: 1px solid var(--hf-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    transform 120ms ease-out,
+    color 120ms ease-out;
+}
+.hf-locate-btn:hover {
+  color: var(--hf-honey-700);
+}
+.hf-locate-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--hf-primary),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.hf-locate-btn:active {
+  transform: scale(0.94);
+}
+.hf-locate-btn--busy svg {
+  animation: hf-locate-spin 900ms linear infinite;
+  opacity: 0.65;
+}
+@keyframes hf-locate-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Subtle ring on selected list items / focus targets */
 .hf-ring-primary {
   box-shadow: 0 0 0 2px var(--hf-primary);

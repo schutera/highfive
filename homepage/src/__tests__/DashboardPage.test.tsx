@@ -19,6 +19,7 @@ vi.mock('../services/api', () => ({
     ),
     getModuleById: vi.fn(),
     getModuleLogs: vi.fn().mockResolvedValue([]),
+    getUserLocation: vi.fn().mockResolvedValue(null),
     healthCheck: vi.fn().mockResolvedValue({ status: 'ok', timestamp: '' }),
   },
 }));
@@ -54,11 +55,35 @@ vi.mock('leaflet', () => {
       public lng: number,
     ) {}
   }
+
+  // LocateControl uses L.Control.extend({...}) + L.DomEvent.disable*. The
+  // shim only needs to produce a constructible "control" — the smoke test
+  // never asserts the button is rendered, so onAdd is a no-op here.
+  type ControlProto = {
+    options?: Record<string, unknown>;
+    onAdd?: (map: unknown) => HTMLElement;
+  };
+  const Control = function (this: ControlProto) {} as unknown as {
+    new (): ControlProto;
+    extend(proto: ControlProto): { new (): ControlProto };
+  };
+  Control.extend = (proto: ControlProto) => {
+    const Sub = function (this: ControlProto) {
+      Object.assign(this, proto);
+    } as unknown as { new (): ControlProto };
+    return Sub;
+  };
+
   const L = {
     divIcon,
     icon,
     Icon: { Default: IconDefault },
     Marker,
+    Control,
+    DomEvent: {
+      disableClickPropagation: () => undefined,
+      disableScrollPropagation: () => undefined,
+    },
     LatLngBounds: class {
       contains() {
         return true;
@@ -90,6 +115,9 @@ vi.mock('react-leaflet', () => {
     useMap: () => ({
       getBounds: () => ({ contains: () => true }),
       setView: () => undefined,
+      flyTo: () => undefined,
+      addControl: () => undefined,
+      removeControl: () => undefined,
       on: () => undefined,
       off: () => undefined,
     }),

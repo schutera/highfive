@@ -141,17 +141,21 @@ And in `docker compose logs duckdb-service`:
 
 ## T3 — Boot-heartbeat fwVersion appears before mark-valid
 
-**What it proves**: the dashboard's `fwVersion` panel updates within
-seconds of the new slot reaching the boot heartbeat — not after the
-full warm-up and mark-valid completion. ADR-008 trades off "brief
-flicker if rollback happens" against "fast post-flash refresh"; this
-test confirms the first half.
+**What it proves**: the dashboard's **Firmware** pill (rendered in
+`ModulePanel.tsx`'s module-detail header, sourced from
+`Module.latestHeartbeat.fwVersion`) updates within seconds of the new
+slot reaching the boot heartbeat — not after the full warm-up and
+mark-valid completion. ADR-008 trades off "brief flicker if rollback
+happens" against "fast post-flash refresh"; this test confirms the
+first half.
 
 **Steps**: implicit in T2. The boot heartbeat at the start of T2's
 post-OTA boot fires _before_ `esp_ota_mark_app_valid_cancel_rollback()`
 at the end of `setup()` — visible as the `uptime_ms ≈ 7–13 s` row in
-the heartbeat output. If the slot rolls back (T4), the next clean
-boot's heartbeat corrects the displayed version automatically.
+the heartbeat output AND as a refreshed **Firmware <bee-name>** pill
+on the dashboard's module-detail panel (open the module card on the
+map). If the slot rolls back (T4), the next clean boot's heartbeat
+corrects the displayed version automatically.
 
 ## T4 — Bricked-firmware rollback
 

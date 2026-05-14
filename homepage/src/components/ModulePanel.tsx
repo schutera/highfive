@@ -268,6 +268,38 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
               </svg>
               {moduleDetail.imageCount} {t('modulePanel.images')}
             </div>
+
+            {/* Firmware version pill — sourced from latestHeartbeat
+                (ESP fills it on every heartbeat per ADR-006 / #15). Hidden
+                when the module has never heartbeated (latestHeartbeat null)
+                or when the firmware didn't bake a release version into the
+                binary (`FIRMWARE_VERSION="dev-unset"` — Arduino-IDE-only
+                path that build.sh / extra_scripts.py both refuse to ship). */}
+            {moduleDetail.latestHeartbeat?.fwVersion &&
+              moduleDetail.latestHeartbeat.fwVersion !== 'dev-unset' && (
+                <div
+                  className="inline-flex items-center gap-1.5 bg-white/20 rounded-full px-3 py-1 text-hf-xs font-semibold"
+                  title={t('modulePanel.firmwareTooltip')}
+                >
+                  <svg
+                    className="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                  </svg>
+                  {t('modulePanel.firmware', {
+                    version: moduleDetail.latestHeartbeat.fwVersion,
+                  })}
+                </div>
+              )}
           </div>
 
           {formattedTime && (

@@ -21,13 +21,17 @@ import { LanguageProvider } from '../i18n/LanguageContext';
 // Per-test mutable mock — set before each render() call.
 let nextModuleDetail: ModuleDetail | null = null;
 
+// Note: `hasAdminKey` / `isAdminMode` are NOT exported from
+// `../services/api` — they're file-local helpers inside
+// `ModulePanel.tsx` itself. We don't mock them; they default to false
+// in jsdom (empty sessionStorage, no `?admin` URL param), so the
+// admin/non-admin branch the pill is in is the only branch exercised
+// here. That's the right branch — operators don't see admin mode.
 vi.mock('../services/api', () => ({
   api: {
     getModuleById: vi.fn(() => Promise.resolve(nextModuleDetail)),
     getModuleLogs: vi.fn().mockResolvedValue([]),
   },
-  hasAdminKey: () => false,
-  isAdminMode: () => false,
 }));
 
 // Static import after the vi.mock above (vitest hoists vi.mock).

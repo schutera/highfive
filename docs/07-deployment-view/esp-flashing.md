@@ -346,9 +346,11 @@ rather than from a remote office.
 After that one-time USB flash, every subsequent update can be OTA.
 Symptom of trying to OTA-push to an un-migrated module: the upload
 fails before the binary stream completes, or `Update.begin()` rejects
-the image because there is no OTA slot to write to. The module
-keeps booting the old firmware and the dashboard's `fwVersion`
-panel never advances. See
+the image because there is no OTA slot to write to. The module keeps
+booting the old firmware and the **Firmware** pill on the dashboard's
+module-detail panel
+([`homepage/src/components/ModulePanel.tsx`](../../homepage/src/components/ModulePanel.tsx))
+never advances past the pre-OTA bee-name. See
 [../11-risks-and-technical-debt/README.md](../11-risks-and-technical-debt/README.md)
 "OTA migration is one-way".
 

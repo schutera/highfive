@@ -46,10 +46,14 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   `ESP32-CAM/GEO_API_KEY` file fallback. Full mechanism:
   [`docs/08-crosscutting-concepts/auth.md`](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
   The original key remains in git history and must stay revoked.
-- **Dev API key fallback** `hf_dev_key_2026` in `backend/src/auth.ts:4`
-  — intentional for local dev. **Must** be overridden via
-  `HIGHFIVE_API_KEY` for any non-local deploy. See
-  [02-constraints](../02-constraints/README.md).
+- **Dev API key fallback** `hf_dev_key_2026` in
+  [`backend/src/auth.ts`'s `DEV_FALLBACK_KEY`](../../backend/src/auth.ts)
+  — intentional for local dev. Must be overridden via `HIGHFIVE_API_KEY`
+  for any non-local deploy. Code-side enforcement: `auth.ts` refuses to
+  load when `isProduction()` is true and the env var is unset, or when
+  the env var is the dev fallback (case-insensitively). The operator
+  cannot ship the dev key as the prod gate without the backend crashing
+  at startup. See [02-constraints](../02-constraints/README.md).
 - **WiFi password printed plaintext to Serial** — was unconditionally
   logged at the top of `setupWifiConnection` in `ESP32-CAM/esp_init.cpp`.
   Now gated behind `-DDEBUG_WIFI` and redacted by default (issue #41,

@@ -1,38 +1,45 @@
 import { Request, Response, NextFunction } from 'express';
+import { isProduction } from './env';
 
 // Public dev fallback. Lives here, in tests, and in CLAUDE.md — anyone reading
 // the repo can grep for it. Safe only when the deployment overrides it.
 const DEV_FALLBACK_KEY = 'hf_dev_key_2026';
 
 // Resolved from env, then validated. Two failure modes the validator catches:
-// (1) `HIGHFIVE_API_KEY` is set to the literal dev fallback. The fallback is
-//     a public string by design (it's documented in CLAUDE.md and used by the
-//     test suite); setting it explicitly via env var defeats the override
-//     mechanism and is almost always a copy-paste from `.env.example`.
-// (2) `NODE_ENV=production` is set but `HIGHFIVE_API_KEY` is empty/unset,
+// (1) `HIGHFIVE_API_KEY` is set (case-insensitively) to the literal dev
+//     fallback. The fallback is a public string by design — documented in
+//     CLAUDE.md, used by the entire backend test suite — so an env value
+//     of `hf_dev_key_2026`, `HF_DEV_KEY_2026`, or any case-mixed variant
+//     was almost certainly a copy-paste from `.env.example` rather than
+//     a deliberate strong secret. Comparison is case-insensitive on the
+//     env-value side; the canonical fallback stays lowercase.
+// (2) `isProduction()` is true but `HIGHFIVE_API_KEY` is empty/unset,
 //     which would silently activate the dev fallback as the production
 //     admin gate. CLAUDE.md flags this as a "do NOT violate" rule; this
 //     code makes the rule self-enforcing instead of relying on operator
-//     vigilance.
+//     vigilance. `isProduction()` (see `env.ts`) normalises `NODE_ENV`
+//     across casing and trailing-whitespace typos so `"Production"`,
+//     `"PRODUCTION"`, and `"production "` all activate the guard.
 //
 // Tests run under `NODE_ENV=test` (vitest's default) and don't set the env
 // var, so they take the fallback branch cleanly.
 const ENV_KEY = process.env.HIGHFIVE_API_KEY?.trim() || undefined;
 
-if (ENV_KEY === DEV_FALLBACK_KEY) {
+if (ENV_KEY !== undefined && ENV_KEY.toLowerCase() === DEV_FALLBACK_KEY) {
   throw new Error(
-    `HIGHFIVE_API_KEY is set to the public dev fallback '${DEV_FALLBACK_KEY}'. ` +
-      'Either leave HIGHFIVE_API_KEY unset (the dev fallback applies for ' +
-      'local development only) or set it to a strong production value. ' +
-      'See CLAUDE.md "Critical rules" and .env.production.example.',
+    `HIGHFIVE_API_KEY is set (case-insensitively) to the public dev ` +
+      `fallback '${DEV_FALLBACK_KEY}'. Either leave HIGHFIVE_API_KEY unset ` +
+      `(the dev fallback applies for local development only) or set it to ` +
+      `a strong production value. See CLAUDE.md "Critical rules" and the ` +
+      `repo root .env.production.example.`,
   );
 }
 
-if (process.env.NODE_ENV === 'production' && ENV_KEY === undefined) {
+if (isProduction() && ENV_KEY === undefined) {
   throw new Error(
     'HIGHFIVE_API_KEY must be set when NODE_ENV=production. Refusing to ' +
       'start backend with the public dev fallback as the admin gate. See ' +
-      'CLAUDE.md "Critical rules" and .env.production.example.',
+      'CLAUDE.md "Critical rules" and the repo root .env.production.example.',
   );
 }
 

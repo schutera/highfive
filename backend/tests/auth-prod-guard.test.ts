@@ -24,6 +24,22 @@ describe('auth.ts startup guard', () => {
     await expect(import('../src/auth')).rejects.toThrow(/dev fallback/i);
   });
 
+  // Case-insensitive dev-key check: copy-paste mishaps and shell-history
+  // edits commonly mutate casing. The PR #84 senior-review flagged this
+  // as a P0 — if we harden one casing only, the operator who pastes the
+  // uppercase variant still ships the public string as the admin gate.
+  it('refuses to load when HIGHFIVE_API_KEY is the dev fallback uppercased', async () => {
+    process.env.HIGHFIVE_API_KEY = 'HF_DEV_KEY_2026';
+
+    await expect(import('../src/auth')).rejects.toThrow(/dev fallback/i);
+  });
+
+  it('refuses to load when HIGHFIVE_API_KEY is the dev fallback mixed-case', async () => {
+    process.env.HIGHFIVE_API_KEY = 'Hf_Dev_Key_2026';
+
+    await expect(import('../src/auth')).rejects.toThrow(/dev fallback/i);
+  });
+
   it('refuses to load when NODE_ENV=production and HIGHFIVE_API_KEY is unset', async () => {
     process.env.NODE_ENV = 'production';
 
@@ -35,6 +51,56 @@ describe('auth.ts startup guard', () => {
     process.env.HIGHFIVE_API_KEY = '   ';
 
     await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+  });
+
+  // NODE_ENV typos: PR #84 senior-review caught that strict-equality on
+  // NODE_ENV silently bypassed the guard for "Production", "PRODUCTION",
+  // "production " (trailing space — easy in a hand-edited compose
+  // env-file), and "prod" (operator abbreviation). The first three now
+  // route through `isProduction()` which normalises trim + lowercase
+  // against the canonical token 'production'. "prod" is intentionally
+  // NOT treated as production — it's an unrecognised value, and the
+  // safer interpretation of "deployment author wrote something other
+  // than the canonical token" is the operator-asked-for-something-
+  // unusual interpretation rather than silently activating the guard
+  // on a value the operator may have meant differently. The test pins
+  // that distinction so the next person who "improves" the helper
+  // doesn't quietly change either decision.
+  it('refuses to load when NODE_ENV is Production (capital P) and no key', async () => {
+    process.env.NODE_ENV = 'Production';
+
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+  });
+
+  it('refuses to load when NODE_ENV is PRODUCTION (all caps) and no key', async () => {
+    process.env.NODE_ENV = 'PRODUCTION';
+
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+  });
+
+  it('refuses to load when NODE_ENV has trailing whitespace and no key', async () => {
+    process.env.NODE_ENV = 'production ';
+
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+  });
+
+  it('refuses to load when NODE_ENV="prod" and no key (unrecognised value, treated as prod)', async () => {
+    process.env.NODE_ENV = 'prod';
+
+    // `isProduction()` treats any non-empty NODE_ENV outside the dev
+    // safelist as production. "prod" is the documented operator-typo
+    // case from the PR #84 senior-review — silently routing it to the
+    // dev fallback is the exact failure shape the guard exists to close.
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV/);
+  });
+
+  it('refuses to load when NODE_ENV="staging" and no key (parallel-to-prod env)', async () => {
+    process.env.NODE_ENV = 'staging';
+
+    // Staging environments run with separate-from-prod secrets but
+    // those secrets are still secrets. Routing staging to the public
+    // dev fallback is no safer than routing production to it.
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV/);
   });
 
   it('loads cleanly with no env (dev fallback active)', async () => {

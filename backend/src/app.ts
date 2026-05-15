@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { tryParseModuleId } from '@highfive/contracts';
 import { db } from './database';
-import { apiKeyAuth, getApiKey } from './auth';
+import { apiKeyAuth, verifyApiKey } from './auth';
 import { DUCKDB_URL } from './duckdbClient';
 import { isProduction } from './env';
 
@@ -159,7 +159,7 @@ app.delete('/api/modules/:id', async (req, res) => {
 // middleware. Requires an additional X-Admin-Key header matching HIGHFIVE_API_KEY.
 app.get('/api/modules/:id/logs', async (req, res) => {
   const provided = req.header('X-Admin-Key');
-  if (!provided || provided !== getApiKey()) {
+  if (!provided || !verifyApiKey(provided)) {
     res.status(403).json({ error: 'Forbidden: admin key required' });
     return;
   }

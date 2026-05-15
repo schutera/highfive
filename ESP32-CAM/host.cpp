@@ -186,6 +186,11 @@ void saveConfig() {
   -------- HTML CONFIG FORM --------
   ----------------------------------
 */
+// `errorMessage` MUST be a compile-time-controlled string. It is
+// rendered raw into the HTML response with no escape; a future
+// contributor passing operator-tainted data here (e.g. echoing the
+// rejected port value back) opens an XSS hole. Keep it to constant
+// strings populated by the /save handler's failure paths.
 void sendConfigForm(WiFiClient &client, bool saved = false, const char* errorMessage = nullptr) {
   // Three-fields-per-URL pre-fill (issue #79). Logic lives in
   // hf::splitUrlForForm (lib/form_query/) so test_native_form_query

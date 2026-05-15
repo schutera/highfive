@@ -42,6 +42,8 @@ The five call sites:
 
 The five sites share the same shape and could be centralised behind a `hf::tls::selectClient(tlsStorage, plainStorage, scheme, caRootPem)` helper. Deferred for this PR — the inline pattern is small enough that the cross-references in the comments are easier to follow than chasing a single-call helper. If a sixth site appears, factor.
 
+One real correctness gap the deferred helper would close: each site currently invents its own Host-header port convention. `postImage` in `ESP32-CAM/client.cpp` never emits a port (`Host: <host>` only); `sendHeartbeat` always emits `Host: <host>:<port>`; `sendGet` in `ESP32-CAM/ota.cpp` omits port when it matches the scheme default per RFC 7230 §5.4. nginx tolerates all three for default-port topologies, but a non-default-port HTTPS deployment (`https://example.com:8443/upload`) would 404 against a port-aware vhost via `postImage`'s never-emit rule. Centralising the helper would unify Host-header strategy as a single decision.
+
 ## Consequences
 
 **Enables.** The `HIGHFIVE_API_KEY`, operator email in the `/new_module` payload, image bodies, telemetry, and the WiFi-fingerprint geolocation request all become opaque to any passive listener on the WiFi path. A MITM attempting to substitute a server presents a cert the firmware refuses to verify against ISRG Root X1, breaking the handshake before any byte of the request leaves.

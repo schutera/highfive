@@ -3,8 +3,8 @@
     "MODULE_NAME": "",
     "SSID": "",
     "PASSWORD": "",
-    "UPLOAD_URL": "http://highfive.schutera.com/upload",
-    "INIT_URL": "http://highfive.schutera.com/new_module"
+    "UPLOAD_URL": "https://highfive.schutera.com/upload",
+    "INIT_URL": "https://highfive.schutera.com/new_module"
   },
   "CAMERA": {
     "RESOLUTION": "VGA",

@@ -2,8 +2,10 @@
 #include "esp_wifi.h"
 #include "esp_init.h"
 #include "firmware_defaults.h" // hf::defaults::k*ProductionFallback (issue #66)
+#include "form_query.h"        // hf::rewriteLegacyHighfiveUrl — issue #79
 #include "led.h"
 #include "module_id.h"
+#include "url.h"               // hf::parseUrl — scheme-aware TLS dispatch (#79)
 #include "wifi_diag.h"
 #include "breadcrumb.h"
 #include <Arduino.h>
@@ -11,9 +13,11 @@
 #include <FS.h>
 #include <SPIFFS.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
+#include "tls_roots.h" // hf::tls::k{IsrgRootX1,GtsRootR1}Pem — issue #79
 
 
 /* 
@@ -436,16 +440,23 @@ bool loadConfig(esp_config_t *esp_config) {
     esp_config_doc["NETWORK"]["PASSWORD"] | "",
     sizeof(esp_config->wifi_config.PASSWORD)
   );
-  strlcpy(
-    esp_config->UPLOAD_URL,
-    esp_config_doc["NETWORK"]["UPLOAD_URL"] | "",
-    sizeof(esp_config->UPLOAD_URL)
-  );
-  strlcpy(
-    esp_config->INIT_URL,
-    esp_config_doc["NETWORK"]["INIT_URL"] | "",
-    sizeof(esp_config->INIT_URL)
-  );
+  // Pre-#79 modules baked `http://highfive.schutera.com/*` into
+  // SPIFFS. The first boot after the #79 OTA migrates the SPIFFS
+  // values to `https://` so all downstream call sites speak TLS
+  // against the same origin Mark's nginx already serves over 443.
+  // Idempotent: the helper is a no-op on a fresh https:// config,
+  // and the SPIFFS re-save below only fires if the value actually
+  // changed. See hf::rewriteLegacyHighfiveUrl in lib/form_query/
+  // for the exact prefix-match rule.
+  std::string uploadFromDisk = (const char*)(esp_config_doc["NETWORK"]["UPLOAD_URL"] | "");
+  std::string initFromDisk   = (const char*)(esp_config_doc["NETWORK"]["INIT_URL"]   | "");
+  const std::string uploadMigrated = hf::rewriteLegacyHighfiveUrl(uploadFromDisk);
+  const std::string initMigrated   = hf::rewriteLegacyHighfiveUrl(initFromDisk);
+  const bool urlMigrated =
+      (uploadMigrated != uploadFromDisk) || (initMigrated != initFromDisk);
+
+  strlcpy(esp_config->UPLOAD_URL, uploadMigrated.c_str(), sizeof(esp_config->UPLOAD_URL));
+  strlcpy(esp_config->INIT_URL,   initMigrated.c_str(),   sizeof(esp_config->INIT_URL));
   strlcpy(
     esp_config->email,
     esp_config_doc["NETWORK"]["EMAIL"] | "",
@@ -487,6 +498,42 @@ bool loadConfig(esp_config_t *esp_config) {
   } else if (strlen(esp_config->INIT_URL) == 0) {
     Serial.println("------ Could not read INIT_URL from config file.");
     return false;
+  }
+
+  // Persist the URL migration to SPIFFS once. We do this AFTER the
+  // strlen checks above so a malformed config (missing SSID etc.)
+  // is not silently overwritten with a partial-migration state. The
+  // saveConfig in host.cpp uses the same StaticJsonDocument<1024>
+  // shape; we mutate the already-loaded doc in-place rather than
+  // re-reading from disk so a brief power-loss between read and
+  // write doesn't corrupt the config.
+  if (urlMigrated) {
+    Serial.println("------ loadConfig: migrating saved URLs to https:// (issue #79)");
+    esp_config_doc["NETWORK"]["UPLOAD_URL"] = uploadMigrated;
+    esp_config_doc["NETWORK"]["INIT_URL"]   = initMigrated;
+    File out = SPIFFS.open(esp_config->CONFIG_FILE, "w");
+    if (out) {
+      const size_t bytesWritten = serializeJson(esp_config_doc, out);
+      out.close();
+      if (bytesWritten == 0) {
+        // Truncation gate, same shape as host.cpp::saveConfig — see #19.
+        // The file has already been truncated to zero by SPIFFS.open("w");
+        // we cannot un-truncate. Without intervention the next boot would
+        // call this `loadConfig`, hit the JSON parse error on the empty
+        // file, return false, and the setup path would take roughly
+        // `WIFI_FAIL_AP_FALLBACK_THRESH` failed WiFi joins (~3 boots,
+        // each ~30 s) before flipping `setESPConfigured(false)` and
+        // opening the captive portal. To collapse that latency to a
+        // single reboot, we clear the configured flag ourselves here:
+        // the captive portal will open on the very next boot. RAM-side
+        // `esp_config` retains the migrated values for this boot so the
+        // current run still talks to the right URLs over TLS.
+        Serial.println("------ loadConfig: serializeJson wrote 0 bytes — clearing NVS configured flag so captive portal opens on next boot");
+        setESPConfigured(false);
+      }
+    } else {
+      Serial.println("------ loadConfig: failed to open config.json for migration re-save");
+    }
   }
   return true;
 }
@@ -537,10 +584,18 @@ void getGeolocation(esp_config_t *esp_config) {
   String requestBody;
   serializeJson(doc, requestBody);
 
-  HTTPClient http;
+  // Verified TLS to googleapis.com. Pin against GTS Root R1 (the
+  // self-signed Google trust anchor; chain on the wire today is
+  // googleapis.com -> WR2 -> GTS Root R1). Without setCACert the
+  // HTTPClient would still negotiate TLS but skip peer verification,
+  // which leaks the WiFi-BSSID list to any MITM with a self-signed
+  // cert. Issue #79.
+  WiFiClientSecure secureClient;
+  secureClient.setCACert(hf::tls::kGtsRootR1Pem);
 
+  HTTPClient http;
   String url = String("https://www.googleapis.com/geolocation/v1/geolocate?key=") + apiKey;
-  http.begin(url);
+  http.begin(secureClient, url);
   http.addHeader("Content-Type", "application/json");
 
   hf::breadcrumbSet("getGeolocation:http_post");
@@ -576,11 +631,30 @@ void getGeolocation(esp_config_t *esp_config) {
 /* INIT NEW MODULE ON SERVER */
 void initNewModuleOnServer(esp_config_t *esp_config) {
   if (WiFi.status() == WL_CONNECTED) {
+    // Scheme-aware client dispatch (issue #79). HTTPClient::begin(client, url)
+    // uses whatever client you pass it — it does NOT auto-select based on
+    // the URL scheme. So we parse the scheme ourselves and hold a reference
+    // to either a WiFiClientSecure (pinned to ISRG Root X1) or a plain
+    // WiFiClient. LAN-dev INIT_URLs (`http://10.0.0.5:8002/...`) need the
+    // plain branch because duckdb-service doesn't terminate TLS. Same
+    // pattern as `ota.cpp`'s `httpOtaCheckAndApply` and the heartbeat /
+    // upload paths in `client.cpp`. Both storage objects must outlive
+    // `http.end()` since HTTPClient stores `_client = &client`.
+    hf::Url parsed = hf::parseUrl(std::string(esp_config->INIT_URL));
+    const bool useTls = (parsed.scheme == "https");
+    WiFiClientSecure tlsClient;
+    WiFiClient plainClient;
+    WiFiClient& netClient = useTls ? static_cast<WiFiClient&>(tlsClient)
+                                   : plainClient;
+    if (useTls) {
+      tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
+    }
+
     HTTPClient http;
 
     Serial.printf("------ MODULE NAME: %s\n", esp_config->module_name);
 
-    http.begin(esp_config->INIT_URL);
+    http.begin(netClient, esp_config->INIT_URL);
     //http.begin("http://192.168.0.36:8002/new_module");
     http.addHeader("Content-Type", "application/json");
 

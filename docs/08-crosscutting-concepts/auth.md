@@ -31,6 +31,8 @@ Accepted in any of these forms:
 
 Applied to all `/api/modules*` routes.
 
+Since [ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md) the ESP32-CAM firmware speaks verified TLS (CA-pinned to ISRG Root X1) to `highfive.schutera.com`. **Per-module migration is gated on the OTA cycle that delivers post-#79 firmware** — pre-`mason` modules in the field continue to POST in clear-text against nginx's still-listening port-80 vhost until they pick up the new firmware on their next daily reboot. The migration is opt-out only via firmware revision; the server-side closure of the legacy HTTP `location` blocks is a future cleanup once telemetry shows the fleet has rotated. The shared-secret authorization model is otherwise unchanged.
+
 ## Admin gate
 
 Defined inline in [`backend/src/app.ts`](../../backend/src/app.ts)

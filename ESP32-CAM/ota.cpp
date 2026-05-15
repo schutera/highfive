@@ -9,7 +9,9 @@
 #include <Update.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
+#include "tls_roots.h" // hf::tls::kIsrgRootX1Pem — issue #79
 
 #include <cstring>
 #include <string>
@@ -114,7 +116,11 @@ bool sendGet(WiFiClient& c, const std::string& host, uint16_t port,
     c.print(path.c_str());
     c.print(" HTTP/1.1\r\nHost: ");
     c.print(host.c_str());
-    if (port != 80) {
+    // Omit the explicit ":<port>" when it matches the scheme default
+    // (80 for HTTP, 443 for HTTPS) — RFC 7230 §5.4 says the Host header
+    // SHOULD omit a default-port specifier, and some upstreams normalise
+    // virthost lookup on the literal Host string.
+    if (port != 80 && port != 443) {
         c.print(":");
         c.print(port);
     }
@@ -140,87 +146,101 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
         logf("[OTA] no host in INIT_URL — skipping");
         return;
     }
-    // The WiFiClient HTTP plumbing here does not do TLS — refuse https
-    // INIT_URLs loudly rather than silently downgrade to http and have
-    // the request 301 or fail mid-stream. The captive portal does not
-    // accept https INIT_URL today, but an operator pasting from a
-    // browser can introduce one. A signed-update / TLS story belongs
-    // in a follow-up ADR.
-    if (initParsed.scheme != "http" && !initParsed.scheme.empty()) {
-        logf("[OTA] non-http scheme '%s' in INIT_URL — skipping",
-             initParsed.scheme.c_str());
-        return;
-    }
-    const uint16_t port = initParsed.port ? initParsed.port : 80;
+    // OTA traffic uses verified TLS to the same host as the rest of
+    // the firmware's calls (highfive.schutera.com). #79 added the
+    // server-trust infrastructure and migrated the heartbeat / upload
+    // / registration paths; this fetch piggybacks on the same trust
+    // anchor (ISRG Root X1). LAN-dev topologies that put the homepage
+    // on a different port / host are still honoured — the operator's
+    // INIT_URL is parsed as-is and the same scheme+port are used here.
+    // Originally tracked separately as issue #81; folded in.
+    const bool useTls = (initParsed.scheme == "https");
+    const uint16_t port = initParsed.port ? initParsed.port :
+                          (useTls ? 443 : 80);
 
-    // ---- Manifest fetch ----
-    hf::breadcrumbSet("ota:manifest_fetch");
-    WiFiClient client;
-    client.setTimeout(10);  // seconds, applies to read
-
-    if (!sendGet(client, initParsed.host, port, "/firmware.json")) {
-        logf("[OTA] manifest connect failed");
-        client.stop();
-        return;
-    }
-
-    char statusLine[64];
-    if (!readLine(client, statusLine, sizeof(statusLine), 10000)) {
-        logf("[OTA] manifest no status line");
-        client.stop();
-        return;
-    }
-    const int manifestStatus = parseStatus(statusLine);
-    logbufNoteHttpCode(manifestStatus);
-    if (manifestStatus != 200) {
-        logf("[OTA] manifest HTTP %d", manifestStatus);
-        client.stop();
-        return;
-    }
-
-    uint32_t manifestLen = 0;
-    if (!readHeaders(client, &manifestLen, 10000)) {
-        logf("[OTA] manifest header read failed");
-        client.stop();
-        return;
-    }
-    // manifestLen is 0 if the server sends chunked transfer-encoding
-    // (no Content-Length header). nginx serves static files with a
-    // Content-Length, so this is expected to be always set in
-    // production. A chunked response is silently treated as "out of
-    // range" and skipped — safe fallback, better than guessing the body.
-    if (manifestLen == 0 || manifestLen > kManifestMaxBytes) {
-        logf("[OTA] manifest length %u out of range", (unsigned)manifestLen);
-        client.stop();
-        return;
-    }
-
-    char body[kManifestMaxBytes + 1];
-    size_t got = 0;
-    unsigned long readDeadline = millis() + 10000UL;
-    while (got < manifestLen && millis() < readDeadline) {
-        if (!client.available()) {
-            if (!client.connected() && client.available() == 0) break;
-            delay(1);
-            continue;
-        }
-        int b = client.read();
-        if (b < 0) continue;
-        body[got++] = static_cast<char>(b);
-    }
-    client.stop();
-    if (got != manifestLen) {
-        logf("[OTA] manifest short read %u/%u", (unsigned)got, (unsigned)manifestLen);
-        return;
-    }
-    body[got] = '\0';
-
-    hf::breadcrumbSet("ota:manifest_parse");
     hf::OtaManifest manifest{};
-    if (!hf::parseOtaManifest(body, &manifest)) {
-        logf("[OTA] manifest parse failed");
-        return;
-    }
+
+    // ---- Manifest fetch (scoped block so the TLS context releases) ----
+    // The TLS handshake heap (~30 KB transient + an ~8 KB mbedTLS
+    // session context held for the connection's lifetime) is paid
+    // twice when manifest+binary both run over TLS. Re-scoping the
+    // manifest clients into a block ensures the manifest's mbedTLS
+    // context is destructed before the binary fetch's is constructed,
+    // capping the worst-case TLS heap at a single context's size.
+    {
+        hf::breadcrumbSet("ota:manifest_fetch");
+        WiFiClientSecure tlsClient;
+        WiFiClient plainClient;
+        WiFiClient& client = useTls ? static_cast<WiFiClient&>(tlsClient)
+                                    : plainClient;
+        if (useTls) {
+            tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
+        }
+        client.setTimeout(10);  // seconds, applies to read
+
+        if (!sendGet(client, initParsed.host, port, "/firmware.json")) {
+            logf("[OTA] manifest connect failed");
+            client.stop();
+            return;
+        }
+
+        char statusLine[64];
+        if (!readLine(client, statusLine, sizeof(statusLine), 10000)) {
+            logf("[OTA] manifest no status line");
+            client.stop();
+            return;
+        }
+        const int manifestStatus = parseStatus(statusLine);
+        logbufNoteHttpCode(manifestStatus);
+        if (manifestStatus != 200) {
+            logf("[OTA] manifest HTTP %d", manifestStatus);
+            client.stop();
+            return;
+        }
+
+        uint32_t manifestLen = 0;
+        if (!readHeaders(client, &manifestLen, 10000)) {
+            logf("[OTA] manifest header read failed");
+            client.stop();
+            return;
+        }
+        // manifestLen is 0 if the server sends chunked transfer-encoding
+        // (no Content-Length header). nginx serves static files with a
+        // Content-Length, so this is expected to be always set in
+        // production. A chunked response is silently treated as "out of
+        // range" and skipped — safe fallback, better than guessing the body.
+        if (manifestLen == 0 || manifestLen > kManifestMaxBytes) {
+            logf("[OTA] manifest length %u out of range", (unsigned)manifestLen);
+            client.stop();
+            return;
+        }
+
+        char body[kManifestMaxBytes + 1];
+        size_t got = 0;
+        unsigned long readDeadline = millis() + 10000UL;
+        while (got < manifestLen && millis() < readDeadline) {
+            if (!client.available()) {
+                if (!client.connected() && client.available() == 0) break;
+                delay(1);
+                continue;
+            }
+            int b = client.read();
+            if (b < 0) continue;
+            body[got++] = static_cast<char>(b);
+        }
+        client.stop();
+        if (got != manifestLen) {
+            logf("[OTA] manifest short read %u/%u", (unsigned)got, (unsigned)manifestLen);
+            return;
+        }
+        body[got] = '\0';
+
+        hf::breadcrumbSet("ota:manifest_parse");
+        if (!hf::parseOtaManifest(body, &manifest)) {
+            logf("[OTA] manifest parse failed");
+            return;
+        }
+    }  // tlsClient + plainClient destructed here; mbedTLS context released
 
     if (!hf::shouldOtaUpdate(FIRMWARE_VERSION, manifest.version)) {
         logf("[OTA] already current (version=%s)", manifest.version);
@@ -231,8 +251,19 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
          (unsigned)manifest.app_size, manifest.app_md5);
 
     // ---- Binary fetch + Update.write streaming ----
+    // Fresh client for the second hop. The manifest's clients went
+    // out of scope at the end of the block above (Connection: close
+    // already sent), freeing its mbedTLS context, so this handshake
+    // re-pays the heap cost on a clean slate. Net peak TLS heap is
+    // one context, not two.
     hf::breadcrumbSet("ota:binary_fetch");
-    WiFiClient binClient;
+    WiFiClientSecure tlsBinClient;
+    WiFiClient plainBinClient;
+    WiFiClient& binClient = useTls ? static_cast<WiFiClient&>(tlsBinClient)
+                                   : plainBinClient;
+    if (useTls) {
+        tlsBinClient.setCACert(hf::tls::kIsrgRootX1Pem);
+    }
     binClient.setTimeout(15);
 
     if (!sendGet(binClient, initParsed.host, port, "/firmware.app.bin")) {
@@ -240,12 +271,15 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
         binClient.stop();
         return;
     }
-    if (!readLine(binClient, statusLine, sizeof(statusLine), 15000)) {
+    // Fresh statusLine buffer — the manifest's lives in the inner
+    // block scope above and went out of scope with its client.
+    char binStatusLine[64];
+    if (!readLine(binClient, binStatusLine, sizeof(binStatusLine), 15000)) {
         logf("[OTA] binary no status line");
         binClient.stop();
         return;
     }
-    const int binStatus = parseStatus(statusLine);
+    const int binStatus = parseStatus(binStatusLine);
     logbufNoteHttpCode(binStatus);
     if (binStatus != 200) {
         logf("[OTA] binary HTTP %d", binStatus);

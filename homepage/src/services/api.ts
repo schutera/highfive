@@ -1,14 +1,48 @@
 import type { Module, ModuleDetail, TelemetryEntry } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
-// Fail loudly on production builds with empty/missing build-args - the
-// dev fallbacks below would otherwise silently bake the dev key + dev
-// API URL into a prod bundle (e.g. a standalone `docker build` without
-// --build-arg). docker-compose.prod.yml already rejects empty values
-// upstream via ${VAR:?msg}, but this guards direct-build paths too.
-if (import.meta.env.PROD && (!import.meta.env.VITE_API_URL || !import.meta.env.VITE_API_KEY)) {
-  throw new Error('VITE_API_URL and VITE_API_KEY must be set at build time for production builds');
+// The dev fallback. Named once so the validator and the fallback expression
+// below cannot drift. Public string by design (documented in CLAUDE.md and
+// .env.example); safe only in dev builds where the validator below allows it.
+const DEV_FALLBACK_KEY = 'hf_dev_key_2026';
+
+/**
+ * Build-time validator for `VITE_API_KEY`. Throws on prod builds when the
+ * key is absent OR (case-insensitively) the public dev fallback.
+ *
+ * Mirrors the backend's load-time guard in `backend/src/auth.ts`. Vite
+ * inlines `import.meta.env.VITE_API_KEY` at bundle-build time, so this
+ * runs once at first import and a prod bundle built from a copy-pasted
+ * `.env.example` crashes loudly instead of shipping the public dev key
+ * inlined into the JavaScript.
+ *
+ * Exported as a pure function so tests can exercise the decision logic
+ * directly without Vitest env-stubbing (which can't simulate Vite's
+ * build-time env inlining).
+ */
+export function validateBuildTimeApiKey(key: string | undefined, isProd: boolean): void {
+  if (!isProd) return;
+  if (!key) {
+    throw new Error('VITE_API_KEY must be set at build time for production builds.');
+  }
+  if (key.trim().toLowerCase() === DEV_FALLBACK_KEY) {
+    throw new Error(
+      `VITE_API_KEY is set (case-insensitively) to the public dev ` +
+        `fallback '${DEV_FALLBACK_KEY}'. Production builds must use a ` +
+        `strong secret. See CLAUDE.md "Critical rules" and the symmetric ` +
+        `backend guard in backend/src/auth.ts.`,
+    );
+  }
 }
+
+// VITE_API_URL guard stays inline — separate concern, separate throw.
+// docker-compose.prod.yml already rejects empty values upstream via
+// ${VAR:?msg}, but this guards direct-build paths too (e.g. a standalone
+// `docker build` without --build-arg).
+if (import.meta.env.PROD && !import.meta.env.VITE_API_URL) {
+  throw new Error('VITE_API_URL must be set at build time for production builds.');
+}
+validateBuildTimeApiKey(import.meta.env.VITE_API_KEY, import.meta.env.PROD);
 
 export type { TelemetryEntry } from '@highfive/contracts';
 
@@ -21,7 +55,7 @@ export interface ImageUpload {
 }
 
 // API key for authentication - in production, this should come from environment variables
-const API_KEY = import.meta.env.VITE_API_KEY || 'hf_dev_key_2026';
+const API_KEY = import.meta.env.VITE_API_KEY || DEV_FALLBACK_KEY;
 
 class ApiService {
   private baseUrl: string;

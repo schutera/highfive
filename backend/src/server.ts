@@ -3,8 +3,15 @@ import { app } from './app';
 import { getApiKey } from './auth';
 import { duckdbHealth } from './duckdbClient';
 import { isProduction } from './env';
+import { DEFAULT_PORT, resolvePort } from './port';
 
-const PORT = parseInt(process.env.PORT || '3001', 10);
+const { port: PORT, warned: portUnsetWarning } = resolvePort(process.env.PORT);
+if (portUnsetWarning) {
+  console.warn(
+    `[startup] PORT env var unset or non-numeric — defaulting to ${DEFAULT_PORT}. ` +
+      `Set PORT explicitly in production. See docker-compose.yml for the dev convention.`,
+  );
+}
 
 async function bootstrap() {
   try {

@@ -7,14 +7,20 @@ import { parseModuleId } from '@highfive/contracts';
 const DEV_FALLBACK_KEY = 'hf_dev_key_2026';
 
 /**
- * Build-time validator for `VITE_API_KEY`. Throws on prod builds when the
+ * Validator for `VITE_API_KEY`. Throws on prod builds when the
  * key is absent OR (case-insensitively) the public dev fallback.
  *
- * Mirrors the backend's load-time guard in `backend/src/auth.ts`. Vite
- * inlines `import.meta.env.VITE_API_KEY` at bundle-build time, so this
- * runs once at first import and a prod bundle built from a copy-pasted
- * `.env.example` crashes loudly instead of shipping the public dev key
- * inlined into the JavaScript.
+ * Runs at module-load time in the bundle (i.e. first time the browser
+ * imports this file), not at `vite build` time. Vite inlines
+ * `import.meta.env.VITE_API_KEY` into the bundle as a string literal
+ * during transformation; the throw fires when the bundle is loaded.
+ * The bundle artifact therefore still contains the literal string for
+ * a bad key — acceptable because the dev fallback is public by design
+ * (documented in CLAUDE.md). What this guard buys: a misconfigured
+ * production deployment fast-fails with a self-describing error at
+ * first browser load, instead of a stream of opaque 403s from the
+ * hardened backend after [`verifyApiKey`](../auth.ts mirror) rejects
+ * every request.
  *
  * Exported as a pure function so tests can exercise the decision logic
  * directly without Vitest env-stubbing (which can't simulate Vite's

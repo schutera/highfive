@@ -105,10 +105,13 @@ a build error.
 **How to avoid it next time.** Two lessons compound on PR #84's:
 
 1. **When you find yourself adding a "do not violate" rule to
-   CLAUDE.md, first ask whether it can be a build error.** A
-   `static_assert` on a `#define` (firmware), a startup `throw` with
-   a self-describing message (Node service), a top-level guard in a
-   Vite-built module (frontend), or a pure helper plus a native test
+   CLAUDE.md, first ask whether it can be a build error or a fast
+   self-describing crash at first run.** A `static_assert` on a
+   `#define` (firmware), a startup `throw` with a self-describing
+   message (Node service), a load-time guard in a Vite bundle (the
+   crash fires at first browser import, not during `vite build` —
+   Vite inlines `import.meta.env` values but doesn't execute module
+   tops; that's intrinsic), or a pure helper plus a native test
    pinning its contract (firmware non-2xx) cover most of the cases.
    The prose entry is the fallback when none of those mechanisms fit
    — not the first option. PR #84 used a startup throw; this PR added

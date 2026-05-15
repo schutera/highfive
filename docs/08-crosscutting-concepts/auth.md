@@ -43,18 +43,24 @@ and negative-case the two values cut from the safelist during
 review (`'dev'`, `'testing'`) so a future re-add must update the
 tests in lockstep.
 
-The frontend reads the key from `VITE_API_KEY` at build time. The mirror
+The frontend reads the key from `VITE_API_KEY` at Vite's bundle-build
+time and inlines the resolved string into the JS bundle. The mirror
 guard lives in
 [`homepage/src/services/api.ts`'s `validateBuildTimeApiKey`](../../homepage/src/services/api.ts):
 a production bundle (Vite's `import.meta.env.PROD === true`) refuses to
-boot when `VITE_API_KEY` is unset OR (case-insensitively, with
-whitespace tolerance) the literal `hf_dev_key_2026`. Tests in
+load when `VITE_API_KEY` is unset OR (case-insensitively, with
+whitespace tolerance) the literal `hf_dev_key_2026`. The throw fires
+at module-load time in the browser, not during `vite build` — Vite
+treats `import.meta.env.PROD` as a string replacement during
+transformation rather than executing the module's top-level
+statements, so the build artifact still contains the literal key
+string for a bad value. Acceptable because the dev fallback is
+public by design; what the guard buys is a fast, self-describing
+failure at first browser load instead of opaque 403s from the
+hardened backend on every subsequent request. Tests in
 [`homepage/src/__tests__/api-key-validator.test.ts`](../../homepage/src/__tests__/api-key-validator.test.ts)
-pin the truth table the same way the backend guard's tests do. The
-asymmetry of "build-time vs. module-load-time" is intrinsic to Vite —
-the key is inlined into the bundle at build, so a bad value can't be
-caught later at runtime; the validator runs once at first import and
-fast-crashes the bundle.
+pin the validator's truth table the same way the backend guard's
+tests do.
 
 ## API-key middleware
 

@@ -11,9 +11,13 @@ services:
       - .env
     environment:
       NODE_ENV: development
-      # PORT must match the host:container mapping above. server.ts defaults
-      # to 3001 (legacy production), so set it explicitly here for the dev
-      # stack — the homepage's API client also targets :3002.
+      # PORT is set explicitly even though backend/src/port.ts's
+      # resolvePort() now defaults to 3002 — it documents the dev-stack
+      # intent and silences the unset-fallback warning that server.ts
+      # emits otherwise. Dropping this line is a no-op for the dashboard
+      # (default matches the host:container mapping above) but will
+      # trigger the warning; treat that as the signal to ask whether
+      # the drop was intentional.
       PORT: '3002'
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       IMAGE_SERVICE_URL: http://image-service:4444

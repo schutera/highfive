@@ -38,6 +38,21 @@ describe('validateBuildTimeApiKey', () => {
     expect(() => validateBuildTimeApiKey('', true)).toThrow(/VITE_API_KEY must be set/);
   });
 
+  it('throws in prod mode when the key is whitespace-only', () => {
+    // Senior-review (PR-86/87 round 1) caught the symmetric drift:
+    // backend's `process.env.HIGHFIVE_API_KEY?.trim() || undefined`
+    // already coerces whitespace-only to undefined and trips the
+    // production guard. Without the matching `.trim().length === 0`
+    // check on the frontend, a `VITE_API_KEY='   '` slipped through
+    // both branches (whitespace is truthy in JS) and shipped a bundle
+    // whose API_KEY local resolved to '   '. Pin all three common
+    // whitespace shapes — spaces, tabs, newlines — so a future
+    // refactor of the reduction cannot quietly regress this.
+    expect(() => validateBuildTimeApiKey('   ', true)).toThrow(/VITE_API_KEY must be set/);
+    expect(() => validateBuildTimeApiKey('\t\t', true)).toThrow(/VITE_API_KEY must be set/);
+    expect(() => validateBuildTimeApiKey('\n\n', true)).toThrow(/VITE_API_KEY must be set/);
+  });
+
   // ----- prod + dev fallback (any casing): must throw with the dev-fallback message -----
   //
   // Regex pins the dev-fallback throw path specifically so a regression

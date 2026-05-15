@@ -19,7 +19,7 @@ const DEV_FALLBACK_KEY = 'hf_dev_key_2026';
  * (documented in CLAUDE.md). What this guard buys: a misconfigured
  * production deployment fast-fails with a self-describing error at
  * first browser load, instead of a stream of opaque 403s from the
- * hardened backend after [`verifyApiKey`](../auth.ts mirror) rejects
+ * symmetric `verifyApiKey` boundary in `backend/src/auth.ts` rejecting
  * every request.
  *
  * Exported as a pure function so tests can exercise the decision logic
@@ -28,15 +28,29 @@ const DEV_FALLBACK_KEY = 'hf_dev_key_2026';
  */
 export function validateBuildTimeApiKey(key: string | undefined, isProd: boolean): void {
   if (!isProd) return;
-  if (!key) {
-    throw new Error('VITE_API_KEY must be set at build time for production builds.');
+  // Whitespace-only also counts as unset: the backend's
+  // `process.env.HIGHFIVE_API_KEY?.trim() || undefined` coerces a
+  // whitespace-only env value to `undefined` and the production guard
+  // fires. Matching that reduction here keeps the two halves of the
+  // project symmetric — without the `.trim().length === 0` check, a
+  // production build with `VITE_API_KEY='   '` would slip through both
+  // branches below (whitespace is truthy in JavaScript) and ship a
+  // bundle whose API_KEY local resolves to `'   '`, which the backend
+  // then rejects with 403 on every request.
+  if (!key || key.trim().length === 0) {
+    throw new Error(
+      'VITE_API_KEY must be set to a non-empty value for production builds. ' +
+        '(Throws at module load in the browser, not during `vite build` — ' +
+        'see the JSDoc above for the build-time-vs-load-time mechanism.)',
+    );
   }
   if (key.trim().toLowerCase() === DEV_FALLBACK_KEY) {
     throw new Error(
       `VITE_API_KEY is set (case-insensitively) to the public dev ` +
         `fallback '${DEV_FALLBACK_KEY}'. Production builds must use a ` +
         `strong secret. See CLAUDE.md "Critical rules" and the symmetric ` +
-        `backend guard in backend/src/auth.ts.`,
+        `backend guard in backend/src/auth.ts. (Throws at module load in ` +
+        `the browser, not during \`vite build\`.)`,
     );
   }
 }

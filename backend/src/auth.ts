@@ -70,10 +70,12 @@ const API_KEY = ENV_KEY ?? DEV_FALLBACK_KEY;
 //
 // Length mismatch returns false before calling timingSafeEqual: Node's
 // timingSafeEqual throws on length mismatch, and we don't want to surface
-// that as a 500 from the auth middleware. Length itself is one bit of
-// leakage about the configured secret; the byte content is what the
-// constant-time compare protects. Acceptable tradeoff for the threat model
-// in ADR-003.
+// that as a 500 from the auth middleware. The length-mismatch branch leaks
+// the configured secret's length to a probing attacker — for the single
+// fixed-length deployment key the project uses, that's a recoverable
+// constant rather than ongoing leakage. The byte content (the part that
+// actually carries the entropy) is what the constant-time compare protects.
+// Acceptable tradeoff for the threat model in ADR-003.
 function constantTimeEqual(a: string, b: string): boolean {
   const aBuf = Buffer.from(a, 'utf8');
   const bBuf = Buffer.from(b, 'utf8');

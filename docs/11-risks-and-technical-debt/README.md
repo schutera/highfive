@@ -123,10 +123,17 @@ a build error.
    it's a hint that two sources of truth exist, and CLAUDE.md is the
    wrong one. Keeping both invites the next maintainer to weaken the
    code-side check on the assumption that the prose carries the rule.
-   This PR removed the three now-enforced entries; the dev-API-key
-   entry stays because its enforcement is partial (only
-   `NODE_ENV=production` activates the guard, but production-adjacent
-   environments like `staging` rely on operator discipline).
+   This PR removed the three now-enforced entries. The dev-API-key
+   entry stays because the enforcement has one intentional off-ramp:
+   `NODE_ENV=development` (and the rest of `env.ts`'s `DEV_ENV_TOKENS`
+   safelist — `''` and `'test'`) deliberately activates the dev
+   fallback so local development and the test suite still work
+   without an explicit `HIGHFIVE_API_KEY` override. An operator who
+   deploys a `NODE_ENV=development` container to a production host is
+   on their own; nothing in `isProduction()` catches that. Anything
+   outside the safelist — including `'staging'`, `'qa'`, and any
+   unrecognised value — routes to production-mode and the guard
+   fires (pinned by `backend/tests/auth-prod-guard.test.ts`).
 
 The remaining "Critical rules" entries — force-push to main, hook
 bypass, `--amend` after hook failure, `DuckDB` connection from

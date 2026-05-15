@@ -14,7 +14,8 @@ npm install
 npm run dev
 ```
 
-Server will run on `http://localhost:3001`
+Server will run on `http://localhost:3002` (the default in
+`backend/src/port.ts`'s `resolvePort()`; override with `PORT=...`).
 
 ## API Endpoints
 

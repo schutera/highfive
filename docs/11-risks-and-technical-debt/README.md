@@ -77,7 +77,7 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
-### Critical-rules prose-to-code audit — three more rules became self-enforcing (issues #86, #87)
+### Critical-rules prose-to-code audit, extended — five more hardenings in one PR (issues #86, #87)
 
 **What happened.** PR #84 closed the dev-fallback-as-production-admin-gate
 incident by lifting one CLAUDE.md "Critical rules" entry into a

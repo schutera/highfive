@@ -2,8 +2,10 @@ import type { Module, ModuleDetail, TelemetryEntry } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
 // The dev fallback. Named once so the validator and the fallback expression
-// below cannot drift. Public string by design (documented in CLAUDE.md and
-// .env.example); safe only in dev builds where the validator below allows it.
+// below cannot drift. Public string by design (documented in CLAUDE.md
+// "Critical rules" and the symmetric backend constant
+// `backend/src/auth.ts`'s `DEV_FALLBACK_KEY`); safe only in dev builds
+// where the validator below allows it.
 const DEV_FALLBACK_KEY = 'hf_dev_key_2026';
 
 /**

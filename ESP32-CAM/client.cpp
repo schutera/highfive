@@ -316,10 +316,6 @@ int sendHeartbeat(esp_config_t *esp_config) {
                + body);
   hbClient.flush();
 
-  // Parse the HTTP status from the first response line. Format is
-  // "HTTP/1.1 200 OK\r\n"; we want the integer between the first and
-  // second space. Anything not 2xx is a real upload failure that
-  // belongs in the telemetry ring buffer.
   hf::breadcrumbSet("sendHeartbeat:read_status");
   String statusLine = hbClient.readStringUntil('\n');
   hbClient.stop();

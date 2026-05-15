@@ -53,17 +53,14 @@ fall back to it under production-mode `NODE_ENV` — see
 
 - One env var to set in dev. One secret to rotate in production.
 - Simpler deploy story.
+- Both gates share the [`verifyApiKey`](../../backend/src/auth.ts)
+  boundary in `backend/src/auth.ts`, so changes to the compare
+  semantics propagate to both gates by construction.
 
 **Negative**:
 
 - A leak of the API key is also a leak of admin access. Acceptable
   for the current single-tenant threat model; revisit if multi-tenant.
-- Both gates share the
-  [`verifyApiKey`](../../backend/src/auth.ts) boundary in
-  `backend/src/auth.ts`, so changes to the compare semantics propagate
-  to both by construction. Earlier wording flagged the admin-key check
-  as a one-liner easy to miss in audit; the shared-helper refactor
-  closes that audit-surface.
 
 **Forbidden**:
 

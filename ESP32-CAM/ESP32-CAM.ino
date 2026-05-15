@@ -22,7 +22,18 @@
 // retries) + 30 s sleep at end of loop = up to ~55 s between feeds in
 // the worst case. 60 s gives a safety margin while still rebooting on
 // genuine deadlocks within ~1 minute.
+//
+// The 60 s floor was earned: raised from 30 s in commit ea7dc73 (PR-17
+// review critical) after a deployed module reset-looped under degraded
+// WiFi. The static_assert below makes "lower this to make local tests
+// snappier" produce a build error instead of a field outage. ADR-007
+// has the full rationale.
 #define TASK_WDT_TIMEOUT_S    60
+static_assert(TASK_WDT_TIMEOUT_S >= 60,
+              "TASK_WDT_TIMEOUT_S must be >= 60 s — see ADR-007 and "
+              "commit ea7dc73. Lowering this without re-running the "
+              "worst-case captureAndUpload+heartbeat scenario is the "
+              "regression that incident closed.");
 // Max consecutive boots a slot can stay in ESP_OTA_IMG_PENDING_VERIFY
 // before this firmware forces an app-side rollback. See
 // `forceRollbackIfPendingTooLong()` below and the comment that calls

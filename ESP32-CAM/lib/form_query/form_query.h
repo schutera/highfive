@@ -69,9 +69,11 @@ std::string resolveKeepCurrentField(const std::string& submitted,
 //   * Missing "://" → input is not a URL; all three fields empty.
 //   * URL with no path (e.g. `http://example.com`) → endpoint empty.
 //   * URL with trailing slash (`http://example.com/`) → endpoint empty.
-//   * Port with non-digit characters → captured as-is; `joinUrlFromForm`
-//     will pass it through unchanged so the eventual form validator
-//     can flag it.
+//
+// Note: the split function does not validate that the port substring
+// is numeric. Acceptance of the eventual form submission is gated by
+// `isValidPortString` on the server side; this split is the round-
+// trip surface for pre-fill, not the validator.
 struct FormUrlParts {
     std::string base;      // e.g. "https://highfive.schutera.com"
     std::string port;      // e.g. "8002", or "" when implicit

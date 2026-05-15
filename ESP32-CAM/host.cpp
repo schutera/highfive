@@ -186,7 +186,7 @@ void saveConfig() {
   -------- HTML CONFIG FORM --------
   ----------------------------------
 */
-void sendConfigForm(WiFiClient &client, bool saved = false) {
+void sendConfigForm(WiFiClient &client, bool saved = false, const char* errorMessage = nullptr) {
   // Three-fields-per-URL pre-fill (issue #79). Logic lives in
   // hf::splitUrlForForm (lib/form_query/) so test_native_form_query
   // pins the split shape. Port defaults to the LAN-dev convention
@@ -327,6 +327,18 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 
   if (saved) {
     client.println("<div class=\"message\"><strong>Configuration saved successfully.</strong></div>");
+  }
+  // Server-side reject banner (issue #79). Used when /save rejects
+  // a submission for a reason the JS validator would have caught
+  // (port out of range, port non-numeric) but the JS path was
+  // bypassed via curl or a JS-disabled browser. Without this,
+  // operators see the form re-render with their previous values
+  // and no indication that anything went wrong — the same silent-
+  // failure shape chapter-11 already flagged for the setup wizard.
+  if (errorMessage != nullptr) {
+    client.print("<div class=\"message\" style=\"background:#fee2e2;color:#991b1b;border:1px solid #fecaca;\"><strong>");
+    client.print(errorMessage);
+    client.println("</strong></div>");
   }
 
   client.println("<form action=\"/save\" method=\"POST\" autocomplete=\"off\" onsubmit=\"validateForm(event)\">");
@@ -594,14 +606,29 @@ void runAccessPoint() {
                     // otherwise persist `init_port=99999` or
                     // `init_port=abc` to SPIFFS and brick the next
                     // boot's URL parse. On any invalid port we
-                    // re-render the form WITHOUT setting "saved" so
-                    // the operator sees their changes did not stick.
-                    // Logic + 10 unit tests live in `hf::isValidPortString`
+                    // re-render the form WITHOUT setting "saved" AND
+                    // surface an error banner so the operator sees
+                    // their submission did not stick — silent reject
+                    // is the same shape as the setup-wizard silent-
+                    // success bugs chapter-11 already flagged. Logic
+                    // + 10 unit tests live in `hf::isValidPortString`
                     // (lib/form_query/).
-                    if (!hf::isValidPortString(std::string(uploadPort.c_str())) ||
-                        !hf::isValidPortString(std::string(initPort.c_str()))) {
-                      Serial.println("[host] /save rejected: invalid port — re-rendering form");
-                      sendConfigForm(client, false);
+                    const bool uploadPortValid = hf::isValidPortString(std::string(uploadPort.c_str()));
+                    const bool initPortValid   = hf::isValidPortString(std::string(initPort.c_str()));
+                    if (!uploadPortValid || !initPortValid) {
+                      const char* which =
+                          (!uploadPortValid && !initPortValid) ? "Upload Port and Initialization Port"
+                          : (!uploadPortValid)                 ? "Upload Port"
+                                                               : "Initialization Port";
+                      Serial.printf("[host] /save rejected: invalid port (upload_ok=%d init_ok=%d)\n",
+                                    (int)uploadPortValid, (int)initPortValid);
+                      // Reuse one buffer for the banner text — Arduino String
+                      // would heap-fragment on a re-onboarding loop.
+                      char banner[96];
+                      snprintf(banner, sizeof(banner),
+                               "%s must be empty or a number between 1 and 65535.",
+                               which);
+                      sendConfigForm(client, false, banner);
                       break;
                     }
 

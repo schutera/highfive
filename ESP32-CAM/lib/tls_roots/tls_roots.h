@@ -6,9 +6,10 @@
 //
 //   * `kIsrgRootX1Pem` — Internet Security Research Group Root X1.
 //     Anchor for `highfive.schutera.com` (Let's Encrypt R13
-//     intermediate as of 2026-05). Used by `initNewModuleOnServer`,
-//     `postImage`, and `sendHeartbeat` in [`client.cpp`] +
-//     [`esp_init.cpp`].
+//     intermediate as of 2026-05). Used by `initNewModuleOnServer`
+//     in `esp_init.cpp`; `postImage` and `sendHeartbeat` in
+//     `client.cpp`; and the manifest + binary fetches in
+//     `ota.cpp`'s `httpOtaCheckAndApply`.
 //
 //   * `kGtsRootR1Pem` — Google Trust Services Root R1.
 //     Anchor for `www.googleapis.com` (Geolocation API). Used by

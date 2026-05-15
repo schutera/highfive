@@ -145,6 +145,13 @@ std::string rewriteLegacyHighfiveUrl(const std::string& url) {
 
 bool isValidPortString(const std::string& port) {
     if (port.empty()) return true;  // empty = scheme default
+    // Reject leading zeros on multi-digit values — "00080" and "080"
+    // are not canonical and would round-trip badly: `joinUrlFromForm`
+    // emits the literal port into the URL, and `portMatchesSchemeDefault`
+    // does an exact string compare against "80"/"443", so a saved
+    // `http://host:00080/path` would NOT scheme-default-strip on the
+    // next form render.
+    if (port.size() > 1 && port[0] == '0') return false;
     // No internal whitespace, no signs, no exponents — strict digits.
     unsigned long acc = 0;
     for (char c : port) {

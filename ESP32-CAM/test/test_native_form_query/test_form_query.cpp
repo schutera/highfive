@@ -461,6 +461,16 @@ static void test_port_invalid_overflow_during_accumulation(void) {
     TEST_ASSERT_FALSE(isValidPortString("9999999999999"));
 }
 
+static void test_port_invalid_leading_zero(void) {
+    // Leading zeros on multi-digit values are not canonical; they
+    // round-trip badly through joinUrlFromForm + portMatchesSchemeDefault.
+    // A single "0" is rejected by the range check (port 0 reserved);
+    // multi-digit "080", "00080", "0443" must also fail.
+    TEST_ASSERT_FALSE(isValidPortString("080"));
+    TEST_ASSERT_FALSE(isValidPortString("00080"));
+    TEST_ASSERT_FALSE(isValidPortString("0443"));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -531,6 +541,7 @@ int main(int, char**) {
     RUN_TEST(test_port_invalid_negative);
     RUN_TEST(test_port_invalid_whitespace);
     RUN_TEST(test_port_invalid_overflow_during_accumulation);
+    RUN_TEST(test_port_invalid_leading_zero);
 
     return UNITY_END();
 }

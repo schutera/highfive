@@ -130,12 +130,13 @@ int postImage(esp_config_t *esp_config) {
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
     if (useTls) {
-      // Pin against ISRG Root X1 (Let's Encrypt) before every fresh
-      // connect — setCACert just stores the pointer and is cheap, but
-      // it MUST run on a non-connected client (calling it on an open
-      // socket is undefined behaviour in mbedTLS). The PEM lives in
-      // .rodata via [lib/tls_roots/tls_roots.h], program lifetime, so
-      // the pointer outlives every reuse. Issue #79.
+      // Pin against ISRG Root X1 (Let's Encrypt) before each fresh
+      // connect — only on the !connected() branch; on keep-alive
+      // reuse the session was already pinned the last time the
+      // socket was opened, and setCACert on a connected TLS client
+      // is undefined behaviour in mbedTLS. The PEM lives in .rodata
+      // via [lib/tls_roots/tls_roots.h], program lifetime, so the
+      // pointer outlives every reuse. Issue #79.
       tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
     }
     if (!client.connect(url.host.c_str(), url.port)) {

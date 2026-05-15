@@ -16,11 +16,18 @@
 #include <esp_task_wdt.h>
 #include "tls_roots.h" // hf::tls::kIsrgRootX1Pem — issue #79
 
-// Module-level keep-alive client for /upload. WiFiClientSecure rather
-// than WiFiClient since #79 — TLS handshake is paid on the first
-// connect, subsequent uploads reuse the session. setCACert is called
-// inside the !connected() reuse branch in postImage, before connect.
-static WiFiClientSecure client;
+// Module-level keep-alive clients for /upload (issue #79). Two
+// storage objects — one TLS, one plain — and `postImage` picks the
+// reference based on the URL scheme each call. Keeping a static of
+// each rather than reconstructing per call preserves the keep-alive
+// semantics within each scheme. The unused branch holds no open
+// socket; the static cost is the bare object size (~few hundred
+// bytes for WiFiClientSecure's ssl context pointer + ~tens for the
+// plain client). HTTPClient::begin(client, url) does NOT auto-select
+// — see `esp_init.cpp::initNewModuleOnServer` for the same pattern
+// applied to a fresh-per-call client.
+static WiFiClientSecure tlsClient;
+static WiFiClient plainClient;
 
 /*
   Creates unique filename of format: esp_capture_YYYYMMDDhhmmss.jpg
@@ -107,9 +114,12 @@ int postImage(esp_config_t *esp_config) {
 
 
   hf::Url url = hf::parseUrl(std::string(UPLOAD_URL));
+  const bool useTls = (url.scheme == "https");
+  WiFiClient& client = useTls ? static_cast<WiFiClient&>(tlsClient)
+                              : static_cast<WiFiClient&>(plainClient);
 
-  Serial.printf("---- trying to send image to: %s:%u\n",
-                url.host.c_str(), (unsigned)url.port);
+  Serial.printf("---- trying to send image to: %s:%u (tls=%d)\n",
+                url.host.c_str(), (unsigned)url.port, (int)useTls);
   // Issue #42 instrumentation: breadcrumb at each section boundary
   // inside postImage so a TASK_WDT reboot pinpoints connect-vs-write-
   // vs-read. Updates the single RTC_NOINIT slot — last writer wins.
@@ -119,13 +129,15 @@ int postImage(esp_config_t *esp_config) {
   hf::breadcrumbSet("postImage:connect");
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
-    // Pin against ISRG Root X1 (Let's Encrypt) before every fresh
-    // connect — setCACert just stores the pointer and is cheap, but
-    // it MUST run on a non-connected client (calling it on an open
-    // socket is undefined behaviour in mbedTLS). The PEM lives in
-    // .rodata via [lib/tls_roots/tls_roots.h], program lifetime, so
-    // the pointer outlives every reuse. Issue #79.
-    client.setCACert(hf::tls::kIsrgRootX1Pem);
+    if (useTls) {
+      // Pin against ISRG Root X1 (Let's Encrypt) before every fresh
+      // connect — setCACert just stores the pointer and is cheap, but
+      // it MUST run on a non-connected client (calling it on an open
+      // socket is undefined behaviour in mbedTLS). The PEM lives in
+      // .rodata via [lib/tls_roots/tls_roots.h], program lifetime, so
+      // the pointer outlives every reuse. Issue #79.
+      tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
+    }
     if (!client.connect(url.host.c_str(), url.port)) {
       logf("[HTTP] connect failed to %s:%u",
            url.host.c_str(), (unsigned)url.port);
@@ -246,14 +258,23 @@ int sendHeartbeat(esp_config_t *esp_config) {
   }
 
   hf::Url url = hf::parseUrl(std::string(esp_config->INIT_URL));
+  const bool hbUseTls = (url.scheme == "https");
   // Canonical 12-char lowercase-hex module ID (same as /upload + /new_module).
   String macStr = String(hf::formatModuleId(esp_config->esp_ID).c_str());
 
-  // Fresh TLS connection per heartbeat — no keep-alive in this path,
-  // so the handshake cost is paid each hour. Pin against ISRG Root X1
-  // (Let's Encrypt). Issue #79.
-  WiFiClientSecure hbClient;
-  hbClient.setCACert(hf::tls::kIsrgRootX1Pem);
+  // Scheme-aware client dispatch (issue #79). Fresh client per call
+  // — no keep-alive in the heartbeat path — so the TLS handshake
+  // cost is paid on each iteration when INIT_URL is https. LAN-dev
+  // INIT_URLs stay on plain HTTP via the non-TLS branch because the
+  // dev box's duckdb-service does not terminate TLS. Pattern mirrors
+  // `ota.cpp::httpOtaCheckAndApply` and `postImage` above.
+  WiFiClientSecure tlsHbClient;
+  WiFiClient plainHbClient;
+  WiFiClient& hbClient = hbUseTls ? static_cast<WiFiClient&>(tlsHbClient)
+                                  : plainHbClient;
+  if (hbUseTls) {
+    tlsHbClient.setCACert(hf::tls::kIsrgRootX1Pem);
+  }
   hbClient.setTimeout(5000);
   // Issue #42 instrumentation: breadcrumb at each section boundary
   // inside sendHeartbeat — the per-issue suspect list calls heartbeat

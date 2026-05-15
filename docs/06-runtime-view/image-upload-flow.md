@@ -65,7 +65,16 @@ sequenceDiagram
 1. **Upload.** Device sends multipart `POST /upload` to
    `image-service` with form fields `image` (the JPEG), `mac` (the
    module identifier), `battery` (0–100), and optional `logs`
-   (telemetry JSON).
+   (telemetry JSON). When `UPLOAD_URL` has scheme `https://`
+   (production default since [ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)
+   on `mason`+), the request travels through a TLS-pinned
+   `WiFiClientSecure` reusing a module-level keep-alive socket.
+   The first connect after boot pays a ~1–2 s handshake + ~30 KB
+   transient heap; subsequent uploads reuse the TLS session.
+   LAN-dev topologies (`http://10.0.0.5:8000/upload`) route through
+   plain `WiFiClient` because dev-box services do not terminate TLS;
+   the scheme of the saved `UPLOAD_URL` drives the dispatch at
+   [`ESP32-CAM/client.cpp`'s `postImage`](../../ESP32-CAM/client.cpp).
 
 2. **Image-service ingestion.**
    - Saves the JPEG to the shared `duckdb_data` volume.

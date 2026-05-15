@@ -114,4 +114,21 @@ std::string joinUrlFromForm(const std::string& base,
 // is host-testable rather than inlined.
 std::string rewriteLegacyHighfiveUrl(const std::string& url);
 
+// Server-side complement to the captive-portal JS port validator
+// (issue #79). Returns `true` when `port` is acceptable as the port
+// field of a saved URL: an empty string (operator wants the scheme
+// default — 80 for http, 443 for https), or a sequence of ASCII
+// digits that parses into the inclusive range 1..65535. Returns
+// `false` for non-digits, leading whitespace, scientific notation,
+// negative signs, an empty digit run between digits, or values
+// outside the range.
+//
+// The JS validator in `host.cpp`'s `sendConfigForm` enforces the
+// same rule client-side; this helper closes the gap when the form
+// is bypassed (curl, JS-disabled browser, custom client). On a
+// `false` return the `/save` handler in `host.cpp` re-renders the
+// form without persisting to SPIFFS so an operator typo doesn't
+// brick the next boot.
+bool isValidPortString(const std::string& port);
+
 }  // namespace hf

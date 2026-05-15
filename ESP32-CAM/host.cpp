@@ -588,6 +588,23 @@ void runAccessPoint() {
                     initPort.trim();
                     initEndpoint.trim();
 
+                    // Server-side port validation (issue #79). The JS
+                    // validator in `sendConfigForm` enforces the same
+                    // rule, but a curl / JS-disabled submission would
+                    // otherwise persist `init_port=99999` or
+                    // `init_port=abc` to SPIFFS and brick the next
+                    // boot's URL parse. On any invalid port we
+                    // re-render the form WITHOUT setting "saved" so
+                    // the operator sees their changes did not stick.
+                    // Logic + 10 unit tests live in `hf::isValidPortString`
+                    // (lib/form_query/).
+                    if (!hf::isValidPortString(std::string(uploadPort.c_str())) ||
+                        !hf::isValidPortString(std::string(initPort.c_str()))) {
+                      Serial.println("[host] /save rejected: invalid port — re-rendering form");
+                      sendConfigForm(client, false);
+                      break;
+                    }
+
                     cfg_upload_url = String(
                         hf::joinUrlFromForm(
                             std::string(uploadBase.c_str()),

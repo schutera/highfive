@@ -30,15 +30,17 @@ CA-pin against the _self-signed root_ of each authority we trust:
 
 Both PEMs are embedded as `inline constexpr char[]` at namespace scope. `.rodata` on the ESP32 is flash-mapped, so no PROGMEM macro is needed and the pointer has program lifetime — which is the contract `WiFiClientSecure::setCACert` requires (the cert must outlive every connection using it).
 
-The five call sites that touch these hosts call `setCACert` on a fresh `WiFiClientSecure` before each connect:
+Arduino-ESP32's `HTTPClient::begin(client, url)` does NOT auto-select between `WiFiClient` and `WiFiClientSecure` based on the URL scheme — it uses whatever client the caller passed. Each call site therefore implements its own scheme-aware dispatch: parse the URL with `hf::parseUrl`, branch on `scheme == "https"`, hold a `WiFiClient&` reference to either a pre-allocated `WiFiClientSecure` (with `setCACert` applied) or a plain `WiFiClient`, and pass that reference into `HTTPClient::begin` (or directly into a raw socket `connect`). LAN-dev topologies (`http://10.0.0.5:8002/...`) route through the plain branch because the dev-box services do not terminate TLS.
 
-- [`ESP32-CAM/esp_init.cpp`'s `initNewModuleOnServer`](../../ESP32-CAM/esp_init.cpp) — registration, ISRG Root X1.
-- [`ESP32-CAM/esp_init.cpp`'s `getGeolocation`](../../ESP32-CAM/esp_init.cpp) — geolocation, GTS Root R1.
-- [`ESP32-CAM/client.cpp`'s `postImage`](../../ESP32-CAM/client.cpp) — image upload, ISRG Root X1, with the keep-alive `static WiFiClientSecure` re-pinning `setCACert` only inside the `!connected()` branch.
-- [`ESP32-CAM/client.cpp`'s `sendHeartbeat`](../../ESP32-CAM/client.cpp) — heartbeat, ISRG Root X1, fresh client per call.
-- [`ESP32-CAM/ota.cpp`'s `httpOtaCheckAndApply`](../../ESP32-CAM/ota.cpp) — manifest + binary fetch, ISRG Root X1 when INIT_URL scheme is `https`, plain `WiFiClient` when scheme is `http` (LAN-dev). Originally tracked separately as issue #81; folded into the same PR.
+The five call sites:
 
-LAN-dev topologies (`http://10.0.0.5:8002/...`) keep using plain HTTP — the scheme of the operator's saved INIT_URL drives whether TLS is engaged.
+- [`ESP32-CAM/esp_init.cpp`'s `initNewModuleOnServer`](../../ESP32-CAM/esp_init.cpp) — registration. Scheme-aware dispatch, ISRG Root X1 on the TLS branch.
+- [`ESP32-CAM/esp_init.cpp`'s `getGeolocation`](../../ESP32-CAM/esp_init.cpp) — geolocation. URL is hardcoded `https://www.googleapis.com/...` so the dispatch is unconditional TLS with GTS Root R1.
+- [`ESP32-CAM/client.cpp`'s `postImage`](../../ESP32-CAM/client.cpp) — image upload. Two module-level static clients (one TLS, one plain) preserve keep-alive within each scheme; the per-call reference picks based on `UPLOAD_URL`'s scheme. ISRG Root X1 on the TLS branch.
+- [`ESP32-CAM/client.cpp`'s `sendHeartbeat`](../../ESP32-CAM/client.cpp) — heartbeat. Fresh client per call (no keep-alive), scheme-aware dispatch, ISRG Root X1 on the TLS branch.
+- [`ESP32-CAM/ota.cpp`'s `httpOtaCheckAndApply`](../../ESP32-CAM/ota.cpp) — manifest + binary fetch. Scheme-aware dispatch, ISRG Root X1 on the TLS branch. Originally tracked separately as issue #81; folded into the same PR.
+
+The five sites share the same shape and could be centralised behind a `hf::tls::selectClient(tlsStorage, plainStorage, scheme, caRootPem)` helper. Deferred for this PR — the inline pattern is small enough that the cross-references in the comments are easier to follow than chasing a single-call helper. If a sixth site appears, factor.
 
 ## Consequences
 

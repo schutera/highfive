@@ -131,12 +131,28 @@ void ltrimSlash(std::string& s) {
 }  // namespace
 
 std::string rewriteLegacyHighfiveUrl(const std::string& url) {
-    static const char* kLegacyPrefix = "http://highfive.schutera.com";
-    static const std::size_t kLegacyPrefixLen = 28;  // strlen above
+    // `sizeof(literal) - 1` gives the strlen of a string literal at
+    // compile time without re-counting bytes — drift-proof against a
+    // future "tighten the prefix" edit.
+    static constexpr char kLegacyPrefix[] = "http://highfive.schutera.com";
+    static constexpr std::size_t kLegacyPrefixLen = sizeof(kLegacyPrefix) - 1;
     if (url.size() < kLegacyPrefixLen) return url;
     if (url.compare(0, kLegacyPrefixLen, kLegacyPrefix) != 0) return url;
-    // Match. Compose the migrated value: "https://" + remainder.
+    // Match. Compose the migrated value: "https://" + remainder
+    // (skip the legacy scheme "http://" = 7 bytes).
     return std::string("https://") + url.substr(7);
+}
+
+bool isValidPortString(const std::string& port) {
+    if (port.empty()) return true;  // empty = scheme default
+    // No internal whitespace, no signs, no exponents — strict digits.
+    unsigned long acc = 0;
+    for (char c : port) {
+        if (c < '0' || c > '9') return false;
+        acc = acc * 10u + static_cast<unsigned long>(c - '0');
+        if (acc > 65535u) return false;  // early-exit on overflow
+    }
+    return acc >= 1u && acc <= 65535u;
 }
 
 std::string joinUrlFromForm(const std::string& base,

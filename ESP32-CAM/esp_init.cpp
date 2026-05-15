@@ -5,6 +5,7 @@
 #include "form_query.h"        // hf::rewriteLegacyHighfiveUrl — issue #79
 #include "led.h"
 #include "module_id.h"
+#include "url.h"               // hf::parseUrl — scheme-aware TLS dispatch (#79)
 #include "wifi_diag.h"
 #include "breadcrumb.h"
 #include <Arduino.h>
@@ -517,11 +518,18 @@ bool loadConfig(esp_config_t *esp_config) {
       if (bytesWritten == 0) {
         // Truncation gate, same shape as host.cpp::saveConfig — see #19.
         // The file has already been truncated to zero by SPIFFS.open("w");
-        // we cannot un-truncate. The next boot will fall back through
-        // the captive portal (the strlen checks above would fire on the
-        // empty config) so the operator can re-enter URLs. RAM-side
-        // `esp_config` retains the migrated values for this boot.
-        Serial.println("------ loadConfig: serializeJson wrote 0 bytes — SPIFFS now empty");
+        // we cannot un-truncate. Without intervention the next boot would
+        // call this `loadConfig`, hit the JSON parse error on the empty
+        // file, return false, and the setup path would take roughly
+        // `WIFI_FAIL_AP_FALLBACK_THRESH` failed WiFi joins (~3 boots,
+        // each ~30 s) before flipping `setESPConfigured(false)` and
+        // opening the captive portal. To collapse that latency to a
+        // single reboot, we clear the configured flag ourselves here:
+        // the captive portal will open on the very next boot. RAM-side
+        // `esp_config` retains the migrated values for this boot so the
+        // current run still talks to the right URLs over TLS.
+        Serial.println("------ loadConfig: serializeJson wrote 0 bytes — clearing NVS configured flag so captive portal opens on next boot");
+        setESPConfigured(false);
       }
     } else {
       Serial.println("------ loadConfig: failed to open config.json for migration re-save");
@@ -623,19 +631,30 @@ void getGeolocation(esp_config_t *esp_config) {
 /* INIT NEW MODULE ON SERVER */
 void initNewModuleOnServer(esp_config_t *esp_config) {
   if (WiFi.status() == WL_CONNECTED) {
-    // TLS to highfive.schutera.com via Let's Encrypt; pin against
-    // ISRG Root X1. For LAN-dev INIT_URLs that still use http://
-    // (e.g. a local duckdb-service), setCACert is a no-op — the
-    // HTTPClient picks the plain WiFiClient path under the hood
-    // based on URL scheme. Issue #79.
-    WiFiClientSecure secureClient;
-    secureClient.setCACert(hf::tls::kIsrgRootX1Pem);
+    // Scheme-aware client dispatch (issue #79). HTTPClient::begin(client, url)
+    // uses whatever client you pass it — it does NOT auto-select based on
+    // the URL scheme. So we parse the scheme ourselves and hold a reference
+    // to either a WiFiClientSecure (pinned to ISRG Root X1) or a plain
+    // WiFiClient. LAN-dev INIT_URLs (`http://10.0.0.5:8002/...`) need the
+    // plain branch because duckdb-service doesn't terminate TLS. Same
+    // pattern as `ota.cpp`'s `httpOtaCheckAndApply` and the heartbeat /
+    // upload paths in `client.cpp`. Both storage objects must outlive
+    // `http.end()` since HTTPClient stores `_client = &client`.
+    hf::Url parsed = hf::parseUrl(std::string(esp_config->INIT_URL));
+    const bool useTls = (parsed.scheme == "https");
+    WiFiClientSecure tlsClient;
+    WiFiClient plainClient;
+    WiFiClient& netClient = useTls ? static_cast<WiFiClient&>(tlsClient)
+                                   : plainClient;
+    if (useTls) {
+      tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
+    }
 
     HTTPClient http;
 
     Serial.printf("------ MODULE NAME: %s\n", esp_config->module_name);
 
-    http.begin(secureClient, esp_config->INIT_URL);
+    http.begin(netClient, esp_config->INIT_URL);
     //http.begin("http://192.168.0.36:8002/new_module");
     http.addHeader("Content-Type", "application/json");
 

@@ -19,6 +19,7 @@
 #include "form_query.h"
 
 using hf::getParam;
+using hf::isValidPortString;
 using hf::joinUrlFromForm;
 using hf::resolveKeepCurrentField;
 using hf::rewriteLegacyHighfiveUrl;
@@ -402,6 +403,64 @@ static void test_rewrite_explicit_port_preserved(void) {
         rewriteLegacyHighfiveUrl("http://highfive.schutera.com:8080/upload").c_str());
 }
 
+// --- isValidPortString ----------------------------------------------------
+//
+// Server-side port validator (issue #79). The JS validator in the
+// captive portal enforces the same rule, but a curl / JS-disabled
+// submission must not bypass into SPIFFS. Tests pin the boundaries.
+
+static void test_port_valid_empty(void) {
+    // Empty = scheme default; production https URLs submit no port.
+    TEST_ASSERT_TRUE(isValidPortString(""));
+}
+
+static void test_port_valid_low_boundary(void) {
+    TEST_ASSERT_TRUE(isValidPortString("1"));
+}
+
+static void test_port_valid_typical_dev(void) {
+    TEST_ASSERT_TRUE(isValidPortString("8000"));
+    TEST_ASSERT_TRUE(isValidPortString("8002"));
+}
+
+static void test_port_valid_high_boundary(void) {
+    TEST_ASSERT_TRUE(isValidPortString("65535"));
+}
+
+static void test_port_invalid_zero(void) {
+    // Port 0 is reserved; not a legitimate operator choice.
+    TEST_ASSERT_FALSE(isValidPortString("0"));
+}
+
+static void test_port_invalid_over_max(void) {
+    TEST_ASSERT_FALSE(isValidPortString("65536"));
+    TEST_ASSERT_FALSE(isValidPortString("99999"));
+}
+
+static void test_port_invalid_non_digit(void) {
+    TEST_ASSERT_FALSE(isValidPortString("abc"));
+    TEST_ASSERT_FALSE(isValidPortString("80a"));
+    TEST_ASSERT_FALSE(isValidPortString("a80"));
+}
+
+static void test_port_invalid_negative(void) {
+    TEST_ASSERT_FALSE(isValidPortString("-1"));
+}
+
+static void test_port_invalid_whitespace(void) {
+    // Caller is expected to trim; a string that still has whitespace
+    // after trim is operator error and we reject loudly.
+    TEST_ASSERT_FALSE(isValidPortString(" 80"));
+    TEST_ASSERT_FALSE(isValidPortString("80 "));
+}
+
+static void test_port_invalid_overflow_during_accumulation(void) {
+    // Defense against integer overflow in a naive accumulator —
+    // a very long digit string must not wrap and accidentally
+    // produce an in-range value.
+    TEST_ASSERT_FALSE(isValidPortString("9999999999999"));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -461,6 +520,17 @@ int main(int, char**) {
     RUN_TEST(test_rewrite_substring_match_unchanged);
     RUN_TEST(test_rewrite_empty_unchanged);
     RUN_TEST(test_rewrite_explicit_port_preserved);
+
+    RUN_TEST(test_port_valid_empty);
+    RUN_TEST(test_port_valid_low_boundary);
+    RUN_TEST(test_port_valid_typical_dev);
+    RUN_TEST(test_port_valid_high_boundary);
+    RUN_TEST(test_port_invalid_zero);
+    RUN_TEST(test_port_invalid_over_max);
+    RUN_TEST(test_port_invalid_non_digit);
+    RUN_TEST(test_port_invalid_negative);
+    RUN_TEST(test_port_invalid_whitespace);
+    RUN_TEST(test_port_invalid_overflow_during_accumulation);
 
     return UNITY_END();
 }

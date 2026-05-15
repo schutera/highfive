@@ -46,10 +46,14 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   `ESP32-CAM/GEO_API_KEY` file fallback. Full mechanism:
   [`docs/08-crosscutting-concepts/auth.md`](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
   The original key remains in git history and must stay revoked.
-- **Dev API key fallback** `hf_dev_key_2026` in `backend/src/auth.ts:4`
-  — intentional for local dev. **Must** be overridden via
-  `HIGHFIVE_API_KEY` for any non-local deploy. See
-  [02-constraints](../02-constraints/README.md).
+- **Dev API key fallback** `hf_dev_key_2026` in
+  [`backend/src/auth.ts`'s `DEV_FALLBACK_KEY`](../../backend/src/auth.ts)
+  — intentional for local dev. Must be overridden via `HIGHFIVE_API_KEY`
+  for any non-local deploy. Code-side enforcement: `auth.ts` refuses to
+  load when `isProduction()` is true and the env var is unset, or when
+  the env var is the dev fallback (case-insensitively). The operator
+  cannot ship the dev key as the prod gate without the backend crashing
+  at startup. See [02-constraints](../02-constraints/README.md).
 - **WiFi password printed plaintext to Serial** — was unconditionally
   logged at the top of `setupWifiConnection` in `ESP32-CAM/esp_init.cpp`.
   Now gated behind `-DDEBUG_WIFI` and redacted by default (issue #41,
@@ -152,6 +156,72 @@ not a bug introduced by #79.
    refuses any flash where `manifest.sequence <= current.sequence`
    unless the manifest sets an explicit `allow_downgrade: true` flag.
    Deferred from PR #82 to keep the TLS-migration diff focused.
+
+### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
+
+**What happened.** PR #82's hardware smoke test against
+`https://highfive.schutera.com` exercised the migrated TLS endpoints
+(`/new_module`, `/upload`, `/heartbeat`, `/geolocation`) — all four
+passed. As a side-investigation the smoke test poked at the
+production admin endpoint with the dev API-key string
+`hf_dev_key_2026` (a constant visible in
+[`backend/src/auth.ts`'s `DEV_FALLBACK_KEY`](../../backend/src/auth.ts),
+the backend tests, and CLAUDE.md), and the production admin endpoint
+accepted it. The backend was running with `HIGHFIVE_API_KEY` either
+unset (so the dev fallback activated) or set literally to the dev
+string. Either way, anyone who grepped the public repo for that
+constant could log into the deployed admin endpoint as administrator.
+
+**Why it happened.** CLAUDE.md's
+[Critical rules](../../CLAUDE.md) section had carried this exact rule
+for months — _"Never ship the dev API key (`hf_dev_key_2026`) as a
+production fallback. Override `HIGHFIVE_API_KEY`."_ The rule was
+correct, prominent, and load-bearing. But it was prose-only.
+Enforcement relied on the operator remembering to set the env var on
+every production environment, every redeploy, every config change.
+The code itself happily activated the public dev fallback when the
+env var was missing or set to the dev string. Operator vigilance is
+a brittle enforcement mechanism: it works perfectly until a
+deployment shortcut, a `.env` copy from `.env.example`, or a fresh
+environment slips past it.
+
+**How to avoid it next time.** Two distinct lessons:
+
+1. **A "do not violate" rule in CLAUDE.md is a candidate for
+   code-side enforcement.** If the failure mode is silent and operator
+   vigilance is the only gate, lift the rule into a startup check, a
+   CI guard, or a build-time throw.
+   [`backend/src/auth.ts`'s startup guard](../../backend/src/auth.ts)
+   demonstrates the pattern: the backend refuses to load when
+   `isProduction()` is true and `HIGHFIVE_API_KEY` would fall back to
+   the dev string, or when the env var is set (case-insensitively) to
+   the dev string. The remaining "Critical rules" entries deserve
+   the same audit — for each, ask "could a missed env var, a wrong
+   config path, or a default value silently bypass this?" If yes, the
+   rule belongs in code, not in prose.
+2. **Side-investigation during smoke tests pays off.** PR #82's
+   primary goal was TLS handshake verification; the dev-key probe was
+   a five-minute curiosity check that surfaced the highest-severity
+   issue of the cycle. Build the habit of asking, during any
+   auth-adjacent smoke test, _"would the documented dev shortcut work
+   here?"_ — the desired answer is "no, the deploy rejected it" or
+   "fast-crash with a clear remediation message." If the answer is
+   "yes, it logged in", the smoke test has just found the next P0.
+
+Hardening landed in PR #84. Two follow-up issues remain open:
+
+- [#86](https://github.com/schutera/highfive/issues/86) — replace the
+  strict-inequality byte-by-byte comparison in
+  [`apiKeyAuth`](../../backend/src/auth.ts) and the admin-gate
+  middleware with `crypto.timingSafeEqual`. Pre-existing surface,
+  surfaced during PR #84's review cycle.
+- [#87](https://github.com/schutera/highfive/issues/87) — extend the
+  existing build-time guard at
+  [`homepage/src/services/api.ts`'s production-build check](../../homepage/src/services/api.ts)
+  with the same case-insensitive dev-key match that
+  `backend/src/auth.ts` enforces. The current guard catches
+  "VITE_API_KEY unset"; the residual gap is "VITE_API_KEY literally
+  set to the dev fallback (in any casing)."
 
 ### Setup wizard shipped two silent-success bugs (issues #43, #44)
 

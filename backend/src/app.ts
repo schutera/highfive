@@ -4,6 +4,7 @@ import { tryParseModuleId } from '@highfive/contracts';
 import { db } from './database';
 import { apiKeyAuth, getApiKey } from './auth';
 import { DUCKDB_URL } from './duckdbClient';
+import { isProduction } from './env';
 
 const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL ?? 'http://image-service:4444';
 
@@ -17,7 +18,7 @@ export const app = express();
 // `X-Highfive-Data-Incomplete` exposed, the dashboard's
 // "heartbeat data unavailable" banner (#31) never fires.
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' ? 'https://highfive.schutera.com' : '*',
+  origin: isProduction() ? 'https://highfive.schutera.com' : '*',
   credentials: true,
   optionsSuccessStatus: 200,
   exposedHeaders: ['X-Highfive-Data-Incomplete'],

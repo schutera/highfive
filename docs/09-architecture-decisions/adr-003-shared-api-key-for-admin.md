@@ -37,7 +37,10 @@ The two header names are kept distinct so that:
   (the admin-key check); no protocol change required.
 
 The dev fallback is `hf_dev_key_2026` (defined in
-`backend/src/auth.ts:4`).
+[`backend/src/auth.ts`'s `DEV_FALLBACK_KEY`](../../backend/src/auth.ts);
+a startup guard in the same file refuses to boot when the env var would
+fall back to it under production-mode `NODE_ENV` — see
+[chapter 8 → "The secret"](../08-crosscutting-concepts/auth.md#the-secret)).
 
 ## Consequences
 

@@ -13,9 +13,35 @@ runs against one shared secret.
 ## The secret
 
 `HIGHFIVE_API_KEY` (env var). The dev-mode fallback is
-`hf_dev_key_2026` (defined in `backend/src/auth.ts:4` and
-`homepage/src/services/`). This must be overridden for any non-local
-deploy.
+`hf_dev_key_2026`, defined in
+[`backend/src/auth.ts`'s `DEV_FALLBACK_KEY`](../../backend/src/auth.ts)
+and surfaced for the homepage via `VITE_API_KEY`. The fallback is a
+public string by design — it's documented here, in `CLAUDE.md`, and in
+the backend test suite — so it is safe only for local development.
+
+Code-side enforcement: `auth.ts` runs two guards at module load,
+keyed on
+[`backend/src/env.ts`'s `isProduction()`](../../backend/src/env.ts)
+(which normalises `NODE_ENV` for casing + whitespace typos and treats
+unknown values as production):
+
+1. If `HIGHFIVE_API_KEY` is set case-insensitively to the dev
+   fallback, the backend refuses to boot. A `.env` file copy-paste
+   from `.env.example` is the typical trigger.
+2. If `isProduction()` is true and `HIGHFIVE_API_KEY` is unset or
+   whitespace, the backend refuses to boot. A missing override on
+   production is the typical trigger.
+
+Both throws happen before the express app is built, so a
+misconfigured deployment fast-crashes with a self-describing error
+instead of silently exposing the public dev key as the production
+admin gate. Tests in
+[`backend/tests/auth-prod-guard.test.ts`](../../backend/tests/auth-prod-guard.test.ts)
+pin the two throw paths (with regexes specific to each error
+message), positive-case each entry currently in the dev safelist,
+and negative-case the two values cut from the safelist during
+review (`'dev'`, `'testing'`) so a future re-add must update the
+tests in lockstep.
 
 The frontend reads the key from `VITE_API_KEY` at build time.
 

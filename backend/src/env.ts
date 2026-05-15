@@ -20,20 +20,27 @@
 // Silently treating them as dev was the exact failure mode this
 // helper was extracted to close.
 //
-// The dev safelist intentionally stays short. Each token has a load-
-// bearing caller — if you add an entry, point at the Dockerfile,
-// compose file, npm script, or framework default that actually sets
-// it. Round-2 review caught `'local'` here with no such citation and
-// removed it: a safelist entry without an owner is dead code that
-// invites the next maintainer to expand the dev-fallback surface
-// "because it's already a pattern."
+// The dev safelist intentionally stays short. Each token must have a
+// load-bearing caller in this repo — a Dockerfile, compose file, npm
+// script, vitest/Node default, or framework convention that actually
+// sets it. If you add an entry, name the caller in the comment below.
+// Round 2 cut `'local'` (no caller found); round 3's review cut `'dev'`
+// and `'testing'` for the same reason — both had imagined-not-verified
+// citations in an earlier comment. A safelist entry without a verified
+// caller is dead code that invites the next maintainer to expand the
+// dev-fallback surface "because it's already a pattern."
 //
 // Currently in the safelist:
-// * `''` — NODE_ENV unset; the implicit dev workflow `npm run dev`.
-// * `'development'` — Node's documented dev sentinel.
-// * `'dev'` — convenience alias used by some CI matrices.
-// * `'test'` — vitest's default in this repo and in CI.
-// * `'testing'` — pytest convention occasionally bridged into Node-side.
+// * `''` — NODE_ENV unset; the implicit dev workflow when an operator
+//   runs `npm run dev` (see `backend/package.json`'s `dev` script:
+//   `tsx watch src/server.ts`, no env override).
+// * `'development'` — Node's standard sentinel, the value
+//   `dotenv/config` and most Node frameworks recognise. Set by
+//   `docker-compose.yml`'s `backend` service for the dev compose
+//   topology (verified at the time of writing).
+// * `'test'` — vitest's default `NODE_ENV` (Vitest documents this:
+//   "If NODE_ENV is not set, Vitest sets it to 'test' by default").
+//   The backend's entire 60-test suite runs under this value.
 //
 // `process.env` is read each call rather than captured at module load
 // because the test suite manipulates env vars between cases via
@@ -44,7 +51,7 @@
 // key value is policy (set once at deploy time), the env-mode is
 // runtime context (test suite flips it between cases).
 
-const DEV_ENV_TOKENS: ReadonlySet<string> = new Set(['', 'development', 'dev', 'test', 'testing']);
+const DEV_ENV_TOKENS: ReadonlySet<string> = new Set(['', 'development', 'test']);
 
 export function isProduction(): boolean {
   const normalised = (process.env.NODE_ENV ?? '').trim().toLowerCase();

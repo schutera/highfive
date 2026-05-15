@@ -21,7 +21,13 @@ describe('auth.ts startup guard', () => {
   it('refuses to load when HIGHFIVE_API_KEY is the literal dev fallback', async () => {
     process.env.HIGHFIVE_API_KEY = 'hf_dev_key_2026';
 
-    await expect(import('../src/auth')).rejects.toThrow(/dev fallback/i);
+    // Regex pins the dev-fallback-guard throw path specifically; the
+    // production-guard error message also contains "dev fallback" as
+    // a substring, so a looser matcher would pass even if a regression
+    // flipped which guard fires.
+    await expect(import('../src/auth')).rejects.toThrow(
+      /is set \(case-insensitively\) to the public dev fallback/,
+    );
   });
 
   // Case-insensitive dev-key check: copy-paste mishaps and shell-history
@@ -31,13 +37,17 @@ describe('auth.ts startup guard', () => {
   it('refuses to load when HIGHFIVE_API_KEY is the dev fallback uppercased', async () => {
     process.env.HIGHFIVE_API_KEY = 'HF_DEV_KEY_2026';
 
-    await expect(import('../src/auth')).rejects.toThrow(/dev fallback/i);
+    await expect(import('../src/auth')).rejects.toThrow(
+      /is set \(case-insensitively\) to the public dev fallback/,
+    );
   });
 
   it('refuses to load when HIGHFIVE_API_KEY is the dev fallback mixed-case', async () => {
     process.env.HIGHFIVE_API_KEY = 'Hf_Dev_Key_2026';
 
-    await expect(import('../src/auth')).rejects.toThrow(/dev fallback/i);
+    await expect(import('../src/auth')).rejects.toThrow(
+      /is set \(case-insensitively\) to the public dev fallback/,
+    );
   });
 
   it('refuses to load when NODE_ENV=production and HIGHFIVE_API_KEY is unset', async () => {
@@ -119,14 +129,48 @@ describe('auth.ts startup guard', () => {
     await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
   });
 
-  it('loads cleanly with no env (dev fallback active)', async () => {
+  // Positive coverage for each entry in `env.ts`'s `DEV_ENV_TOKENS`
+  // safelist. The next maintainer who adds (or removes) a safelist
+  // entry must also touch this section — that's the contract that
+  // keeps the safelist's documented owners and its actual contents
+  // from drifting. Round-3 review caught the drift in the opposite
+  // direction (comment claimed owners that didn't exist); these
+  // tests close it in both directions.
+
+  it('loads cleanly with NODE_ENV unset (safelist entry `""`)', async () => {
+    // process.env.NODE_ENV not set in beforeEach already.
     await expect(import('../src/auth')).resolves.toBeDefined();
   });
 
-  it('loads cleanly with NODE_ENV=test (matches vitest default)', async () => {
+  it('loads cleanly with NODE_ENV="development" (safelist entry; docker-compose.yml sets this)', async () => {
+    process.env.NODE_ENV = 'development';
+
+    await expect(import('../src/auth')).resolves.toBeDefined();
+  });
+
+  it('loads cleanly with NODE_ENV="test" (safelist entry; vitest default)', async () => {
     process.env.NODE_ENV = 'test';
 
     await expect(import('../src/auth')).resolves.toBeDefined();
+  });
+
+  // Negative pin: `'dev'` and `'testing'` were in the safelist through
+  // round 2 with imagined-not-verified citations. Round 3 cut them.
+  // Both now refuse to load when no key is set, which is the conservative
+  // interpretation — anything outside the verified safelist requires the
+  // strong key. If you ever re-add either to the safelist, update the
+  // env.ts comment with a real caller citation AND flip this test from
+  // refuses-to-loads. Asymmetric edit is the gate.
+  it('refuses to load with NODE_ENV="dev" (not in safelist — was a round-3 cut)', async () => {
+    process.env.NODE_ENV = 'dev';
+
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+  });
+
+  it('refuses to load with NODE_ENV="testing" (not in safelist — was a round-3 cut)', async () => {
+    process.env.NODE_ENV = 'testing';
+
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('loads cleanly with NODE_ENV=production and a strong key', async () => {

@@ -37,7 +37,11 @@ misconfigured deployment fast-crashes with a self-describing error
 instead of silently exposing the public dev key as the production
 admin gate. Tests in
 [`backend/tests/auth-prod-guard.test.ts`](../../backend/tests/auth-prod-guard.test.ts)
-pin both the throw paths and the safelist of dev `NODE_ENV` values.
+pin the two throw paths (with regexes specific to each error
+message), positive-case each entry currently in the dev safelist,
+and negative-case the two values cut from the safelist during
+review (`'dev'`, `'testing'`) so a future re-add must update the
+tests in lockstep.
 
 The frontend reads the key from `VITE_API_KEY` at build time.
 

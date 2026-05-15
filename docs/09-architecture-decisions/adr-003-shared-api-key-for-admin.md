@@ -23,10 +23,15 @@ the admin one routinely; the admin telemetry section silently failed.
 `HIGHFIVE_API_KEY` is the single secret. The backend checks it
 against both headers:
 
-- `X-API-Key` for all `/api/modules*` routes (the API-key middleware
-  in `backend/src/auth.ts`)
-- `X-Admin-Key` for the admin telemetry endpoint (the admin-only
-  block in `backend/src/app.ts` around line 50)
+- `X-API-Key` for all `/api/modules*` routes (`backend/src/auth.ts`'s
+  `apiKeyAuth`)
+- `X-Admin-Key` for the admin telemetry endpoint (the inline check on
+  `backend/src/app.ts`'s `GET /api/modules/:id/logs` handler)
+
+Both checks share the
+[`verifyApiKey`](../../backend/src/auth.ts) helper, which wraps
+`crypto.timingSafeEqual` with a length-mismatch short-circuit. One
+boundary, two header names.
 
 The two header names are kept distinct so that:
 
@@ -53,8 +58,12 @@ fall back to it under production-mode `NODE_ENV` — see
 
 - A leak of the API key is also a leak of admin access. Acceptable
   for the current single-tenant threat model; revisit if multi-tenant.
-- The admin-key check is one line of code; easy to miss in a security
-  audit.
+- Both gates share the
+  [`verifyApiKey`](../../backend/src/auth.ts) boundary in
+  `backend/src/auth.ts`, so changes to the compare semantics propagate
+  to both by construction. Earlier wording flagged the admin-key check
+  as a one-liner easy to miss in audit; the shared-helper refactor
+  closes that audit-surface.
 
 **Forbidden**:
 

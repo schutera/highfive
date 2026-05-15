@@ -43,7 +43,18 @@ and negative-case the two values cut from the safelist during
 review (`'dev'`, `'testing'`) so a future re-add must update the
 tests in lockstep.
 
-The frontend reads the key from `VITE_API_KEY` at build time.
+The frontend reads the key from `VITE_API_KEY` at build time. The mirror
+guard lives in
+[`homepage/src/services/api.ts`'s `validateBuildTimeApiKey`](../../homepage/src/services/api.ts):
+a production bundle (Vite's `import.meta.env.PROD === true`) refuses to
+boot when `VITE_API_KEY` is unset OR (case-insensitively, with
+whitespace tolerance) the literal `hf_dev_key_2026`. Tests in
+[`homepage/src/__tests__/api-key-validator.test.ts`](../../homepage/src/__tests__/api-key-validator.test.ts)
+pin the truth table the same way the backend guard's tests do. The
+asymmetry of "build-time vs. module-load-time" is intrinsic to Vite —
+the key is inlined into the bundle at build, so a bad value can't be
+caught later at runtime; the validator runs once at first import and
+fast-crashes the bundle.
 
 ## API-key middleware
 
@@ -57,15 +68,32 @@ Accepted in any of these forms:
 
 Applied to all `/api/modules*` routes.
 
+The secret-compare is constant-time:
+[`backend/src/auth.ts`'s `verifyApiKey`](../../backend/src/auth.ts) wraps
+`crypto.timingSafeEqual` via a private `constantTimeEqual` helper, with
+a length-mismatch short-circuit that returns `false` before
+`timingSafeEqual` (which throws on length mismatch). `verifyApiKey` is
+the **single exported boundary** for the secret-compare — both the
+middleware here and the admin gate in `app.ts` (below) route through it,
+so changes to the compare semantics propagate to both gates by
+construction. Unit tests in
+[`backend/tests/auth-verify-key.test.ts`](../../backend/tests/auth-verify-key.test.ts)
+pin the match / mismatch / length-short-circuit / empty-string contract.
+
 Since [ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md) the ESP32-CAM firmware speaks verified TLS (CA-pinned to ISRG Root X1) to `highfive.schutera.com`. **Per-module migration is gated on the OTA cycle that delivers post-#79 firmware** — pre-`mason` modules in the field continue to POST in clear-text against nginx's still-listening port-80 vhost until they pick up the new firmware on their next daily reboot. The migration is opt-out only via firmware revision; the server-side closure of the legacy HTTP `location` blocks is a future cleanup once telemetry shows the fleet has rotated. The shared-secret authorization model is otherwise unchanged.
 
 ## Admin gate
 
 Defined inline in [`backend/src/app.ts`](../../backend/src/app.ts)
-around line 50. Layered on top of the API-key middleware:
+on the `GET /api/modules/:id/logs` handler. Layered on top of the
+API-key middleware:
 
 - Requires header `X-Admin-Key: <same-key-as-HIGHFIVE_API_KEY>`.
 - Applied to `GET /api/modules/:id/logs` (telemetry proxy).
+- Uses the same constant-time `verifyApiKey()` helper as the API-key
+  middleware above — one boundary, two header names. The asymmetric
+  header (`X-Admin-Key` vs. `X-API-Key`) is intentional (see
+  [ADR-003](../09-architecture-decisions/adr-003-shared-api-key-for-admin.md)).
 
 The admin UI is gated by `?admin=1` in the URL, stored in
 `sessionStorage['hf_admin']`. The admin key itself is collected via

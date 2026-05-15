@@ -23,8 +23,25 @@ const DEV_FALLBACK_KEY = 'hf_dev_key_2026';
 //
 // Tests run under `NODE_ENV=test` (vitest's default) and don't set the env
 // var, so they take the fallback branch cleanly.
+//
+// `||` (not `??`) is load-bearing here: `''.trim() === ''`, and we want a
+// whitespace-only env value to coerce to `undefined` so the second guard
+// sees "key unset" rather than "key set to empty string". `??` would
+// preserve the empty string and the case-insensitive dev-key compare on
+// the next line would silently pass (empty !== `hf_dev_key_2026`), then
+// the production guard would not fire because `ENV_KEY !== undefined`.
+// The asymmetry with the `??` on the API_KEY assignment below is
+// intentional and not a style nit — there `??` is correct because the
+// inputs are already known-non-empty (or undefined).
 const ENV_KEY = process.env.HIGHFIVE_API_KEY?.trim() || undefined;
 
+// Both guards `throw` independently. A deployment that hits both
+// failure modes (e.g. `NODE_ENV=production` AND `HIGHFIVE_API_KEY` set
+// to the dev fallback) will trip this first guard and never see the
+// second. That's "fail fast on first problem" — the right behaviour
+// for a startup gate, but worth flagging because a future "log all
+// problems" refactor would need to convert the throws into accumulated
+// errors first.
 if (ENV_KEY !== undefined && ENV_KEY.toLowerCase() === DEV_FALLBACK_KEY) {
   throw new Error(
     `HIGHFIVE_API_KEY is set (case-insensitively) to the public dev ` +

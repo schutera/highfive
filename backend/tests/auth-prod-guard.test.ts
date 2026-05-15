@@ -91,7 +91,11 @@ describe('auth.ts startup guard', () => {
     // safelist as production. "prod" is the documented operator-typo
     // case from the PR #84 senior-review — silently routing it to the
     // dev fallback is the exact failure shape the guard exists to close.
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV/);
+    // Regex pins the production-guard throw path rather than just any
+    // throw containing "NODE_ENV"; the dev-fallback guard also mentions
+    // NODE_ENV in its message, and a regression that flipped which path
+    // fires would be invisible to a looser matcher.
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('refuses to load when NODE_ENV="staging" and no key (parallel-to-prod env)', async () => {
@@ -100,7 +104,19 @@ describe('auth.ts startup guard', () => {
     // Staging environments run with separate-from-prod secrets but
     // those secrets are still secrets. Routing staging to the public
     // dev fallback is no safer than routing production to it.
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV/);
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+  });
+
+  // Exotic whitespace: vim-with-autoindent and Windows-line-ending env
+  // files can plant `\t` or `\r\n` into a NODE_ENV value. `.trim()`
+  // handles all ASCII whitespace, so behaviour is correct — but a
+  // future refactor of the helper that replaced `.trim()` with a
+  // hand-rolled space-only stripper would silently regress. This pins
+  // the contract.
+  it('refuses to load with NODE_ENV containing tab/newline whitespace and no key', async () => {
+    process.env.NODE_ENV = '\tproduction\n';
+
+    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('loads cleanly with no env (dev fallback active)', async () => {

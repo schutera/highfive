@@ -15,15 +15,19 @@ export const DEFAULT_PORT = 3002;
 
 /**
  * Resolve the listen port from the env-string and signal whether the
- * caller should warn about an unset PORT.
+ * caller should warn about an unset / malformed PORT.
  *
  * Pure function — caller owns the side effect (console.warn) so the
  * resolution logic stays unit-testable without binding sockets.
  *
- * Treats empty-string and non-numeric values as "unset" — both route
- * to the default plus warning. parseInt prefix-parsing (e.g. '3002junk'
- * yields 3002) is preserved so a botched env value with a stray
- * character still produces a deterministic port rather than NaN.
+ * Treats anything that isn't a clean run of digits (after .trim()) as
+ * a misconfiguration: default + warn. parseInt prefix-parsing
+ * ('3002junk' → 3002) is intentionally NOT accepted as silent success
+ * — round-2 review caught the contradiction with the docstring's
+ * "warn on misconfig" promise. A stray trailing character almost
+ * always indicates a botched env file, and "fail loud, bind the
+ * default" is the operator-friendlier shape than "bind the prefix and
+ * stay quiet."
  */
 export function resolvePort(envValue: string | undefined): {
   port: number;
@@ -32,9 +36,9 @@ export function resolvePort(envValue: string | undefined): {
   if (envValue === undefined) {
     return { port: DEFAULT_PORT, warned: true };
   }
-  const parsed = parseInt(envValue, 10);
-  if (Number.isNaN(parsed)) {
+  const trimmed = envValue.trim();
+  if (trimmed === '' || !/^\d+$/.test(trimmed)) {
     return { port: DEFAULT_PORT, warned: true };
   }
-  return { port: parsed, warned: false };
+  return { port: parseInt(trimmed, 10), warned: false };
 }

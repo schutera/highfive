@@ -145,7 +145,7 @@ Three-step configuration guide shown after flashing:
 
 The homepage talks to **only one** server-side endpoint:
 `backend` (port `3002` in dev, configurable via `VITE_API_URL`).
-All HTTP calls go through `homepage/src/services/api.ts:4`:
+All HTTP calls go through `homepage/src/services/api.ts`'s `API_BASE_URL`:
 
 ```ts
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';

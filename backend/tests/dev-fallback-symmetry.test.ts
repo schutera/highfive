@@ -27,8 +27,20 @@ const HOMEPAGE_API = resolve(REPO_ROOT, 'homepage', 'src', 'services', 'api.ts')
 // Extract the value assigned to a `const DEV_FALLBACK_KEY = '...'` decl.
 // Returns null on no-match so the test can produce a useful failure
 // message rather than a misleading "undefined === undefined" tautology.
+//
+// Regex design (round-2 review tightened this from the lazy original):
+//   * ^\s* + m flag — anchor the match on a real statement line, not a
+//     commented-out copy somewhere else in the file. A line that starts
+//     with `//` cannot match because `//` would have to come between
+//     `^\s*` and `const`, which the regex forbids.
+//   * Optional `export ` — tolerates a future `export const ...` refactor.
+//   * Single- or double-quoted literal — survives a prettier config flip
+//     between quote styles (today's `.prettierrc` is singleQuote: true).
+//   * Optional `as const` — tolerates a TS-tightening refactor.
 function extractDevFallbackLiteral(source: string): string | null {
-  const match = source.match(/const DEV_FALLBACK_KEY = '([^']+)';/);
+  const re =
+    /^\s*(?:export\s+)?const DEV_FALLBACK_KEY\s*=\s*['"]([^'"]+)['"]\s*(?:as\s+const\s*)?;/m;
+  const match = source.match(re);
   return match ? match[1] : null;
 }
 

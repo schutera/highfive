@@ -51,13 +51,29 @@ describe('resolvePort', () => {
     expect(resolvePort('abc')).toEqual({ port: 3002, warned: true });
   });
 
-  // ----- parseInt edge cases worth pinning -----
+  // ----- malformed PORT: trailing garbage rejected -----
+  //
+  // Round-2 review caught that parseInt('3002junk', 10) returning 3002
+  // was being treated as silent success, contradicting resolvePort's
+  // "warn on misconfig" docstring. Anything that isn't a clean run of
+  // digits (after .trim()) is now a default + warn case. The first
+  // production deploy with a botched env file should fail loud.
 
-  it('returns the parsed prefix when PORT has trailing garbage (parseInt behaviour)', () => {
-    // parseInt('3002junk', 10) === 3002. This is JavaScript's documented
-    // parseInt semantics — pinning so a future Number() refactor that
-    // would return NaN for '3002junk' triggers the test rather than the
-    // first production deploy with a botched env file.
-    expect(resolvePort('3002junk')).toEqual({ port: 3002, warned: false });
+  it('returns the default 3002 when PORT has trailing garbage, with warned=true', () => {
+    expect(resolvePort('3002junk')).toEqual({ port: 3002, warned: true });
+  });
+
+  it('returns the default 3002 when PORT has leading garbage, with warned=true', () => {
+    expect(resolvePort('junk3002')).toEqual({ port: 3002, warned: true });
+  });
+
+  // ----- whitespace-padded numeric PORT: accept, no warn -----
+
+  it('returns the parsed env value when PORT is a number with surrounding whitespace, no warn', () => {
+    // A trailing newline from a docker-compose env_file or a leading
+    // space from a shell-edit is honest operator intent, not garbage.
+    // .trim() handles it; no warning fires.
+    expect(resolvePort('  3002  ')).toEqual({ port: 3002, warned: false });
+    expect(resolvePort('\t4000\n')).toEqual({ port: 4000, warned: false });
   });
 });

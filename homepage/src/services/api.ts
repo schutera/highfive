@@ -38,19 +38,14 @@ export function validateBuildTimeApiKey(key: string | undefined, isProd: boolean
   // bundle whose API_KEY local resolves to `'   '`, which the backend
   // then rejects with 403 on every request.
   if (!key || key.trim().length === 0) {
-    throw new Error(
-      'VITE_API_KEY must be set to a non-empty value for production builds. ' +
-        '(Throws at module load in the browser, not during `vite build` — ' +
-        'see the JSDoc above for the build-time-vs-load-time mechanism.)',
-    );
+    throw new Error('VITE_API_KEY must be set to a non-empty value for production builds.');
   }
   if (key.trim().toLowerCase() === DEV_FALLBACK_KEY) {
     throw new Error(
       `VITE_API_KEY is set (case-insensitively) to the public dev ` +
         `fallback '${DEV_FALLBACK_KEY}'. Production builds must use a ` +
         `strong secret. See CLAUDE.md "Critical rules" and the symmetric ` +
-        `backend guard in backend/src/auth.ts. (Throws at module load in ` +
-        `the browser, not during \`vite build\`.)`,
+        `backend guard in backend/src/auth.ts.`,
     );
   }
 }

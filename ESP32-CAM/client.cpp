@@ -246,6 +246,13 @@ int postImage(esp_config_t *esp_config) {
   unsigned long __t_all_end = millis();
   Serial.println(String("---- total capture+post took ") + String((__t_all_end - __t_all_start) / 1000.0f, 3) + " seconds");
 
+  // Return shape: the raw HTTP code (e.g. 200, 403, 500) or a negative
+  // sentinel. ESP32-CAM.ino's captureAndUpload switch (`if (httpCode >=
+  // 100)`) keys on this — DO NOT switch to statusCodeToReturnValue here,
+  // it would collapse "200 OK" to 0 and the switch would skip the
+  // success-path logging. sendHeartbeat returns the OPPOSITE shape
+  // (0 for 2xx, code otherwise) because its caller only cares about
+  // success/failure. The asymmetry is load-bearing for both call sites.
   return code;
 }
 
@@ -337,5 +344,12 @@ int sendHeartbeat(esp_config_t *esp_config) {
   if (returnValue != 0) {
     logf("[heartbeat] non-2xx: %d", httpCode);
   }
+  // Return shape: 0 for 2xx, otherwise the raw HTTP code or negative
+  // sentinel. ESP32-CAM.ino's boot-heartbeat check (`if (sendHeartbeat(...)
+  // == 0)`) keys on the 0=success convention. DO NOT swap for the raw
+  // code shape that postImage uses — both callers depend on this
+  // asymmetry; postImage's switch needs the raw code, this caller only
+  // wants pass/fail. The helpers in `lib/http_status/` produce both
+  // shapes; each call site picks the right one for its caller.
   return returnValue;
 }

@@ -24,6 +24,28 @@ python -m pip install pyserial
 
 That's it — they don't depend on the rest of the dev stack.
 
+## Invocation — positional args, never flags
+
+All three ESP helpers take **positional arguments**, never named flags. A
+`--port`/`--seconds` invocation silently fails with a Python `ValueError`
+because the value following `--port` is fed to `int(sys.argv[2])` and the
+script's argparse-free design accepts no `--` prefixes.
+
+```powershell
+# RIGHT — positional
+python scripts\esp_reset.py   COM9
+python scripts\esp_capture.py COM9 60     # 60 s capture (default: 25 s)
+python scripts\esp_monitor.py COM9 300    # 300 s monitor (default: 120 s)
+
+# WRONG — named flags fail with: invalid literal for int() with base 10: 'COM9'
+python scripts\esp_capture.py --port COM9 --seconds 60
+```
+
+`esp_capture.py` also always writes a copy of the log to
+`%TEMP%\esp_log.txt` regardless of the calling shell's redirect, so a
+follow-up `Get-Content $env:TEMP\esp_log.txt -Tail 60` works even if a
+PowerShell tee-redirect chain got mangled.
+
 ## Wiring expectations
 
 All three scripts assume the **AI Thinker ESP32-CAM-MB** (the

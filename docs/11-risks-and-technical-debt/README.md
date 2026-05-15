@@ -78,7 +78,7 @@ Format: short title + **What happened** + **Why it happened** +
 **What happened.** The shipped `ESP32-CAM/config.json` baked
 `http://highfive.schutera.com/upload` and `.../new_module` as the
 factory defaults. Every flashed module sent the `HIGHFIVE_API_KEY`,
-operator email, image bodies, and hourly telemetry in clear-text
+image bodies, and hourly telemetry in clear-text
 over WiFi. A single passive `tcpdump` on any LAN segment between a
 module and the server captured the shared admin secret and granted
 full server compromise — the same key gates `/api/modules*` and the
@@ -111,6 +111,47 @@ unauthenticated to the peer. Both lessons collapse into a single
 rule: when a firmware call site is `https://`, it must also be
 CA-pinned. See [ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)
 for the trust-model decision and the embedded-roots design.
+
+### OTA `shouldOtaUpdate` accepts downgrades (surfaced during #79 smoke test)
+
+**What happened.** During the PR #82 hardware smoke test on 2026-05-15, a
+test module running `mason` (the TLS-migration firmware) was put on its
+home WiFi while the production manifest at `firmware.json` still
+advertised the previous `leafcutter` version. On every boot the module
+fetched the manifest, observed that `mason != leafcutter`, and proceeded
+to download and flash `leafcutter` — wiping the TLS-migration firmware.
+Next boot, the now-`leafcutter` module fetched the manifest, observed
+`leafcutter != mason` was no longer true (since it was now itself
+`leafcutter`), and stopped. The trap surfaced as a one-shot downgrade in
+the test, but a misconfigured production deployment (manifest rolled
+back, binary not) would expose the same bidirectional pingpong.
+
+**Why it happened.** [`ota_version.cpp`'s `shouldOtaUpdate`](../../ESP32-CAM/lib/ota_version/ota_version.cpp)
+implements version comparison as plain `strcmp(current, manifest) != 0`.
+Bee names ([ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md))
+are deliberately unordered identifiers — there is no total order from
+which "newer than" could be derived. The current logic treats any
+difference as a green light to flash, which conflates the upgrade and
+downgrade directions. The unit test
+`test_should_update_returns_true_on_diff` in
+[`test_native_ota_version/test_ota_version.cpp`](../../ESP32-CAM/test/test_native_ota_version/test_ota_version.cpp)
+pins this behaviour explicitly, so it was a conscious choice from #26,
+not a bug introduced by #79.
+
+**How to avoid it next time.** Two layers:
+
+1. **Operationally**, when rolling out a new firmware version, upload
+   the binary to the server _before_ updating `firmware.json` to
+   advertise the new version. The manifest is the trigger; if it points
+   at a binary that does not yet exist, modules see `404` and skip.
+   Atomicity is on the operator.
+2. **Architecturally**, the firmware should not be able to downgrade by
+   accident. Tracked as issue [#83](https://github.com/schutera/highfive/issues/83):
+   add a monotonic `sequence` integer alongside the bee name in
+   `ESP32-CAM/VERSION` and in `firmware.json`; `shouldOtaUpdate`
+   refuses any flash where `manifest.sequence <= current.sequence`
+   unless the manifest sets an explicit `allow_downgrade: true` flag.
+   Deferred from PR #82 to keep the TLS-migration diff focused.
 
 ### Setup wizard shipped two silent-success bugs (issues #43, #44)
 

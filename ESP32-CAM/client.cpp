@@ -307,6 +307,29 @@ int sendHeartbeat(esp_config_t *esp_config) {
               + "&free_heap=" + String(ESP.getFreeHeap())
               + "&fw_version=" + String(FIRMWARE_VERSION);
 
+  // PR II / issue #89: if a deferred geolocation retry succeeded
+  // mid-uptime, attach the fresh fix to this heartbeat so the server
+  // can recover a module that registered at the (0,0) sentinel on
+  // boot. The duckdb-service side will UPDATE module_configs.lat/lng
+  // — but ONLY if the existing row is at (0,0) — so this is safe to
+  // send unconditionally once we have a plausible fix queued.
+  //
+  // Peek/commit split (round-1 senior-review P1): we PEEK the fix
+  // here to build the body; the flag is committed (cleared) further
+  // down only after the POST returns 2xx. A transient server outage
+  // therefore keeps the same fix queued and the next heartbeat
+  // re-sends it — instead of dropping the recovery on the floor and
+  // waiting 24h for the next daily reboot to maybe-fix it.
+  const bool sendingPendingFix = hasPendingGeolocationFixToReport();
+  if (sendingPendingFix) {
+    geolocation_t fix = peekPendingGeolocationFixForHeartbeat();
+    body += String("&latitude=")  + String(fix.latitude, 6);
+    body += String("&longitude=") + String(fix.longitude, 6);
+    body += String("&accuracy=")  + String(fix.accuracy, 1);
+    logf("[heartbeat] carrying recovered geolocation fix lat=%.6f lng=%.6f acc=%.1f",
+         fix.latitude, fix.longitude, fix.accuracy);
+  }
+
   hf::breadcrumbSet("sendHeartbeat:write");
   hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
                + "Host: " + String(url.host.c_str()) + ":" + String((unsigned)url.port) + "\r\n"
@@ -340,6 +363,17 @@ int sendHeartbeat(esp_config_t *esp_config) {
   if (returnValue != 0) {
     logf("[heartbeat] non-2xx: %d", httpCode);
   }
+
+  // Commit-on-2xx for the geolocation fix peek above (PR II / issue
+  // #89). The flag was deliberately left set during body build so a
+  // network drop, a TCP reset, a 5xx, or a parse failure leaves the
+  // fix queued for the next heartbeat. Only a real 2xx clears it.
+  // Local connect/write failures returned early above (`return -2`)
+  // and never reach this line, so the flag survives those too.
+  if (sendingPendingFix && returnValue == 0) {
+    commitPendingGeolocationFixReported();
+  }
+
   // Return shape: 0 for 2xx, otherwise the raw HTTP code or negative
   // sentinel. ESP32-CAM.ino's boot-heartbeat check (`if (sendHeartbeat(...)
   // == 0)`) keys on the 0=success convention. DO NOT swap for the raw

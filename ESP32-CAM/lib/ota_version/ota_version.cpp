@@ -82,6 +82,39 @@ bool parseUint32(const char* json, long long start, uint32_t* out) {
     return true;
 }
 
+// Read a literal JSON boolean at `start`. Returns true and sets *out
+// only for the EXACT 4-byte sequence `true` followed by a JSON
+// terminator (`,`, `}`, whitespace, or NUL). Any prefix-match like
+// `truer` or `truefoobar` falls through to `*out=false`. The literal
+// `false` and every other non-true input (numbers, quoted strings,
+// garbage) sets *out=false and still returns true — i.e. "the field
+// was present and we parsed it". The narrow acceptance for `true`
+// is the safety invariant: an operator typo in the manifest must
+// NEVER accidentally enable a downgrade. Combined with "absent
+// field → false" at the caller, the contract is "literal `true`,
+// anywhere else false".
+//
+// The strncmp-then-boundary-check pattern (rather than reading 4
+// bytes blindly) keeps the OOB-safe behaviour from the previous
+// version: short_circuit-from-NUL inside the firmware's bounded
+// manifest body means we never read past EOF.
+bool parseBoolLiteral(const char* json, long long start, bool* out) {
+    if (start < 0 || !json || !out) return false;
+    size_t i = static_cast<size_t>(start);
+    if (json[i] != 't' || json[i + 1] != 'r' || json[i + 2] != 'u' || json[i + 3] != 'e') {
+        *out = false;
+        return true;
+    }
+    // Trailing-byte guard: `truer` must NOT match `true`. JSON's
+    // terminator alphabet here is comma/close-brace/whitespace/NUL.
+    const char next = json[i + 4];
+    const bool atTerminator = (next == ',' || next == '}' || next == ' ' ||
+                               next == '\t' || next == '\n' || next == '\r' ||
+                               next == '\0');
+    *out = atTerminator;
+    return true;
+}
+
 bool isLowerHex(const char* s, size_t n) {
     for (size_t i = 0; i < n; ++i) {
         const char c = s[i];
@@ -94,10 +127,26 @@ bool isLowerHex(const char* s, size_t n) {
 
 }  // namespace
 
-bool shouldOtaUpdate(const char* current_version, const char* manifest_version) {
-    if (!current_version || !manifest_version) return false;
-    if (current_version[0] == '\0' || manifest_version[0] == '\0') return false;
-    return std::strcmp(current_version, manifest_version) != 0;
+bool shouldOtaUpdate(const char* current_version, uint32_t current_sequence,
+                     const OtaManifest& manifest) {
+    if (!current_version) return false;
+    if (current_version[0] == '\0') return false;
+    if (manifest.version[0] == '\0') return false;
+    if (std::strcmp(current_version, manifest.version) == 0) return false;
+    // Dev-build guard (round-3 senior-review P1). FIRMWARE_SEQUENCE
+    // == 0 is the Arduino-IDE fallback in `esp_init.h` — the binary
+    // was hand-compiled without going through `build.sh` /
+    // `extra_scripts.py`. Without this guard, `manifest.sequence (1)
+    // > current_sequence (0)` would be true and a dev binary would
+    // happily auto-flash itself to whatever fleet release is sitting
+    // at `/firmware.json`. The right answer for a hand-compiled
+    // binary is "stay on the dev code"; the operator must explicitly
+    // USB-flash a sequenced release before OTA can take over. The
+    // dev escape hatch is covered by a host test that pins this
+    // exact behaviour.
+    if (current_sequence == 0) return false;
+    if (manifest.allow_downgrade) return true;
+    return manifest.sequence > current_sequence;
 }
 
 bool parseOtaManifest(const char* json_body, OtaManifest* out) {
@@ -125,6 +174,26 @@ bool parseOtaManifest(const char* json_body, OtaManifest* out) {
     }
     if (tmp.app_size == 0 || tmp.app_size > HF_OTA_MAX_APP_BYTES) {
         return false;
+    }
+    // `sequence` is mandatory — see header comment. A manifest without
+    // it is rejected so the new firmware cannot silently fall back to
+    // the pre-#83 strcmp behaviour.
+    if (!parseUint32(json_body,
+                     findValueStart(json_body, "sequence"),
+                     &tmp.sequence)) {
+        return false;
+    }
+    // `allow_downgrade` is optional. Absent → false; literal `true`
+    // → true; anything else → false. We don't fail-closed on absence
+    // because operators ship the regular happy-path manifest without
+    // it; they only set it on deliberate-rollback publishes.
+    const long long allowStart = findValueStart(json_body, "allow_downgrade");
+    if (allowStart >= 0) {
+        if (!parseBoolLiteral(json_body, allowStart, &tmp.allow_downgrade)) {
+            return false;
+        }
+    } else {
+        tmp.allow_downgrade = false;
     }
 
     *out = tmp;

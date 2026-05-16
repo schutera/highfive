@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useState } from 'react';
 import type { Module } from '@highfive/contracts';
+import { hasPlausibleLocation } from '../lib/location';
 
 // Create a badge icon for clusters
 function createBadgeIcon(count: number, hasOnline: boolean) {
@@ -68,6 +69,12 @@ function fuzzLocation(location: { lat: number; lng: number }, moduleId: string):
 
   return [location.lat + offsetLat, location.lng + offsetLng];
 }
+
+// `hasPlausibleLocation` lives in `src/lib/location.ts`. The
+// import at the top of this file is the only consumer-of-record
+// inside this module; every other caller imports it directly from
+// `lib/location` so the leaflet-bound MapView module isn't pulled
+// in just to evaluate a predicate.
 
 // Interpolate between colors based on hatches
 // emerald → amber → rose gradient for nature/activity visualization
@@ -306,24 +313,47 @@ export default function MapView({
   const [bounds, setBounds] = useState<L.LatLngBounds | null>(null);
   const CLUSTER_ZOOM_THRESHOLD = 13; // Show clusters below this zoom level
 
-  // Center map on first module or default location
-  const center: [number, number] = modules[0]?.location
-    ? [modules[0].location.lat, modules[0].location.lng]
+  // Center map on first module with a plausible location, falling
+  // back to the Germany default [47.78, 9.61] when no module has
+  // landed a fix yet. Without this guard a single (0,0) module from
+  // a botched first-boot (#89) would re-center the map to the Gulf
+  // of Guinea (#49). Find-first because the side-list order is the
+  // operator's preference; we don't want to silently re-order under
+  // them just because of a (0,0) at index 0.
+  const firstPlausible = modules.find((m) => hasPlausibleLocation(m.location));
+  const center: [number, number] = firstPlausible
+    ? [firstPlausible.location.lat, firstPlausible.location.lng]
     : [47.78, 9.61];
 
-  // Memoize fuzzed locations to keep them consistent
+  // Memoize fuzzed locations to keep them consistent. (0,0) and
+  // out-of-range modules are FILTERED OUT entirely from the rendered
+  // map circle set — they still appear in the dashboard side-list
+  // (with the "Location pending" pill), but no marker is plotted at
+  // Null Island. The filter happens at the fuzzedModules construction
+  // step so every downstream consumer (clustering, individual
+  // circles, the visibleModules useMemo) sees a clean list.
   const fuzzedModules = useMemo(
     () =>
-      modules.map((module) => ({
-        ...module,
-        fuzzedLocation: fuzzLocation(module.location, module.id),
-      })),
+      modules
+        .filter((module) => hasPlausibleLocation(module.location))
+        .map((module) => ({
+          ...module,
+          fuzzedLocation: fuzzLocation(module.location, module.id),
+        })),
     [modules],
   );
 
-  // Filter modules visible in current map bounds
+  // Filter modules visible in current map bounds. The pre-bounds
+  // fallback (first render, before MapController's useEffect fires)
+  // ALSO filters (0,0) modules so the dashboard side-list stays
+  // consistent with the marker set in both states. Without this,
+  // the first render of the dashboard would briefly include (0,0)
+  // modules in `visibleModules`, then drop them once bounds came
+  // in — visible flicker, and in practice
+  // `onVisibleModulesChange` is gated on `bounds` so the leak
+  // didn't reach DashboardPage today; round-1 senior-review P2.
   const visibleModules = useMemo(() => {
-    if (!bounds) return modules;
+    if (!bounds) return modules.filter((m) => hasPlausibleLocation(m.location));
     return fuzzedModules.filter((module) =>
       bounds.contains(L.latLng(module.fuzzedLocation[0], module.fuzzedLocation[1])),
     );

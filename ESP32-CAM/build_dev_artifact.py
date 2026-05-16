@@ -48,6 +48,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 PIO_OUT = HERE / ".pio" / "build" / "esp32cam" / "firmware.bin"
 VERSION_FILE = HERE / "VERSION"
+SEQUENCE_FILE = HERE / "SEQUENCE"
 HOMEPAGE_PUBLIC = REPO / "homepage" / "public"
 
 
@@ -61,10 +62,21 @@ def main() -> int:
     if not VERSION_FILE.exists():
         print(f"ERROR: {VERSION_FILE} not found.", file=sys.stderr)
         return 1
+    if not SEQUENCE_FILE.exists():
+        print(f"ERROR: {SEQUENCE_FILE} not found.", file=sys.stderr)
+        return 1
 
     version = VERSION_FILE.read_text(encoding="utf-8").strip()
     if not version:
         print(f"ERROR: {VERSION_FILE} is empty.", file=sys.stderr)
+        return 1
+    try:
+        sequence = int(SEQUENCE_FILE.read_text(encoding="utf-8").strip())
+    except ValueError:
+        print(f"ERROR: {SEQUENCE_FILE} is not an integer.", file=sys.stderr)
+        return 1
+    if sequence < 1:
+        print(f"ERROR: SEQUENCE must be >= 1; got {sequence}.", file=sys.stderr)
         return 1
 
     HOMEPAGE_PUBLIC.mkdir(parents=True, exist_ok=True)
@@ -99,11 +111,18 @@ def main() -> int:
     # wizard implementation (`homepage/src/components/setup/`) does
     # not read `md5` from the manifest, so this is mostly future-
     # proofing against the wizard adding integrity checks later.
+    # `sequence` + `allow_downgrade` (#83) are required for the new
+    # firmware's `parseOtaManifest` to accept this manifest. The dev
+    # path always emits `allow_downgrade: false` — a dev who wants to
+    # exercise the downgrade flow can edit the file by hand, same as
+    # for the release path.
     manifest = {
         "version": version,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "app_md5": app_md5,
         "app_size": app_size,
+        "sequence": sequence,
+        "allow_downgrade": False,
     }
     # Trailing newline — `cat firmware.json` shouldn't smush into the
     # next prompt, and most JSON-handling tooling expects one.
@@ -113,7 +132,7 @@ def main() -> int:
 
     print(f"Wrote {dst_app} ({app_size} bytes)")
     print(f"Wrote {HOMEPAGE_PUBLIC / 'firmware.json'}")
-    print(f"  version={version} app_md5={app_md5} app_size={app_size}")
+    print(f"  version={version} sequence={sequence} app_md5={app_md5} app_size={app_size}")
     print("  (dev manifest — no merged firmware.bin; web installer disabled)")
     return 0
 

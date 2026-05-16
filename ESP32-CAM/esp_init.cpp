@@ -3,6 +3,7 @@
 #include "esp_init.h"
 #include "firmware_defaults.h" // hf::defaults::k*ProductionFallback (issue #66)
 #include "form_query.h"        // hf::rewriteLegacyHighfiveUrl — issue #79
+#include "geolocation.h"       // hf::isPlausibleFix — issue #89
 #include "led.h"
 #include "module_id.h"
 #include "module_name.h"       // hf::moduleNameFromMac — issue #92
@@ -19,6 +20,29 @@
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 #include "tls_roots.h" // hf::tls::k{IsrgRootX1,GtsRootR1}Pem — issue #79
+
+// Geolocation retry state for the heartbeat-side recovery path (PR
+// II / issue #89). When the boot-time 3-attempt loop in
+// getGeolocation() fails to obtain a plausible fix, we register the
+// module at (0,0) and set g_needs_geolocation_retry = true. loop()
+// calls tickGeolocationDeferredRetry() every iteration; once
+// HF_GEOLOCATION_DEFERRED_RETRY_MS has elapsed it re-runs the single-
+// shot attempt and on success populates g_pending_geolocation_fix and
+// sets g_has_pending_fix_to_report. The next heartbeat picks up the
+// pending fix via consumePendingGeolocationFixForHeartbeat() (which
+// also clears the flag) and POSTs it as `latitude=&longitude=&accuracy=`.
+//
+// File-local rather than esp_config_t fields because the lifetime is
+// narrowly scoped to "between boot-fix failure and the first
+// successful heartbeat that carries the recovery" — adding three
+// fields to the struct would imply they're worth persisting to
+// SPIFFS, which they aren't.
+namespace {
+bool         g_needs_geolocation_retry      = false;
+bool         g_has_pending_fix_to_report    = false;
+geolocation_t g_pending_geolocation_fix      = {0.0f, 0.0f, 0.0f};
+unsigned long g_last_geolocation_retry_at_ms = 0;
+}
 
 
 /* 
@@ -529,48 +553,49 @@ bool loadConfig(esp_config_t *esp_config) {
 }
 
 
-// GEOLOCATION (uses Google Geolocation API and stores latitdue and longitude)
-void getGeolocation(esp_config_t *esp_config) {
+// GEO_API_KEY is injected at build time by extra_scripts.py (PlatformIO)
+// or build.sh (arduino-cli). Fallback to empty string so raw Arduino IDE
+// builds compile; the runtime guard below makes the missing-key case
+// observable instead of producing a broken HTTPS request to Google.
+#ifndef GEO_API_KEY
+#define GEO_API_KEY ""
+#endif
 
-  // GEO_API_KEY is injected at build time by extra_scripts.py (PlatformIO)
-  // or build.sh (arduino-cli). Fallback to empty string so raw Arduino IDE
-  // builds compile; the runtime guard below makes the missing-key case
-  // observable instead of producing a broken HTTPS request to Google.
-  #ifndef GEO_API_KEY
-  #define GEO_API_KEY ""
-  #endif
+// Single attempt at the Google Geolocation API — extracted from the old
+// getGeolocation body so the 3-attempt retry loop (PR II / issue #89)
+// can call it without code duplication. Writes lat/lng/accuracy into
+// *out on success. Returns true iff the API responded and the response
+// JSON parsed; the *plausibility* check (sentinel (0,0,*), out-of-range,
+// zero-accuracy) lives in the caller via `hf::isPlausibleFix`.
+static bool attemptGeolocation(geolocation_t* out) {
+  if (!out) return false;
   const char* apiKey = GEO_API_KEY;
-
   if (apiKey[0] == '\0') {
     Serial.println("getGeolocation: GEO_API_KEY not set at build time — skipping geolocation lookup.");
-    return;
+    return false;
   }
 
   // Issue #42 instrumentation: breadcrumb each blocking call inside
-  // getGeolocation. The HTTPClient calls below have NO explicit
+  // attemptGeolocation. The HTTPClient calls below have NO explicit
   // setTimeout(), so a slow Google response can block past the 60 s
   // TASK_WDT budget undetected. If the WDT fires, the next boot's
   // last_stage_before_reboot field will name the section.
   hf::breadcrumbSet("getGeolocation:wifi_scan");
-  // Scan WiFi networks
   int n = WiFi.scanNetworks();
   Serial.println("Scan complete");
 
   if (n <= 0) {
     Serial.println("No networks found");
-    return;
+    return false;
   }
 
   DynamicJsonDocument doc(4096);
-
   JsonArray wifiArray = doc.createNestedArray("wifiAccessPoints");
-
-  for (int i = 0; i < min(n, 7); i++) {  // send up to 7 networks
+  for (int i = 0; i < min(n, 7); i++) {
     JsonObject wifiObj = wifiArray.createNestedObject();
     wifiObj["macAddress"] = WiFi.BSSIDstr(i);
     wifiObj["signalStrength"] = WiFi.RSSI(i);
   }
-
   String requestBody;
   serializeJson(doc, requestBody);
 
@@ -582,7 +607,6 @@ void getGeolocation(esp_config_t *esp_config) {
   // cert. Issue #79.
   WiFiClientSecure secureClient;
   secureClient.setCACert(hf::tls::kGtsRootR1Pem);
-
   HTTPClient http;
   String url = String("https://www.googleapis.com/geolocation/v1/geolocate?key=") + apiKey;
   http.begin(secureClient, url);
@@ -591,30 +615,124 @@ void getGeolocation(esp_config_t *esp_config) {
   hf::breadcrumbSet("getGeolocation:http_post");
   int httpResponseCode = http.POST(requestBody);
 
+  bool ok = false;
   if (httpResponseCode > 0) {
-
     hf::breadcrumbSet("getGeolocation:get_string");
     String response = http.getString();
-    //Serial.println("Response:");
-    //Serial.println(response);
-
     DynamicJsonDocument responseDoc(2048);
     DeserializationError error = deserializeJson(responseDoc, response);
-
     if (!error) {
-      esp_config->geolocation.latitude = responseDoc["location"]["lat"];
-      esp_config->geolocation.longitude = responseDoc["location"]["lng"];
-      esp_config->geolocation.accuracy = responseDoc["accuracy"];
+      out->latitude  = responseDoc["location"]["lat"];
+      out->longitude = responseDoc["location"]["lng"];
+      out->accuracy  = responseDoc["accuracy"];
+      ok = true;
     } else {
       Serial.println("failed to parse JSON to get the geolocation.");
     }
-
   } else {
     Serial.print("HTTP Error: ");
     Serial.println(httpResponseCode);
   }
-
   http.end();
+  return ok;
+}
+
+// Public retry-loop wrapper (PR II / issue #89). Three attempts with
+// exponential backoff (2s, 6s, 14s — total ~22s worst case, well under
+// the 60s TASK_WDT budget). Returns true iff the final fix is plausible
+// per `hf::isPlausibleFix`. On boot-time failure the caller is expected
+// to register the module at the (0,0) sentinel and arm the deferred-
+// retry path via `markGeolocationFixNeedsRetry()`; the heartbeat-side
+// recovery (loop()) reads the flag and re-attempts in the background.
+bool getGeolocation(esp_config_t *esp_config) {
+  if (!esp_config) return false;
+  const unsigned long kBackoffMs[3] = {2000, 6000, 14000};
+  geolocation_t tmp = {0.0f, 0.0f, 0.0f};
+
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    char crumb[40];
+    snprintf(crumb, sizeof(crumb), "getGeolocation:retry_attempt_%d", attempt + 1);
+    hf::breadcrumbSet(crumb);
+
+    bool apiOk = attemptGeolocation(&tmp);
+    if (apiOk && hf::isPlausibleFix(tmp.latitude, tmp.longitude, tmp.accuracy)) {
+      esp_config->geolocation = tmp;
+      Serial.printf("[getGeolocation] success on attempt %d (lat=%.6f lng=%.6f acc=%.1f)\n",
+                    attempt + 1, tmp.latitude, tmp.longitude, tmp.accuracy);
+      return true;
+    }
+    if (attempt < 2) {
+      Serial.printf("[getGeolocation] attempt %d failed — backing off %lums\n",
+                    attempt + 1, kBackoffMs[attempt]);
+      // Feed the watchdog so the backoff sleep is genuinely safe.
+      // 14s is the longest single backoff, well under the 60s WDT
+      // budget, but the loop body above can drift past that on a slow
+      // WiFi scan + slow HTTP timeout combined.
+      esp_task_wdt_reset();
+      delay(kBackoffMs[attempt]);
+    }
+  }
+  Serial.println("[getGeolocation] 3 attempts exhausted — no plausible fix this boot");
+  // Leave esp_config->geolocation at the sentinel set by `loadConfig`
+  // so downstream code sees (0,0,0) — the heartbeat-side recovery
+  // will pick this up on the deferred retry path.
+  return false;
+}
+
+// Heartbeat-side recovery helpers (PR II / issue #89). See the
+// declarations in esp_init.h for the contract.
+void markGeolocationFixNeedsRetry() {
+  g_needs_geolocation_retry = true;
+  g_has_pending_fix_to_report = false;
+  // Reset the retry clock so the first deferred attempt fires
+  // HF_GEOLOCATION_DEFERRED_RETRY_MS from "now" rather than from
+  // whatever millis() was the last time we ran a retry.
+  g_last_geolocation_retry_at_ms = millis();
+}
+
+bool hasPendingGeolocationFixToReport() {
+  return g_has_pending_fix_to_report;
+}
+
+// peek/commit split — see esp_init.h for the contract. A transient
+// heartbeat POST failure must NOT lose the recovered fix; the caller
+// peeks the value into the body, sends the POST, and only commits
+// (clears the flag) when the POST returned a 2xx. If the POST fails,
+// next heartbeat will re-send the same body via the same peek.
+geolocation_t peekPendingGeolocationFixForHeartbeat() {
+  return g_pending_geolocation_fix;
+}
+
+void commitPendingGeolocationFixReported() {
+  g_has_pending_fix_to_report = false;
+}
+
+void tickGeolocationDeferredRetry(esp_config_t *esp_config) {
+  if (!esp_config) return;
+  if (!g_needs_geolocation_retry) return;
+  // If a pending fix is already queued for the next heartbeat, don't
+  // keep hammering Google's API — wait for the heartbeat to consume it.
+  if (g_has_pending_fix_to_report) return;
+  const unsigned long now = millis();
+  // First call after markGeolocationFixNeedsRetry() seeds
+  // g_last_geolocation_retry_at_ms = now, so the wraparound-safe
+  // unsigned subtraction below evaluates to 0 < interval → no fire.
+  if (now - g_last_geolocation_retry_at_ms < HF_GEOLOCATION_DEFERRED_RETRY_MS) return;
+
+  hf::breadcrumbSet("loop:getGeolocation:deferred_retry");
+  g_last_geolocation_retry_at_ms = now;
+  geolocation_t tmp = {0.0f, 0.0f, 0.0f};
+  if (attemptGeolocation(&tmp) &&
+      hf::isPlausibleFix(tmp.latitude, tmp.longitude, tmp.accuracy)) {
+    esp_config->geolocation = tmp;
+    g_pending_geolocation_fix = tmp;
+    g_has_pending_fix_to_report = true;
+    g_needs_geolocation_retry = false;  // success: stop retrying
+    Serial.printf("[getGeolocation] deferred retry SUCCESS (lat=%.6f lng=%.6f acc=%.1f) — will report on next heartbeat\n",
+                  tmp.latitude, tmp.longitude, tmp.accuracy);
+  } else {
+    Serial.println("[getGeolocation] deferred retry failed — will try again in 30 minutes");
+  }
 }
 
 

@@ -47,6 +47,16 @@ introduction. Each release bumps the single source — `ESP32-CAM/VERSION`
 | `ESP32-CAM/extra_scripts.py`            | injects `-DFIRMWARE_VERSION="<value>"` for PlatformIO    | Same macro for the `pio run -e esp32cam` cross-compile path.                                                                                                                                                 |
 | `ESP32-CAM/esp_init.h` (fallback)       | `#define FIRMWARE_VERSION "dev-unset"` if not injected   | Only fires when the sketch is compiled directly in Arduino IDE without going through `build.sh` or `pio`. The string surfaces in boot log + telemetry + heartbeat as a "this is not a release build" signal. |
 
+PR II / issue #83 adds a parallel `ESP32-CAM/SEQUENCE` file (single
+writer) that follows the exact same shape — read by `build.sh`,
+`extra_scripts.py`, and `build_dev_artifact.py`; injected as
+`-DFIRMWARE_SEQUENCE=<int>`; fallback `0` in `esp_init.h` for raw
+Arduino IDE builds. Same one-writer-four-readers pattern, different
+macro. See [ADR-008 "Sequence + allow_downgrade addendum"](adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83)
+for the OTA-comparator semantics that read it. The version stays the
+unordered bee name; SEQUENCE is the ordering signal the OTA path
+needs.
+
 The `FIRMWARE_VERSION` macro is consumed by:
 
 - `ESP32-CAM/ESP32-CAM.ino` (`setup()` boot log line)

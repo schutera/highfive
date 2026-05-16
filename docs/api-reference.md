@@ -429,14 +429,17 @@ Content-Type: application/x-www-form-urlencoded
 
 Form fields:
 
-| Field        | Type   | Notes                                                                                                                  |
-| ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `mac`        | string | accepted in canonical 12-hex form, colon-separated, or dash-separated; canonicalised on the server (or `esp_id` alias) |
-| `battery`    | int    | optional                                                                                                               |
-| `rssi`       | int    | optional, dBm                                                                                                          |
-| `uptime_ms`  | int    | optional, since last boot                                                                                              |
-| `free_heap`  | int    | optional, bytes                                                                                                        |
-| `fw_version` | string | optional, ≤40 chars (a bee-name from `ESP32-CAM/VERSION`; see ADR-006)                                                 |
+| Field        | Type   | Notes                                                                                                                                                                                                          |
+| ------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mac`        | string | accepted in canonical 12-hex form, colon-separated, or dash-separated; canonicalised on the server (or `esp_id` alias)                                                                                         |
+| `battery`    | int    | optional                                                                                                                                                                                                       |
+| `rssi`       | int    | optional, dBm                                                                                                                                                                                                  |
+| `uptime_ms`  | int    | optional, since last boot                                                                                                                                                                                      |
+| `free_heap`  | int    | optional, bytes                                                                                                                                                                                                |
+| `fw_version` | string | optional, ≤40 chars (a bee-name from `ESP32-CAM/VERSION`; see ADR-006)                                                                                                                                         |
+| `latitude`   | float  | optional — geolocation-recovery field; only sent by firmware when its boot-time `getGeolocation` failed and the deferred retry has since succeeded (PR II / issue #89). Must be in `[-90, 90]` to be accepted. |
+| `longitude`  | float  | optional, paired with `latitude`. Must be in `[-180, 180]`.                                                                                                                                                    |
+| `accuracy`   | float  | optional, paired with `latitude`/`longitude`. Must be `> 0` (Google's "no fix" response is `accuracy: 0`, which the server treats as not-a-fix).                                                               |
 
 The `mac` field is canonicalised to lowercase 12-hex via
 `ModuleId.model_validate(...)` before the `INSERT`, mirroring the
@@ -449,9 +452,21 @@ Returns `{ "ok": true }`, `200`. Missing `mac` returns
 reduce to `[0-9a-f]{12}` returns `{ "error": "invalid mac format" }`,
 `400`.
 
-Side effect: a single `INSERT` into `module_heartbeats`. The handler
-does **not** update `module_configs`. Implementation in
-the `heartbeat` route of `duckdb-service/routes/heartbeats.py`.
+Side effects: a single `INSERT` into `module_heartbeats`. The
+handler **also** UPDATEs `module_configs.lat`/`lng` (PR II / issue
+#89) — but ONLY when ALL of the following are true:
+
+1. The heartbeat carries plausible `latitude`/`longitude`/`accuracy`
+   (the `_is_plausible_fix` rule: not `(0,0)`, not NaN, not out of
+   range, `accuracy > 0`).
+2. The existing `module_configs` row sits at the `(0,0)` sentinel.
+   A deliberately-placed module is **never** clobbered — the rule
+   is "only patch from (0,0)".
+
+The handler does **not** touch `module_configs.updated_at` (that
+column has dual semantics — see chapter-11 "updated_at semantic
+overload" / issue #97). Implementation in the `heartbeat` route of
+`duckdb-service/routes/heartbeats.py`.
 
 This is the **telemetry heartbeat** fired hourly by firmware's
 `sendHeartbeat` in `ESP32-CAM/client.cpp`. It is distinct from the post-upload

@@ -332,6 +332,287 @@ not a bug introduced by #79.
    unless the manifest sets an explicit `allow_downgrade: true` flag.
    Deferred from PR #82 to keep the TLS-migration diff focused.
 
+**Closed in PR II — implementation note.** The architectural fix landed
+as the 3-arg `hf::shouldOtaUpdate(current_version, current_sequence,
+manifest)` in [`ESP32-CAM/lib/ota_version/ota_version.cpp`](../../ESP32-CAM/lib/ota_version/ota_version.cpp).
+SEQUENCE lives in `ESP32-CAM/SEQUENCE` (single writer, same pattern
+as VERSION) and rides through `build.sh` + `extra_scripts.py` +
+`build_dev_artifact.py` to `firmware.json` and the firmware binary
+macro. `parseOtaManifest` **rejects** manifests missing `sequence`
+— see [ADR-008's "Sequence + allow_downgrade addendum"](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83)
+for the full migration mechanic. The rollback procedure
+(`allow_downgrade: true` for the deliberate rollback wave, then
+immediately unset it) is documented in
+[`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md).
+
+**Sub-lesson: the dev-binary OTA self-overwrite (round-3 reviewer
+finding).** The first PR II landing shipped `shouldOtaUpdate` as
+`manifest.sequence > current_sequence` with no special-casing of
+`current_sequence == 0` — which is the Arduino-IDE fallback set in
+`esp_init.h` when a binary is hand-compiled without `build.sh` /
+`extra_scripts.py`. Result: a dev hand-flashing a local binary onto
+a module that's on the same LAN as the production homepage would
+have seen the first OTA poll silently overwrite their code (because
+`1 > 0` is true for any fleet release with `sequence >= 1`). Round-3
+senior-review caught the comment-vs-code mismatch (the comments
+already said "refuses every OTA from a properly-built fleet" —
+which only became true after the guard landed). Fix: explicit
+`current_sequence == 0 → refuse` clause, paired with two host
+tests pinning both the no-allow_downgrade and allow_downgrade
+branches. Operator implication: a dev binary requires a USB
+reflash with a properly-built sequenced binary before it can
+participate in OTAs; `allow_downgrade: true` on the fleet manifest
+does NOT unlock dev-binary participation (deliberate — a rollback
+wave shouldn't also clobber developer machines).
+
+**How to avoid the same class next time.** When a comparator
+acquires a new argument, write the host test for the sentinel
+value (`0`, `null`, `""`, etc.) before writing the code; the host
+test for `FIRMWARE_SEQUENCE=0` didn't exist in the first PR II
+landing, so the comment claiming the sentinel was a refuse-signal
+was not testable. Comments that describe behaviour without a
+corresponding test will drift — the broader "trust code over
+commit messages" rule in CLAUDE.md applies to ADR pseudocode and
+source comments too, not just commit history.
+
+### First-boot geolocation race: bounded retry + heartbeat-side recovery (#89, PR II)
+
+**What happened.** The firmware's `getGeolocation` in
+[`ESP32-CAM/esp_init.cpp`](../../ESP32-CAM/esp_init.cpp) was a
+single-shot WiFi scan + Google Geolocation API POST called once
+unconditionally in `setup()`. On the realistic failure mode — fresh
+radio, DHCP still settling, WiFi scan returns empty before connection
+is fully up — it silently returned, leaving `esp_config->geolocation`
+at the `(0,0,0)` sentinel set in `setupConfig`. The next call,
+`initNewModuleOnServer`, UPSERTed the row at `(0,0)` — the module
+appeared at Null Island in the dashboard map until manually fixed.
+Surfaced as issue [#89](https://github.com/schutera/highfive/issues/89);
+the same root cause produced half of the symptom in issue
+[#49](https://github.com/schutera/highfive/issues/49) ("jumping
+geolocation in the dashboard" — the other half was the existing
+deterministic `fuzzLocation`, which was a red herring).
+
+**Why it happened.** Two design choices compounded.
+
+1. `getGeolocation` had no retry loop. The Google API legitimately
+   fails on a flaky first-boot WiFi association (BSSID list comes
+   back too short / empty), and there was no second attempt within
+   the boot window.
+2. There was no in-uptime recovery path: heartbeats carried no
+   lat/lng, so a module that registered at `(0,0)` could only be
+   fixed by the next daily reboot (ADR-007) re-running `setup()`'s
+   `getGeolocation+initNewModuleOnServer` pair.
+
+**How to avoid it next time.** Two layers — pinned by tests in
+[`ESP32-CAM/test/test_native_geolocation/`](../../ESP32-CAM/test/test_native_geolocation/test_geolocation.cpp)
+and [`duckdb-service/tests/test_heartbeats_endpoint.py`](../../duckdb-service/tests/test_heartbeats_endpoint.py):
+
+1. **Boot-time bounded retry** (3 attempts with 2s/6s/14s backoff)
+   wrapping the existing single-shot logic. Worst case ~22s, well
+   under the 60s `TASK_WDT` budget. Validated by a pure
+   `hf::isPlausibleFix(float lat, float lng, float acc)` helper in
+   [`ESP32-CAM/lib/geolocation/`](../../ESP32-CAM/lib/geolocation/geolocation.cpp)
+   that rejects `(0,0,*)`, NaN, out-of-range, and zero-accuracy
+   readings. Host-testable C++17, no Arduino deps — same pattern as
+   `lib/module_name/` from PR I.
+2. **Heartbeat-side recovery** for the case where all 3 boot
+   attempts fail. The firmware still registers the module (at the
+   `(0,0)` sentinel) so it appears in the operator UI with a
+   "Location pending" pill, then `loop()` schedules `attemptGeolocation`
+   retries every 30 minutes. On success the next heartbeat carries
+   `latitude/longitude/accuracy` as form fields; the duckdb-service
+   heartbeat endpoint UPDATEs `module_configs.lat/lng` **iff** the
+   existing row sits at `(0,0)` — the conservative "only patch from
+   (0,0)" rule guards against clobbering a deliberately-placed module.
+
+The frontend `lib/location.ts::hasPlausibleLocation` helper applies the
+same rule one layer further: any module that the server still has
+recorded at `(0,0)` is filtered out of the map's marker set and
+flagged with a "Location pending" pill in the side-list. Three
+layers, one rule — `hf::isPlausibleFix` (firmware), `_is_plausible_fix`
+(server), `hasPlausibleLocation` (frontend) — so a refactor that
+drifts one without the others is a test-suite regression on three
+sides at once.
+
+**Deferred follow-ups:**
+
+- The 30-minute deferred-retry cadence is a guess; the right
+  cadence is "as often as plausible without DoSing Google's API on a
+  captive-portal scenario". Field telemetry from the first
+  deployment cycle should inform a tune.
+- "Module physically moved" is NOT solved here. The heartbeat-side
+  patch is `(0,0) → real fix` only. A module that's been picked up
+  and reinstalled elsewhere will keep reporting heartbeats with the
+  new fix; the server ignores them. A future feature could lift this
+  via an explicit operator "relocate" gesture in the admin UI.
+- `module_configs.lat`/`lng` has two writers — `/new_module`'s
+  UPSERT and `/heartbeat`'s UPDATE — each carrying the (0,0)-
+  preservation invariant inline. PR II's first round shipped the
+  guard on the heartbeat side only; the senior-review caught that
+  the register-side UPSERT also clobbers, so the same inline
+  CASE/preserve logic now lives in `routes/modules.py` too. Two
+  copies of the same rule.
+
+  Clean fix: extract a single repository method that both call
+  sites delegate to. The two writers don't share a wire shape
+  (the heartbeat carries `accuracy`; `/new_module` doesn't), so
+  the shared method takes only `(mac, lat, lng)` and leaves the
+  accuracy-based plausibility check to the caller — the register
+  path uses `ModuleData` Pydantic clamps at the entry point, the
+  heartbeat path calls `_is_plausible_fix` inline. The shared
+  function is just the SQL-level "patch from (0,0) only" rule.
+  Out of scope for PR II — refactor with its own scope.
+
+  The cross-test that pins the invariant is in
+  `tests/test_modules.py::test_new_module_re_registration_does_not_clobber_recovered_location`
+  paired with the heartbeat-side test in
+  `tests/test_heartbeats_endpoint.py`. The four UPSERT-state
+  quadrants are pinned by
+  `test_new_module_re_registration_does_not_clobber_recovered_location`,
+  `test_new_module_re_registration_with_real_fix_overwrites_existing`,
+  `test_new_module_re_registration_after_null_island_with_real_fix_overwrites`,
+  and `test_new_module_initial_registration_at_null_island_stores_zeros`.
+
+  **The test files pin the (lat, lng) quadrant transitions but
+  NOT the plausibility predicate itself.** Each writer carries its
+  own test set; nothing fires if `_is_plausible_fix` is tightened
+  (e.g. rejecting `accuracy > 10_000.0`) without parallel SQL
+  changes. `/new_module`'s CASE is a pure SQL "is the incoming
+  (0,0)" check, while `_is_plausible_fix` is a Python predicate
+  that also rejects NaN, out-of-range, and zero accuracy — the
+  convergence of input validity comes from
+  `ModuleData.{latitude,longitude}: Field(ge=…, le=…)` Pydantic
+  clamps at the entry point, not from the SQL itself. A future
+  repo-method consolidation must lift the SQL rule AND the Python
+  predicate together; treating only the SQL CASE as the seam will
+  leave the asymmetric input validation untouched.
+
+- Heartbeat-side recovery has a worst-case ~90 min staleness
+  window: deferred retry can succeed up to 60 min before the next
+  hourly heartbeat fires. For a stationary module this is
+  irrelevant — the location won't change in 90 min. For a module
+  physically moved during that window, the server records the
+  pre-move location and then refuses to update because the chosen
+  invariant is "only patch from (0,0)". Same bucket as the "module
+  physically moved" deferred-follow-up above.
+
+### "Three layers, one rule" was actually four surfaces — the dashboard side-list silently filtered pending modules (PR II final-pass smoke)
+
+**What happened.** PR II's design intent was: a module stuck at the
+`(0,0)` sentinel still appears in the operator UI with a "Location
+pending" pill, so the operator can spot it and wait for the
+heartbeat-side recovery (see the previous "First-boot geolocation
+race" entry). Three rule definitions were aligned across firmware,
+server, and frontend (`hf::isPlausibleFix`, `_is_plausible_fix`,
+`hasPlausibleLocation`). The comment block at
+[`homepage/src/components/MapView.tsx`'s `fuzzedModules`](../../homepage/src/components/MapView.tsx)
+explicitly says "(0,0) and out-of-range modules are FILTERED OUT
+entirely from the rendered map circle set — they still appear in
+the dashboard side-list (with the 'Location pending' pill), but no
+marker is plotted at Null Island". The PR description, the manual-
+tests runbook's frontend-smoke section, and chapter-11's "First-boot
+geolocation race" entry all asserted the same.
+
+The dashboard side-list silently filtered them out anyway.
+[`homepage/src/pages/DashboardPage.tsx`](../../homepage/src/pages/DashboardPage.tsx)
+maps `visibleModules` (the bounds-filtered set MapView emits via
+`onVisibleModulesChange`) into both the desktop floating list and
+the mobile bottom-sheet. `MapView.tsx::fuzzedModules` already pre-
+filters pending modules out before they can reach the callback, so
+`visibleModules` is a plausible-only set by construction. Operator
+impact: AdminPage rendered the pill correctly, the header counter
+showed `N/N online` correctly, but the dashboard side-list silently
+said `N-1 sichtbar` and the pending module had no UI affordance to
+spot. Found visually during pre-merge manual dev-stack smoke; the
+asymmetry between admin/header (correct) and dashboard list
+(wrong) was the diagnostic.
+
+**Why it happened.** The contract was prose-only.
+
+1. **The contract lived in comments + the PR description, not in
+   code.** The MapView comment block at `fuzzedModules`, the PR
+   description's "side-list shows it with 'Location pending' pill"
+   line, and the existing "First-boot geolocation race" entry one
+   section above all asserted that pending modules appear in the
+   dashboard side-list with the pill. None of those is an enforced
+   contract — they're prose. The actual code never enforced what
+   they asserted: `MapView.tsx::fuzzedModules` carried the
+   `.filter((module) => hasPlausibleLocation(module.location))` from
+   the original PR II commit `ef548e5` onward, and the downstream
+   `visibleModules` (which `onVisibleModulesChange` feeds to
+   `DashboardPage`) is derived from `fuzzedModules`. The side-list
+   has consumed a plausible-only set since day one of PR II. The
+   bug shipped with the first commit; round-1's later edit to the
+   pre-bounds fallback branch was defensive consistency on a code
+   path the parent never observed (`onVisibleModulesChange` is
+   gated on `bounds` being truthy, so the pre-bounds fallback
+   branch is computed but never propagated). The asymmetry the
+   round-1 commit message describes was already cosmetic.
+2. **No integration test pinned the cross-surface contract.**
+   `MapView.test.tsx` only tests the pure `hasPlausibleLocation`
+   helper. `ModulePanel.test.tsx` tests the pill render given a
+   module directly. Nothing mounted `DashboardPage` with a mixed
+   plausible/pending fixture and asserted the side-list's rendered
+   DOM. So the prose claim that the side-list shows pending modules
+   had no build-time gate to disagree with the prose claim itself.
+
+**How to avoid it next time.** Pinned by
+[`homepage/src/__tests__/DashboardPage.test.tsx`'s `DashboardPage Location-pending side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
+(commit `e9b0345`):
+
+1. **The side-list logic itself**: `DashboardPage` now derives
+   `sideListModules = visibleModules ∪ pendingModules`, where
+   `pendingModules = modules.filter(!hasPlausibleLocation)`. The two
+   sets are disjoint by construction (visible ⊆ plausible, pending =
+   !plausible), so no dedup is needed at the call site. MapView's
+   `visibleModules` stays strict — its semantic of "rendered on the
+   map" is unchanged; the union happens in DashboardPage because the
+   side-list semantic is distinct from the map-marker semantic.
+2. **Cross-surface assertion in the test**: the new test fixture has
+   one plausible + one pending module; the assertion checks that the
+   pending module's firmware name AND the "Location pending" pill
+   text are both in the rendered DOM, with the header counter
+   reading `2 of 2 modules online`. Before the fix, the side-list
+   would have rendered 0 modules (`visibleModules` is `[]` on
+   initial render before MapView's bounds callback fires, and `[]`
+   contains no pending modules), so the assertion would have failed
+   with `Unable to find an element with the text: pending-null-island`.
+
+**The meta-lesson.** **A behavioural contract asserted only in a
+comment block, a PR description, or a chapter-11 entry is not a
+contract — it is a wish.** PR II's prose said "pending modules show
+up in the side-list with the pill"; the code shipped a filter that
+made that impossible. Two senior-review rounds, a CLAUDE.md
+"Verifying UI claims" finding, and a chapter-11 lessons-learned
+entry all referenced the contract while it was structurally false.
+The only thing that caught it was an operator opening the dashboard
+during pre-merge manual smoke. Pin cross-surface contracts with a
+mount-and-render integration test (here:
+`DashboardPage.test.tsx::DashboardPage Location-pending side-list`).
+Same pattern as PR-42's [Telemetry sidecar envelope drift](#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field)
+entry — the wire-shape-mismatch story there was the same shape:
+docs + types + code all individually correct, but the cross-layer
+contract was wishful.
+
+**Deferred follow-ups (tracked as separate issues):**
+
+- The German copy `dashboard.modulesInView` resolves to "X Module
+  sichtbar" — "sichtbar on the map" is semantically false when X
+  includes a non-on-map pending module. The English "in view" has
+  the same lie. Worth a rename to `dashboard.modulesListed` ("X
+  modules listed" / "X gelistet") or a split into "X in view + Y
+  pending". Filed separately so this PR's scope stays small.
+- The current `sideListModules` test relies on `visibleModules` and
+  `pendingModules` being disjoint at runtime, an invariant enforced
+  by MapView's `fuzzedModules` filter. No unit test fires if a
+  future MapView refactor loosens that filter — `sideListModules`
+  would silently double-render the (0,0) module once as "visible"
+  and once as "pending", and the existing `toHaveLength(1)` pill
+  assertion still passes because there's still one pill per pending
+  module. A defensive test that feeds a pending module through a
+  mocked `onVisibleModulesChange` callback (instead of going through
+  the real `MapView` mount) would catch this. Filed separately.
+
 ### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
 
 **What happened.** PR #82's hardware smoke test against

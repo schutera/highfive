@@ -21,42 +21,122 @@ using hf::shouldOtaUpdate;
 void setUp() {}
 void tearDown() {}
 
-// --- shouldOtaUpdate -------------------------------------------------------
+// --- helpers --------------------------------------------------------------
 
-static void test_should_update_returns_false_on_equal(void) {
-    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", "carpenter"));
+static OtaManifest makeManifest(const char* version, uint32_t sequence,
+                                bool allow_downgrade = false) {
+    OtaManifest m{};
+    std::strncpy(m.version, version, sizeof(m.version) - 1);
+    std::strncpy(m.app_md5, "0123456789abcdef0123456789abcdef", sizeof(m.app_md5) - 1);
+    m.app_size = 1024;
+    m.sequence = sequence;
+    m.allow_downgrade = allow_downgrade;
+    return m;
 }
 
-static void test_should_update_returns_true_on_diff(void) {
-    TEST_ASSERT_TRUE(shouldOtaUpdate("carpenter", "wallpaper"));
+// --- shouldOtaUpdate ------------------------------------------------------
+
+static void test_should_update_returns_false_on_equal_version(void) {
+    // Same version → no-op, regardless of sequence drift (a stale-but-same
+    // manifest is not an OTA opportunity).
+    OtaManifest m = makeManifest("carpenter", 5);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", 5, m));
+    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", 1, m));
+    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", 99, m));
+}
+
+static void test_should_update_returns_true_on_higher_sequence(void) {
+    // Different version AND higher sequence → the canonical upgrade.
+    OtaManifest m = makeManifest("wallpaper", 6);
+    TEST_ASSERT_TRUE(shouldOtaUpdate("carpenter", 5, m));
+}
+
+static void test_should_update_refuses_lower_sequence_no_flag(void) {
+    // Different version, manifest sequence lower than running → the
+    // downgrade-pingpong scenario from chapter-11. Without an explicit
+    // `allow_downgrade: true` the firmware must refuse.
+    OtaManifest m = makeManifest("leafcutter", 1);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("mason", 2, m));
+}
+
+static void test_should_update_refuses_equal_sequence_no_flag(void) {
+    // A common operator mistake: ship a hot-fix binary under a new bee
+    // name but forget to bump SEQUENCE. The new firmware refuses to
+    // flash itself — loud-failure design.
+    OtaManifest m = makeManifest("wallpaper", 5);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", 5, m));
+}
+
+static void test_should_update_allows_lower_sequence_with_flag(void) {
+    // Deliberate rollback wave: operator publishes the older binary
+    // with allow_downgrade=true. New firmware honours the explicit
+    // flag.
+    OtaManifest m = makeManifest("leafcutter", 1, /*allow_downgrade=*/true);
+    TEST_ASSERT_TRUE(shouldOtaUpdate("mason", 2, m));
+}
+
+static void test_should_update_allows_equal_sequence_with_flag(void) {
+    // Edge case: rollback to the same-sequence sibling binary. Honour
+    // the flag — operator knows what they're doing.
+    OtaManifest m = makeManifest("wallpaper", 5, /*allow_downgrade=*/true);
+    TEST_ASSERT_TRUE(shouldOtaUpdate("carpenter", 5, m));
 }
 
 static void test_should_update_is_case_sensitive(void) {
     // Bee names are lowercase per ADR-006; case-mismatched manifest is a
-    // drift signal, but treating it as "update" would re-flash on every
-    // boot for no behaviour change. The conservative answer is "yes
-    // they differ as strings, update" — operator can resolve drift.
-    TEST_ASSERT_TRUE(shouldOtaUpdate("carpenter", "Carpenter"));
+    // drift signal. Treating it as "update" requires the sequence to be
+    // higher (or the flag set) — same rule as any other version change.
+    OtaManifest m = makeManifest("Carpenter", 6);
+    TEST_ASSERT_TRUE(shouldOtaUpdate("carpenter", 5, m));
+    OtaManifest mEqualSeq = makeManifest("Carpenter", 5);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", 5, mEqualSeq));
 }
 
-static void test_should_update_returns_false_on_null(void) {
-    TEST_ASSERT_FALSE(shouldOtaUpdate(nullptr, "wallpaper"));
-    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", nullptr));
-    TEST_ASSERT_FALSE(shouldOtaUpdate(nullptr, nullptr));
+static void test_should_update_returns_false_on_null_current(void) {
+    OtaManifest m = makeManifest("wallpaper", 6);
+    TEST_ASSERT_FALSE(shouldOtaUpdate(nullptr, 5, m));
 }
 
-static void test_should_update_returns_false_on_empty(void) {
-    TEST_ASSERT_FALSE(shouldOtaUpdate("", "wallpaper"));
-    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", ""));
+static void test_should_update_returns_false_on_empty_current(void) {
+    OtaManifest m = makeManifest("wallpaper", 6);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("", 5, m));
 }
 
-// --- parseOtaManifest, happy path ------------------------------------------
+static void test_should_update_returns_false_on_empty_manifest_version(void) {
+    OtaManifest m = makeManifest("", 6);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", 5, m));
+}
+
+static void test_should_update_refuses_when_current_sequence_is_zero(void) {
+    // Round-3 senior-review P1: FIRMWARE_SEQUENCE == 0 is the dev
+    // escape hatch (Arduino-IDE compile without build.sh /
+    // extra_scripts.py). A dev binary must NOT auto-OTA to a
+    // properly-built fleet release just because `1 > 0` evaluates
+    // true — the dev wants to stay on their code until they
+    // explicitly USB-flash a sequenced binary. Pinned here so a
+    // future comparator refactor can't silently drop the guard.
+    OtaManifest m = makeManifest("wallpaper", 1);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("dev-unset", 0, m));
+}
+
+static void test_should_update_refuses_when_current_sequence_is_zero_even_with_allow_downgrade(void) {
+    // The allow_downgrade flag MUST NOT override the dev-build
+    // guard. An operator deliberately rolling back a fleet release
+    // doesn't want to also flatten a dev's hand-compiled binary
+    // back to the rollback target.
+    OtaManifest m = makeManifest("wallpaper", 1, /*allow_downgrade=*/true);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("dev-unset", 0, m));
+}
+
+// --- parseOtaManifest, happy path -----------------------------------------
 
 static const char *kValidManifest =
     "{\"version\":\"wallpaper\",\"md5\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
     "\"built_at\":\"2026-05-13T10:00:00+00:00\","
     "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
-    "\"app_size\":987654}";
+    "\"app_size\":987654,"
+    "\"sequence\":2,"
+    "\"allow_downgrade\":false}";
 
 static void test_parse_valid_manifest_populates_all_fields(void) {
     OtaManifest m{};
@@ -64,6 +144,8 @@ static void test_parse_valid_manifest_populates_all_fields(void) {
     TEST_ASSERT_EQUAL_STRING("wallpaper", m.version);
     TEST_ASSERT_EQUAL_STRING("0123456789abcdef0123456789abcdef", m.app_md5);
     TEST_ASSERT_EQUAL_UINT32(987654u, m.app_size);
+    TEST_ASSERT_EQUAL_UINT32(2u, m.sequence);
+    TEST_ASSERT_FALSE(m.allow_downgrade);
 }
 
 static void test_parse_ignores_unrelated_top_level_fields(void) {
@@ -75,15 +157,17 @@ static void test_parse_ignores_unrelated_top_level_fields(void) {
         "\"app_size\":1024,"
         "\"version\":\"carpenter\","
         "\"md5\":\"ffffffffffffffffffffffffffffffff\","
+        "\"sequence\":3,"
         "\"app_md5\":\"deadbeefdeadbeefdeadbeefdeadbeef\"}";
     OtaManifest m{};
     TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
     TEST_ASSERT_EQUAL_STRING("carpenter", m.version);
     TEST_ASSERT_EQUAL_STRING("deadbeefdeadbeefdeadbeefdeadbeef", m.app_md5);
     TEST_ASSERT_EQUAL_UINT32(1024u, m.app_size);
+    TEST_ASSERT_EQUAL_UINT32(3u, m.sequence);
 }
 
-// --- parseOtaManifest, malformed inputs ------------------------------------
+// --- parseOtaManifest, malformed inputs -----------------------------------
 
 static void test_parse_returns_false_on_null_inputs(void) {
     OtaManifest m{};
@@ -94,14 +178,14 @@ static void test_parse_returns_false_on_null_inputs(void) {
 static void test_parse_returns_false_on_missing_version(void) {
     const char *json =
         "{\"app_md5\":\"0123456789abcdef0123456789abcdef\","
-        "\"app_size\":1024}";
+        "\"app_size\":1024,\"sequence\":1}";
     OtaManifest m{};
     TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
 }
 
 static void test_parse_returns_false_on_missing_app_md5(void) {
     const char *json =
-        "{\"version\":\"wallpaper\",\"app_size\":1024}";
+        "{\"version\":\"wallpaper\",\"app_size\":1024,\"sequence\":1}";
     OtaManifest m{};
     TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
 }
@@ -109,7 +193,20 @@ static void test_parse_returns_false_on_missing_app_md5(void) {
 static void test_parse_returns_false_on_missing_app_size(void) {
     const char *json =
         "{\"version\":\"wallpaper\","
-        "\"app_md5\":\"0123456789abcdef0123456789abcdef\"}";
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"sequence\":1}";
+    OtaManifest m{};
+    TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
+}
+
+static void test_parse_requires_sequence_field(void) {
+    // The migration gate: a sequence-less manifest is rejected so the
+    // new firmware cannot silently fall back to pre-#83 strcmp
+    // behaviour the moment an operator forgets to bump SEQUENCE.
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024}";
     OtaManifest m{};
     TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
 }
@@ -118,7 +215,7 @@ static void test_parse_returns_false_on_short_md5(void) {
     const char *json =
         "{\"version\":\"wallpaper\","
         "\"app_md5\":\"0123456789abcdef\","   // only 16 chars
-        "\"app_size\":1024}";
+        "\"app_size\":1024,\"sequence\":1}";
     OtaManifest m{};
     TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
 }
@@ -130,7 +227,7 @@ static void test_parse_returns_false_on_uppercase_md5(void) {
     const char *json =
         "{\"version\":\"wallpaper\","
         "\"app_md5\":\"0123456789ABCDEF0123456789abcdef\","
-        "\"app_size\":1024}";
+        "\"app_size\":1024,\"sequence\":1}";
     OtaManifest m{};
     TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
 }
@@ -141,7 +238,7 @@ static void test_parse_returns_false_on_oversize_app(void) {
     const char *json =
         "{\"version\":\"wallpaper\","
         "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
-        "\"app_size\":9000000}";
+        "\"app_size\":9000000,\"sequence\":1}";
     OtaManifest m{};
     TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
 }
@@ -150,7 +247,7 @@ static void test_parse_returns_false_on_zero_app_size(void) {
     const char *json =
         "{\"version\":\"wallpaper\","
         "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
-        "\"app_size\":0}";
+        "\"app_size\":0,\"sequence\":1}";
     OtaManifest m{};
     TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
 }
@@ -170,7 +267,19 @@ static void test_parse_rejects_overlong_version(void) {
     const char *json =
         "{\"version\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","  // 40 a's
         "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
-        "\"app_size\":1024}";
+        "\"app_size\":1024,\"sequence\":1}";
+    OtaManifest m{};
+    TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
+}
+
+static void test_parse_rejects_negative_sequence(void) {
+    // `sequence: -1` — parseUint32 sees the leading `-`, which isn't a
+    // digit, and returns false. Loud-failure rather than silent
+    // accept-as-uint-overflow.
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":-1}";
     OtaManifest m{};
     TEST_ASSERT_FALSE(parseOtaManifest(json, &m));
 }
@@ -182,31 +291,158 @@ static void test_parse_does_not_false_match_substring_key(void) {
         "{\"version_extra\":\"ignored\","
         "\"version\":\"wallpaper\","
         "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
-        "\"app_size\":1024}";
+        "\"app_size\":1024,\"sequence\":1}";
     OtaManifest m{};
     TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
     TEST_ASSERT_EQUAL_STRING("wallpaper", m.version);
 }
 
+// --- allow_downgrade parsing ----------------------------------------------
+
+static void test_parse_allow_downgrade_literal_true(void) {
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":1,"
+        "\"allow_downgrade\":true}";
+    OtaManifest m{};
+    TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
+    TEST_ASSERT_TRUE(m.allow_downgrade);
+}
+
+static void test_parse_allow_downgrade_literal_false(void) {
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":1,"
+        "\"allow_downgrade\":false}";
+    OtaManifest m{};
+    TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
+    TEST_ASSERT_FALSE(m.allow_downgrade);
+}
+
+static void test_parse_allow_downgrade_absent_defaults_false(void) {
+    OtaManifest m{};
+    m.allow_downgrade = true;  // poison so a missed assignment is caught
+    TEST_ASSERT_TRUE(parseOtaManifest(kValidManifest, &m));
+    TEST_ASSERT_FALSE(m.allow_downgrade);
+}
+
+static void test_parse_allow_downgrade_garbage_defaults_false(void) {
+    // Non-literal-true → false. A typo like `"allow_downgrade":1`
+    // must NOT enable a downgrade — operator typos fail closed.
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":1,"
+        "\"allow_downgrade\":1}";
+    OtaManifest m{};
+    TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
+    TEST_ASSERT_FALSE(m.allow_downgrade);
+}
+
+static void test_parse_allow_downgrade_quoted_true_defaults_false(void) {
+    // `"allow_downgrade":"true"` is a stringly-typed mistake the parser
+    // must NOT honour as a downgrade enable. Same reason as the
+    // garbage-default test: typos fail closed.
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":1,"
+        "\"allow_downgrade\":\"true\"}";
+    OtaManifest m{};
+    TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
+    TEST_ASSERT_FALSE(m.allow_downgrade);
+}
+
+static void test_parse_allow_downgrade_prefix_match_rejected(void) {
+    // Round-1 senior-review P2: the original `parseBoolLiteral` checked
+    // only the first 4 bytes, so `truer` or `truefoobar` would have
+    // been accepted as `true` (the 5th byte was ignored). The
+    // terminator-boundary guard rejects that.
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":1,"
+        "\"allow_downgrade\":truer}";
+    OtaManifest m{};
+    TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
+    TEST_ASSERT_FALSE(m.allow_downgrade);
+}
+
+static void test_parse_allow_downgrade_eof_after_true_accepts(void) {
+    // TODO: DELETE THIS TEST when the signed-envelope ADR lands.
+    // This test pins parser leniency that the new envelope will
+    // presumably remove; leaving the test in place after that
+    // landing would re-establish the lax behaviour the new
+    // envelope intends to forbid. Round-4 senior-review P2 marker.
+    //
+    // Round-2 senior-review P2: truncation case — manifest body
+    // ends with `"allow_downgrade":true` and a NUL right after, no
+    // closing brace. The terminator-boundary guard accepts NUL as
+    // a terminator (matches the JSON "end of input" implicit
+    // terminator), so the flag IS read as true. This pins the
+    // contract: a malformed manifest that happens to truncate
+    // immediately after a valid `true` IS treated as `true`. The
+    // outer `parseOtaManifest` doesn't validate closing punctuation
+    // either; bigger missing pieces (no `"app_md5"`, no `"app_size"`)
+    // are what catch a truncation mid-body, and `findValueStart`
+    // returns -1 for them.
+    //
+    // Threat-model framing (round-3 senior-review P2): the obvious
+    // worry here is "an MITM serves a truncated manifest to force
+    // a downgrade". ADR-008's "Sequence + allow_downgrade addendum"
+    // (PR II) explicitly accepts this under the "Plain HTTP, MD5
+    // integrity, no signature" stance and defers a signed-envelope
+    // ADR. The lax parsing of `allow_downgrade` is consistent with
+    // that stance — strictening the parser doesn't change the
+    // threat model meaningfully; a manifest-integrity solution
+    // changes the whole envelope at once.
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":1,"
+        "\"allow_downgrade\":true";  // implicit NUL right after `true`
+    OtaManifest m{};
+    TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
+    TEST_ASSERT_TRUE(m.allow_downgrade);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
-    RUN_TEST(test_should_update_returns_false_on_equal);
-    RUN_TEST(test_should_update_returns_true_on_diff);
+    RUN_TEST(test_should_update_returns_false_on_equal_version);
+    RUN_TEST(test_should_update_returns_true_on_higher_sequence);
+    RUN_TEST(test_should_update_refuses_lower_sequence_no_flag);
+    RUN_TEST(test_should_update_refuses_equal_sequence_no_flag);
+    RUN_TEST(test_should_update_allows_lower_sequence_with_flag);
+    RUN_TEST(test_should_update_allows_equal_sequence_with_flag);
     RUN_TEST(test_should_update_is_case_sensitive);
-    RUN_TEST(test_should_update_returns_false_on_null);
-    RUN_TEST(test_should_update_returns_false_on_empty);
+    RUN_TEST(test_should_update_returns_false_on_null_current);
+    RUN_TEST(test_should_update_returns_false_on_empty_current);
+    RUN_TEST(test_should_update_returns_false_on_empty_manifest_version);
+    RUN_TEST(test_should_update_refuses_when_current_sequence_is_zero);
+    RUN_TEST(test_should_update_refuses_when_current_sequence_is_zero_even_with_allow_downgrade);
     RUN_TEST(test_parse_valid_manifest_populates_all_fields);
     RUN_TEST(test_parse_ignores_unrelated_top_level_fields);
     RUN_TEST(test_parse_returns_false_on_null_inputs);
     RUN_TEST(test_parse_returns_false_on_missing_version);
     RUN_TEST(test_parse_returns_false_on_missing_app_md5);
     RUN_TEST(test_parse_returns_false_on_missing_app_size);
+    RUN_TEST(test_parse_requires_sequence_field);
     RUN_TEST(test_parse_returns_false_on_short_md5);
     RUN_TEST(test_parse_returns_false_on_uppercase_md5);
     RUN_TEST(test_parse_returns_false_on_oversize_app);
     RUN_TEST(test_parse_returns_false_on_zero_app_size);
     RUN_TEST(test_parse_returns_false_on_garbage_json);
     RUN_TEST(test_parse_rejects_overlong_version);
+    RUN_TEST(test_parse_rejects_negative_sequence);
     RUN_TEST(test_parse_does_not_false_match_substring_key);
+    RUN_TEST(test_parse_allow_downgrade_literal_true);
+    RUN_TEST(test_parse_allow_downgrade_literal_false);
+    RUN_TEST(test_parse_allow_downgrade_absent_defaults_false);
+    RUN_TEST(test_parse_allow_downgrade_garbage_defaults_false);
+    RUN_TEST(test_parse_allow_downgrade_quoted_true_defaults_false);
+    RUN_TEST(test_parse_allow_downgrade_prefix_match_rejected);
+    RUN_TEST(test_parse_allow_downgrade_eof_after_true_accepts);
     return UNITY_END();
 }

@@ -16,6 +16,42 @@ if [ ! -f "${SKETCH_DIR}/VERSION" ]; then
 fi
 VERSION="$(cat "${SKETCH_DIR}/VERSION")"
 
+# SEQUENCE is the single writer for the OTA sequence-number macro
+# (issue #83). Same file-then-macro pattern as VERSION; injected as
+# -DFIRMWARE_SEQUENCE and emitted into firmware.json so the new
+# `shouldOtaUpdate` (lib/ota_version/) can refuse downgrades unless
+# allow_downgrade is set. Fail loud on absence — a release build that
+# defaulted SEQUENCE to 0 would refuse every OTA from a properly-built
+# fleet (the runtime check is `manifest.sequence > current_sequence`).
+if [ ! -f "${SKETCH_DIR}/SEQUENCE" ]; then
+  echo "ERROR: ${SKETCH_DIR}/SEQUENCE not found — refusing to build a release without an OTA sequence." >&2
+  exit 1
+fi
+SEQUENCE="$(tr -d '[:space:]' < "${SKETCH_DIR}/SEQUENCE")"
+if ! [[ "${SEQUENCE}" =~ ^[0-9]+$ ]] || [ "${SEQUENCE}" -lt 1 ]; then
+  echo "ERROR: SEQUENCE must be a positive integer; got '${SEQUENCE}'." >&2
+  exit 1
+fi
+
+# Best-effort drift warning: if a previously-published firmware.json
+# exists with a HIGHER sequence than the one we're about to publish,
+# the new manifest would be a downgrade that the freshly-flashed
+# fleet refuses. Loud on stderr so the operator can choose to bump
+# SEQUENCE or set allow_downgrade in the next manifest publish.
+HOMEPAGE_PUBLIC_PRECHECK="${SKETCH_DIR}/../homepage/public"
+if [ -f "${HOMEPAGE_PUBLIC_PRECHECK}/firmware.json" ]; then
+  OLD_SEQ="$(grep -oE '"sequence"[[:space:]]*:[[:space:]]*[0-9]+' "${HOMEPAGE_PUBLIC_PRECHECK}/firmware.json" | grep -oE '[0-9]+$' || true)"
+  if [ -n "${OLD_SEQ}" ] && [ "${SEQUENCE}" -lt "${OLD_SEQ}" ]; then
+    echo "" >&2
+    echo "WARNING: SEQUENCE=${SEQUENCE} is LOWER than the previously-published" >&2
+    echo "         manifest's sequence=${OLD_SEQ}. New firmware will refuse to" >&2
+    echo "         flash this manifest unless allow_downgrade is also set." >&2
+    echo "         See docs/07-deployment-view/esp-flashing.md 'How to" >&2
+    echo "         deliberately roll back' for the supported procedure." >&2
+    echo "" >&2
+  fi
+fi
+
 # GEO_API_KEY is the Google Geolocation API key used by getGeolocation in
 # esp_init.cpp. Sourced from env var first, then a .gitignored file (so
 # local dev doesn't have to export it every shell). Missing key is NOT
@@ -36,10 +72,11 @@ if [ -z "${GEO_API_KEY}" ] && [ -f "${SKETCH_DIR}/GEO_API_KEY" ]; then
 fi
 
 echo "Compiling ESP32-CAM firmware..."
-echo "  FQBN:    ${FQBN}"
-echo "  Sketch:  ${SKETCH_DIR}"
-echo "  Output:  ${BUILD_DIR}"
-echo "  Version: ${VERSION}"
+echo "  FQBN:     ${FQBN}"
+echo "  Sketch:   ${SKETCH_DIR}"
+echo "  Output:   ${BUILD_DIR}"
+echo "  Version:  ${VERSION}"
+echo "  Sequence: ${SEQUENCE}"
 if [ -n "${GEO_API_KEY}" ]; then
   echo "  GeoKey:  set (len=${#GEO_API_KEY})"
 else
@@ -70,7 +107,7 @@ arduino-cli compile \
   --fqbn "${FQBN}" \
   --output-dir "${BUILD_DIR}" \
   --libraries "${SKETCH_DIR}/lib" \
-  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\"" \
+  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\" -DFIRMWARE_SEQUENCE=${SEQUENCE}" \
   --build-property "build.partitions=min_spiffs" \
   "${SKETCH_DIR}"
 
@@ -179,11 +216,16 @@ if [ -d "${HOMEPAGE_PUBLIC}" ]; then
     exit 1
   fi
   BUILT_AT="$(date -Iseconds)"
+  # `allow_downgrade` is emitted explicitly as `false` so the
+  # happy-path manifest is a positive declaration of the safe default
+  # rather than relying on the parser's "absent → false" branch. An
+  # operator publishing a deliberate rollback flips it to `true` by
+  # hand (see esp-flashing.md "How to deliberately roll back").
   cat > "${HOMEPAGE_PUBLIC}/firmware.json" <<JSON
-{"version":"${VERSION}","md5":"${MD5}","built_at":"${BUILT_AT}","app_md5":"${APP_MD5}","app_size":${APP_SIZE}}
+{"version":"${VERSION}","md5":"${MD5}","built_at":"${BUILT_AT}","app_md5":"${APP_MD5}","app_size":${APP_SIZE},"sequence":${SEQUENCE},"allow_downgrade":false}
 JSON
   echo ""
   echo "Copied firmware.bin     to ${HOMEPAGE_PUBLIC}/ (${MD5})"
   echo "Copied firmware.app.bin to ${HOMEPAGE_PUBLIC}/ (${APP_MD5}, ${APP_SIZE} bytes)"
-  echo "Wrote manifest:           ${HOMEPAGE_PUBLIC}/firmware.json (version=${VERSION})"
+  echo "Wrote manifest:           ${HOMEPAGE_PUBLIC}/firmware.json (version=${VERSION}, sequence=${SEQUENCE})"
 fi

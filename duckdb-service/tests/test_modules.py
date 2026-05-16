@@ -111,6 +111,139 @@ def test_new_module_same_id_twice_replaces_row(client, fresh_db):
     assert len(fresh_db.discord_calls) == 2
 
 
+def test_new_module_re_registration_does_not_clobber_recovered_location(
+    client, fresh_db
+):
+    """PR II / issue #89 follow-up — pin the (0,0)-preservation guard.
+
+    Scenario the senior-review caught: a module registers at (0,0)
+    on day-1 boot (getGeolocation failed), the heartbeat-side
+    deferred-retry recovers a real fix at, say, (47.79, 9.62), and
+    day-2 boot's getGeolocation fails again — sending
+    ``initNewModuleOnServer`` with (0,0) once more. The pre-fix
+    UPSERT clobbered the recovered location back to (0,0), defeating
+    the recovery on every daily reboot whose boot fix happened to
+    fail. The new CASE-based UPSERT preserves the existing lat/lng
+    when the incoming row is at (0,0) AND the stored row is not.
+    """
+    # Day-1: register at (0,0) — boot getGeolocation failed.
+    r1 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=0.0, longitude=0.0),
+    )
+    assert r1.status_code == 200
+
+    # Heartbeat-side recovery patches lat/lng to a real fix. Use the
+    # heartbeat endpoint to mirror the actual recovery path rather
+    # than a direct SQL write — keeps the test honest about the
+    # cross-route contract.
+    r_hb = client.post(
+        "/heartbeat",
+        data={
+            "mac": TEST_MAC,
+            "battery": 80,
+            "latitude": "47.79",
+            "longitude": "9.62",
+            "accuracy": "50",
+        },
+    )
+    assert r_hb.status_code == 200
+
+    # Day-2: re-register at (0,0) — boot getGeolocation failed again.
+    r2 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=0.0, longitude=0.0, module_name="TestHive"),
+    )
+    assert r2.status_code == 200
+
+    # Critical assertion: the recovered location must survive.
+    listed = client.get("/modules").get_json()["modules"]
+    assert len(listed) == 1
+    # duckdb-service returns raw `lat`/`lng`; the backend reshapes
+    # to `location: {lat, lng}` for the homepage consumer.
+    assert float(listed[0]["lat"]) == 47.79
+    assert float(listed[0]["lng"]) == 9.62
+
+
+def test_new_module_re_registration_with_real_fix_overwrites_existing(client, fresh_db):
+    """Mirror image of the test above — when the firmware DOES have
+    a plausible fix (boot getGeolocation succeeded), the UPSERT must
+    still update lat/lng. The (0,0)-preservation guard is gated on
+    ``EXCLUDED.lat = 0 AND EXCLUDED.lng = 0`` so any non-(0,0)
+    incoming row overrides whatever was there before. This pins the
+    "module physically moved by the operator" path — operator
+    re-onboards from a new location, the new coords win.
+    """
+    r1 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=47.79, longitude=9.62),
+    )
+    assert r1.status_code == 200
+
+    # Operator picks up the module and re-onboards from a different spot.
+    r2 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=48.27, longitude=11.66),
+    )
+    assert r2.status_code == 200
+
+    listed = client.get("/modules").get_json()["modules"]
+    assert float(listed[0]["lat"]) == 48.27
+    assert float(listed[0]["lng"]) == 11.66
+
+
+def test_new_module_re_registration_after_null_island_with_real_fix_overwrites(
+    client, fresh_db
+):
+    """Fourth quadrant of the (0,0)-preservation matrix (round-2
+    senior-review P1): day-1 stored is (0,0), day-2 incoming is a
+    plausible fix → UPSERT writes the new fix.
+
+    The CASE's WHEN clause requires ``EXCLUDED.lat = 0 AND
+    EXCLUDED.lng = 0``, which is false here, so the ELSE branch runs
+    and EXCLUDED.lat/lng land in the row. Test pins it explicitly
+    rather than leaving the path covered only implicitly by mutation
+    of `test_register_module`.
+    """
+    # Day-1: registered at (0,0) — firmware boot getGeolocation failed.
+    r1 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=0.0, longitude=0.0),
+    )
+    assert r1.status_code == 200
+
+    # Day-2: boot succeeds, firmware sends a real fix.
+    r2 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=47.79, longitude=9.62),
+    )
+    assert r2.status_code == 200
+
+    # Row should reflect the new real fix.
+    listed = client.get("/modules").get_json()["modules"]
+    assert float(listed[0]["lat"]) == 47.79
+    assert float(listed[0]["lng"]) == 9.62
+
+
+def test_new_module_initial_registration_at_null_island_stores_zeros(client, fresh_db):
+    """Edge case: very first registration is at (0,0). The CASE
+    preserves "existing" only when there IS an existing non-(0,0)
+    row; the INSERT side of the UPSERT just writes (0,0) as given.
+    This is the right answer — the module shows up in the operator
+    UI with the "Location pending" pill, and the heartbeat-side
+    recovery can later patch it FROM (0,0).
+    """
+    r = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=0.0, longitude=0.0),
+    )
+    assert r.status_code == 200
+
+    listed = client.get("/modules").get_json()["modules"]
+    assert float(listed[0]["lat"]) == 0.0
+    assert float(listed[0]["lng"]) == 0.0
+
+
 def test_get_modules_returns_json_500_on_query_failure(client, monkeypatch):
     """Pin behaviour from issue #32: an uncaught DB exception must surface as
     parseable JSON with status 500, not the Flask default HTML page that the

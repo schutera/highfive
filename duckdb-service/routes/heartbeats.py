@@ -16,12 +16,66 @@ def _to_int(value, default=None):
         return default
 
 
+def _to_float(value, default=None):
+    """Parse a possibly-missing float field from a form-encoded body.
+
+    Mirrors `_to_int` for the heartbeat-side geolocation recovery path
+    (PR II / issue #89). Empty strings / missing keys / un-parseable
+    values all return `default` rather than raising — the heartbeat
+    endpoint must never 500 because a single optional field is
+    malformed, since the firmware fails-quiet on a non-2xx response
+    and a 500 would mean the operator has to wait for the next daily
+    reboot's `initNewModuleOnServer` UPSERT instead of the next
+    deferred-retry's heartbeat-side patch.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_plausible_fix(lat, lng, acc):
+    """Mirror the firmware's `hf::isPlausibleFix` rule.
+
+    Same rule, server side: reject Null Island (0,0), reject NaN,
+    reject out-of-range, reject zero/negative accuracy. The firmware
+    only attaches lat/lng to a heartbeat once its own
+    `hf::isPlausibleFix` has cleared the value, so this check is
+    defence-in-depth against a stray manual `curl` or a future
+    firmware regression. None on any field → False (missing field is
+    not a fix).
+    """
+    if lat is None or lng is None or acc is None:
+        return False
+    if lat != lat or lng != lng or acc != acc:  # NaN
+        return False
+    if acc <= 0.0:
+        return False
+    if lat == 0.0 and lng == 0.0:
+        return False
+    if lat > 90.0 or lat < -90.0:
+        return False
+    if lng > 180.0 or lng < -180.0:
+        return False
+    return True
+
+
 @heartbeats_bp.post("/heartbeat")
 def post_heartbeat():
     """Tiny liveness ping from the ESP — fired hourly. Stores a row in
     module_heartbeats; the dashboard derives lastSeenAt from this table
     so a module that hasn't uploaded an image since noon still shows
-    online if it's been heartbeating."""
+    online if it's been heartbeating.
+
+    PR II / issue #89: heartbeats may optionally carry
+    `latitude`/`longitude`/`accuracy`. If the values are plausible
+    AND the existing `module_configs` row for this module sits at the
+    (0,0) sentinel, we UPDATE the row with the fresh fix. The
+    conservative "only patch from (0,0)" rule means a deliberately-
+    placed module is never clobbered by a stale firmware reading.
+    """
     if request.is_json:
         data = request.get_json(silent=True) or {}
     else:
@@ -41,9 +95,21 @@ def post_heartbeat():
     free_heap = _to_int(data.get("free_heap"))
     fw_version = (data.get("fw_version") or "")[:40] or None
 
+    # Optional geolocation-recovery fields. Absent → None → not
+    # written. Present-but-implausible → silently dropped (logged
+    # below for observability).
+    lat = _to_float(data.get("latitude"))
+    lng = _to_float(data.get("longitude"))
+    acc = _to_float(data.get("accuracy"))
+
     print(
         f"[heartbeat] mac={mac} battery={battery} rssi={rssi} "
         f"uptime_ms={uptime_ms} free_heap={free_heap} fw={fw_version}"
+        + (
+            f" lat={lat} lng={lng} acc={acc}"
+            if (lat is not None or lng is not None)
+            else ""
+        )
     )
 
     with lock:
@@ -56,6 +122,39 @@ def post_heartbeat():
             """,
             [mac, battery, rssi, uptime_ms, free_heap, fw_version],
         )
+
+        # Heartbeat-side geolocation patch (PR II / issue #89). Guarded
+        # by:
+        #  1) all three fields present + plausible (the firmware
+        #     gates this; the server re-checks for safety),
+        #  2) an existing module_configs row sits at the (0,0)
+        #     sentinel — we never overwrite a placed module.
+        # Tested via `tests/test_heartbeats_endpoint.py`. Note that we
+        # deliberately do NOT touch `module_configs.updated_at` —
+        # that column has dual semantics (row metadata vs liveness),
+        # see chapter-11 "updated_at semantic overload" / issue #97.
+        if _is_plausible_fix(lat, lng, acc):
+            # Column names in `module_configs` are `lat`/`lng` (not
+            # `latitude`/`longitude`); the contracts-layer rename to
+            # `location.lat/lng` happens in the dto in
+            # `backend/src/database.ts`, not in the DB. Don't touch
+            # `updated_at` here — it's a liveness signal (issue #97).
+            row = con.execute(
+                "SELECT lat, lng FROM module_configs WHERE id = ?",
+                [mac],
+            ).fetchone()
+            if row is not None:
+                existing_lat = float(row[0]) if row[0] is not None else 0.0
+                existing_lng = float(row[1]) if row[1] is not None else 0.0
+                if existing_lat == 0.0 and existing_lng == 0.0:
+                    con.execute(
+                        "UPDATE module_configs SET lat = ?, lng = ? WHERE id = ?",
+                        [lat, lng, mac],
+                    )
+                    print(
+                        f"[heartbeat] patched module_configs lat/lng for {mac} "
+                        f"from (0,0) -> ({lat},{lng}) acc={acc}"
+                    )
 
     return jsonify({"ok": True}), 200
 

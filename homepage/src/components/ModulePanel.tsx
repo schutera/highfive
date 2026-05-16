@@ -4,6 +4,7 @@ import type { Module, ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
+import { hasPlausibleLocation } from '../lib/location';
 
 const ADMIN_KEY_STORAGE = 'hf_admin_key';
 
@@ -254,6 +255,19 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           >
             {moduleDetail.id.slice(0, 4).toUpperCase()}
           </p>
+
+          {/* "Location pending" pill (PR II / issue #89). The detail
+              panel re-renders the same pill the side-list shows so the
+              operator has a single coherent signal: "this module
+              registered without a usable geolocation fix". */}
+          {!hasPlausibleLocation(moduleDetail.location) && (
+            <span
+              className="inline-block mb-2 md:mb-3 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-white/15 text-white/85"
+              title={t('dashboard.locationPendingTooltip')}
+            >
+              {t('dashboard.locationPending')}
+            </span>
+          )}
 
           <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
             <div

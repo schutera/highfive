@@ -22,7 +22,15 @@ class ModuleData(BaseModel):
     # non-colliding 200-char name still reached the DB. Moving it
     # here makes the cap unconditional.
     module_name: str = Field(max_length=100)
-    latitude: float
-    longitude: float
+    # Range constraints mirror `hf::isPlausibleFix` (firmware) and
+    # `heartbeats.py::_is_plausible_fix` (server) — defence in depth at
+    # the registration entry point. The (0,0) sentinel is NOT rejected
+    # here: a module that fails its boot-time geolocation retry still
+    # needs to register so it appears in the operator UI with a
+    # "Location pending" pill; the heartbeat-side recovery path patches
+    # the lat/lng once a fix lands. Out-of-range values (lat>90,
+    # lng>180) are a parser glitch and ARE rejected.
+    latitude: float = Field(ge=-90.0, le=90.0)
+    longitude: float = Field(ge=-180.0, le=180.0)
     battery: int = Field(ge=0, le=100, validation_alias="battery_level")
     email: Optional[str] = None

@@ -1,15 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import type { Module } from '@highfive/contracts';
+import { parseModuleId } from '@highfive/contracts';
 import { LanguageProvider } from '../i18n/LanguageContext';
 
-// Mock api so the dashboard's useEffect resolves with no modules.
+// Mock api so the dashboard's useEffect resolves with whatever the
+// individual test sets via `nextDashboardModules` below — `[]` by default.
+let nextDashboardModules: Module[] = [];
 vi.mock('../services/api', () => ({
   api: {
-    getAllModules: vi.fn().mockResolvedValue([]),
-    getAllModulesWithMeta: vi
-      .fn()
-      .mockResolvedValue({ modules: [], dataIncomplete: { heartbeats: false } }),
+    getAllModules: vi.fn(() => Promise.resolve(nextDashboardModules)),
+    getAllModulesWithMeta: vi.fn(() =>
+      Promise.resolve({
+        modules: nextDashboardModules,
+        dataIncomplete: { heartbeats: false },
+      }),
+    ),
     getModuleById: vi.fn(),
     getModuleLogs: vi.fn().mockResolvedValue([]),
     healthCheck: vi.fn().mockResolvedValue({ status: 'ok', timestamp: '' }),
@@ -34,6 +41,19 @@ vi.mock('leaflet', () => {
   };
   Marker.prototype = { options: { icon: null } };
 
+  // `LatLng` is named out here so the factory `latLng` (Leaflet's
+  // lowercase-helper convention) can hand back an *instance* of the
+  // class rather than a bare object. Round-5 senior-review P2: if a
+  // future MapView change calls `.distanceTo(...)` or `.equals(...)`
+  // on the result, a bare-object mock TypeErrors in tests while the
+  // prod build keeps working — keeping the mock class-identity-
+  // compatible avoids that future fragility.
+  class LatLng {
+    constructor(
+      public lat: number,
+      public lng: number,
+    ) {}
+  }
   const L = {
     divIcon,
     icon,
@@ -44,12 +64,15 @@ vi.mock('leaflet', () => {
         return true;
       }
     },
-    LatLng: class {
-      constructor(
-        public lat: number,
-        public lng: number,
-      ) {}
-    },
+    LatLng,
+    // `L.latLng(lat, lng)` is called by MapView's bounds-filter useMemo
+    // (`L.latLng(fuzzedLocation[0], fuzzedLocation[1])`); add the
+    // factory form so non-empty `modules` fixtures don't trip the
+    // bounds path with an "is not a function" exception. The actual
+    // bounds.contains() result is stubbed to `true` above, so the
+    // returned value's content doesn't matter — only that it's an
+    // instance-shaped object (see LatLng comment above).
+    latLng: (lat: number, lng: number) => new LatLng(lat, lng),
   };
   return { default: L, ...L };
 });
@@ -76,8 +99,32 @@ vi.mock('react-leaflet', () => {
 
 import DashboardPage from '../pages/DashboardPage';
 
+function makeModule(args: {
+  id: string;
+  name?: string;
+  location?: { lat: number; lng: number };
+}): Module {
+  return {
+    id: parseModuleId(args.id),
+    name: args.name ?? 'fierce-apricot-specht',
+    displayName: null,
+    location: args.location ?? { lat: 47.78, lng: 9.61 },
+    status: 'online',
+    lastApiCall: '2026-05-16T20:00:00.000Z',
+    batteryLevel: 88,
+    firstOnline: '2026-05-16',
+    totalHatches: 0,
+    imageCount: 0,
+    email: null,
+    updatedAt: '2026-05-16T20:00:00.000Z',
+    lastSeenAt: '2026-05-16T20:00:00.000Z',
+    latestHeartbeat: null,
+  };
+}
+
 describe('DashboardPage smoke', () => {
   it('renders the dashboard shell when api returns no modules', async () => {
+    nextDashboardModules = [];
     render(
       <LanguageProvider>
         <MemoryRouter>
@@ -95,5 +142,86 @@ describe('DashboardPage smoke', () => {
       // At least one element with text "0" should now exist (online count).
       expect(screen.queryByText(/Loading/i)).not.toBeInTheDocument();
     });
+  });
+});
+
+// PR II / issue #89 — the side-list must include modules without a
+// plausible location (the (0,0) Null Island sentinel) so operators can
+// spot a module that failed boot-time getGeolocation and hasn't yet
+// recovered via heartbeat. MapView itself filters them out of the
+// rendered marker set (`hasPlausibleLocation` in
+// homepage/src/lib/location.ts) — DashboardPage adds them back to the
+// side-list as the union of bounds-filtered visible + all pending.
+// Without this test, the round-1 senior-review fix that tightened the
+// MapView pre-bounds fallback to ALSO filter pending modules silently
+// dropped them from the side-list entirely. Found during manual
+// dev-stack smoke before PR-II merge: AdminPage showed the module
+// with the pill, header counter showed 6/6, but the dashboard side-
+// list said "5 sichtbar" and the operator had no way to find the
+// pending module from the dashboard view.
+describe('DashboardPage Location-pending side-list', () => {
+  it('shows pending-location modules in the side-list with the Location pending pill', async () => {
+    nextDashboardModules = [
+      makeModule({
+        id: '000000000001',
+        name: 'real-bodensee',
+        location: { lat: 47.78, lng: 9.61 },
+      }),
+      makeModule({ id: 'aabbccddeeff', name: 'pending-null-island', location: { lat: 0, lng: 0 } }),
+    ];
+    render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+
+    await waitFor(() => {
+      // The pending module's firmware name renders in the side-list.
+      // If this fails, the operator-visible regression is back —
+      // pending modules are invisible from the dashboard.
+      expect(screen.getByText('pending-null-island')).toBeInTheDocument();
+    });
+
+    // Scope the pill assertion to the desktop side-list (`<ul>` →
+    // `getByRole('list')`). Under fresh jsdom mount, only the desktop
+    // side-list renders a `<ul>` — the mobile bottom-sheet's `<ul>` is
+    // gated by `mobileListExpanded` (user input, false at mount), and
+    // the mobile collapsed-pill markup renders a `<button>` without a
+    // `<ul>` and contains only the "X in view • Tap to expand" copy,
+    // not a per-module pill. Scoping by role gives the assertion two
+    // guarantees the unscoped `getAllByText('Location pending')`
+    // didn't: (1) the pill renders inside the side-list `<ul>`, not
+    // in some unrelated surface, and (2) a future change that ever
+    // moves the pill markup into the mobile collapsed pill (e.g. "show
+    // a small dot when there's a pending module") fails this
+    // assertion with a clear "found 0 in <ul>" message rather than
+    // silently bumping the count past 1. Pin: exactly one pill per
+    // pending module, rendered inside the side-list.
+    const sideList = screen.getByRole('list');
+    expect(within(sideList).getAllByText('Location pending')).toHaveLength(1);
+
+    // Header counter includes BOTH modules (2/2 online). Before this
+    // fix the side-list said "1 sichtbar" while the header still
+    // counted 2/2 — the asymmetry between the two surfaces is what
+    // the operator-visible bug looked like.
+    expect(screen.getByLabelText(/2 of 2 modules online/i)).toBeInTheDocument();
+
+    // The plausible-location fixture is intentionally not asserted on
+    // here. In this jsdom env the react-leaflet mocks don't propagate
+    // MapView's `onVisibleModulesChange` callback synchronously enough
+    // for the visible-half of the union to land in the rendered DOM
+    // before the test reads it, so a getByText('real-bodensee') would
+    // flake. Keeping the fixture in `nextDashboardModules` ensures the
+    // `pendingModules = modules.filter(!plausible)` logic is exercised
+    // against a *mixed* input — a regression that lumped plausible
+    // modules into the pending bucket would surface a stray
+    // 'real-bodensee' Location-pending pill above, which the strict
+    // single-pill assertion would still catch indirectly. The visible-
+    // half of the union is exercised end-to-end by the manual smoke
+    // documented in
+    // docs/10-quality-requirements/manual-tests-field-reliability.md
+    // (Part 2 of the field-reliability runbook).
   });
 });

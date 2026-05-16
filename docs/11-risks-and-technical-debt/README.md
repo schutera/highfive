@@ -395,7 +395,7 @@ and [`duckdb-service/tests/test_heartbeats_endpoint.py`](../../duckdb-service/te
    existing row sits at `(0,0)` — the conservative "only patch from
    (0,0)" rule guards against clobbering a deliberately-placed module.
 
-The frontend `MapView.tsx::hasPlausibleLocation` helper applies the
+The frontend `lib/location.ts::hasPlausibleLocation` helper applies the
 same rule one layer further: any module that the server still has
 recorded at `(0,0)` is filtered out of the map's marker set and
 flagged with a "Location pending" pill in the side-list. Three
@@ -421,14 +421,38 @@ sides at once.
   guard on the heartbeat side only; the senior-review caught that
   the register-side UPSERT also clobbers, so the same inline
   CASE/preserve logic now lives in `routes/modules.py` too. Two
-  copies of the same rule. Clean fix: extract a single repository
-  method `try_patch_module_location(mac, lat, lng, acc)` that both
-  call sites delegate to. Out of scope for PR II — refactor with
-  its own scope. The cross-test that pins the invariant is in
+  copies of the same rule.
+
+  Clean fix: extract a single repository method that both call
+  sites delegate to. The two writers don't share a wire shape
+  (the heartbeat carries `accuracy`; `/new_module` doesn't), so
+  the shared method takes only `(mac, lat, lng)` and leaves the
+  accuracy-based plausibility check to the caller — the register
+  path uses `ModuleData` Pydantic clamps at the entry point, the
+  heartbeat path calls `_is_plausible_fix` inline. The shared
+  function is just the SQL-level "patch from (0,0) only" rule.
+  Out of scope for PR II — refactor with its own scope.
+
+  The cross-test that pins the invariant is in
   `tests/test_modules.py::test_new_module_re_registration_does_not_clobber_recovered_location`
   paired with the heartbeat-side test in
-  `tests/test_heartbeats_endpoint.py`. If a future refactor merges
-  the two writers, both tests should keep passing.
+  `tests/test_heartbeats_endpoint.py`. The four UPSERT-state
+  quadrants are pinned by
+  `test_new_module_re_registration_does_not_clobber_recovered_location`,
+  `test_new_module_re_registration_with_real_fix_overwrites_existing`,
+  `test_new_module_re_registration_after_null_island_with_real_fix_overwrites`,
+  and `test_new_module_initial_registration_at_null_island_stores_zeros`.
+  If a future refactor merges the two writers, all four should
+  keep passing.
+
+- Heartbeat-side recovery has a worst-case ~90 min staleness
+  window: deferred retry can succeed up to 60 min before the next
+  hourly heartbeat fires. For a stationary module this is
+  irrelevant — the location won't change in 90 min. For a module
+  physically moved during that window, the server records the
+  pre-move location and then refuses to update because the chosen
+  invariant is "only patch from (0,0)". Same bucket as the "module
+  physically moved" deferred-follow-up above.
 
 ### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
 

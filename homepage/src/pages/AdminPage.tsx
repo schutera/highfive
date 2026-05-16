@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, ImageUpload } from '../services/api';
 import type { Module } from '@highfive/contracts';
 import RenameModuleModal from '../components/RenameModuleModal';
-import { hasPlausibleLocation } from '../components/MapView';
+import { hasPlausibleLocation } from '../lib/location';
 
 const SESSION_KEY = 'highfive_admin_auth';
 
@@ -268,7 +268,15 @@ export default function AdminPage() {
                         {/* "Location pending" pill — PR II / issue #89.
                             Lets the operator spot modules that registered
                             at the (0,0) sentinel before the heartbeat-side
-                            recovery has caught up. */}
+                            recovery has caught up.
+
+                            Hardcoded English, not piped through i18n,
+                            because AdminPage is entirely English today
+                            (operator-facing, no LanguageContext consumer
+                            anywhere in this file). When a future PR
+                            wires AdminPage to i18n, this becomes a
+                            `t('dashboard.locationPending')` call — both
+                            translation strings are already in place. */}
                         {!hasPlausibleLocation(m.location) && (
                           <span
                             className="ml-2 inline-block px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider bg-amber-100 text-amber-700"

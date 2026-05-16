@@ -16,6 +16,13 @@ eggs/
 .eggs/
 lib/
 !ESP32-CAM/lib/
+# `lib/` above is the Python build-output convention. `homepage/src/lib/`
+# is source code (shared helpers consumed by multiple components) and
+# must NOT be ignored. The carve-out mirrors the ESP32-CAM/lib/ one
+# above. Round-2 senior-review P0 caught this: `homepage/src/lib/location.ts`
+# was added on the author's disk but invisible to git, so CI would fail
+# at `tsc` on the missing import in `homepage/src/components/MapView.tsx`.
+!homepage/src/lib/
 lib64/
 parts/
 sdist/

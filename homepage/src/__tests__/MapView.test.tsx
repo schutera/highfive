@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasPlausibleLocation } from '../components/MapView';
+import { hasPlausibleLocation } from '../lib/location';
 
 // Pure unit tests for `hasPlausibleLocation`. The helper mirrors the
 // `hf::isPlausibleFix` rule on the firmware side (PR II / issue #89)

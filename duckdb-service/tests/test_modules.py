@@ -192,6 +192,39 @@ def test_new_module_re_registration_with_real_fix_overwrites_existing(client, fr
     assert float(listed[0]["lng"]) == 11.66
 
 
+def test_new_module_re_registration_after_null_island_with_real_fix_overwrites(
+    client, fresh_db
+):
+    """Fourth quadrant of the (0,0)-preservation matrix (round-2
+    senior-review P1): day-1 stored is (0,0), day-2 incoming is a
+    plausible fix → UPSERT writes the new fix.
+
+    The CASE's WHEN clause requires ``EXCLUDED.lat = 0 AND
+    EXCLUDED.lng = 0``, which is false here, so the ELSE branch runs
+    and EXCLUDED.lat/lng land in the row. Test pins it explicitly
+    rather than leaving the path covered only implicitly by mutation
+    of `test_register_module`.
+    """
+    # Day-1: registered at (0,0) — firmware boot getGeolocation failed.
+    r1 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=0.0, longitude=0.0),
+    )
+    assert r1.status_code == 200
+
+    # Day-2: boot succeeds, firmware sends a real fix.
+    r2 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=47.79, longitude=9.62),
+    )
+    assert r2.status_code == 200
+
+    # Row should reflect the new real fix.
+    listed = client.get("/modules").get_json()["modules"]
+    assert float(listed[0]["lat"]) == 47.79
+    assert float(listed[0]["lng"]) == 9.62
+
+
 def test_new_module_initial_registration_at_null_island_stores_zeros(client, fresh_db):
     """Edge case: very first registration is at (0,0). The CASE
     preserves "existing" only when there IS an existing non-(0,0)

@@ -349,6 +349,32 @@ static void test_parse_allow_downgrade_prefix_match_rejected(void) {
     TEST_ASSERT_FALSE(m.allow_downgrade);
 }
 
+static void test_parse_allow_downgrade_eof_after_true_accepts(void) {
+    // Round-2 senior-review P2: truncation case — manifest body
+    // ends with `"allow_downgrade":true` and a NUL right after, no
+    // closing brace. The terminator-boundary guard accepts NUL as
+    // a terminator (matches the JSON "end of input" implicit
+    // terminator), so the flag IS read as true. This pins the
+    // contract: a malformed manifest that happens to truncate
+    // immediately after a valid `true` IS treated as `true`. The
+    // outer `parseOtaManifest` doesn't validate closing punctuation
+    // either; bigger missing pieces (no `"app_md5"`, no `"app_size"`)
+    // are what catch a truncation mid-body, and `findValueStart`
+    // returns -1 for them. Worst case for this specific input: we
+    // accept allow_downgrade=true on a manifest that was supposed
+    // to be longer — the operator's downgrade just went through.
+    // That's a malformed-input scenario; a stricter parser would
+    // be welcome but is out of scope for #83.
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":1,"
+        "\"allow_downgrade\":true";  // implicit NUL right after `true`
+    OtaManifest m{};
+    TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
+    TEST_ASSERT_TRUE(m.allow_downgrade);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_should_update_returns_false_on_equal_version);
@@ -382,5 +408,6 @@ int main(int, char**) {
     RUN_TEST(test_parse_allow_downgrade_garbage_defaults_false);
     RUN_TEST(test_parse_allow_downgrade_quoted_true_defaults_false);
     RUN_TEST(test_parse_allow_downgrade_prefix_match_rejected);
+    RUN_TEST(test_parse_allow_downgrade_eof_after_true_accepts);
     return UNITY_END();
 }

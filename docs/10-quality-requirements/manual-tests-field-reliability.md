@@ -1,5 +1,17 @@
 # Manual tests for field-reliability bundle (PR II — #89, #49, #83)
 
+> **Status: not yet executed.** Round-2 senior-review P1: this
+> runbook was written from code-reading during PR II authoring; no
+> module has been physically reset, no `firmware.json` has been hand-
+> edited, no `python scripts/esp_capture.py` has been run. Every
+> `Expected serial output` block below is the **predicted** behaviour
+> based on the source code, not observed evidence. The next operator
+> to run a hardware iteration should re-verify each `Expected` block
+> and check off the test in the PR body. CLAUDE.md "Verifying UI
+> claims, wire shapes, and component-test fixtures" applies — pin
+> the observed result against the prediction before treating any of
+> these as "done".
+
 Five manual tests gate the field-reliability bundle. They cannot be
 automated without a real ESP32-CAM on a LAN — they live here so the
 next person can re-run them after firmware churn and have a single
@@ -213,7 +225,7 @@ The whole bundle should be re-run after any change to:
 - `ESP32-CAM/client.cpp::sendHeartbeat` (heartbeat body)
 - `ESP32-CAM/lib/ota_version/` (parser or comparator)
 - `duckdb-service/routes/heartbeats.py` (geolocation patch path)
-- `homepage/src/components/MapView.tsx::hasPlausibleLocation` (the
+- `homepage/src/lib/location.ts::hasPlausibleLocation` (the
   rule definition itself)
 
 Document the run in the PR body before merging.

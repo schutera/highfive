@@ -61,8 +61,8 @@ const translations = {
       // Pill rendered next to a module name when its location is at
       // the (0,0) sentinel \u2014 the firmware failed to obtain a fix at
       // boot and hasn't yet recovered via heartbeat-side retry.
-      // PR II / issue #89 \u2014 see homepage/src/components/MapView.tsx
-      // for the matching `hasPlausibleLocation` helper.
+      // PR II / issue #89 \u2014 see homepage/src/lib/location.ts for the
+      // matching `hasPlausibleLocation` helper.
       locationPending: 'Location pending',
       locationPendingTooltip:
         'Module registered without a usable geolocation fix; will recover on the next successful heartbeat retry.',

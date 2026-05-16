@@ -4,7 +4,7 @@ import type { Module, ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
-import { hasPlausibleLocation } from './MapView';
+import { hasPlausibleLocation } from '../lib/location';
 
 const ADMIN_KEY_STORAGE = 'hf_admin_key';
 

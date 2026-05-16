@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import MapView, { hasPlausibleLocation } from '../components/MapView';
+import MapView from '../components/MapView';
+import { hasPlausibleLocation } from '../lib/location';
 import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
 import { useTranslation } from '../i18n/LanguageContext';

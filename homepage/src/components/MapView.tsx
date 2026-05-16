@@ -5,12 +5,6 @@ import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useState } from 'react';
 import type { Module } from '@highfive/contracts';
 import { hasPlausibleLocation } from '../lib/location';
-// Re-export for callers that still import from this module — round-1
-// senior-review P2: the predicate now lives in `src/lib/location.ts`
-// (three consumers, only one is map-related). Keep the re-export so
-// the existing import surface in AdminPage/DashboardPage/ModulePanel
-// doesn't churn in two PRs.
-export { hasPlausibleLocation };
 
 // Create a badge icon for clusters
 function createBadgeIcon(count: number, hasOnline: boolean) {
@@ -76,10 +70,11 @@ function fuzzLocation(location: { lat: number; lng: number }, moduleId: string):
   return [location.lat + offsetLat, location.lng + offsetLng];
 }
 
-// `hasPlausibleLocation` lives in `src/lib/location.ts` now — see
-// the import + re-export near the top of this file. Round-1 senior-
-// review P2 moved it out so AdminPage / ModulePanel can import the
-// predicate without pulling in the leaflet-bound MapView module.
+// `hasPlausibleLocation` lives in `src/lib/location.ts`. The
+// import at the top of this file is the only consumer-of-record
+// inside this module; every other caller imports it directly from
+// `lib/location` so the leaflet-bound MapView module isn't pulled
+// in just to evaluate a predicate.
 
 // Interpolate between colors based on hatches
 // emerald → amber → rose gradient for nature/activity visualization

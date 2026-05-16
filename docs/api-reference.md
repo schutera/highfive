@@ -73,8 +73,9 @@ Returns an array of `Module` objects shaped for the dashboard:
 ```json
 [
   {
-    "id": "hive-001",
-    "name": "Klostergarten",
+    "id": "aabbccddeeff",
+    "name": "fierce-apricot-specht",
+    "displayName": "Klostergarten",
     "location": { "lat": 47.8086, "lng": 9.6433 },
     "status": "online",
     "lastApiCall": "2026-04-25T12:34:56.000Z",
@@ -85,6 +86,13 @@ Returns an array of `Module` objects shaped for the dashboard:
   }
 ]
 ```
+
+`name` is the firmware-reported value (mutable on every UPSERT; same-batch
+collisions auto-suffixed by `duckdb-service` `add_module`). `displayName`
+is an optional admin-settable override; null when the operator has not
+renamed the module. Dashboard surfaces render `displayName ?? name`,
+with the last 4 hex chars of `id` as a visual subtitle. See
+[ADR-011](09-architecture-decisions/adr-011-module-display-name-override.md).
 
 `status` is one of `'online' | 'offline' | 'unknown'` and is computed
 in `backend/src/database.ts's fetchAndAssemble`. A module is `'online'`
@@ -117,7 +125,40 @@ Same shape as above, plus a `nests` array of `NestData`. Each nest
 carries `dailyProgress[]` with `progress_id`, `nest_id`, `date`,
 `empty`, `sealed`, `hatched`. 404 if the module is unknown.
 
-## 1.4 Module telemetry logs (admin)
+## 1.4 Rename module (admin)
+
+```
+PATCH /api/modules/:id/name
+Headers:
+  X-API-Key:   <key>
+  X-Admin-Key: <key>   # must match HIGHFIVE_API_KEY
+Body: { "display_name": "Garden Bee" }   # or null to clear
+```
+
+Sets or clears the operator-settable `display_name` override (ADR-011).
+Backend proxies to `duckdb-service` `PATCH /modules/<id>/display_name`,
+which enforces a UNIQUE constraint at the DB layer. The dashboard renders
+`displayName ?? name`, so this is the endpoint to call when an operator
+wants to rename a module without re-flashing it.
+
+Status codes:
+
+- **200** — success. Body echoes `{ id, display_name, message }` with the
+  newly-stored value (or `null` if cleared).
+- **400** — body missing the `display_name` key, or value is not a string
+  or `null`, or exceeds 100 chars.
+- **403** — `X-Admin-Key` missing or wrong.
+- **404** — module id is well-formed but not registered.
+- **409** — another module already holds this `display_name`. Body:
+  `{ error, display_name, conflicting_module_id }`. The homepage's
+  `RenameModuleModal` surfaces the conflicting module's last 4 hex
+  inline so the operator can pick a different name.
+- **502** — `duckdb-service` unreachable.
+
+Passing an empty/whitespace string is treated as `null` (clears the
+override), matching the modal's "leave empty to clear" UX.
+
+## 1.5 Module telemetry logs (admin)
 
 ```
 GET /api/modules/:id/logs?limit=10

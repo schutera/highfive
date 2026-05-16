@@ -77,6 +77,61 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Same-batch ESP firmwares collided on the auto-generated module name (issues #91, #92, #93, #94)
+
+**What happened.** Two distinct modules with MACs `b0:69:6e:f2:3a:08`
+and `e8:9f:a9:f2:3a:08` both registered with the dashboard as
+`fierce-apricot-specht`. The dashboard had no way to tell them apart,
+the server happily accepted both rows, and operators discovered the
+ambiguity only by deleting one module and watching the wrong one
+disappear. Compounding it: the captive portal's "Module Name" field
+was being silently discarded on every reboot, so even an operator who
+tried to rename a module by hand saw their input vanish.
+
+**Why it happened.**
+
+1. `generateModuleName()` seeded indices into the three 32-entry word
+   lists from `bytes[0..2]` of `ESP.getEfuseMac()`. On little-endian
+   ESP32, those positions are the **LSB three octets** of the MAC —
+   which are manufacturer-shared for same-batch devices. The three
+   shared octets (`f2:3a:08`) drove `fierce` (`08 % 32`), `apricot`
+   (`3a % 32`), `specht` (`f2 % 32`); the unique-prefix octets that
+   would have disambiguated the two modules were ignored.
+2. `loadConfig()` parsed `SSID`, `PASSWORD`, `UPLOAD_URL`, `INIT_URL`,
+   `EMAIL` out of SPIFFS, but never read `MODULE_NAME`. The variable
+   was _written_ to SPIFFS correctly by the captive portal; the read
+   path was missing entirely. Every boot took the
+   `generateModuleName()` fallback regardless.
+3. `module_configs.name` had no `UNIQUE` constraint, and
+   `add_module()`'s upsert conflicted only on `id` (MAC). Two distinct
+   MACs with the same name were both accepted without warning.
+
+**How to avoid it next time.**
+
+- **Treat MAC-derived defaults as collision-prone by construction.**
+  Manufacturer batches share their suffix bytes; any hashing /
+  indexing strategy that doesn't mix all six bytes will collide on
+  the dashboard at some point. The fix XOR-pairs paired bytes
+  (`mac[0]^mac[3]`, …) so every octet contributes to every word
+  index — see `ESP32-CAM/lib/module_name/`.
+- **Pull SPIFFS read/write paths into the same code review.**
+  `saveConfig()` and `loadConfig()` are two halves of one contract;
+  if you add a field to one, you have to add it to the other. The
+  asymmetry here went undetected for months because the two
+  functions live in different files (`host.cpp` and `esp_init.cpp`)
+  and neither has a unit test covering the round-trip.
+- **A "human label" column needs UNIQUE, but the firmware-reported
+  column cannot have it.** The firmware UPSERTs on every boot, and
+  same-batch collisions would turn UNIQUE into "second module
+  refuses to register." Two columns (`name` mutable + advisory,
+  `display_name` UNIQUE + admin-settable, coalesced at the client)
+  is the right separation. See [ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md).
+- **Host-test the byte-mixing logic.** The XOR fix is one line, but
+  the regression test for the _specific_ field collision case (the
+  two `fierce-apricot-specht` MACs) is the structural guard that
+  catches a future "let's simplify the index derivation" refactor.
+  Lives in `ESP32-CAM/test/test_native_module_name/`.
+
 ### Critical-rules prose-to-code audit, extended — five more hardenings in one PR (issues #86, #87)
 
 **What happened.** PR #84 closed the dev-fallback-as-production-admin-gate

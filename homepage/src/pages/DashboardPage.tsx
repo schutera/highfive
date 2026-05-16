@@ -281,7 +281,17 @@ export default function DashboardPage() {
                   aria-current={selectedModule?.id === module.id ? 'true' : undefined}
                 >
                   <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-hf-fg truncate text-hf-sm">{module.name}</h3>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
+                        {module.displayName ?? module.name}
+                      </h3>
+                      {/* MAC suffix subtitle so two same-named modules
+                          stay distinguishable. Uppercased hex to read
+                          as a label. See ADR-011 and issue #93. */}
+                      <p className="text-[10px] font-mono tracking-wider text-hf-fg-mute">
+                        {module.id.slice(-4).toUpperCase()}
+                      </p>
+                    </div>
                     <span
                       className="w-2.5 h-2.5 rounded-full flex-shrink-0 ml-2"
                       style={{
@@ -424,8 +434,11 @@ export default function DashboardPage() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
-                              {m.name}
+                              {m.displayName ?? m.name}
                             </h3>
+                            <p className="text-[10px] font-mono tracking-wider text-hf-fg-mute">
+                              {m.id.slice(-4).toUpperCase()}
+                            </p>
                             <p
                               className="text-hf-xs"
                               style={{

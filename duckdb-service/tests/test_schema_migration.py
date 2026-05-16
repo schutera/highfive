@@ -278,3 +278,155 @@ def test_migration_is_idempotent_on_fresh_db(fresh_db):
         con.execute("SELECT COUNT(*) FROM daily_progress").fetchone()
     finally:
         con.close()
+
+
+# ---------- display_name column (PR I — issue #93) ----------
+
+
+def test_display_name_column_added_idempotently(fresh_db):
+    """`display_name VARCHAR(100) UNIQUE` is present after init_db, both
+    when freshly created (column is in `_MODULE_CONFIGS_DDL`) and when
+    additively added (the `ALTER TABLE ADD COLUMN` migration block in
+    `db/schema.py`). A second `init_db()` call is a no-op."""
+    con = fresh_db.connection.get_conn()
+    try:
+        cols = [
+            c[1] for c in con.execute("PRAGMA table_info(module_configs)").fetchall()
+        ]
+        assert "display_name" in cols, (
+            f"display_name column should be present on a fresh DB; cols: {cols}"
+        )
+    finally:
+        con.close()
+
+    # Second init_db should not raise (the `if not in existing_cols` gate
+    # short-circuits the ALTER).
+    fresh_db.schema.init_db()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        cols = [
+            c[1] for c in con.execute("PRAGMA table_info(module_configs)").fetchall()
+        ]
+        assert cols.count("display_name") == 1, (
+            f"display_name appears more than once after re-init: {cols}"
+        )
+    finally:
+        con.close()
+
+
+def test_display_name_migration_on_existing_db(fresh_db):
+    """Simulate a pre-#93 volume that has `module_configs` without
+    `display_name` and prove the additive ALTER fires on a re-init.
+    Mirrors the pattern in `test_migration_drops_status_and_preserves_data`
+    but for the post-PR-I additive case."""
+    con = fresh_db.connection.get_conn()
+    try:
+        # Drop and recreate the table without the display_name column to
+        # simulate a deployment that came up before this migration shipped.
+        # FK-dependent tables must be dropped first because DuckDB locks
+        # the parent table on any structural change otherwise.
+        con.execute("DROP TABLE IF EXISTS daily_progress")
+        con.execute("DROP TABLE IF EXISTS nest_data")
+        con.execute("DROP TABLE IF EXISTS module_configs")
+        con.execute(
+            """
+            CREATE TABLE module_configs (
+                id VARCHAR(20) PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                lat DECIMAL(9,6) NOT NULL,
+                lng DECIMAL(9,6) NOT NULL,
+                first_online DATE NOT NULL,
+                battery_level INTEGER,
+                image_count INTEGER NOT NULL DEFAULT 0,
+                email VARCHAR(255),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_silence_alert_at TIMESTAMP
+            )
+            """
+        )
+        con.execute(
+            "INSERT INTO module_configs "
+            "(id, name, lat, lng, first_online, battery_level, image_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("aabbccddeeff", "TestHive", 47.8, 9.6, "2024-01-01", 80, 0),
+        )
+        # Confirm the old shape before migration.
+        cols = [
+            c[1] for c in con.execute("PRAGMA table_info(module_configs)").fetchall()
+        ]
+        assert "display_name" not in cols
+    finally:
+        con.close()
+
+    fresh_db.schema.init_db()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        cols = [
+            c[1] for c in con.execute("PRAGMA table_info(module_configs)").fetchall()
+        ]
+        assert "display_name" in cols, (
+            "display_name should have been added by additive migration"
+        )
+        # Original row survives the migration; display_name starts NULL.
+        row = con.execute(
+            "SELECT id, name, display_name FROM module_configs"
+        ).fetchone()
+        assert row == ("aabbccddeeff", "TestHive", None)
+    finally:
+        con.close()
+
+
+def test_display_name_unique_constraint(fresh_db):
+    """Two modules cannot share a `display_name`. NULL is allowed for any
+    number of rows (DuckDB treats NULLs as distinct under UNIQUE) — that
+    matters because new modules register with `display_name = NULL` and
+    must not block each other."""
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO module_configs "
+            "(id, name, display_name, lat, lng, first_online) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("aaaaaaaaaaaa", "auto-name-a", "Garden Bee", 47.8, 9.6, "2024-01-01"),
+        )
+        con.execute(
+            "INSERT INTO module_configs "
+            "(id, name, display_name, lat, lng, first_online) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("bbbbbbbbbbbb", "auto-name-b", "Forest Bee", 47.8, 9.6, "2024-01-01"),
+        )
+        # Two NULLs are fine.
+        con.execute(
+            "INSERT INTO module_configs "
+            "(id, name, display_name, lat, lng, first_online) "
+            "VALUES (?, ?, NULL, ?, ?, ?)",
+            ("cccccccccccc", "auto-name-c", 47.8, 9.6, "2024-01-01"),
+        )
+        con.execute(
+            "INSERT INTO module_configs "
+            "(id, name, display_name, lat, lng, first_online) "
+            "VALUES (?, ?, NULL, ?, ?, ?)",
+            ("dddddddddddd", "auto-name-d", 47.8, 9.6, "2024-01-01"),
+        )
+
+        # Now the actual UNIQUE violation: two non-null rows sharing a label.
+        try:
+            con.execute(
+                "INSERT INTO module_configs "
+                "(id, name, display_name, lat, lng, first_online) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("eeeeeeeeeeee", "auto-name-e", "Garden Bee", 47.8, 9.6, "2024-01-01"),
+            )
+            raise AssertionError(
+                "duplicate display_name should have been rejected by UNIQUE"
+            )
+        except Exception as e:
+            assert (
+                "constraint" in str(e).lower()
+                or "duplicate" in str(e).lower()
+                or "unique" in str(e).lower()
+            ), f"unexpected exception: {e!r}"
+    finally:
+        con.close()

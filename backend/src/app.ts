@@ -155,6 +155,42 @@ app.delete('/api/modules/:id', async (req, res) => {
   }
 });
 
+// Admin-only: set or clear the operator-settable display-name override
+// for a module. Layered on top of the existing X-API-Key middleware;
+// requires an additional X-Admin-Key matching HIGHFIVE_API_KEY (mirrors
+// the /logs gate below). Proxies to duckdb-service's PATCH endpoint
+// which enforces the UNIQUE constraint and surfaces 409 on collision —
+// we forward both status and body so the homepage can render the
+// inline error with the conflicting MAC. See ADR-011 and issue #93.
+app.patch('/api/modules/:id/name', async (req, res) => {
+  const provided = req.header('X-Admin-Key');
+  if (!provided || !verifyApiKey(provided)) {
+    res.status(403).json({ error: 'Forbidden: admin key required' });
+    return;
+  }
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
+  if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, 'display_name')) {
+    res.status(400).json({ error: "body must include 'display_name' (string or null)" });
+    return;
+  }
+  try {
+    const upstream = await fetch(`${DUCKDB_URL}/modules/${encodeURIComponent(id)}/display_name`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: req.body.display_name }),
+    });
+    const data = await upstream.json();
+    res.status(upstream.status).json(data);
+  } catch (error) {
+    console.error('[PATCH /api/modules/:id/name]', { id, error: String(error) });
+    res.status(502).json({ error: 'duckdb-service unreachable' });
+  }
+});
+
 // Admin-only: telemetry sidecar logs. Layered on top of the existing X-API-Key
 // middleware. Requires an additional X-Admin-Key header matching HIGHFIVE_API_KEY.
 app.get('/api/modules/:id/logs', async (req, res) => {

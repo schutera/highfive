@@ -1,0 +1,10 @@
+{
+  "name": "hf_module_name",
+  "version": "0.1.0",
+  "description": "Bee-themed module-name generation from MAC bytes. Pure C++17, host-testable. See issue #92.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

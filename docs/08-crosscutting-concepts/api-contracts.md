@@ -56,8 +56,11 @@ export interface HeartbeatSnapshot {
 }
 ```
 
-`Module` gained `email`, `updatedAt`, `lastSeenAt`, and
-`latestHeartbeat`. The shape lives in the shared package by
+`Module` gained `displayName`, `email`, `updatedAt`, `lastSeenAt`, and
+`latestHeartbeat`. `displayName` is the admin-settable label override
+introduced in PR I (ADR-011) — null when no operator has renamed the
+module, otherwise a string that the dashboard renders in preference to
+the firmware-reported `name`. The shape lives in the shared package by
 deliberate decision —
 [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
 

@@ -18,6 +18,21 @@ export interface ImageUpload {
   uploaded_at: string;
 }
 
+/**
+ * Thrown by `api.renameModule()` when the server returns 409 because
+ * another module already holds the requested display name. Carries the
+ * conflicting MAC so the admin UI can render a useful inline message.
+ */
+export class RenameConflictError extends Error {
+  constructor(
+    public readonly displayName: string,
+    public readonly conflictingModuleId: string,
+  ) {
+    super(`display_name "${displayName}" already in use by module ${conflictingModuleId}`);
+    this.name = 'RenameConflictError';
+  }
+}
+
 // API key for authentication - in production, this should come from environment variables
 const API_KEY = import.meta.env.VITE_API_KEY || DEV_FALLBACK_KEY;
 
@@ -95,6 +110,43 @@ class ApiService {
     });
     if (!response.ok) {
       throw new Error(`Failed to delete module ${id}`);
+    }
+  }
+
+  /**
+   * Set or clear the admin-settable display-name override for a module.
+   * Pass `null` (or empty string) to clear. Reuses the `hf_admin_key`
+   * sessionStorage plumbing established by `getModuleLogs` — on 401/403
+   * we clear the stored key and throw `'unauthorized'` so the caller
+   * can re-prompt. On 409 we throw a `RenameConflictError` carrying the
+   * conflicting MAC so the UI can render an inline message.
+   * See backend route `PATCH /api/modules/:id/name` and ADR-011.
+   */
+  async renameModule(id: string, displayName: string | null): Promise<void> {
+    const adminKey = typeof window !== 'undefined' ? sessionStorage.getItem('hf_admin_key') : null;
+    const headers: Record<string, string> = { ...(this.getHeaders() as Record<string, string>) };
+    if (adminKey) headers['X-Admin-Key'] = adminKey;
+    const response = await fetch(`${this.baseUrl}/modules/${encodeURIComponent(id)}/name`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ display_name: displayName }),
+    });
+    if (response.status === 401 || response.status === 403) {
+      if (typeof window !== 'undefined') sessionStorage.removeItem('hf_admin_key');
+      throw new Error('unauthorized');
+    }
+    if (response.status === 409) {
+      const body = (await response.json().catch(() => ({}))) as {
+        display_name?: string;
+        conflicting_module_id?: string;
+      };
+      throw new RenameConflictError(
+        body.display_name ?? displayName ?? '',
+        body.conflicting_module_id ?? '',
+      );
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to rename module ${id}`);
     }
   }
 

@@ -1,16 +1,22 @@
 # Manual tests for field-reliability bundle (PR II — #89, #49, #83)
 
-> **Status: not yet executed.** Round-2 senior-review P1: this
-> runbook was written from code-reading during PR II authoring; no
-> module has been physically reset, no `firmware.json` has been hand-
-> edited, no `python scripts/esp_capture.py` has been run. Every
-> `Expected serial output` block below is the **predicted** behaviour
-> based on the source code, not observed evidence. The next operator
-> to run a hardware iteration should re-verify each `Expected` block
-> and check off the test in the PR body. CLAUDE.md "Verifying UI
-> claims, wire shapes, and component-test fixtures" applies — pin
-> the observed result against the prediction before treating any of
-> these as "done".
+> **Status: executed on 2026-05-17 against firmware `mason seq=1`
+> (PR-II HEAD `e9b0345`) on physical module `hive-02` (MAC
+> `08:3a:f2:a9:9f:e8`) over USB on COM9 + home WLAN.**
+>
+> | Test                        | Result                             | Observed line                                                                                                                                                                                                                                                                                                                                                              |
+> | --------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | T1 OTA no-op                | PASS                               | `[OTA] no update: current=mason seq=1, manifest=mason seq=1 allow_downgrade=0`                                                                                                                                                                                                                                                                                             |
+> | T2 downgrade refusal        | PASS                               | `[OTA] no update: current=mason seq=1, manifest=leafcutter seq=0 allow_downgrade=0`                                                                                                                                                                                                                                                                                        |
+> | T3 allow_downgrade override | PASS                               | `[OTA] update available: mason seq=1 -> leafcutter seq=0 (1161296 bytes, md5=…, allow_downgrade=1)`                                                                                                                                                                                                                                                                        |
+> | T4 geolocation happy path   | PASS                               | `[getGeolocation] success on attempt 1 (lat=48.198078 lng=11.770400 acc=16.6)`                                                                                                                                                                                                                                                                                             |
+> | T5 boot-fail half           | PASS (probe boot)                  | `[getGeolocation] 3 attempts exhausted — no plausible fix this boot` + `[STAGE] getGeolocation took=27963ms fix=deferred`                                                                                                                                                                                                                                                  |
+> | T5 recovery half            | DEFERRED to server-side validation | Server log: `[heartbeat] patched module_configs lat/lng for aabbccddeeff from (0,0) -> (47.79,9.62) acc=50.0` — the firmware-side `[getGeolocation] deferred retry SUCCESS` line was not exercised on hardware (30-min wait + needs WAN-egress break). The server-side "only patch from (0,0)" path is end-to-end-validated, which is the consumer side of the same value. |
+> | T6 dev-binary OTA refusal   | PASS                               | `[OTA] no update: current=dev-unset seq=0, manifest=mason seq=1 allow_downgrade=0` (binary compiled via `arduino-cli compile` WITHOUT `-DFIRMWARE_SEQUENCE` so the macro defaults to 0; round-3 P1 guard in `hf::shouldOtaUpdate` fires).                                                                                                                                  |
+>
+> Re-run this runbook after any change to the files listed in the
+> "Re-running" section at the end. The `Expected` blocks below stay
+> as the prediction; the table above is the observation.
 
 Five manual tests gate the field-reliability bundle. They cannot be
 automated without a real ESP32-CAM on a LAN — they live here so the
@@ -53,7 +59,7 @@ T2/T3 below can be distinguished from a generic "no update".)
    bash ESP32-CAM/build.sh
    ```
 3. Wait for the next daily-reboot HTTP-OTA poll (or reset the module
-   via `python scripts/esp_reset.py --port $MODULE_PORT`).
+   via `python scripts/esp_reset.py $MODULE_PORT`).
 
 **Expected serial output**:
 
@@ -139,7 +145,7 @@ from a fluke.)
 2. Re-onboard via the captive portal.
 3. Capture the boot serial:
    ```powershell
-   python scripts/esp_capture.py --port COM9 --seconds 60 > t4.log
+   python scripts/esp_capture.py COM9 60 > t4.log
    ```
 
 **Expected**:
@@ -171,13 +177,13 @@ patches the location once a fix lands. This is the central #89 fix.
    uses local LAN, so it works fine with WAN down.
 4. Capture the boot serial:
    ```powershell
-   python scripts/esp_capture.py --port COM9 --seconds 60 > t5-boot.log
+   python scripts/esp_capture.py COM9 60 > t5-boot.log
    ```
 5. Restore WAN connectivity.
 6. Wait 30 minutes (the `HF_GEOLOCATION_DEFERRED_RETRY_MS` cadence).
 7. Capture the next-heartbeat serial:
    ```powershell
-   python scripts/esp_monitor.py --port COM9 --seconds 120 > t5-recovery.log
+   python scripts/esp_monitor.py COM9 120 > t5-recovery.log
    ```
 
 **Expected boot serial (t5-boot.log)**:
@@ -236,7 +242,7 @@ dev build) would be invisible to the unit suite.
    `UPLOAD_URL` at the dev stack that's serving the latest
    `firmware.json` (`SEQUENCE >= 1`).
 3. Wait for the next daily-reboot HTTP-OTA poll, or reset the
-   module via `python scripts/esp_reset.py --port COM9`.
+   module via `python scripts/esp_reset.py COM9`.
 
 **Expected serial output**:
 

@@ -30,7 +30,12 @@ interface ModulePanelProps {
   // out of sync with the wire shape (#31 reviewer P2). 'unknown' is set
   // when the heartbeat fetch failed and the module would otherwise have
   // been classified as 'offline' — see backend/src/database.ts.
-  module: Pick<Module, 'id' | 'name' | 'status'>;
+  //
+  // `displayName` is included so the loading-state header (rendered
+  // before `moduleDetail` resolves) can already show the operator-
+  // chosen label rather than briefly flashing the firmware name. See
+  // ADR-011 and issue #93.
+  module: Pick<Module, 'id' | 'name' | 'displayName' | 'status'>;
   onClose: () => void;
   onError: (error: string) => void;
 }
@@ -228,9 +233,27 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
         </button>
 
         <div className="pr-0 md:pr-8">
-          <h2 className="font-bold mb-2 md:mb-3" style={{ fontSize: 'var(--fs-lg)' }}>
-            {moduleDetail.name}
+          <h2 className="font-bold" style={{ fontSize: 'var(--fs-lg)' }}>
+            {moduleDetail.displayName ?? moduleDetail.name}
           </h2>
+          {/* MAC-prefix subtitle (first 4 hex chars) so two modules
+              that share a label stay visually distinct on the dashboard.
+              The *leading* 4 chars are the right choice here, not the
+              trailing 4: same-batch ESP32 hardware shares its trailing
+              MAC octets (the field incident in issue #92 — MACs
+              b0:69:6e:f2:3a:08 and e8:9f:a9:f2:3a:08 share `f2:3a:08`),
+              so a trailing-4 disambiguator would render `3A08` on both
+              and defeat the whole point. The unique-prefix bytes
+              (`B069` vs `E89F`) actually differ. Always rendered —
+              even when displayName is null — because two same-batch
+              firmwares can still produce identical auto-names until
+              an operator runs the rename flow. */}
+          <p
+            className="text-white/75 text-hf-xs font-mono tracking-wider mb-2 md:mb-3"
+            aria-label="module identifier"
+          >
+            {moduleDetail.id.slice(0, 4).toUpperCase()}
+          </p>
 
           <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
             <div

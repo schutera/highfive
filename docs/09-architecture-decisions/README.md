@@ -19,6 +19,7 @@ and link backwards.
 | [008](adr-008-firmware-ota-partition-and-rollback.md)      | Firmware OTA — partition layout, two-slot rollback, dual-binary publish         | Accepted |
 | [009](adr-009-node-22-baseline.md)                         | Node 22.12+ baseline for `backend` and `homepage`, enforced via `engine-strict` | Accepted |
 | [010](adr-010-esp-firmware-tls-trust-model.md)             | ESP firmware TLS — CA-pinned trust anchors for highfive.schutera.com            | Accepted |
+| [011](adr-011-module-display-name-override.md)             | Two-column module naming — firmware `name` + admin-settable `display_name`      | Accepted |
 
 ## When to create an ADR
 

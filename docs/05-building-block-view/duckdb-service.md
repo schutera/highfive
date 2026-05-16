@@ -141,11 +141,16 @@ Registers a new module in the system.
 
 - Existing modules with the same ID will be overwritten
 - The time of registration is saved (`first_online`); `updated_at` is bumped on every call via the `ON CONFLICT DO UPDATE` branch
+- The firmware-reported `module_name` is checked against other modules' `name` before insert; on collision the value is auto-suffixed (`-2`, `-3`, …) so two modules cannot share a label even before an operator runs the rename flow. Response body echoes the actually-stored name. See [ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md).
 - The dashboard's `Module.status` is **derived** from `lastSeenAt` in `backend/src/database.ts`'s `fetchAndAssemble` (2 h offline threshold); duckdb-service does not store a `status` column (dropped in [#69](https://github.com/schutera/highfive/issues/69))
 
 ### GET /modules
 
-Returns all registered modules.
+Returns all registered modules. Each row includes both `name` (firmware-reported, mutable) and `display_name` (admin-settable override, UNIQUE; null by default). The homepage coalesces `display_name ?? name`. See [ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md).
+
+### PATCH /modules/&lt;module_id&gt;/display_name
+
+Sets or clears the admin-settable display-name override. Body: `{"display_name": "Garden Bee"}` to set, `{"display_name": null}` to clear. UNIQUE-enforced at the DB layer; HTTP 409 with the conflicting MAC on collision. Network-internal endpoint only — public access goes through the backend's `PATCH /api/modules/:id/name`, which adds the `X-Admin-Key` gate.
 
 ### GET /nests
 

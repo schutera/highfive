@@ -23,7 +23,7 @@ The watcher needs three things:
 2. **A place to record "we already alerted on this silence so don't
    re-fire for `REALERT_INTERVAL_S` seconds"** — done with a single
    nullable `last_silence_alert_at TIMESTAMP` column on
-   `module_configs` (`duckdb-service/db/schema.py:86`). Set on alert
+   `module_configs` (`duckdb-service/db/schema.py:26`). Set on alert
    (`silence_watcher.py:73`), cleared on recovery (`silence_watcher.py:83`).
    No separate alerts table.
 3. **A periodic trigger.** It runs as a background thread inside

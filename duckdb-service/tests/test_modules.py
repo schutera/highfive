@@ -132,3 +132,228 @@ def test_get_modules_returns_json_500_on_query_failure(client, monkeypatch):
     # forces any consumer that ignores the status to TypeError on
     # data.modules.map rather than render an empty fleet.
     assert "modules" not in body
+
+
+# ---------- display_name override + auto-suffix collision (PR I — #93/#94) ----------
+
+
+TEST_MAC_A = "aabbccddee01"
+TEST_MAC_B = "aabbccddee02"
+TEST_MAC_C = "aabbccddee03"
+
+
+def _payload(mac, name="ShareName"):
+    return {
+        "esp_id": mac,
+        "module_name": name,
+        "latitude": 47.8086,
+        "longitude": 9.6433,
+        "battery_level": 80,
+    }
+
+
+def test_add_module_auto_suffixes_colliding_firmware_names(client, fresh_db):
+    """Two distinct modules registering the same firmware-reported name
+    don't both end up as `ShareName`. The second one becomes `ShareName-2`,
+    the response body echoes the stored value, and the dashboard listing
+    reflects the disambiguation. Closes #94."""
+    r1 = client.post("/new_module", json=_payload(TEST_MAC_A, "ShareName"))
+    assert r1.status_code == 200
+    body1 = r1.get_json()
+    assert body1["id"] == TEST_MAC_A
+    assert body1["name"] == "ShareName", body1
+
+    r2 = client.post("/new_module", json=_payload(TEST_MAC_B, "ShareName"))
+    assert r2.status_code == 200
+    body2 = r2.get_json()
+    assert body2["id"] == TEST_MAC_B
+    assert body2["name"] == "ShareName-2", body2
+
+    # A third collision goes to -3.
+    r3 = client.post("/new_module", json=_payload(TEST_MAC_C, "ShareName"))
+    assert r3.status_code == 200
+    assert r3.get_json()["name"] == "ShareName-3"
+
+    listed = {m["id"]: m["name"] for m in client.get("/modules").get_json()["modules"]}
+    assert listed[TEST_MAC_A] == "ShareName"
+    assert listed[TEST_MAC_B] == "ShareName-2"
+    assert listed[TEST_MAC_C] == "ShareName-3"
+
+
+def test_add_module_reregistration_keeps_existing_name(client, fresh_db):
+    """Re-registering the same MAC with the same firmware-reported name
+    is a no-op on the suffix logic — the collision check excludes the
+    row's own id, so we don't accidentally re-suffix every boot."""
+    r1 = client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    assert r1.status_code == 200
+    assert r1.get_json()["name"] == "BeeOne"
+
+    # Same MAC, same name -> still BeeOne (the second insert is the UPSERT
+    # path; the pre-check sees a self-match and skips suffixing).
+    r2 = client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    assert r2.status_code == 200
+    assert r2.get_json()["name"] == "BeeOne"
+
+
+def test_get_modules_includes_display_name_field(client, fresh_db):
+    """The wire shape exposes display_name (null by default). The homepage
+    coalesces; the field's presence in every row is the contract that
+    makes that coalesce safe."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    rows = client.get("/modules").get_json()["modules"]
+    assert len(rows) == 1
+    assert "display_name" in rows[0]
+    assert rows[0]["display_name"] is None
+
+
+def test_patch_display_name_sets_and_clears(client, fresh_db):
+    """Happy path: set a display_name on a module, then clear it again.
+    Both 200; the GET response reflects the latest state both times."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name",
+        json={"display_name": "Garden Bee"},
+    )
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["display_name"] == "Garden Bee"
+
+    rows = client.get("/modules").get_json()["modules"]
+    assert rows[0]["display_name"] == "Garden Bee"
+
+    # Clear with null.
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name",
+        json={"display_name": None},
+    )
+    assert r.status_code == 200
+    assert r.get_json()["display_name"] is None
+
+    rows = client.get("/modules").get_json()["modules"]
+    assert rows[0]["display_name"] is None
+
+
+def test_patch_display_name_collision_returns_409(client, fresh_db):
+    """Two modules cannot share a display_name. The 409 body carries the
+    name and the conflicting MAC so the admin UI can render a useful
+    inline error."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    client.post("/new_module", json=_payload(TEST_MAC_B, "BeeTwo"))
+
+    r1 = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name", json={"display_name": "Garden Bee"}
+    )
+    assert r1.status_code == 200
+
+    r2 = client.patch(
+        f"/modules/{TEST_MAC_B}/display_name", json={"display_name": "Garden Bee"}
+    )
+    assert r2.status_code == 409
+    body = r2.get_json()
+    assert body["display_name"] == "Garden Bee"
+    assert body["conflicting_module_id"] == TEST_MAC_A
+
+
+def test_patch_display_name_unknown_module_returns_404(client, fresh_db):
+    """Targeting a module that doesn't exist returns 404 even with a
+    canonical-form id. (Invalid-shape ids are 400 — covered by
+    `_canonicalize_or_400`.)"""
+    r = client.patch(
+        "/modules/ffffffffffff/display_name", json={"display_name": "Anything"}
+    )
+    assert r.status_code == 404
+
+
+def test_patch_display_name_rejects_missing_key(client, fresh_db):
+    """The body must include the `display_name` key — an empty body is
+    a 400, not an accidental clear."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    r = client.patch(f"/modules/{TEST_MAC_A}/display_name", json={})
+    assert r.status_code == 400
+
+
+def test_patch_display_name_rejects_non_string(client, fresh_db):
+    """display_name must be a string or null; numbers/bools/etc are 400."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    r = client.patch(f"/modules/{TEST_MAC_A}/display_name", json={"display_name": 42})
+    assert r.status_code == 400
+
+
+def test_patch_display_name_does_not_bump_updated_at(client, fresh_db):
+    """Renaming is a metadata edit, not a liveness event. `updated_at`
+    drives `Module.lastSeenAt` and the 2 h online window in
+    `backend/src/database.ts::fetchAndAssemble`; bumping it on rename
+    would flip any renamed offline module to "online" for two hours
+    regardless of telemetry. Regression for PR-I senior review."""
+    import time
+
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        before = con.execute(
+            "SELECT updated_at FROM module_configs WHERE id = ?", (TEST_MAC_A,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    # Force a measurable gap so any bump would surface as a non-equal
+    # value, not a sub-second tie.
+    time.sleep(0.01)
+
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name", json={"display_name": "Renamed"}
+    )
+    assert r.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        after = con.execute(
+            "SELECT updated_at FROM module_configs WHERE id = ?", (TEST_MAC_A,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert after == before, (
+        f"updated_at must not move on rename; was {before!r}, is {after!r}"
+    )
+
+
+def test_patch_display_name_treats_empty_string_as_clear(client, fresh_db):
+    """An empty/whitespace string clears the override. This matches the
+    admin UI's "Save with empty input clears the override" UX."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    client.patch(f"/modules/{TEST_MAC_A}/display_name", json={"display_name": "First"})
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name", json={"display_name": "   "}
+    )
+    assert r.status_code == 200
+    assert r.get_json()["display_name"] is None
+
+
+def test_add_module_rejects_module_name_over_100_chars(client, fresh_db):
+    """`ModuleData.module_name` is bounded at 100 chars by Pydantic
+    `Field(max_length=100)` so a misbehaving firmware can't bypass the
+    schema's intent. Round-2 PR-I senior-review nit: previously the
+    cap only fired in the collision path of
+    `_resolve_unique_firmware_name`, so the front-door entry was
+    unbounded. Pin the rejection here."""
+    over_long = "x" * 101
+    r = client.post("/new_module", json=_payload(TEST_MAC_A, over_long))
+    assert r.status_code == 400
+    body = r.get_json()
+    # Assert on the structured Pydantic v2 error code rather than the
+    # human-readable `msg`, which has changed between minor versions.
+    # `string_too_long` is the stable type emitted for `max_length`
+    # violations on string fields; loc names which field tripped it.
+    assert any(
+        e.get("type") == "string_too_long" and "module_name" in e.get("loc", [])
+        for e in body.get("error", [])
+    ), body
+
+
+def test_add_module_accepts_module_name_at_100_chars(client, fresh_db):
+    """The boundary is inclusive — 100 chars is fine, 101 is not."""
+    exactly_100 = "y" * 100
+    r = client.post("/new_module", json=_payload(TEST_MAC_A, exactly_100))
+    assert r.status_code == 200
+    assert r.get_json()["name"] == exactly_100

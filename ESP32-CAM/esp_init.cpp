@@ -5,6 +5,7 @@
 #include "form_query.h"        // hf::rewriteLegacyHighfiveUrl — issue #79
 #include "led.h"
 #include "module_id.h"
+#include "module_name.h"       // hf::moduleNameFromMac — issue #92
 #include "url.h"               // hf::parseUrl — scheme-aware TLS dispatch (#79)
 #include "wifi_diag.h"
 #include "breadcrumb.h"
@@ -334,35 +335,13 @@ void setupWifiConnection(wifi_configuration_t *wifi_config) {
 /* ---------------------------------------- */
 /* ---------- MODULE NAME GENERATOR ---------- */
 /* ---------------------------------------- */
-// 32 × 32 × 32 = 32,768 unique combinations.
-// Animals are lowercase German names with umlauts substituted (ae/ue/oe)
-// so they stay ASCII-safe across the URL/JSON/filename pipeline.
-static const char* ADJECTIVES[] = {
-  "swift", "brave", "quiet", "bright", "gentle", "proud", "calm", "eager",
-  "fierce", "glad", "happy", "jolly", "kind", "lively", "merry", "noble",
-  "patient", "pure", "quick", "ready", "smart", "strong", "tame", "vivid",
-  "wise", "witty", "young", "loyal", "sleek", "spry", "mild", "keen"
-};
-static const char* FRUITS[] = {
-  "plum", "grape", "fig", "lime", "pear", "kiwi", "guava", "date",
-  "apple", "mango", "peach", "lemon", "melon", "berry", "cherry", "papaya",
-  "lychee", "quince", "pomelo", "raisin", "banana", "currant", "olive", "coconut",
-  "citron", "ackee", "apricot", "mulberry", "persimmon", "nectarine", "raspberry", "blackberry"
-};
-static const char* ANIMALS[] = {
-  "wolf", "fuchs", "baer", "luchs", "dachs", "iltis", "marder", "otter",
-  "biber", "hase", "eule", "uhu", "falke", "milan", "adler", "reh",
-  "hirsch", "elch", "specht", "kraehe", "amsel", "spatz", "meise", "star",
-  "schwan", "ente", "gans", "reiher", "storch", "kuckuck", "forelle", "hecht"
-};
-
+// The word lists and the byte-mixing logic live in lib/module_name/ so
+// they are host-testable independent of the Arduino runtime — see
+// ADR-002 and issue #92 (same-batch MAC collision incident). The
+// wrapper here is the only place that touches ESP.getEfuseMac().
 String generateModuleName() {
   uint64_t mac = ESP.getEfuseMac();
-  uint8_t* bytes = (uint8_t*)&mac;
-  const char* adj = ADJECTIVES[bytes[0] % 32];
-  const char* fruit = FRUITS[bytes[1] % 32];
-  const char* animal = ANIMALS[bytes[2] % 32];
-  return String(adj) + "-" + String(fruit) + "-" + String(animal);
+  return String(hf::moduleNameFromMac(reinterpret_cast<const uint8_t*>(&mac)).c_str());
 }
 
 /* -------------------------------- */
@@ -426,9 +405,20 @@ bool loadConfig(esp_config_t *esp_config) {
     return false;
   }
 
-  String autoName = generateModuleName();
-  strlcpy(esp_config->module_name, autoName.c_str(), sizeof(esp_config->module_name));
-  Serial.printf("------ Auto-generated module name: %s\n", esp_config->module_name);
+  // SPIFFS-first read for MODULE_NAME so the operator's captive-portal
+  // choice survives reboots (issue #91 — the read was missing entirely,
+  // so every boot overwrote the saved name with a fresh auto-generated
+  // one). Auto-generation is the fallback for first boot / cleared
+  // config. Saved by host.cpp::saveConfig at the same JSON key path.
+  const char* savedModuleName = esp_config_doc["NETWORK"]["MODULE_NAME"] | "";
+  if (strlen(savedModuleName) > 0) {
+    strlcpy(esp_config->module_name, savedModuleName, sizeof(esp_config->module_name));
+    Serial.printf("------ Loaded module name from SPIFFS: %s\n", esp_config->module_name);
+  } else {
+    String autoName = generateModuleName();
+    strlcpy(esp_config->module_name, autoName.c_str(), sizeof(esp_config->module_name));
+    Serial.printf("------ Auto-generated module name: %s\n", esp_config->module_name);
+  }
 
   strlcpy(
     esp_config->wifi_config.SSID,

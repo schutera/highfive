@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ImageUpload } from '../services/api';
 import type { Module } from '@highfive/contracts';
+import RenameModuleModal from '../components/RenameModuleModal';
 
 const SESSION_KEY = 'highfive_admin_auth';
 
@@ -69,6 +70,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lightboxImage, setLightboxImage] = useState<ImageUpload | null>(null);
+  // Module being renamed (null = no modal open). See ADR-011 / #93.
+  const [renameTarget, setRenameTarget] = useState<Module | null>(null);
 
   useEffect(() => {
     if (authed) loadModules();
@@ -114,13 +117,19 @@ export default function AdminPage() {
     }
   };
 
-  const getModuleName = (moduleId: string) => {
+  // Coalesces the operator-settable override over the firmware-reported
+  // name. Falls back to the bare MAC if the module is unknown to this
+  // page (e.g. an image label for a module that's since been deleted).
+  // See ADR-011 / issue #93.
+  const getModuleLabel = (moduleId: string) => {
     const mod = modules.find((m) => m.id === moduleId);
-    return mod ? mod.name : moduleId;
+    if (!mod) return moduleId;
+    return mod.displayName ?? mod.name;
   };
 
   const handleDeleteModule = async (mod: Module) => {
-    if (!confirm(`Delete module "${mod.name}" (${mod.id}) and all its data?`)) return;
+    const label = mod.displayName ?? mod.name;
+    if (!confirm(`Delete module "${label}" (${mod.id}) and all its data?`)) return;
     try {
       await api.deleteModule(mod.id);
       setModules((prev) => prev.filter((m) => m.id !== mod.id));
@@ -245,7 +254,17 @@ export default function AdminPage() {
                       className={`hover:bg-amber-50/50 cursor-pointer transition-colors ${selectedModule === m.id ? 'bg-amber-50' : ''}`}
                       onClick={() => setSelectedModule(selectedModule === m.id ? '' : m.id)}
                     >
-                      <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        {m.displayName ?? m.name}
+                        {m.displayName && (
+                          <span
+                            className="ml-2 text-[10px] font-normal text-gray-400"
+                            title={`Firmware-reported name: ${m.name}`}
+                          >
+                            ({m.name})
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">{m.id}</td>
                       <td className="px-4 py-3">
                         <span
@@ -297,28 +316,53 @@ export default function AdminPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteModule(m);
-                          }}
-                          className="text-red-400 hover:text-red-600 transition-colors"
-                          title="Delete module"
-                        >
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRenameTarget(m);
+                            }}
+                            className="text-gray-400 hover:text-amber-600 transition-colors"
+                            title="Rename module (sets display_name override)"
+                            aria-label={`Rename module ${m.displayName ?? m.name}`}
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
-                          </svg>
-                        </button>
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteModule(m);
+                            }}
+                            className="text-red-400 hover:text-red-600 transition-colors"
+                            title="Delete module"
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -341,7 +385,7 @@ export default function AdminPage() {
                 <option value="">All modules</option>
                 {modules.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name} ({m.id})
+                    {(m.displayName ?? m.name) + ' (' + m.id + ')'}
                   </option>
                 ))}
               </select>
@@ -442,7 +486,7 @@ export default function AdminPage() {
                 </div>
                 <div className="p-2.5">
                   <p className="text-xs font-medium text-amber-700 truncate">
-                    {getModuleName(img.module_id)}
+                    {getModuleLabel(img.module_id)}
                   </p>
                   <p className="text-[10px] text-gray-400 mt-0.5">{formatDate(img.uploaded_at)}</p>
                 </div>
@@ -482,7 +526,7 @@ export default function AdminPage() {
             {/* Info bar */}
             <div className="mt-4 bg-white/10 backdrop-blur rounded-lg p-3 flex items-center justify-between text-sm text-white">
               <div>
-                <span className="font-medium">{getModuleName(lightboxImage.module_id)}</span>
+                <span className="font-medium">{getModuleLabel(lightboxImage.module_id)}</span>
                 <span className="text-white/60 mx-2">|</span>
                 <span className="text-white/80">{lightboxImage.module_id}</span>
               </div>
@@ -498,6 +542,25 @@ export default function AdminPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Rename modal — opens when a row's pencil icon is clicked. The
+          modal carries the api call + admin-key prompt + 409-collision
+          inline error; we just give it a Module and an `onSaved`
+          callback to keep the local list in sync. See ADR-011. */}
+      {renameTarget && (
+        <RenameModuleModal
+          module={renameTarget}
+          onClose={() => setRenameTarget(null)}
+          onSaved={(displayName) => {
+            // Optimistic local update so the table reflects the new
+            // label without a full /modules refetch. The next refresh
+            // (e.g. on selectedModule change) will reconcile if the
+            // server normalised the value differently.
+            const id = renameTarget.id;
+            setModules((prev) => prev.map((m) => (m.id === id ? { ...m, displayName } : m)));
+          }}
+        />
       )}
     </div>
   );

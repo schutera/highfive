@@ -25,6 +25,10 @@ interface ApiHeartbeatSummaryResponse {
 interface ApiModule {
   id: string;
   name: string;
+  // Admin-settable label override from duckdb-service. Null when not
+  // set. Wire-shape pinned by `duckdb-service/db/schema.py` and the
+  // `Module` contract's `displayName` field; see ADR-011.
+  display_name: string | null;
   lat: string;
   lng: string;
   first_online: string;
@@ -79,6 +83,7 @@ export class ModuleReadModel {
     const modules = items.map(({ detail, totalHatches }) => ({
       id: detail.id,
       name: detail.name,
+      displayName: detail.displayName,
       location: detail.location,
       status: detail.status,
       lastApiCall: detail.lastApiCall,
@@ -264,6 +269,13 @@ export class ModuleReadModel {
       const detail: ModuleDetail = {
         id: moduleId,
         name: m.name,
+        // `?? null` because old duckdb-service builds (pre-PR-I) won't
+        // include the field at all — keep the contract's `string | null`
+        // shape honest in skew scenarios. The homepage coalesces
+        // `displayName ?? name` so a null here just means "fall back
+        // to the firmware-reported name", which is the right behaviour
+        // for modules that have never been renamed.
+        displayName: m.display_name ?? null,
         location: { lat: Number(m.lat), lng: Number(m.lng) },
         status,
         firstOnline: firstOnlineStr,

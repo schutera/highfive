@@ -52,7 +52,18 @@ export interface HeartbeatSnapshot {
 
 export interface Module {
   id: ModuleId;
+  // Firmware-reported name. Mutates on every registration / UPSERT
+  // (duckdb-service `add_module` writes whatever the ESP posted in
+  // `module_name`). Same-batch ESPs used to collide here — issue #92
+  // fixed the entropy and #94's auto-suffix in `add_module` keeps
+  // collisions from reaching this field. The dashboard renders
+  // `displayName ?? name`, so this is a *fallback* label that
+  // operators can override server-side.
   name: string;
+  // Admin-settable override (see ADR-011). When non-null, the UI
+  // renders this instead of `name`. Server-side UNIQUE so two modules
+  // cannot share a display label. Null = use `name`.
+  displayName: string | null;
   location: {
     lat: number;
     lng: number;

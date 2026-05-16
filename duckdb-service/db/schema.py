@@ -15,6 +15,7 @@ _MODULE_CONFIGS_DDL = """
     CREATE TABLE module_configs (
         id VARCHAR(20) PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
+        display_name VARCHAR(100) UNIQUE,
         lat DECIMAL(9,6) NOT NULL,
         lng DECIMAL(9,6) NOT NULL,
         first_online DATE NOT NULL,
@@ -26,8 +27,13 @@ _MODULE_CONFIGS_DDL = """
     )
 """
 
+# `name` stores the firmware-reported value (mutable on every UPSERT, no
+# UNIQUE — same-batch firmware can collide and `add_module` auto-suffixes
+# to disambiguate). `display_name` is an admin-settable override with a
+# UNIQUE constraint so two modules cannot share a label; the read path
+# coalesces `display_name ?? name` at the client. See ADR-011 and #93.
 _MODULE_CONFIGS_COLUMNS = (
-    "id, name, lat, lng, first_online, battery_level, "
+    "id, name, display_name, lat, lng, first_online, battery_level, "
     "image_count, email, updated_at, last_silence_alert_at"
 )
 
@@ -120,6 +126,28 @@ def init_db():
         if "last_silence_alert_at" not in existing_cols:
             con.execute(
                 "ALTER TABLE module_configs ADD COLUMN last_silence_alert_at TIMESTAMP"
+            )
+        # Admin-settable display-name override for module labelling. The
+        # firmware-reported `name` keeps churning on every registration,
+        # but the operator's chosen label persists here under a UNIQUE
+        # constraint so two modules cannot share a display label. See
+        # ADR-011 and issue #93.
+        #
+        # DuckDB 1.4 rejects `ADD COLUMN ... UNIQUE` in a single ALTER
+        # (Parser Error: "Adding columns with constraints not yet
+        # supported"), so the additive migration splits into ADD COLUMN
+        # + CREATE UNIQUE INDEX. Fresh-DB DDL keeps the inline UNIQUE
+        # (CREATE TABLE does support it). Both paths end up enforcing
+        # the same invariant; the index is named so the constraint is
+        # introspectable on operator volumes that arrived via this
+        # migration rather than a fresh CREATE.
+        if "display_name" not in existing_cols:
+            con.execute(
+                "ALTER TABLE module_configs ADD COLUMN display_name VARCHAR(100)"
+            )
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_module_configs_display_name "
+                "ON module_configs(display_name)"
             )
 
         # Migration: drop the dead-weight `status` column from existing DBs

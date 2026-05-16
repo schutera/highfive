@@ -18,12 +18,16 @@
 // FIRMWARE_SEQUENCE (#83) is normally injected from ESP32-CAM/SEQUENCE
 // via the same two paths as FIRMWARE_VERSION above. The `0` fallback
 // fires for raw Arduino IDE builds that go through neither path. Zero
-// is the "this is a dev build" sentinel: the runtime
-// `hf::shouldOtaUpdate` check requires the manifest sequence to be
-// strictly greater than the running one (no allow_downgrade override
-// in the happy path), so a dev binary will refuse every OTA from a
-// properly-built fleet — the right answer for "this binary was hand-
-// compiled without provenance".
+// is the dev-build sentinel: `hf::shouldOtaUpdate` carries an
+// explicit `current_sequence == 0 → refuse` guard so a hand-compiled
+// binary cannot auto-OTA to a properly-built fleet release. (Without
+// that guard, `manifest.sequence (1) > current_sequence (0)` would
+// evaluate true and the dev binary would silently overwrite itself.)
+// The right answer for "this binary was hand-compiled without
+// provenance" is to require an explicit USB reflash before OTA
+// participation. Pinned by
+// `test_should_update_refuses_when_current_sequence_is_zero` in
+// `ESP32-CAM/test/test_native_ota_version/test_ota_version.cpp`.
 #ifndef FIRMWARE_SEQUENCE
 #define FIRMWARE_SEQUENCE 0
 #endif

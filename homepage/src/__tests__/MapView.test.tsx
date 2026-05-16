@@ -10,8 +10,11 @@ import { hasPlausibleLocation } from '../lib/location';
 //
 // MapView itself is harder to mount under jsdom (react-leaflet
 // requires a canvas-capable env). The component-level tests for the
-// (0,0)-filter behaviour live in `DashboardPage.test.tsx`, which
-// already wires the leaflet-in-jsdom mock pattern.
+// "Location pending" pill render (the user-visible consequence of
+// `hasPlausibleLocation` returning false) live in
+// `ModulePanel.test.tsx`'s `describe('ModulePanel location-pending
+// pill')` block, which mounts the panel with `(0,0)` and out-of-
+// range fixtures and asserts on the pill text.
 
 describe('hasPlausibleLocation', () => {
   // --- rejection cases --------------------------------------------------

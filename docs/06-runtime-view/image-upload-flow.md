@@ -28,8 +28,9 @@ sequenceDiagram
     IMG-->>ESP: 200 OK
 
     Note over ESP,DDB: independently, hourly
-    ESP->>DDB: POST /heartbeat<br/>(telemetry, body: mac, battery, rssi, uptime_ms, free_heap, fw_version)
+    ESP->>DDB: POST /heartbeat<br/>(telemetry, body: mac, battery, rssi, uptime_ms, free_heap, fw_version,<br/>optional latitude/longitude/accuracy when deferred-retry recovered)
     DDB->>DDB: insert row in module_heartbeats
+    DDB->>DDB: if lat/lng plausible AND existing config row at (0,0): UPDATE module_configs (#89)
 
     Note over BR,DDB: later, on dashboard poll
     BR->>DDB: GET /modules /nests /progress<br/>(via backend, normalised)
@@ -45,10 +46,18 @@ sequenceDiagram
 >
 > The hourly `POST /heartbeat` fired directly by firmware is the
 > **telemetry heartbeat** — body
-> `mac/battery/rssi/uptime_ms/free_heap/fw_version`, inserts a row
-> into `module_heartbeats` (`heartbeat` route in
+> `mac/battery/rssi/uptime_ms/free_heap/fw_version` plus the optional
+> `latitude/longitude/accuracy` triplet attached by `sendHeartbeat`
+> only when `hasPendingGeolocationFixToReport()` is true (PR II /
+> issue #89: the firmware's deferred-retry path obtained a fix
+> mid-uptime after a failed boot getGeolocation). The handler
+> inserts a row into `module_heartbeats` AND — if the optional
+> lat/lng arrived plausible AND the existing `module_configs` row
+> sits at the `(0,0)` sentinel — UPDATEs `module_configs.lat`/`lng`.
+> The "only patch from (0,0)" rule means a deliberately-placed
+> module is never clobbered. `heartbeat` route in
 > `duckdb-service/routes/heartbeats.py`; `sendHeartbeat` in
-> `ESP32-CAM/client.cpp`). It is the source of `latestHeartbeat`
+> `ESP32-CAM/client.cpp`. It is the source of `latestHeartbeat`
 > /`HeartbeatSnapshot` ([ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md)).
 >
 > See the glossary entries "Heartbeat (telemetry)" and

@@ -32,8 +32,9 @@ struct OtaManifest {
 };
 
 // True iff the manifest's version differs from the running firmware
-// AND (the manifest's sequence is strictly greater than the running
-// sequence OR the manifest explicitly sets `allow_downgrade: true`).
+// AND `current_sequence` is non-zero AND (the manifest's sequence is
+// strictly greater than the running sequence OR the manifest
+// explicitly sets `allow_downgrade: true`).
 //
 // Pre-#83 this was plain `strcmp(current, manifest) != 0`, which
 // flashed in either direction — surfaced during the PR #82 smoke test
@@ -42,6 +43,14 @@ struct OtaManifest {
 // regression at the type level: any caller that wants to compare a
 // manifest must also pass the running sequence, and any manifest that
 // doesn't carry one fails to parse.
+//
+// `current_sequence == 0` is the dev escape hatch (round-3 senior-
+// review P1). Arduino-IDE compiles that bypass `build.sh` /
+// `extra_scripts.py` end up with `FIRMWARE_SEQUENCE = 0` via the
+// fallback in `esp_init.h`. Without this guard a dev binary would
+// silently auto-flash to whatever fleet release `/firmware.json`
+// advertises — the operator must USB-flash a properly-built binary
+// before OTA can take over.
 //
 // NULL or empty `current_version`, NULL `manifest.version`, or empty
 // `manifest.version` all return false — a malformed input is a "do not

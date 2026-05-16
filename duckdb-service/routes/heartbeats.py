@@ -129,7 +129,7 @@ def post_heartbeat():
         #     gates this; the server re-checks for safety),
         #  2) an existing module_configs row sits at the (0,0)
         #     sentinel — we never overwrite a placed module.
-        # Tested via `tests/test_heartbeats.py`. Note that we
+        # Tested via `tests/test_heartbeats_endpoint.py`. Note that we
         # deliberately do NOT touch `module_configs.updated_at` —
         # that column has dual semantics (row metadata vs liveness),
         # see chapter-11 "updated_at semantic overload" / issue #97.

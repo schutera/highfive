@@ -442,8 +442,14 @@ sides at once.
   `test_new_module_re_registration_with_real_fix_overwrites_existing`,
   `test_new_module_re_registration_after_null_island_with_real_fix_overwrites`,
   and `test_new_module_initial_registration_at_null_island_stores_zeros`.
-  If a future refactor merges the two writers, all four should
-  keep passing.
+
+  **These test files are the ONLY thing keeping the two writers in
+  sync.** Both copies of the CASE/UPDATE logic must agree on the
+  same "only patch from (0,0)" rule; nothing else (no shared SQL
+  fragment, no shared Python helper) enforces it. A future
+  refactor that consolidates into a single repository method must
+  keep BOTH test files green; deleting one and relying on the
+  other to catch drift would re-open the dual-writer trap.
 
 - Heartbeat-side recovery has a worst-case ~90 min staleness
   window: deferred retry can succeed up to 60 min before the next

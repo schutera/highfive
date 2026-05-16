@@ -107,6 +107,27 @@ static void test_should_update_returns_false_on_empty_manifest_version(void) {
     TEST_ASSERT_FALSE(shouldOtaUpdate("carpenter", 5, m));
 }
 
+static void test_should_update_refuses_when_current_sequence_is_zero(void) {
+    // Round-3 senior-review P1: FIRMWARE_SEQUENCE == 0 is the dev
+    // escape hatch (Arduino-IDE compile without build.sh /
+    // extra_scripts.py). A dev binary must NOT auto-OTA to a
+    // properly-built fleet release just because `1 > 0` evaluates
+    // true — the dev wants to stay on their code until they
+    // explicitly USB-flash a sequenced binary. Pinned here so a
+    // future comparator refactor can't silently drop the guard.
+    OtaManifest m = makeManifest("wallpaper", 1);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("dev-unset", 0, m));
+}
+
+static void test_should_update_refuses_when_current_sequence_is_zero_even_with_allow_downgrade(void) {
+    // The allow_downgrade flag MUST NOT override the dev-build
+    // guard. An operator deliberately rolling back a fleet release
+    // doesn't want to also flatten a dev's hand-compiled binary
+    // back to the rollback target.
+    OtaManifest m = makeManifest("wallpaper", 1, /*allow_downgrade=*/true);
+    TEST_ASSERT_FALSE(shouldOtaUpdate("dev-unset", 0, m));
+}
+
 // --- parseOtaManifest, happy path -----------------------------------------
 
 static const char *kValidManifest =
@@ -360,11 +381,17 @@ static void test_parse_allow_downgrade_eof_after_true_accepts(void) {
     // outer `parseOtaManifest` doesn't validate closing punctuation
     // either; bigger missing pieces (no `"app_md5"`, no `"app_size"`)
     // are what catch a truncation mid-body, and `findValueStart`
-    // returns -1 for them. Worst case for this specific input: we
-    // accept allow_downgrade=true on a manifest that was supposed
-    // to be longer — the operator's downgrade just went through.
-    // That's a malformed-input scenario; a stricter parser would
-    // be welcome but is out of scope for #83.
+    // returns -1 for them.
+    //
+    // Threat-model framing (round-3 senior-review P2): the obvious
+    // worry here is "an MITM serves a truncated manifest to force
+    // a downgrade". ADR-008's "Sequence + allow_downgrade addendum"
+    // (PR II) explicitly accepts this under the "Plain HTTP, MD5
+    // integrity, no signature" stance and defers a signed-envelope
+    // ADR. The lax parsing of `allow_downgrade` is consistent with
+    // that stance — strictening the parser doesn't change the
+    // threat model meaningfully; a manifest-integrity solution
+    // changes the whole envelope at once.
     const char *json =
         "{\"version\":\"wallpaper\","
         "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
@@ -387,6 +414,8 @@ int main(int, char**) {
     RUN_TEST(test_should_update_returns_false_on_null_current);
     RUN_TEST(test_should_update_returns_false_on_empty_current);
     RUN_TEST(test_should_update_returns_false_on_empty_manifest_version);
+    RUN_TEST(test_should_update_refuses_when_current_sequence_is_zero);
+    RUN_TEST(test_should_update_refuses_when_current_sequence_is_zero_even_with_allow_downgrade);
     RUN_TEST(test_parse_valid_manifest_populates_all_fields);
     RUN_TEST(test_parse_ignores_unrelated_top_level_fields);
     RUN_TEST(test_parse_returns_false_on_null_inputs);

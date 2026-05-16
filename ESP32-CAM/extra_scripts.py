@@ -63,8 +63,10 @@ version = (
 
 # SEQUENCE (#83): operator-bumped monotonic integer. Read from
 # `ESP32-CAM/SEQUENCE`. The Arduino-IDE fallback (no SEQUENCE file at
-# all) emits ``0`` so the firmware's `shouldOtaUpdate` refuses to OTA
-# from a dev build — see ``esp_init.h``'s `FIRMWARE_SEQUENCE` fallback.
+# all) emits ``0``; `hf::shouldOtaUpdate` carries an explicit
+# `current_sequence == 0 → refuse` guard so a dev binary cannot
+# auto-OTA to a properly-built fleet release. Full rationale in
+# ``esp_init.h``'s `FIRMWARE_SEQUENCE` block.
 #
 # Loud-fail on a present-but-malformed SEQUENCE file. Mirrors the
 # `build.sh` policy exactly: a dev who ran `pio run -e esp32cam`

@@ -133,6 +133,18 @@ bool shouldOtaUpdate(const char* current_version, uint32_t current_sequence,
     if (current_version[0] == '\0') return false;
     if (manifest.version[0] == '\0') return false;
     if (std::strcmp(current_version, manifest.version) == 0) return false;
+    // Dev-build guard (round-3 senior-review P1). FIRMWARE_SEQUENCE
+    // == 0 is the Arduino-IDE fallback in `esp_init.h` — the binary
+    // was hand-compiled without going through `build.sh` /
+    // `extra_scripts.py`. Without this guard, `manifest.sequence (1)
+    // > current_sequence (0)` would be true and a dev binary would
+    // happily auto-flash itself to whatever fleet release is sitting
+    // at `/firmware.json`. The right answer for a hand-compiled
+    // binary is "stay on the dev code"; the operator must explicitly
+    // USB-flash a sequenced release before OTA can take over. The
+    // dev escape hatch is covered by a host test that pins this
+    // exact behaviour.
+    if (current_sequence == 0) return false;
     if (manifest.allow_downgrade) return true;
     return manifest.sequence > current_sequence;
 }

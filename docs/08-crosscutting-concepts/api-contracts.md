@@ -64,6 +64,16 @@ the firmware-reported `name`. The shape lives in the shared package by
 deliberate decision —
 [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).
 
+The **`POST /heartbeat` request body** (not the `HeartbeatSnapshot`
+reply shape above) gained three optional fields in PR II / issue #89:
+`latitude`, `longitude`, `accuracy`. The firmware attaches them only
+when its deferred-retry path obtained a fix mid-uptime; the server
+UPDATEs `module_configs.lat`/`lng` iff the row sits at the `(0,0)`
+sentinel. The wire shape of `HeartbeatSnapshot` (the dashboard-
+facing reply) is unchanged — those fields drive a side effect, not a
+new field on the snapshot. Full wire-level documentation:
+[`../api-reference.md` §3.7](../api-reference.md).
+
 ## `Module.status` is three-valued
 
 `Module.status` is `'online' | 'offline' | 'unknown'`. The `'unknown'`

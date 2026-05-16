@@ -199,18 +199,28 @@ endpoints are wholly separate.
 
 Called by ESP32-CAM firmware directly, hourly (`sendHeartbeat` in
 `ESP32-CAM/client.cpp`). Implementation in
-`duckdb-service/routes/heartbeats.py` (`heartbeat` route).
+`duckdb-service/routes/heartbeats.py` (`post_heartbeat` route).
 
 Body (form-encoded): `mac`, `battery`, `rssi`, `uptime_ms`,
-`free_heap`, `fw_version` → returns `{"ok": true}`.
+`free_heap`, `fw_version`, plus the optional triplet `latitude`,
+`longitude`, `accuracy` (PR II / issue #89: the firmware attaches
+these only when its deferred-retry path obtained a fix mid-uptime
+after a failed boot getGeolocation). Returns `{"ok": true}`.
 
-Side effect: a single `INSERT` into `module_heartbeats`
-(`routes/heartbeats.py:45-52`). The handler does **not** update
-`module_configs` — liveness derivation in the backend reads
+Side effects: an unconditional `INSERT` into `module_heartbeats`
+(see `post_heartbeat` body) plus a **conditional UPDATE** of
+`module_configs.lat`/`lng` (PR II / issue #89). The UPDATE fires
+iff the optional lat/lng/accuracy fields parsed plausible (matching
+the `_is_plausible_fix` rule — same shape as `hf::isPlausibleFix`
+on the firmware side) AND the existing `module_configs` row sits at
+the `(0,0)` sentinel. The "only patch from (0,0)" rule means a
+deliberately-placed module is never clobbered. The handler does
+**not** touch `module_configs.updated_at` — that column has dual
+semantics (issue #97). Liveness derivation in the backend reads
 `module_configs.updated_at`, the latest `module_heartbeats.received_at`,
 and the latest `image_uploads.uploaded_at` separately and takes the
-freshest (`backend/src/database.ts`'s `fetchAndAssemble`). The most recent
-`module_heartbeats` row is materialised on the wire as
+freshest (`backend/src/database.ts`'s `fetchAndAssemble`). The most
+recent `module_heartbeats` row is materialised on the wire as
 `Module.latestHeartbeat`
 (shape: [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md))
 per [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md).

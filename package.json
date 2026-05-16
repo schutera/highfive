@@ -6,6 +6,9 @@
     "backend",
     "homepage"
   ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "prepare": "husky"
   },

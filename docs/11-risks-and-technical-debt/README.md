@@ -345,6 +345,36 @@ for the full migration mechanic. The rollback procedure
 immediately unset it) is documented in
 [`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md).
 
+**Sub-lesson: the dev-binary OTA self-overwrite (round-3 reviewer
+finding).** The first PR II landing shipped `shouldOtaUpdate` as
+`manifest.sequence > current_sequence` with no special-casing of
+`current_sequence == 0` — which is the Arduino-IDE fallback set in
+`esp_init.h` when a binary is hand-compiled without `build.sh` /
+`extra_scripts.py`. Result: a dev hand-flashing a local binary onto
+a module that's on the same LAN as the production homepage would
+have seen the first OTA poll silently overwrite their code (because
+`1 > 0` is true for any fleet release with `sequence >= 1`). Round-3
+senior-review caught the comment-vs-code mismatch (the comments
+already said "refuses every OTA from a properly-built fleet" —
+which only became true after the guard landed). Fix: explicit
+`current_sequence == 0 → refuse` clause, paired with two host
+tests pinning both the no-allow_downgrade and allow_downgrade
+branches. Operator implication: a dev binary requires a USB
+reflash with a properly-built sequenced binary before it can
+participate in OTAs; `allow_downgrade: true` on the fleet manifest
+does NOT unlock dev-binary participation (deliberate — a rollback
+wave shouldn't also clobber developer machines).
+
+**How to avoid the same class next time.** When a comparator
+acquires a new argument, write the host test for the sentinel
+value (`0`, `null`, `""`, etc.) before writing the code; the host
+test for `FIRMWARE_SEQUENCE=0` didn't exist in the first PR II
+landing, so the comment claiming the sentinel was a refuse-signal
+was not testable. Comments that describe behaviour without a
+corresponding test will drift — the broader "trust code over
+commit messages" rule in CLAUDE.md applies to ADR pseudocode and
+source comments too, not just commit history.
+
 ### First-boot geolocation race: bounded retry + heartbeat-side recovery (#89, PR II)
 
 **What happened.** The firmware's `getGeolocation` in
@@ -443,13 +473,19 @@ sides at once.
   `test_new_module_re_registration_after_null_island_with_real_fix_overwrites`,
   and `test_new_module_initial_registration_at_null_island_stores_zeros`.
 
-  **These test files are the ONLY thing keeping the two writers in
-  sync.** Both copies of the CASE/UPDATE logic must agree on the
-  same "only patch from (0,0)" rule; nothing else (no shared SQL
-  fragment, no shared Python helper) enforces it. A future
-  refactor that consolidates into a single repository method must
-  keep BOTH test files green; deleting one and relying on the
-  other to catch drift would re-open the dual-writer trap.
+  **The test files pin the (lat, lng) quadrant transitions but
+  NOT the plausibility predicate itself.** Each writer carries its
+  own test set; nothing fires if `_is_plausible_fix` is tightened
+  (e.g. rejecting `accuracy > 10_000.0`) without parallel SQL
+  changes. `/new_module`'s CASE is a pure SQL "is the incoming
+  (0,0)" check, while `_is_plausible_fix` is a Python predicate
+  that also rejects NaN, out-of-range, and zero accuracy — the
+  convergence of input validity comes from
+  `ModuleData.{latitude,longitude}: Field(ge=…, le=…)` Pydantic
+  clamps at the entry point, not from the SQL itself. A future
+  repo-method consolidation must lift the SQL rule AND the Python
+  predicate together; treating only the SQL CASE as the seam will
+  leave the asymmetric input validation untouched.
 
 - Heartbeat-side recovery has a worst-case ~90 min staleness
   window: deferred retry can succeed up to 60 min before the next

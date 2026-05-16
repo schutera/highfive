@@ -389,6 +389,13 @@ Sometimes you _need_ to downgrade — a freshly-flashed `carpenter`
 seq=2 is panicking in the field and you want every module back on
 the known-good `mason` seq=1.
 
+> **Note for developers.** Binaries built without `build.sh` or
+> `pio run` carry `FIRMWARE_SEQUENCE=0` (the Arduino-IDE fallback in
+> `esp_init.h`) and **refuse every OTA regardless of
+> `allow_downgrade`**. The rollback procedure below applies to
+> properly-built fleet binaries only. To OTA a hand-compiled dev
+> binary, USB-reflash a sequenced release first.
+
 **Procedure:**
 
 1. Build the rollback target normally — checkout the older commit,

@@ -215,6 +215,48 @@ prints `[heartbeat] patched module_configs lat/lng for <mac> from
 `docker compose logs duckdb-service` — useful as a server-side
 confirmation.
 
+## T6 — Dev-binary OTA refusal (round-3 senior-review)
+
+**What it proves**: a binary hand-compiled in Arduino IDE (no
+`build.sh`, no `pio run`) carries `FIRMWARE_SEQUENCE=0` and refuses
+every OTA from a properly-built fleet. Covers the macro plumbing
+that the host test cannot reach: the host test takes
+`current_sequence` as a function argument, so a regression in
+`build.sh` / `extra_scripts.py` / `esp_init.h` that drops the
+injection (e.g. `FIRMWARE_SEQUENCE` becomes `1` by accident on a
+dev build) would be invisible to the unit suite.
+
+**Steps**:
+
+1. Compile a binary directly via Arduino IDE — open
+   `ESP32-CAM/ESP32-CAM.ino` in the IDE, select board
+   "AI Thinker ESP32-CAM", click Upload. Do NOT run `pio run` or
+   `bash build.sh`.
+2. Onboard the module via captive portal. Point `INIT_URL` /
+   `UPLOAD_URL` at the dev stack that's serving the latest
+   `firmware.json` (`SEQUENCE >= 1`).
+3. Wait for the next daily-reboot HTTP-OTA poll, or reset the
+   module via `python scripts/esp_reset.py --port COM9`.
+
+**Expected serial output**:
+
+```
+[OTA] no update: current=dev-unset seq=0, manifest=mason seq=1 allow_downgrade=0
+```
+
+The `seq=0` on the firmware side is the diagnostic — that's the
+Arduino-IDE fallback firing. The `[OTA] no update` line confirms
+the dev-build guard refused the flash.
+
+**Expected dashboard state**: the module appears with
+`Module.latestHeartbeat.fwVersion = "dev-unset"`. No flash
+happens; subsequent boots keep reporting `dev-unset`.
+
+To exit dev-binary mode and rejoin fleet OTAs, USB-flash a
+properly-built binary (`bash ESP32-CAM/build.sh` or `pio run`)
+once; from that boot forward the module's `FIRMWARE_SEQUENCE` is
+the real value and normal OTA semantics apply.
+
 ## Re-running
 
 The whole bundle should be re-run after any change to:

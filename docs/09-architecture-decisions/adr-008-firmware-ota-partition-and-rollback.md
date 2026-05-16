@@ -340,8 +340,28 @@ bool shouldOtaUpdate(const char* current_version,
                      const OtaManifest& manifest);
 // returns true iff:
 //   manifest.version != current_version AND
+//   current_sequence != 0 AND
 //   (manifest.sequence > current_sequence OR manifest.allow_downgrade)
 ```
+
+The `current_sequence != 0` clause is the **dev-build escape hatch**.
+`FIRMWARE_SEQUENCE = 0` is the Arduino-IDE fallback in
+[`ESP32-CAM/esp_init.h`](../../ESP32-CAM/esp_init.h) — fires when
+the binary was compiled directly in Arduino IDE, bypassing both
+`build.sh` and `extra_scripts.py`. Without this guard a hand-
+compiled binary would happily auto-flash to whatever fleet release
+sits at `/firmware.json` (`1 > 0` evaluates true), silently
+overwriting the dev's local code on the first OTA poll. The right
+behaviour for "this binary has no provenance" is to require an
+explicit USB reflash with a properly-sequenced binary before OTA
+participation. Pinned by
+`test_should_update_refuses_when_current_sequence_is_zero` and
+`test_should_update_refuses_when_current_sequence_is_zero_even_with_allow_downgrade`
+in
+[`ESP32-CAM/test/test_native_ota_version/test_ota_version.cpp`](../../ESP32-CAM/test/test_native_ota_version/test_ota_version.cpp).
+The `allow_downgrade: true` operator override **cannot** unlock the
+dev escape hatch — a deliberate fleet rollback should not also
+flatten a developer's hand-compiled binary.
 
 `parseOtaManifest` **requires** `sequence` (rejects manifests that
 omit it). This is the migration gate: a new firmware that silently

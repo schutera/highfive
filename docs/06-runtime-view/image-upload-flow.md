@@ -30,7 +30,7 @@ sequenceDiagram
     Note over ESP,DDB: independently, hourly
     ESP->>DDB: POST /heartbeat<br/>(telemetry, body: mac, battery, rssi, uptime_ms, free_heap, fw_version,<br/>optional latitude/longitude/accuracy when deferred-retry recovered)
     DDB->>DDB: insert row in module_heartbeats
-    DDB->>DDB: if lat/lng plausible AND existing config row at (0,0): UPDATE module_configs (#89)
+    DDB->>DDB: if lat/lng/accuracy plausible AND existing config row at (0,0): UPDATE module_configs (#89)
 
     Note over BR,DDB: later, on dashboard poll
     BR->>DDB: GET /modules /nests /progress<br/>(via backend, normalised)

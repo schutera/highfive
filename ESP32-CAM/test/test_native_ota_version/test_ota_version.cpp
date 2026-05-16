@@ -371,6 +371,12 @@ static void test_parse_allow_downgrade_prefix_match_rejected(void) {
 }
 
 static void test_parse_allow_downgrade_eof_after_true_accepts(void) {
+    // TODO: DELETE THIS TEST when the signed-envelope ADR lands.
+    // This test pins parser leniency that the new envelope will
+    // presumably remove; leaving the test in place after that
+    // landing would re-establish the lax behaviour the new
+    // envelope intends to forbid. Round-4 senior-review P2 marker.
+    //
     // Round-2 senior-review P2: truncation case — manifest body
     // ends with `"allow_downgrade":true` and a NUL right after, no
     // closing brace. The terminator-boundary guard accepts NUL as

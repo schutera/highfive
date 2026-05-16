@@ -2,7 +2,7 @@
 #
 # Build context is the repo root (see docker-compose.prod.yml). Same
 # workspace setup as backend/Dockerfile - see that file for rationale.
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 

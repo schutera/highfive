@@ -4,7 +4,7 @@
 # image installs the whole npm workspace (contracts + backend + homepage)
 # so the `@highfive/contracts` workspace symlink resolves at build and
 # runtime. The image does NOT bind-mount source - the dist/ is baked in.
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -42,7 +42,7 @@ RUN node_modules/.bin/tsc \
     contracts/src/index.ts
 
 # ---- Runtime stage ----
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 

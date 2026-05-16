@@ -1,25 +1,25 @@
 # Backend (`backend/`)
 
-Node 20 + Express + TypeScript. Serves the React frontend with a typed,
+Node 22 + Express + TypeScript. Serves the React frontend with a typed,
 auth-gated JSON API. Stateless read-through projection on top of
 `duckdb-service`; no DB connection of its own.
 
-| Path                                | Role                          |
-| ----------------------------------- | ----------------------------- |
-| `backend/src/server.ts`             | Express bootstrap, port `3002` |
-| `backend/src/app.ts`                | Route handlers                |
-| `backend/src/auth.ts`               | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
-| `backend/src/duckdbClient.ts`       | Typed HTTP client for `duckdb-service` |
-| `backend/tests/*.test.ts`           | Vitest + supertest, 17 tests  |
+| Path                          | Role                                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `backend/src/server.ts`       | Express bootstrap, port `3002`                                               |
+| `backend/src/app.ts`          | Route handlers                                                               |
+| `backend/src/auth.ts`         | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
+| `backend/src/duckdbClient.ts` | Typed HTTP client for `duckdb-service`                                       |
+| `backend/tests/*.test.ts`     | Vitest + supertest, 17 tests                                                 |
 
 ## Endpoints
 
-| Endpoint                              | Auth                  | Purpose                                   |
-| ------------------------------------- | --------------------- | ----------------------------------------- |
-| `GET /api/health`                     | public                | Liveness check (`{"status":"ok"}`)        |
-| `GET /api/modules`                    | `X-API-Key`           | List all modules + their nests + latest progress |
-| `GET /api/modules/:id`                | `X-API-Key`           | One module + its detail                   |
-| `GET /api/modules/:id/logs`           | `X-API-Key` + `X-Admin-Key` | Proxies to `image-service /modules/<mac>/logs` for admin telemetry inspection |
+| Endpoint                    | Auth                        | Purpose                                                                       |
+| --------------------------- | --------------------------- | ----------------------------------------------------------------------------- |
+| `GET /api/health`           | public                      | Liveness check (`{"status":"ok"}`)                                            |
+| `GET /api/modules`          | `X-API-Key`                 | List all modules + their nests + latest progress                              |
+| `GET /api/modules/:id`      | `X-API-Key`                 | One module + its detail                                                       |
+| `GET /api/modules/:id/logs` | `X-API-Key` + `X-Admin-Key` | Proxies to `image-service /modules/<mac>/logs` for admin telemetry inspection |
 
 Full request/response shapes in [docs/api-reference.md](../api-reference.md).
 

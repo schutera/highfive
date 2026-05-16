@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Module } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
@@ -41,6 +41,19 @@ vi.mock('leaflet', () => {
   };
   Marker.prototype = { options: { icon: null } };
 
+  // `LatLng` is named out here so the factory `latLng` (Leaflet's
+  // lowercase-helper convention) can hand back an *instance* of the
+  // class rather than a bare object. Round-5 senior-review P2: if a
+  // future MapView change calls `.distanceTo(...)` or `.equals(...)`
+  // on the result, a bare-object mock TypeErrors in tests while the
+  // prod build keeps working — keeping the mock class-identity-
+  // compatible avoids that future fragility.
+  class LatLng {
+    constructor(
+      public lat: number,
+      public lng: number,
+    ) {}
+  }
   const L = {
     divIcon,
     icon,
@@ -51,19 +64,15 @@ vi.mock('leaflet', () => {
         return true;
       }
     },
-    LatLng: class {
-      constructor(
-        public lat: number,
-        public lng: number,
-      ) {}
-    },
+    LatLng,
     // `L.latLng(lat, lng)` is called by MapView's bounds-filter useMemo
-    // (`L.latLng(fuzzedLocation[0], fuzzedLocation[1])`); add a plain
-    // function form so non-empty `modules` fixtures don't trip the
+    // (`L.latLng(fuzzedLocation[0], fuzzedLocation[1])`); add the
+    // factory form so non-empty `modules` fixtures don't trip the
     // bounds path with an "is not a function" exception. The actual
-    // bounds.contains() result is stubbed to `true` above, so this is
-    // a pass-through.
-    latLng: (lat: number, lng: number) => ({ lat, lng }),
+    // bounds.contains() result is stubbed to `true` above, so the
+    // returned value's content doesn't matter — only that it's an
+    // instance-shaped object (see LatLng comment above).
+    latLng: (lat: number, lng: number) => new LatLng(lat, lng),
   };
   return { default: L, ...L };
 });
@@ -175,14 +184,23 @@ describe('DashboardPage Location-pending side-list', () => {
       expect(screen.getByText('pending-null-island')).toBeInTheDocument();
     });
 
-    // The pill copy comes from the LanguageProvider default lang (en).
-    // It appears exactly once — once per pending module, in the
-    // desktop side-list. The mobile bottom-sheet's pill markup only
-    // renders when the sheet is expanded (which requires user input),
-    // so under jsdom mount alone there's a single pill node. A tighter
-    // assertion than ">0" catches a regression that double-renders or
-    // misses the pill for some pending modules.
-    expect(screen.getAllByText('Location pending')).toHaveLength(1);
+    // Scope the pill assertion to the desktop side-list (`<ul>` →
+    // `getByRole('list')`). Under fresh jsdom mount, only the desktop
+    // side-list renders a `<ul>` — the mobile bottom-sheet's `<ul>` is
+    // gated by `mobileListExpanded` (user input, false at mount), and
+    // the mobile collapsed-pill markup renders a `<button>` without a
+    // `<ul>` and contains only the "X in view • Tap to expand" copy,
+    // not a per-module pill. Scoping by role gives the assertion two
+    // guarantees the unscoped `getAllByText('Location pending')`
+    // didn't: (1) the pill renders inside the side-list `<ul>`, not
+    // in some unrelated surface, and (2) a future change that ever
+    // moves the pill markup into the mobile collapsed pill (e.g. "show
+    // a small dot when there's a pending module") fails this
+    // assertion with a clear "found 0 in <ul>" message rather than
+    // silently bumping the count past 1. Pin: exactly one pill per
+    // pending module, rendered inside the side-list.
+    const sideList = screen.getByRole('list');
+    expect(within(sideList).getAllByText('Location pending')).toHaveLength(1);
 
     // Header counter includes BOTH modules (2/2 online). Before this
     // fix the side-list said "1 sichtbar" while the header still

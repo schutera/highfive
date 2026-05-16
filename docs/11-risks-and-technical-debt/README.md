@@ -496,6 +496,111 @@ sides at once.
   invariant is "only patch from (0,0)". Same bucket as the "module
   physically moved" deferred-follow-up above.
 
+### "Three layers, one rule" was actually four surfaces — the dashboard side-list silently filtered pending modules (PR II final-pass smoke)
+
+**What happened.** PR II's design intent was: a module stuck at the
+`(0,0)` sentinel still appears in the operator UI with a "Location
+pending" pill, so the operator can spot it and wait for the
+heartbeat-side recovery (see the previous "First-boot geolocation
+race" entry). Three rule definitions were aligned across firmware,
+server, and frontend (`hf::isPlausibleFix`, `_is_plausible_fix`,
+`hasPlausibleLocation`). The comment block at
+[`homepage/src/components/MapView.tsx`'s `fuzzedModules`](../../homepage/src/components/MapView.tsx)
+explicitly says "(0,0) and out-of-range modules are FILTERED OUT
+entirely from the rendered map circle set — they still appear in
+the dashboard side-list (with the 'Location pending' pill), but no
+marker is plotted at Null Island". The PR description, the manual-
+tests runbook's frontend-smoke section, and chapter-11's "First-boot
+geolocation race" entry all asserted the same.
+
+The dashboard side-list silently filtered them out anyway.
+[`homepage/src/pages/DashboardPage.tsx`](../../homepage/src/pages/DashboardPage.tsx)
+maps `visibleModules` (the bounds-filtered set MapView emits via
+`onVisibleModulesChange`) into both the desktop floating list and
+the mobile bottom-sheet. `MapView.tsx::fuzzedModules` already pre-
+filters pending modules out before they can reach the callback, so
+`visibleModules` is a plausible-only set by construction. Operator
+impact: AdminPage rendered the pill correctly, the header counter
+showed `N/N online` correctly, but the dashboard side-list silently
+said `N-1 sichtbar` and the pending module had no UI affordance to
+spot. Found visually during pre-merge manual dev-stack smoke; the
+asymmetry between admin/header (correct) and dashboard list
+(wrong) was the diagnostic.
+
+**Why it happened.** Two compounding causes:
+
+1. **Round-1 senior-review tightened the wrong consumer.** PR II
+   round-1 commit `33bd815` "fixed" the MapView pre-bounds fallback
+   to also filter pending modules. The original asymmetric state
+   (`if (!bounds) return modules.filter(plausible); else return
+fuzzedModules.filter(...)`) was correct for the dashboard surface
+   — it leaked pending modules into `visibleModules` during the
+   initial render-before-bounds-event window, and that "leak" was
+   actually the path that made the side-list correct. Round-1's
+   "tightening" sealed the leak without anyone verifying the
+   downstream DashboardPage surface still rendered pending modules
+   via a different code path.
+2. **No integration test pinned the contract across the MapView
+   → DashboardPage seam.** `MapView.test.tsx` only tests the pure
+   `hasPlausibleLocation` helper. `ModulePanel.test.tsx` tests the
+   pill render given a module directly. Nothing mounts `DashboardPage`
+   with a mixed plausible/pending fixture and asserts the side-list's
+   rendered DOM. The comment block at MapView and the PR description
+   were the only "tests" of the contract — both were prose, both
+   were wrong.
+
+**How to avoid it next time.** Pinned by
+[`homepage/src/__tests__/DashboardPage.test.tsx`'s `DashboardPage Location-pending side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
+(commit `e9b0345`):
+
+1. **The side-list logic itself**: `DashboardPage` now derives
+   `sideListModules = visibleModules ∪ pendingModules`, where
+   `pendingModules = modules.filter(!hasPlausibleLocation)`. The two
+   sets are disjoint by construction (visible ⊆ plausible, pending =
+   !plausible), so no dedup is needed at the call site. MapView's
+   `visibleModules` stays strict — its semantic of "rendered on the
+   map" is unchanged; the union happens in DashboardPage because the
+   side-list semantic is distinct from the map-marker semantic.
+2. **Cross-surface assertion in the test**: the new test fixture has
+   one plausible + one pending module; the assertion checks that the
+   pending module's firmware name AND the "Location pending" pill
+   text are both in the rendered DOM, with the header counter
+   reading `2 of 2 modules online`. Before the fix, the side-list
+   would have rendered 0 modules (`visibleModules` is `[]` on
+   initial render before MapView's bounds callback fires, and `[]`
+   contains no pending modules), so the assertion would have failed
+   with `Unable to find an element with the text: pending-null-island`.
+
+**The meta-lesson.** When a CLAUDE.md "Verifying UI claims" finding
+forces you to widen a filter (the round-1 P2 that tightened MapView),
+re-check **every consumer** of the filtered output. The "tighten one
+side" pattern is symmetric to the "loosen one side" pattern from
+PR-42's [Telemetry sidecar envelope drift](#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field)
+entry: in both cases, a single-surface change preserved one
+consumer's correctness while silently breaking another's. The new
+test makes the cross-surface contract a build-time gate; this
+should be the default when filtering at one layer feeds rendering
+at another.
+
+**Deferred follow-ups (tracked as separate issues):**
+
+- The German copy `dashboard.modulesInView` resolves to "X Module
+  sichtbar" — "sichtbar on the map" is semantically false when X
+  includes a non-on-map pending module. The English "in view" has
+  the same lie. Worth a rename to `dashboard.modulesListed` ("X
+  modules listed" / "X gelistet") or a split into "X in view + Y
+  pending". Filed separately so this PR's scope stays small.
+- The current `sideListModules` test relies on `visibleModules` and
+  `pendingModules` being disjoint at runtime, an invariant enforced
+  by MapView's `fuzzedModules` filter. No unit test fires if a
+  future MapView refactor loosens that filter — `sideListModules`
+  would silently double-render the (0,0) module once as "visible"
+  and once as "pending", and the existing `toHaveLength(1)` pill
+  assertion still passes because there's still one pill per pending
+  module. A defensive test that feeds a pending module through a
+  mocked `onVisibleModulesChange` callback (instead of going through
+  the real `MapView` mount) would catch this. Filed separately.
+
 ### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
 
 **What happened.** PR #82's hardware smoke test against

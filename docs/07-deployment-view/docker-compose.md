@@ -10,7 +10,7 @@ subdomain, frontend container handles its own 80/443) or
 
 The system consists of four services:
 
-- **backend** — Node 20 + Express + TypeScript API
+- **backend** — Node 22 + Express + TypeScript API
 - **homepage** — React 19 + Vite + TypeScript frontend
 - **image-service** — Python 3.11 + Flask image ingestion / classification
 - **duckdb-service** — Python 3.11 + Flask database service (sole writer of `app.duckdb`)

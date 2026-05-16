@@ -2,11 +2,13 @@
 #
 # Build context is the repo root (see docker-compose.prod.yml). Same
 # workspace setup as backend/Dockerfile - see that file for rationale.
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+# `.npmrc` carries `engine-strict=true` (see ADR-009) so a future
+# base-image swap to a sub-22.12 Node would hard-fail here.
+COPY package.json package-lock.json .npmrc ./
 COPY contracts/package.json ./contracts/package.json
 COPY backend/package.json ./backend/package.json
 COPY homepage/package.json ./homepage/package.json

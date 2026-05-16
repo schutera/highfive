@@ -5,13 +5,13 @@ two of them, and where each piece lives in the repo.
 
 ## Service map
 
-| Service          | Stack                           | Host:Container | Directory         | Detail |
-| ---------------- | ------------------------------- | -------------- | ----------------- | ------ |
-| `homepage`       | React 19 + Vite + TS + Tailwind | `5173:5173`    | `homepage/`       | [homepage.md](homepage.md) |
-| `backend`        | Node 20 + Express + TS          | `3002:3002`    | `backend/`        | [backend.md](backend.md) |
-| `image-service`  | Python 3.11 + Flask             | `8000:4444`    | `image-service/`  | [image-service.md](image-service.md) |
+| Service          | Stack                           | Host:Container | Directory         | Detail                                 |
+| ---------------- | ------------------------------- | -------------- | ----------------- | -------------------------------------- |
+| `homepage`       | React 19 + Vite + TS + Tailwind | `5173:5173`    | `homepage/`       | [homepage.md](homepage.md)             |
+| `backend`        | Node 22 + Express + TS          | `3002:3002`    | `backend/`        | [backend.md](backend.md)               |
+| `image-service`  | Python 3.11 + Flask             | `8000:4444`    | `image-service/`  | [image-service.md](image-service.md)   |
 | `duckdb-service` | Python 3.11 + Flask + DuckDB    | `8002:8000`    | `duckdb-service/` | [duckdb-service.md](duckdb-service.md) |
-| `ESP32-CAM`      | C++17 + Arduino + PlatformIO    | n/a (edge)     | `ESP32-CAM/`      | [esp32cam.md](esp32cam.md) |
+| `ESP32-CAM`      | C++17 + Arduino + PlatformIO    | n/a (edge)     | `ESP32-CAM/`      | [esp32cam.md](esp32cam.md)             |
 
 Internal calls use Docker service names (e.g. `http://duckdb-service:8000`),
 **not** `localhost`. The DuckDB file lives in the named volume

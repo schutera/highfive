@@ -11,7 +11,7 @@ HiveHive monitors wild-bee nesting activity. ESP32-CAM modules upload images to 
 | Service          | Stack                           | Host:Container | Directory         |
 | ---------------- | ------------------------------- | -------------- | ----------------- |
 | `homepage`       | React 19 + Vite + TS + Tailwind | `5173:5173`    | `homepage/`       |
-| `backend`        | Node 20 + Express + TS          | `3002:3002`    | `backend/`        |
+| `backend`        | Node 22 + Express + TS          | `3002:3002`    | `backend/`        |
 | `image-service`  | Python 3.11 + Flask             | `8000:4444`    | `image-service/`  |
 | `duckdb-service` | Python 3.11 + Flask + DuckDB    | `8002:8000`    | `duckdb-service/` |
 | `ESP32-CAM`      | C++17 + Arduino + PlatformIO    | n/a (edge)     | `ESP32-CAM/`      |

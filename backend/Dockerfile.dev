@@ -5,13 +5,14 @@
 # the `@highfive/contracts` workspace symlink resolves at runtime.
 # Only the backend's `src/` is bind-mounted in dev (see compose), so
 # the in-image install handles the contracts package + node_modules.
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
 # Copy lockfile + every workspace package.json so `npm ci` can resolve
-# the workspace graph without needing the rest of the source.
-COPY package.json package-lock.json ./
+# the workspace graph without needing the rest of the source. The
+# `.npmrc` carries `engine-strict=true` (see ADR-009).
+COPY package.json package-lock.json .npmrc ./
 COPY contracts/package.json ./contracts/package.json
 COPY backend/package.json ./backend/package.json
 COPY homepage/package.json ./homepage/package.json

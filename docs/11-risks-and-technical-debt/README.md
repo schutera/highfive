@@ -527,27 +527,34 @@ spot. Found visually during pre-merge manual dev-stack smoke; the
 asymmetry between admin/header (correct) and dashboard list
 (wrong) was the diagnostic.
 
-**Why it happened.** Two compounding causes:
+**Why it happened.** The contract was prose-only.
 
-1. **Round-1 senior-review tightened the wrong consumer.** PR II
-   round-1 commit `33bd815` "fixed" the MapView pre-bounds fallback
-   to also filter pending modules. The original asymmetric state
-   (`if (!bounds) return modules.filter(plausible); else return
-fuzzedModules.filter(...)`) was correct for the dashboard surface
-   — it leaked pending modules into `visibleModules` during the
-   initial render-before-bounds-event window, and that "leak" was
-   actually the path that made the side-list correct. Round-1's
-   "tightening" sealed the leak without anyone verifying the
-   downstream DashboardPage surface still rendered pending modules
-   via a different code path.
-2. **No integration test pinned the contract across the MapView
-   → DashboardPage seam.** `MapView.test.tsx` only tests the pure
-   `hasPlausibleLocation` helper. `ModulePanel.test.tsx` tests the
-   pill render given a module directly. Nothing mounts `DashboardPage`
-   with a mixed plausible/pending fixture and asserts the side-list's
-   rendered DOM. The comment block at MapView and the PR description
-   were the only "tests" of the contract — both were prose, both
-   were wrong.
+1. **The contract lived in comments + the PR description, not in
+   code.** The MapView comment block at `fuzzedModules`, the PR
+   description's "side-list shows it with 'Location pending' pill"
+   line, and the existing "First-boot geolocation race" entry one
+   section above all asserted that pending modules appear in the
+   dashboard side-list with the pill. None of those is an enforced
+   contract — they're prose. The actual code never enforced what
+   they asserted: `MapView.tsx::fuzzedModules` carried the
+   `.filter((module) => hasPlausibleLocation(module.location))` from
+   the original PR II commit `ef548e5` onward, and the downstream
+   `visibleModules` (which `onVisibleModulesChange` feeds to
+   `DashboardPage`) is derived from `fuzzedModules`. The side-list
+   has consumed a plausible-only set since day one of PR II. The
+   bug shipped with the first commit; round-1's later edit to the
+   pre-bounds fallback branch was defensive consistency on a code
+   path the parent never observed (`onVisibleModulesChange` is
+   gated on `bounds` being truthy, so the pre-bounds fallback
+   branch is computed but never propagated). The asymmetry the
+   round-1 commit message describes was already cosmetic.
+2. **No integration test pinned the cross-surface contract.**
+   `MapView.test.tsx` only tests the pure `hasPlausibleLocation`
+   helper. `ModulePanel.test.tsx` tests the pill render given a
+   module directly. Nothing mounted `DashboardPage` with a mixed
+   plausible/pending fixture and asserted the side-list's rendered
+   DOM. So the prose claim that the side-list shows pending modules
+   had no build-time gate to disagree with the prose claim itself.
 
 **How to avoid it next time.** Pinned by
 [`homepage/src/__tests__/DashboardPage.test.tsx`'s `DashboardPage Location-pending side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
@@ -571,16 +578,21 @@ fuzzedModules.filter(...)`) was correct for the dashboard surface
    contains no pending modules), so the assertion would have failed
    with `Unable to find an element with the text: pending-null-island`.
 
-**The meta-lesson.** When a CLAUDE.md "Verifying UI claims" finding
-forces you to widen a filter (the round-1 P2 that tightened MapView),
-re-check **every consumer** of the filtered output. The "tighten one
-side" pattern is symmetric to the "loosen one side" pattern from
-PR-42's [Telemetry sidecar envelope drift](#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field)
-entry: in both cases, a single-surface change preserved one
-consumer's correctness while silently breaking another's. The new
-test makes the cross-surface contract a build-time gate; this
-should be the default when filtering at one layer feeds rendering
-at another.
+**The meta-lesson.** **A behavioural contract asserted only in a
+comment block, a PR description, or a chapter-11 entry is not a
+contract — it is a wish.** PR II's prose said "pending modules show
+up in the side-list with the pill"; the code shipped a filter that
+made that impossible. Two senior-review rounds, a CLAUDE.md
+"Verifying UI claims" finding, and a chapter-11 lessons-learned
+entry all referenced the contract while it was structurally false.
+The only thing that caught it was an operator opening the dashboard
+during pre-merge manual smoke. Pin cross-surface contracts with a
+mount-and-render integration test (here:
+`DashboardPage.test.tsx::DashboardPage Location-pending side-list`).
+Same pattern as PR-42's [Telemetry sidecar envelope drift](#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field)
+entry — the wire-shape-mismatch story there was the same shape:
+docs + types + code all individually correct, but the cross-layer
+contract was wishful.
 
 **Deferred follow-ups (tracked as separate issues):**
 

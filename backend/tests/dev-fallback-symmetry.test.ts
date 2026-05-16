@@ -22,7 +22,17 @@ import { resolve } from 'path';
 
 const REPO_ROOT = resolve(__dirname, '..', '..');
 const BACKEND_AUTH = resolve(REPO_ROOT, 'backend', 'src', 'auth.ts');
-const HOMEPAGE_API = resolve(REPO_ROOT, 'homepage', 'src', 'services', 'api.ts');
+// The homepage's DEV_FALLBACK_KEY declaration lives in api-key-validator.ts
+// (not api.ts) since the PR-#88 manual-smoke-test fix that pulled the
+// validator out of the lazy api-* chunk and into the entry chunk. api.ts
+// re-exports for the unit tests, but the canonical declaration is here.
+const HOMEPAGE_VALIDATOR = resolve(
+  REPO_ROOT,
+  'homepage',
+  'src',
+  'services',
+  'api-key-validator.ts',
+);
 
 // Extract the value assigned to a `const DEV_FALLBACK_KEY = '...'` decl.
 // Returns null on no-match so the test can produce a useful failure
@@ -47,9 +57,12 @@ function extractDevFallbackLiteral(source: string): string | null {
 describe('DEV_FALLBACK_KEY symmetry across backend and homepage', () => {
   it('both files declare the same literal', () => {
     const backendLit = extractDevFallbackLiteral(readFileSync(BACKEND_AUTH, 'utf-8'));
-    const homepageLit = extractDevFallbackLiteral(readFileSync(HOMEPAGE_API, 'utf-8'));
+    const homepageLit = extractDevFallbackLiteral(readFileSync(HOMEPAGE_VALIDATOR, 'utf-8'));
     expect(backendLit, `no DEV_FALLBACK_KEY declaration found in ${BACKEND_AUTH}`).not.toBeNull();
-    expect(homepageLit, `no DEV_FALLBACK_KEY declaration found in ${HOMEPAGE_API}`).not.toBeNull();
+    expect(
+      homepageLit,
+      `no DEV_FALLBACK_KEY declaration found in ${HOMEPAGE_VALIDATOR}`,
+    ).not.toBeNull();
     expect(homepageLit).toBe(backendLit);
   });
 

@@ -69,6 +69,25 @@ function fuzzLocation(location: { lat: number; lng: number }, moduleId: string):
   return [location.lat + offsetLat, location.lng + offsetLng];
 }
 
+// Reject a module's location reading that looks like the (0,0) "no
+// fix" sentinel set by the firmware when getGeolocation fails (issue
+// #89), an out-of-range value, or NaN. Mirrors `hf::isPlausibleFix`
+// on the firmware side and `_is_plausible_fix` on the server side —
+// same rule on all three layers so a deliberate "render at Null
+// Island" can't sneak in from any direction. Used to (a) gate the
+// map's center derivation, (b) filter (0,0) modules out of the
+// rendered circle set, and (c) drive the "Location pending" pill
+// rendering in the side-list (PR II / issue #49).
+export function hasPlausibleLocation(
+  loc: { lat: number; lng: number } | null | undefined,
+): boolean {
+  if (!loc) return false;
+  if (!Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return false;
+  if (loc.lat === 0 && loc.lng === 0) return false;
+  if (Math.abs(loc.lat) > 90 || Math.abs(loc.lng) > 180) return false;
+  return true;
+}
+
 // Interpolate between colors based on hatches
 // emerald → amber → rose gradient for nature/activity visualization
 function getColorFromHatches(totalHatches: number, maxHatches: number = 1000): string {
@@ -306,18 +325,33 @@ export default function MapView({
   const [bounds, setBounds] = useState<L.LatLngBounds | null>(null);
   const CLUSTER_ZOOM_THRESHOLD = 13; // Show clusters below this zoom level
 
-  // Center map on first module or default location
-  const center: [number, number] = modules[0]?.location
-    ? [modules[0].location.lat, modules[0].location.lng]
+  // Center map on first module with a plausible location, falling
+  // back to the Germany default [47.78, 9.61] when no module has
+  // landed a fix yet. Without this guard a single (0,0) module from
+  // a botched first-boot (#89) would re-center the map to the Gulf
+  // of Guinea (#49). Find-first because the side-list order is the
+  // operator's preference; we don't want to silently re-order under
+  // them just because of a (0,0) at index 0.
+  const firstPlausible = modules.find((m) => hasPlausibleLocation(m.location));
+  const center: [number, number] = firstPlausible
+    ? [firstPlausible.location.lat, firstPlausible.location.lng]
     : [47.78, 9.61];
 
-  // Memoize fuzzed locations to keep them consistent
+  // Memoize fuzzed locations to keep them consistent. (0,0) and
+  // out-of-range modules are FILTERED OUT entirely from the rendered
+  // map circle set — they still appear in the dashboard side-list
+  // (with the "Location pending" pill), but no marker is plotted at
+  // Null Island. The filter happens at the fuzzedModules construction
+  // step so every downstream consumer (clustering, individual
+  // circles, the visibleModules useMemo) sees a clean list.
   const fuzzedModules = useMemo(
     () =>
-      modules.map((module) => ({
-        ...module,
-        fuzzedLocation: fuzzLocation(module.location, module.id),
-      })),
+      modules
+        .filter((module) => hasPlausibleLocation(module.location))
+        .map((module) => ({
+          ...module,
+          fuzzedLocation: fuzzLocation(module.location, module.id),
+        })),
     [modules],
   );
 

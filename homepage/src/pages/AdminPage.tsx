@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, ImageUpload } from '../services/api';
 import type { Module } from '@highfive/contracts';
 import RenameModuleModal from '../components/RenameModuleModal';
+import { hasPlausibleLocation } from '../components/MapView';
 
 const SESSION_KEY = 'highfive_admin_auth';
 
@@ -262,6 +263,18 @@ export default function AdminPage() {
                             title={`Firmware-reported name: ${m.name}`}
                           >
                             ({m.name})
+                          </span>
+                        )}
+                        {/* "Location pending" pill — PR II / issue #89.
+                            Lets the operator spot modules that registered
+                            at the (0,0) sentinel before the heartbeat-side
+                            recovery has caught up. */}
+                        {!hasPlausibleLocation(m.location) && (
+                          <span
+                            className="ml-2 inline-block px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider bg-amber-100 text-amber-700"
+                            title="Module registered without a usable geolocation fix; will recover on the next successful heartbeat retry."
+                          >
+                            Location pending
                           </span>
                         )}
                       </td>

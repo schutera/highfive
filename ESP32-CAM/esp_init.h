@@ -15,6 +15,19 @@
 #define FIRMWARE_VERSION "dev-unset"
 #endif
 
+// FIRMWARE_SEQUENCE (#83) is normally injected from ESP32-CAM/SEQUENCE
+// via the same two paths as FIRMWARE_VERSION above. The `0` fallback
+// fires for raw Arduino IDE builds that go through neither path. Zero
+// is the "this is a dev build" sentinel: the runtime
+// `hf::shouldOtaUpdate` check requires the manifest sequence to be
+// strictly greater than the running one (no allow_downgrade override
+// in the happy path), so a dev binary will refuse every OTA from a
+// properly-built fleet — the right answer for "this binary was hand-
+// compiled without provenance".
+#ifndef FIRMWARE_SEQUENCE
+#define FIRMWARE_SEQUENCE 0
+#endif
+
 
 typedef struct {
   char SSID[64];
@@ -85,8 +98,31 @@ void initEspCamera(framesize_t resolution);
 void recoverCamera(framesize_t resolution);
 void configure_camera_sensor(esp_config_t *esp_config);
 void setupWifiConnection(wifi_configuration_t *wifi_config);
-void getGeolocation(esp_config_t *esp_config);
+// getGeolocation: 3-attempt retry at boot (PR II / issue #89). Returns
+// true if the resulting fix is plausible (`hf::isPlausibleFix` over
+// the populated esp_config->geolocation fields). False means the
+// retry loop exhausted itself; caller can treat this as "no fix this
+// boot, defer to heartbeat-side recovery".
+bool getGeolocation(esp_config_t *esp_config);
 void initNewModuleOnServer(esp_config_t *esp_config);
+
+// Heartbeat-side geolocation recovery (PR II / issue #89). loop()
+// schedules retries every HF_GEOLOCATION_DEFERRED_RETRY_MS while the
+// boot fix is missing; on success the next heartbeat carries the
+// fix to the server. Sendable-by-heartbeat state lives in
+// `esp_init.cpp` as file-local globals; this pair of accessors is the
+// only API the heartbeat path needs.
+bool hasPendingGeolocationFixToReport();
+geolocation_t consumePendingGeolocationFixForHeartbeat();
+void markGeolocationFixNeedsRetry();
+void tickGeolocationDeferredRetry(esp_config_t *esp_config);
+
+// Retry cadence for the deferred-fix path. 30 minutes — long enough
+// that we're not spamming Google's API on a captive-portal failure,
+// short enough that the operator sees the module on the map within
+// an hour of normal connectivity returning. Public so the loop()
+// site in ESP32-CAM.ino can reuse it for breadcrumb labelling.
+#define HF_GEOLOCATION_DEFERRED_RETRY_MS (30UL * 60UL * 1000UL)
 
 /* Telemetry: reset-reason + boot count persistence + WiFi recovery */
 uint32_t incrementBootCount();

@@ -300,7 +300,12 @@ existing 30 s sleeps).
 ### Boot-time HTTP pull
 
 Bump `ESP32-CAM/VERSION` (per [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)
-the value is the next bee-species name), then:
+the value is the next bee-species name), **and** bump
+`ESP32-CAM/SEQUENCE` (PR II / issue #83) to the next integer. The
+sequence number is the operator-controlled ordering signal that
+prevents accidental downgrades — see
+[ADR-008's "Sequence + allow_downgrade addendum"](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83)
+for the comparator semantics. Then:
 
 ```bash
 cd ESP32-CAM
@@ -372,6 +377,55 @@ module-detail panel
 never advances past the pre-OTA bee-name. See
 [../11-risks-and-technical-debt/README.md](../11-risks-and-technical-debt/README.md)
 "OTA migration is one-way".
+
+### How to deliberately roll back a fleet (PR II / issue #83)
+
+The new sequence-aware comparator refuses any OTA where
+`manifest.sequence <= current.sequence` UNLESS the manifest also
+declares `allow_downgrade: true`. This is the safety net against
+accidental downgrades described in
+[ADR-008's addendum](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83).
+Sometimes you _need_ to downgrade — a freshly-flashed `carpenter`
+seq=2 is panicking in the field and you want every module back on
+the known-good `mason` seq=1.
+
+**Procedure:**
+
+1. Build the rollback target normally — checkout the older commit,
+   `bash ESP32-CAM/build.sh` (it will refuse to bump SEQUENCE
+   _backwards_ in the file itself; that's OK, we're going to edit
+   the manifest by hand).
+2. The output `homepage/public/firmware.json` will declare
+   `"sequence": 1`, `"allow_downgrade": false`. Open it and flip
+   the flag to `true`:
+
+   ```json
+   {"version":"mason","sequence":1,"allow_downgrade":true, ...}
+   ```
+
+3. Deploy `homepage/public/*` as normal. On each module's next
+   daily-reboot HTTP-OTA poll, the new `shouldOtaUpdate` sees
+   `mason != carpenter`, `seq=1 <= current seq=2`, but
+   `allow_downgrade=true` → flash proceeds. Watch the dashboard's
+   firmware pill update as modules roll back over the next ~24h.
+4. **CRITICAL: as soon as the rollback wave completes, run
+   `bash ESP32-CAM/build.sh` again to publish a regular manifest
+   (`allow_downgrade: false`) over the top of the hand-edited one.**
+   Leaving `allow_downgrade: true` in the published manifest means
+   ANY subsequent operator typo on SEQUENCE can re-trigger a
+   downgrade. The flag is meant for a single, deliberate publish.
+
+**Symptom you got it right:** the next regular release (bumped
+SEQUENCE, new bee name, default `allow_downgrade: false`) flashes
+the fleet forward as usual.
+
+**Symptom you got it wrong (left flag set):** a future "this isn't
+a real release, just a hot-fix" manifest accidentally lower-
+sequenced still gets accepted. Worst case: an attacker who can MITM
+your manifest URL can serve any previous binary they prefer. Until
+the TLS+signing follow-up ADR lands, the manifest is unsigned and
+this flag is the only thing standing between an attacker and a
+forced downgrade.
 
 ---
 

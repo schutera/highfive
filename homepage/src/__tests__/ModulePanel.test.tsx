@@ -237,3 +237,42 @@ describe('ModulePanel MAC disambiguation for same-batch hardware', () => {
     expect(screen.queryByText('3A08')).not.toBeInTheDocument();
   });
 });
+
+// PR II / issue #89 — the "Location pending" pill renders when the
+// module's location field is at the (0,0) sentinel. The
+// `hasPlausibleLocation` helper that drives the pill is unit-tested
+// in `MapView.test.tsx`; this file pins the integration into the
+// ModulePanel header.
+describe('ModulePanel location-pending pill', () => {
+  beforeEach(() => {
+    nextModuleDetail = null;
+  });
+
+  it('renders "Location pending" pill when the module is at (0,0)', async () => {
+    nextModuleDetail = { ...baseModule, location: { lat: 0, lng: 0 } };
+    renderPanel();
+    await waitFor(() => {
+      // The English pill copy comes from the LanguageProvider's
+      // default lang (en). German operators see "Standort ausstehend"
+      // — same key, different translation.
+      expect(screen.getByText('Location pending')).toBeInTheDocument();
+    });
+  });
+
+  it('does NOT render the pill when the module has a plausible location', async () => {
+    nextModuleDetail = { ...baseModule, location: { lat: 48.27, lng: 11.66 } };
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText(baseModule.name)).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Location pending')).not.toBeInTheDocument();
+  });
+
+  it('renders the pill for out-of-range coords too (defence in depth)', async () => {
+    nextModuleDetail = { ...baseModule, location: { lat: 200, lng: 11.66 } };
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText('Location pending')).toBeInTheDocument();
+    });
+  });
+});

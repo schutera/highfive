@@ -58,6 +58,12 @@ const translations = {
       onlineCount: '{online}/{total}',
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
+      // Pill rendered next to a module name when its location is at
+      // the (0,0) sentinel \u2014 the firmware failed to obtain a fix at
+      // boot and hasn't yet recovered via heartbeat-side retry.
+      // PR II / issue #89 \u2014 see homepage/src/components/MapView.tsx
+      // for the matching `hasPlausibleLocation` helper.
+      locationPending: 'Location pending',
     },
 
     // ---- Module Panel ----
@@ -441,6 +447,7 @@ const translations = {
       onlineCount: '{online}/{total}',
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
+      locationPending: 'Standort ausstehend',
     },
 
     // ---- Module Panel ----

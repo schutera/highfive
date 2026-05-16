@@ -332,6 +332,90 @@ not a bug introduced by #79.
    unless the manifest sets an explicit `allow_downgrade: true` flag.
    Deferred from PR #82 to keep the TLS-migration diff focused.
 
+**Closed in PR II — implementation note.** The architectural fix landed
+as the 3-arg `hf::shouldOtaUpdate(current_version, current_sequence,
+manifest)` in [`ESP32-CAM/lib/ota_version/ota_version.cpp`](../../ESP32-CAM/lib/ota_version/ota_version.cpp).
+SEQUENCE lives in `ESP32-CAM/SEQUENCE` (single writer, same pattern
+as VERSION) and rides through `build.sh` + `extra_scripts.py` +
+`build_dev_artifact.py` to `firmware.json` and the firmware binary
+macro. `parseOtaManifest` **rejects** manifests missing `sequence`
+— see [ADR-008's "Sequence + allow_downgrade addendum"](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83)
+for the full migration mechanic. The rollback procedure
+(`allow_downgrade: true` for the deliberate rollback wave, then
+immediately unset it) is documented in
+[`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md).
+
+### First-boot geolocation race: bounded retry + heartbeat-side recovery (#89, PR II)
+
+**What happened.** The firmware's `getGeolocation` in
+[`ESP32-CAM/esp_init.cpp`](../../ESP32-CAM/esp_init.cpp) was a
+single-shot WiFi scan + Google Geolocation API POST called once
+unconditionally in `setup()`. On the realistic failure mode — fresh
+radio, DHCP still settling, WiFi scan returns empty before connection
+is fully up — it silently returned, leaving `esp_config->geolocation`
+at the `(0,0,0)` sentinel set in `setupConfig`. The next call,
+`initNewModuleOnServer`, UPSERTed the row at `(0,0)` — the module
+appeared at Null Island in the dashboard map until manually fixed.
+Surfaced as issue [#89](https://github.com/schutera/highfive/issues/89);
+the same root cause produced half of the symptom in issue
+[#49](https://github.com/schutera/highfive/issues/49) ("jumping
+geolocation in the dashboard" — the other half was the existing
+deterministic `fuzzLocation`, which was a red herring).
+
+**Why it happened.** Two design choices compounded.
+
+1. `getGeolocation` had no retry loop. The Google API legitimately
+   fails on a flaky first-boot WiFi association (BSSID list comes
+   back too short / empty), and there was no second attempt within
+   the boot window.
+2. There was no in-uptime recovery path: heartbeats carried no
+   lat/lng, so a module that registered at `(0,0)` could only be
+   fixed by the next daily reboot (ADR-007) re-running `setup()`'s
+   `getGeolocation+initNewModuleOnServer` pair.
+
+**How to avoid it next time.** Two layers — pinned by tests in
+[`ESP32-CAM/test/test_native_geolocation/`](../../ESP32-CAM/test/test_native_geolocation/test_geolocation.cpp)
+and [`duckdb-service/tests/test_heartbeats_endpoint.py`](../../duckdb-service/tests/test_heartbeats_endpoint.py):
+
+1. **Boot-time bounded retry** (3 attempts with 2s/6s/14s backoff)
+   wrapping the existing single-shot logic. Worst case ~22s, well
+   under the 60s `TASK_WDT` budget. Validated by a pure
+   `hf::isPlausibleFix(float lat, float lng, float acc)` helper in
+   [`ESP32-CAM/lib/geolocation/`](../../ESP32-CAM/lib/geolocation/geolocation.cpp)
+   that rejects `(0,0,*)`, NaN, out-of-range, and zero-accuracy
+   readings. Host-testable C++17, no Arduino deps — same pattern as
+   `lib/module_name/` from PR I.
+2. **Heartbeat-side recovery** for the case where all 3 boot
+   attempts fail. The firmware still registers the module (at the
+   `(0,0)` sentinel) so it appears in the operator UI with a
+   "Location pending" pill, then `loop()` schedules `attemptGeolocation`
+   retries every 30 minutes. On success the next heartbeat carries
+   `latitude/longitude/accuracy` as form fields; the duckdb-service
+   heartbeat endpoint UPDATEs `module_configs.lat/lng` **iff** the
+   existing row sits at `(0,0)` — the conservative "only patch from
+   (0,0)" rule guards against clobbering a deliberately-placed module.
+
+The frontend `MapView.tsx::hasPlausibleLocation` helper applies the
+same rule one layer further: any module that the server still has
+recorded at `(0,0)` is filtered out of the map's marker set and
+flagged with a "Location pending" pill in the side-list. Three
+layers, one rule — `hf::isPlausibleFix` (firmware), `_is_plausible_fix`
+(server), `hasPlausibleLocation` (frontend) — so a refactor that
+drifts one without the others is a test-suite regression on three
+sides at once.
+
+**Deferred follow-ups:**
+
+- The 30-minute deferred-retry cadence is a guess; the right
+  cadence is "as often as plausible without DoSing Google's API on a
+  captive-portal scenario". Field telemetry from the first
+  deployment cycle should inform a tune.
+- "Module physically moved" is NOT solved here. The heartbeat-side
+  patch is `(0,0) → real fix` only. A module that's been picked up
+  and reinstalled elsewhere will keep reporting heartbeats with the
+  new fix; the server ignores them. A future feature could lift this
+  via an explicit operator "relocate" gesture in the admin UI.
+
 ### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
 
 **What happened.** PR #82's hardware smoke test against

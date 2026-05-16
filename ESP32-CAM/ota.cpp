@@ -242,13 +242,23 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
         }
     }  // tlsClient + plainClient destructed here; mbedTLS context released
 
-    if (!hf::shouldOtaUpdate(FIRMWARE_VERSION, manifest.version)) {
-        logf("[OTA] already current (version=%s)", manifest.version);
+    if (!hf::shouldOtaUpdate(FIRMWARE_VERSION, FIRMWARE_SEQUENCE, manifest)) {
+        // Three reasons we land here: same version (canonical no-op),
+        // different version + lower-or-equal sequence without
+        // allow_downgrade (downgrade refusal — the #83 guard), or
+        // malformed version on either side. Log the comparison so the
+        // operator can distinguish them in the field.
+        logf("[OTA] no update: current=%s seq=%u, manifest=%s seq=%u allow_downgrade=%d",
+             FIRMWARE_VERSION, (unsigned)FIRMWARE_SEQUENCE,
+             manifest.version, (unsigned)manifest.sequence,
+             (int)manifest.allow_downgrade);
         return;
     }
-    logf("[OTA] update available: %s -> %s (%u bytes, md5=%s)",
-         FIRMWARE_VERSION, manifest.version,
-         (unsigned)manifest.app_size, manifest.app_md5);
+    logf("[OTA] update available: %s seq=%u -> %s seq=%u (%u bytes, md5=%s, allow_downgrade=%d)",
+         FIRMWARE_VERSION, (unsigned)FIRMWARE_SEQUENCE,
+         manifest.version,  (unsigned)manifest.sequence,
+         (unsigned)manifest.app_size, manifest.app_md5,
+         (int)manifest.allow_downgrade);
 
     // ---- Binary fetch + Update.write streaming ----
     // Fresh client for the second hop. The manifest's clients went

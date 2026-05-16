@@ -1,0 +1,10 @@
+{
+  "name": "hf_geolocation",
+  "version": "0.1.0",
+  "description": "Plausibility checker for geolocation fixes. Pure C++17, host-testable. See issue #89.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

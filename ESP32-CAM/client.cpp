@@ -307,6 +307,30 @@ int sendHeartbeat(esp_config_t *esp_config) {
               + "&free_heap=" + String(ESP.getFreeHeap())
               + "&fw_version=" + String(FIRMWARE_VERSION);
 
+  // PR II / issue #89: if a deferred geolocation retry succeeded
+  // mid-uptime, attach the fresh fix to this heartbeat so the server
+  // can recover a module that registered at the (0,0) sentinel on
+  // boot. The duckdb-service side will UPDATE module_configs.lat/lng
+  // — but ONLY if the existing row is at (0,0) — so this is safe to
+  // send unconditionally once we have a plausible fix queued.
+  //
+  // Consume-on-success semantics: `consumePendingGeolocationFixForHeartbeat`
+  // clears the pending flag before we POST, so a failed POST does NOT
+  // re-queue the fix. This is intentional — the next deferred retry
+  // (30 minutes out) will produce a fresh fix anyway, and re-queueing
+  // would keep the heartbeat body growing every iteration until the
+  // POST eventually lands. On a long server outage the operator can
+  // still rely on the next daily reboot's fresh getGeolocation+
+  // initNewModuleOnServer pair to fix the row.
+  if (hasPendingGeolocationFixToReport()) {
+    geolocation_t fix = consumePendingGeolocationFixForHeartbeat();
+    body += String("&latitude=")  + String(fix.latitude, 6);
+    body += String("&longitude=") + String(fix.longitude, 6);
+    body += String("&accuracy=")  + String(fix.accuracy, 1);
+    logf("[heartbeat] carrying recovered geolocation fix lat=%.6f lng=%.6f acc=%.1f",
+         fix.latitude, fix.longitude, fix.accuracy);
+  }
+
   hf::breadcrumbSet("sendHeartbeat:write");
   hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
                + "Host: " + String(url.host.c_str()) + ":" + String((unsigned)url.port) + "\r\n"

@@ -1,9 +1,14 @@
-"""PlatformIO pre-build hook: inject FIRMWARE_VERSION and GEO_API_KEY.
+"""PlatformIO pre-build hook: inject FIRMWARE_VERSION, FIRMWARE_SEQUENCE, GEO_API_KEY.
 
 Mirrors what ``build.sh`` passes to ``arduino-cli`` via ``--build-property``,
 so both build paths agree on the build-time macros. The fallback in
 ``esp_init.h`` only fires for raw Arduino IDE compiles that don't go through
 either path.
+
+NOTE (chapter-11 follow-up): this is the third macro injected through both
+this script and ``build.sh``. The duplication is intentional for now — see
+``docs/11-risks-and-technical-debt/README.md`` for the eventual consolidation
+into ``build_macros.{sh,py}``. Don't add a fourth without consolidating.
 
 Wired into ``[env:esp32cam]`` via ``extra_scripts = pre:extra_scripts.py``.
 
@@ -56,6 +61,19 @@ version = (
     else "dev-unset"
 )
 
+# SEQUENCE (#83): operator-bumped monotonic integer. Read from
+# `ESP32-CAM/SEQUENCE`. The Arduino-IDE fallback (no SEQUENCE file at
+# all) emits ``0`` so the firmware's `shouldOtaUpdate` refuses to OTA
+# from a dev build — see ``esp_init.h``'s `FIRMWARE_SEQUENCE` fallback.
+sequence_file = project_dir / "SEQUENCE"
+if sequence_file.exists():
+    try:
+        sequence = int(_strip_all_whitespace(sequence_file.read_text(encoding="utf-8")))
+    except ValueError:
+        sequence = 0
+else:
+    sequence = 0
+
 geo_key_file = project_dir / "GEO_API_KEY"
 geo_key = (
     _strip_all_whitespace(os.environ.get("GEO_API_KEY") or "")
@@ -64,10 +82,12 @@ geo_key = (
 
 env.Append(  # noqa: F821
     CPPDEFINES=[
-        ("FIRMWARE_VERSION", env.StringifyMacro(version)),       # noqa: F821
-        ("GEO_API_KEY",      env.StringifyMacro(geo_key)),       # noqa: F821
+        ("FIRMWARE_VERSION",  env.StringifyMacro(version)),       # noqa: F821
+        ("FIRMWARE_SEQUENCE", str(sequence)),
+        ("GEO_API_KEY",       env.StringifyMacro(geo_key)),       # noqa: F821
     ]
 )
 
 print(f"[extra_scripts] FIRMWARE_VERSION={version}")
+print(f"[extra_scripts] FIRMWARE_SEQUENCE={sequence}")
 print(f"[extra_scripts] GEO_API_KEY len={len(geo_key)}")

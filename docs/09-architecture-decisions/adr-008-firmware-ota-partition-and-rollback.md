@@ -313,3 +313,65 @@ watchdog feed.
   we ever want canary releases or per-region pinning, that's a
   manifest shape change (probably keyed by module-ID prefix) and a
   follow-up ADR.
+
+## Sequence + allow_downgrade addendum (PR II, #83)
+
+The original `shouldOtaUpdate` in `ESP32-CAM/lib/ota_version/ota_version.cpp`
+was `strcmp(current, manifest) != 0` — any string difference flashed,
+in either direction. ADR-006 deliberately leaves bee names unordered,
+so the comparator had no way to know which side was "newer". The PR
+#82 hardware smoke test surfaced this as a one-shot downgrade
+pingpong (`mason → leafcutter → mason → leafcutter ...`); the lesson
+is filed at `docs/11-risks-and-technical-debt/README.md` "OTA
+`shouldOtaUpdate` accepts downgrades".
+
+PR II closes it. `firmware.json` grows two fields:
+
+- `sequence`: required, positive integer, monotonic, operator-bumped
+  via `ESP32-CAM/SEQUENCE` (same single-writer pattern as `VERSION`).
+- `allow_downgrade`: optional boolean, default `false`. Set to `true`
+  explicitly when publishing a deliberate rollback wave.
+
+The new comparator:
+
+```cpp
+bool shouldOtaUpdate(const char* current_version,
+                     uint32_t current_sequence,
+                     const OtaManifest& manifest);
+// returns true iff:
+//   manifest.version != current_version AND
+//   (manifest.sequence > current_sequence OR manifest.allow_downgrade)
+```
+
+`parseOtaManifest` **requires** `sequence` (rejects manifests that
+omit it). This is the migration gate: a new firmware that silently
+accepted a sequence-less manifest would fall back to pre-#83 strcmp
+behaviour the moment an operator forgets to add the field. Loud-fail
+is the right answer.
+
+`allow_downgrade` is read but only **literal** `true` enables; absent
+or any non-`true` value (`false`, `1`, `"true"`, garbage) is treated
+as `false`. Operator typos fail closed.
+
+**Migration mechanic.** The first firmware to ship with sequence-
+aware OTA is `mason` + `SEQUENCE=1`. No prod modules currently run
+`mason` (PR II is the first publish), so the pre-#83 firmware
+pingpong scenario does not apply in the field; the only flash that
+matters is the dev module used for hardware smoke-test T1.
+
+**Operator rollback procedure.** Documented in
+`docs/07-deployment-view/esp-flashing.md` "How to deliberately roll
+back a fleet". Short form: bump SEQUENCE _backwards_ is forbidden;
+set `allow_downgrade: true` for the rollback publish, then
+immediately un-set it on the next regular publish. `build.sh` emits
+a stderr warning if SEQUENCE drops below the previously-published
+manifest's value.
+
+**Trade-off taken.** `allow_downgrade` is an unsigned manifest field.
+Combined with ADR-008's pre-existing "Plain HTTP, MD5 integrity, no
+signature" stance, an attacker with network MITM can serve a forged
+manifest with `allow_downgrade: true` to force a downgrade. This is
+no weaker than the rest of the manifest under the current threat
+model. A future TLS + signed-manifest ADR will close both gaps
+together — they share an implementation seam (a signed envelope) and
+splitting them would force two migration cycles instead of one.

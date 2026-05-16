@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import MapView from '../components/MapView';
+import MapView, { hasPlausibleLocation } from '../components/MapView';
 import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
 import { useTranslation } from '../i18n/LanguageContext';
@@ -292,6 +292,17 @@ export default function DashboardPage() {
                       <p className="text-[10px] font-mono tracking-wider text-hf-fg-mute">
                         {module.id.slice(0, 4).toUpperCase()}
                       </p>
+                      {/* "Location pending" pill (PR II / issue #89).
+                          Shown when the module is at the (0,0) sentinel
+                          — firmware failed boot-time getGeolocation
+                          and hasn't yet recovered via heartbeat-side
+                          retry. Filtered out of the map's marker set
+                          by `hasPlausibleLocation` in MapView. */}
+                      {!hasPlausibleLocation(module.location) && (
+                        <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider bg-hf-fg/[0.06] text-hf-fg-mute">
+                          {t('dashboard.locationPending')}
+                        </span>
+                      )}
                     </div>
                     <span
                       className="w-2.5 h-2.5 rounded-full flex-shrink-0 ml-2"
@@ -442,6 +453,11 @@ export default function DashboardPage() {
                             <p className="text-[10px] font-mono tracking-wider text-hf-fg-mute">
                               {m.id.slice(0, 4).toUpperCase()}
                             </p>
+                            {!hasPlausibleLocation(m.location) && (
+                              <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider bg-hf-fg/[0.06] text-hf-fg-mute">
+                                {t('dashboard.locationPending')}
+                              </span>
+                            )}
                             <p
                               className="text-hf-xs"
                               style={{

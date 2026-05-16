@@ -349,8 +349,9 @@ void setup() {
 
   hf::breadcrumbSet("setup:getGeolocation");
   stageStartMs = millis();
-  getGeolocation(&esp_config);
-  logf("[STAGE] getGeolocation took=%lums", millis() - stageStartMs);
+  const bool gotFix = getGeolocation(&esp_config);
+  logf("[STAGE] getGeolocation took=%lums fix=%s",
+       millis() - stageStartMs, gotFix ? "ok" : "deferred");
 
   Serial.print("Latitude: ");
   Serial.println(esp_config.geolocation.latitude, 6);
@@ -362,10 +363,25 @@ void setup() {
   Serial.println(esp_config.geolocation.accuracy);
 
   // ---- Initialize new module on server ---- //
+  // We register UNCONDITIONALLY — even at the (0,0) sentinel when no
+  // fix was obtained — so the module appears in the operator UI with
+  // a "Location pending" pill (homepage-side, PR II / issue #49)
+  // rather than being invisible until the next boot succeeds. The
+  // heartbeat-side recovery path (loop()) will UPDATE the lat/lng
+  // once a fix lands; duckdb-service only patches FROM (0,0), so a
+  // deliberately-placed module is never clobbered.
   hf::breadcrumbSet("setup:initNewModuleOnServer");
   stageStartMs = millis();
   initNewModuleOnServer(&esp_config);
   logf("[STAGE] initNewModuleOnServer took=%lums", millis() - stageStartMs);
+
+  // Arm the deferred-retry path if boot failed to obtain a fix.
+  // loop() ticks the retry every iteration; once 30 minutes elapses
+  // and a successful fix lands, the next heartbeat carries it.
+  if (!gotFix) {
+    markGeolocationFixNeedsRetry();
+    Serial.println("[setup] no plausible geolocation fix this boot — armed deferred retry");
+  }
 
   // Boot-time heartbeat (#15): plant freshness signal before slow
   // camera init so the dashboard reflects the post-reflash / daily-
@@ -617,6 +633,12 @@ void loop() {
     delay(500);
     ESP.restart();
   }
+
+  // Geolocation deferred-retry tick (PR II / issue #89). Cheap call —
+  // returns immediately unless the boot fix failed AND the 30-minute
+  // backoff has elapsed. On a successful retry it queues the new fix
+  // to be picked up by the next heartbeat.
+  tickGeolocationDeferredRetry(&esp_config);
 
   // Hourly telemetry heartbeat so the dashboard's lastSeenAt stays
   // fresh between captures. Tiny payload, no camera work, fails-quiet

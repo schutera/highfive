@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import MapView from '../components/MapView';
 import { hasPlausibleLocation } from '../lib/location';
@@ -56,6 +56,27 @@ export default function DashboardPage() {
   };
 
   const onlineCount = modules.filter((m) => m.status === 'online').length;
+
+  // Side-list = bounds-filtered plausible modules (from MapView's
+  // `onVisibleModulesChange`) PLUS every module without a plausible
+  // location. Pending-location modules have no spatial relationship
+  // to the map bounds, so the side-list is the only surface where the
+  // operator can spot a module stuck at the (0,0) sentinel after a
+  // failed first-boot getGeolocation (#89). MapView itself stays
+  // strict (only renders markers for plausible coords); the union
+  // happens here so MapView's name "visible" keeps meaning "rendered
+  // on the map". The two sets are disjoint by construction —
+  // pendingModules = !plausible, visibleModules ⊆ plausible — so no
+  // dedup needed. Pinned by DashboardPage.test.tsx's
+  // "renders Location pending pill" test.
+  const pendingModules = useMemo(
+    () => modules.filter((m) => !hasPlausibleLocation(m.location)),
+    [modules],
+  );
+  const sideListModules = useMemo(
+    () => [...visibleModules, ...pendingModules],
+    [visibleModules, pendingModules],
+  );
 
   /**
    * Status pill for the header — live region so screen readers hear updates
@@ -259,18 +280,18 @@ export default function DashboardPage() {
       )}
 
       {/* Desktop: floating module list */}
-      {!loading && !error && visibleModules.length > 0 && (
+      {!loading && !error && sideListModules.length > 0 && (
         <div className="hidden md:flex absolute bottom-6 left-6 w-80 hf-card hf-glass z-[999] max-h-[420px] flex-col overflow-hidden">
           <div className="p-4 border-b border-hf-border shrink-0">
             <h2 className="font-bold text-hf-honey-700" style={{ fontSize: 'var(--fs-md)' }}>
               {t('common.hiveModules')}
             </h2>
             <p className="text-hf-xs text-hf-fg-mute mt-0.5">
-              {t('dashboard.modulesInView', { count: visibleModules.length })}
+              {t('dashboard.modulesInView', { count: sideListModules.length })}
             </p>
           </div>
           <ul className="overflow-y-auto flex-1 p-3 space-y-1.5">
-            {visibleModules.map((module) => (
+            {sideListModules.map((module) => (
               <li key={module.id}>
                 <button
                   onClick={() => setSelectedModule(module)}
@@ -335,7 +356,7 @@ export default function DashboardPage() {
       )}
 
       {/* Mobile: collapsed pill + bottom-sheet */}
-      {!loading && !error && visibleModules.length > 0 && !selectedModule && (
+      {!loading && !error && sideListModules.length > 0 && !selectedModule && (
         <div className="md:hidden absolute bottom-0 left-0 right-0 z-[999]">
           {!mobileListExpanded && (
             <div className="p-3 pb-safe-bottom">
@@ -357,7 +378,7 @@ export default function DashboardPage() {
                       {t('common.hiveModules')}
                     </div>
                     <div className="text-hf-xs text-hf-fg-mute">
-                      {t('dashboard.inViewTap', { count: visibleModules.length })}
+                      {t('dashboard.inViewTap', { count: sideListModules.length })}
                     </div>
                   </div>
                 </div>
@@ -400,7 +421,7 @@ export default function DashboardPage() {
                   <div>
                     <h2 className="font-bold text-hf-fg">{t('common.hiveModules')}</h2>
                     <p className="text-hf-xs text-hf-fg-mute">
-                      {t('dashboard.modulesInView', { count: visibleModules.length })}
+                      {t('dashboard.modulesInView', { count: sideListModules.length })}
                     </p>
                   </div>
                   <button
@@ -425,7 +446,7 @@ export default function DashboardPage() {
                   </button>
                 </div>
                 <ul className="overflow-y-auto overscroll-contain flex-1 p-4 pb-safe-bottom space-y-2">
-                  {visibleModules.map((m) => (
+                  {sideListModules.map((m) => (
                     <li key={m.id}>
                       <button
                         onClick={() => handleModuleSelect(m)}

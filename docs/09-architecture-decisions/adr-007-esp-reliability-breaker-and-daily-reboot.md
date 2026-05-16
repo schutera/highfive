@@ -128,7 +128,10 @@ but whose heartbeats fail will not.
   `ESP.restart()`.
 - Don't lower `TASK_WDT_TIMEOUT_S` back to 30 without re-running
   the worst-case capture-plus-heartbeat scenario (commit `ea7dc73`
-  is the last one that audited it).
+  is the last one that audited it). Enforced at compile time by the
+  `static_assert(TASK_WDT_TIMEOUT_S >= 60, ...)` immediately after the
+  `#define` in `ESP32-CAM/ESP32-CAM.ino` — a lowered value produces
+  a build error with the citation trail back to this ADR.
 - Don't move the `daily_reboot` NVS flag out of the `boot`
   namespace without updating both the writer (in `loop()`'s
   daily-trigger path) and the reader/clear path (early in

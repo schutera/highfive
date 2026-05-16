@@ -78,22 +78,29 @@ Docker will build and start all services defined in the
 
 After startup the services are available on the following ports:
 
-| Service                | Port   | Description                              |
-| ---------------------- | ------ | ---------------------------------------- |
-| Homepage               | `5173` | React + Vite frontend                    |
-| Backend API            | `3002` | Express + TS backend                     |
-| Image Service          | `8000` | Image ingestion and analysis             |
-| DuckDB Service         | `8002` | Database API                             |
+| Service        | Port   | Description                  |
+| -------------- | ------ | ---------------------------- |
+| Homepage       | `5173` | React + Vite frontend        |
+| Backend API    | `3002` | Express + TS backend         |
+| Image Service  | `8000` | Image ingestion and analysis |
+| DuckDB Service | `8002` | Database API                 |
 
 The web-interface itself is reachable under: http://localhost:5173
 
-> **Backend port — must be 3002.** `backend/src/server.ts` reads the
-> `PORT` env var (default `3001`, a legacy production value). The dev
-> compose stack maps host `3002 → container 3002` and the homepage API
-> client targets `:3002`, so the backend service in `docker-compose.yml`
-> sets `PORT=3002` explicitly. If you remove that line the dashboard
-> can't reach the backend (host port stays unbound). See lessons
-> register in [`CLAUDE.md`](../../CLAUDE.md) for the original incident.
+> **Backend port — 3002 by default.** `backend/src/server.ts` reads
+> the `PORT` env var through `backend/src/port.ts`'s `resolvePort()`,
+> which falls back to `3002` when `PORT` is unset, empty, or
+> non-numeric. The dev compose stack maps host `3002 → container 3002`
+> and the homepage API client targets `:3002`, so the binding lines
+> up with the host map even when nobody touches `PORT`. The backend
+> service in `docker-compose.yml` still sets `PORT=3002` explicitly —
+> it documents the dev-stack intent and silences the unset-fallback
+> warning that `server.ts` emits on `npm run dev` workflows. Removing
+> it now is a no-op for the dashboard (default matches), but the
+> startup warning will fire — that's the signal to ask whether the
+> drop was intentional. The earlier `3001` default plus the original
+> incident (host port unbound → silent dashboard breakage) is
+> captured in chapter 11's lessons-learned register.
 
 ## 6. Persistent Storage
 

@@ -4,6 +4,7 @@
 #include "logbuf.h"
 #include "module_id.h"
 #include "url.h"
+#include "http_status.h"
 #include "breadcrumb.h"
 #include <string>
 #include <time.h>
@@ -227,12 +228,16 @@ int postImage(esp_config_t *esp_config) {
     }
   }
 
-  int code = -4;
-  if (status.startsWith("HTTP/1.1 ")) {
-    code = status.substring(9, 12).toInt();
-  }
+  // The non-2xx contract (CLAUDE.md "Critical rules" historical entry):
+  // parse, always note the code in logbuf, then propagate non-zero on
+  // anything outside 2xx so the upstream return-value flow surfaces the
+  // failure. The two helpers live in lib/http_status/ and are pinned by
+  // the native test suite — refactoring out either call is now visible
+  // in code review rather than silently breaking the rule.
+  const int code = hf::http::parseStatusCode(std::string(status.c_str()));
   logbufNoteHttpCode(code);
-  if (code < 200 || code >= 300) {
+  const int returnValue = hf::http::statusCodeToReturnValue(code);
+  if (returnValue != 0) {
     logf("[HTTP] non-2xx %d — dropping socket", code);
     client.stop();
   }
@@ -241,6 +246,13 @@ int postImage(esp_config_t *esp_config) {
   unsigned long __t_all_end = millis();
   Serial.println(String("---- total capture+post took ") + String((__t_all_end - __t_all_start) / 1000.0f, 3) + " seconds");
 
+  // Return shape: the raw HTTP code (e.g. 200, 403, 500) or a negative
+  // sentinel. ESP32-CAM.ino's captureAndUpload switch (`if (httpCode >=
+  // 100)`) keys on this — DO NOT switch to statusCodeToReturnValue here,
+  // it would collapse "200 OK" to 0 and the switch would skip the
+  // success-path logging. sendHeartbeat returns the OPPOSITE shape
+  // (0 for 2xx, code otherwise) because its caller only cares about
+  // success/failure. The asymmetry is load-bearing for both call sites.
   return code;
 }
 
@@ -304,26 +316,36 @@ int sendHeartbeat(esp_config_t *esp_config) {
                + body);
   hbClient.flush();
 
-  // Parse the HTTP status from the first response line. Format is
-  // "HTTP/1.1 200 OK\r\n"; we want the integer between the first and
-  // second space. Anything not 2xx is a real upload failure that
-  // belongs in the telemetry ring buffer.
   hf::breadcrumbSet("sendHeartbeat:read_status");
   String statusLine = hbClient.readStringUntil('\n');
   hbClient.stop();
   Serial.print("[heartbeat] ");
   Serial.println(statusLine);
 
-  int firstSpace = statusLine.indexOf(' ');
-  int secondSpace = statusLine.indexOf(' ', firstSpace + 1);
-  int httpCode = -4; // sentinel: invalid/missing response
-  if (firstSpace > 0 && secondSpace > firstSpace) {
-    httpCode = statusLine.substring(firstSpace + 1, secondSpace).toInt();
-  }
+  // Shared non-2xx contract — see the postImage call site above. The
+  // helpers in lib/http_status/ are the single source of truth for
+  // "parse + decide whether to surface as non-zero." The native test
+  // suite pins both functions; the integration here is the part that
+  // code review must keep honest.
+  //
+  // Behaviour vs. the previous inline indexOf()-based parse: the new
+  // helper requires a strict "HTTP/1.1 " prefix. duckdb-service's
+  // Flask backend speaks HTTP/1.1, and an HTTP/1.0 response from
+  // anything else is a protocol-version mismatch that legitimately
+  // belongs in the non-2xx telemetry rather than being silently
+  // accepted as 200.
+  const int httpCode = hf::http::parseStatusCode(std::string(statusLine.c_str()));
   logbufNoteHttpCode(httpCode);
-  if (httpCode < 200 || httpCode >= 300) {
+  const int returnValue = hf::http::statusCodeToReturnValue(httpCode);
+  if (returnValue != 0) {
     logf("[heartbeat] non-2xx: %d", httpCode);
-    return httpCode;
   }
-  return 0;
+  // Return shape: 0 for 2xx, otherwise the raw HTTP code or negative
+  // sentinel. ESP32-CAM.ino's boot-heartbeat check (`if (sendHeartbeat(...)
+  // == 0)`) keys on the 0=success convention. DO NOT swap for the raw
+  // code shape that postImage uses — both callers depend on this
+  // asymmetry; postImage's switch needs the raw code, this caller only
+  // wants pass/fail. The helpers in `lib/http_status/` produce both
+  // shapes; each call site picks the right one for its caller.
+  return returnValue;
 }

@@ -1,0 +1,10 @@
+{
+  "name": "hf_http_status",
+  "version": "0.1.0",
+  "description": "Pure C++ HTTP/1.1 status-line parsing and 2xx-decision helpers for HiveHive ESP32-CAM firmware. Host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

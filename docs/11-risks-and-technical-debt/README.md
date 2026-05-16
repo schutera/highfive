@@ -77,6 +77,69 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Critical-rules prose-to-code audit, extended — five more hardenings in one PR (issues #86, #87)
+
+**What happened.** PR #84 closed the dev-fallback-as-production-admin-gate
+incident by lifting one CLAUDE.md "Critical rules" entry into a
+code-side startup guard. The senior-review cycle on PR #84 also called
+out three sibling problems that the same audit pattern would close:
+two trailing-edge auth-surface findings (timing-safe-equal on the
+secret compare; case-insensitive dev-key match at frontend build time)
+plus three more "do not violate" rules in CLAUDE.md that were still
+prose-only — `TASK_WDT_TIMEOUT_S ≥ 60s`, `PORT=3002` in
+docker-compose, and "`sendHeartbeat` must not swallow non-2xx". The
+PR-#84-only lesson named this in its "How to avoid it next time"
+item 1: _"The remaining 'Critical rules' entries deserve the same
+audit."_ This PR is the second iteration of that pattern.
+
+**Why it happened.** The bugs that earned those CLAUDE.md entries
+(`ea7dc73`, PR-17 review critical) were paid for with field outages.
+The fixes landed in code but the rules were transcribed as prose for
+the next maintainer to remember — which works exactly until the next
+maintainer is a fresh contributor, a future-you under time pressure,
+or a refactor that "simplifies" something across the boundary. The
+"Critical rules" list grew because the same anti-pattern kept playing
+out: a load-bearing constraint encoded as a sentence rather than as
+a build error.
+
+**How to avoid it next time.** Two lessons compound on PR #84's:
+
+1. **When you find yourself adding a "do not violate" rule to
+   CLAUDE.md, first ask whether it can be a build error or a fast
+   self-describing crash at first run.** A `static_assert` on a
+   `#define` (firmware), a startup `throw` with a self-describing
+   message (Node service), a load-time guard in a Vite bundle (the
+   crash fires at first browser import, not during `vite build` —
+   Vite inlines `import.meta.env` values but doesn't execute module
+   tops; that's intrinsic), or a pure helper plus a native test
+   pinning its contract (firmware non-2xx) cover most of the cases.
+   The prose entry is the fallback when none of those mechanisms fit
+   — not the first option. PR #84 used a startup throw; this PR added
+   `static_assert`, a startup warn-on-unset, a build-time validator,
+   constant-time-compare via a single boundary, and a native test
+   pinning a refactor-resistant contract.
+2. **Removing the prose entry is part of the work.** If the rule is
+   now code-enforced, the prose entry isn't a redundant safety net —
+   it's a hint that two sources of truth exist, and CLAUDE.md is the
+   wrong one. Keeping both invites the next maintainer to weaken the
+   code-side check on the assumption that the prose carries the rule.
+   This PR removed three now-enforced entries. The dev-API-key
+   entry stays because `NODE_ENV=development` is an intentional
+   off-ramp the operator owns — safelist semantics and pinned tests
+   live in `backend/src/env.ts`'s `DEV_ENV_TOKENS` +
+   `backend/tests/auth-prod-guard.test.ts`. Next iteration of this
+   pattern: move the dev-fallback behind an explicit
+   `ALLOW_DEV_FALLBACK=1` opt-in env var that no production deploy
+   would set, and the prose entry can come out too.
+
+The remaining "Critical rules" entries — force-push to main, hook
+bypass, `--amend` after hook failure, `DuckDB` connection from
+image-service, `localhost` in inter-service URLs, commit-message-vs-
+code trust — are either review-time disciplines or partial-enforcement
+cases. None map cleanly to a build error today; revisit if the
+project grows enforcement infrastructure (e.g. a custom ESLint rule
+or a CI lint pass).
+
 ### Plaintext API key on the wire was the default for months (issue #79)
 
 **What happened.** The shipped `ESP32-CAM/config.json` baked
@@ -208,20 +271,12 @@ environment slips past it.
    "fast-crash with a clear remediation message." If the answer is
    "yes, it logged in", the smoke test has just found the next P0.
 
-Hardening landed in PR #84. Two follow-up issues remain open:
-
-- [#86](https://github.com/schutera/highfive/issues/86) — replace the
-  strict-inequality byte-by-byte comparison in
-  [`apiKeyAuth`](../../backend/src/auth.ts) and the admin-gate
-  middleware with `crypto.timingSafeEqual`. Pre-existing surface,
-  surfaced during PR #84's review cycle.
-- [#87](https://github.com/schutera/highfive/issues/87) — extend the
-  existing build-time guard at
-  [`homepage/src/services/api.ts`'s production-build check](../../homepage/src/services/api.ts)
-  with the same case-insensitive dev-key match that
-  `backend/src/auth.ts` enforces. The current guard catches
-  "VITE_API_KEY unset"; the residual gap is "VITE_API_KEY literally
-  set to the dev fallback (in any casing)."
+Hardening landed in PR #84. Both follow-up issues
+([#86](https://github.com/schutera/highfive/issues/86) — constant-time
+admin-key compare via `verifyApiKey`;
+[#87](https://github.com/schutera/highfive/issues/87) — frontend
+case-insensitive dev-key match via `validateBuildTimeApiKey`) closed
+in the Critical-rules prose-to-code audit PR (lesson above).
 
 ### Setup wizard shipped two silent-success bugs (issues #43, #44)
 

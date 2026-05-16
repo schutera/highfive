@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { timingSafeEqual } from 'crypto';
 import { isProduction } from './env';
 
 // Public dev fallback. Lives here, in tests, and in CLAUDE.md — anyone reading
@@ -62,6 +63,37 @@ if (isProduction() && ENV_KEY === undefined) {
 
 const API_KEY = ENV_KEY ?? DEV_FALLBACK_KEY;
 
+// Constant-time compare for symmetric secrets. Strict-inequality short-circuits
+// on the first differing byte, leaking how many leading bytes of the submitted
+// value matched the configured key — exploitable over thousands of probes from
+// a network position with low jitter. timingSafeEqual is the standard fix.
+//
+// Length mismatch returns false before calling timingSafeEqual: Node's
+// timingSafeEqual throws on length mismatch, and we don't want to surface
+// that as a 500 from the auth middleware. The length-mismatch branch leaks
+// the configured secret's length to a probing attacker — for the single
+// fixed-length deployment key the project uses, that's a recoverable
+// constant rather than ongoing leakage. The byte content (the part that
+// actually carries the entropy) is what the constant-time compare protects.
+// Acceptable tradeoff for the threat model in ADR-003.
+function constantTimeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, 'utf8');
+  const bBuf = Buffer.from(b, 'utf8');
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
+/**
+ * Verify a submitted key against the configured API_KEY in constant time.
+ *
+ * Single exported boundary for the secret-compare — both the API-key middleware
+ * in this file and the admin-gate inline in `app.ts` route through here, so
+ * changes to the compare semantics propagate to both gates by construction.
+ */
+export function verifyApiKey(provided: string): boolean {
+  return constantTimeEqual(provided, API_KEY);
+}
+
 export interface AuthenticatedRequest extends Request {
   apiKeyValid?: boolean;
 }
@@ -88,7 +120,7 @@ export function apiKeyAuth(req: AuthenticatedRequest, res: Response, next: NextF
     return;
   }
 
-  if (apiKey !== API_KEY) {
+  if (!verifyApiKey(apiKey)) {
     res.status(403).json({
       error: 'Forbidden',
       message: 'Invalid API key',

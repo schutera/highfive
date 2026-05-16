@@ -1,15 +1,13 @@
 import type { Module, ModuleDetail, TelemetryEntry } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
+// The build-time validator + DEV_FALLBACK_KEY live in their own module
+// so main.tsx can side-effect-import them and the throw fires on first
+// page load. See ./api-key-validator.ts for the rationale; importing
+// here would land them in the lazy api-* chunk and the home-page route
+// would not trigger them. Re-exported for unit tests.
+import { DEV_FALLBACK_KEY, validateBuildTimeApiKey } from './api-key-validator';
 
-// Fail loudly on production builds with empty/missing build-args - the
-// dev fallbacks below would otherwise silently bake the dev key + dev
-// API URL into a prod bundle (e.g. a standalone `docker build` without
-// --build-arg). docker-compose.prod.yml already rejects empty values
-// upstream via ${VAR:?msg}, but this guards direct-build paths too.
-if (import.meta.env.PROD && (!import.meta.env.VITE_API_URL || !import.meta.env.VITE_API_KEY)) {
-  throw new Error('VITE_API_URL and VITE_API_KEY must be set at build time for production builds');
-}
-
+export { DEV_FALLBACK_KEY, validateBuildTimeApiKey };
 export type { TelemetryEntry } from '@highfive/contracts';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
@@ -21,7 +19,7 @@ export interface ImageUpload {
 }
 
 // API key for authentication - in production, this should come from environment variables
-const API_KEY = import.meta.env.VITE_API_KEY || 'hf_dev_key_2026';
+const API_KEY = import.meta.env.VITE_API_KEY || DEV_FALLBACK_KEY;
 
 class ApiService {
   private baseUrl: string;

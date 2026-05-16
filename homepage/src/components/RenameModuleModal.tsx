@@ -62,8 +62,11 @@ export default function RenameModuleModal({ module, onClose, onSaved }: RenameMo
       onClose();
     } catch (err) {
       if (err instanceof RenameConflictError) {
+        // Leading 4 hex (matches the disambiguator subtitle elsewhere).
+        // Trailing 4 would collide for same-batch hardware.
+        const macLabel = err.conflictingModuleId.slice(0, 4).toUpperCase();
         setError(
-          `Name "${err.displayName}" is already used by module ${err.conflictingModuleId.slice(-4).toUpperCase()}. Pick a different name.`,
+          `Name "${err.displayName}" is already used by module ${macLabel}. Pick a different name.`,
         );
       } else if (err instanceof Error && err.message === 'unauthorized') {
         // api.renameModule already cleared the key from sessionStorage.

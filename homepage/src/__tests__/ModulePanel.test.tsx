@@ -149,23 +149,87 @@ describe('ModulePanel display-name override', () => {
     });
   });
 
-  it('renders the MAC suffix subtitle in uppercase hex', async () => {
-    // baseModule.id = 'e89fa9f23a08' → last 4 = '3a08' → uppercased '3A08'
+  it('renders the MAC-prefix subtitle in uppercase hex', async () => {
+    // baseModule.id = 'e89fa9f23a08' → leading 4 = 'e89f' → 'E89F'.
+    // Leading rather than trailing so same-batch hardware (which shares
+    // its trailing MAC octets) remains visually distinct — see ADR-011
+    // and the field incident in issue #92.
     nextModuleDetail = { ...baseModule };
     renderPanel();
     await waitFor(() => {
-      expect(screen.getByText('3A08')).toBeInTheDocument();
+      expect(screen.getByText('E89F')).toBeInTheDocument();
     });
   });
 
-  it('renders MAC suffix even when displayName is set (always-visible disambiguator)', async () => {
+  it('renders MAC prefix even when displayName is set (always-visible disambiguator)', async () => {
     nextModuleDetail = { ...baseModule, displayName: 'Garden Bee' };
     renderPanel();
     await waitFor(() => {
       expect(screen.getByText('Garden Bee')).toBeInTheDocument();
     });
-    // MAC suffix is also present so two modules with the same custom
+    // MAC prefix is also present so two modules with the same custom
     // label remain distinguishable on the dashboard.
-    expect(screen.getByText('3A08')).toBeInTheDocument();
+    expect(screen.getByText('E89F')).toBeInTheDocument();
+  });
+});
+
+// Pin the exact field-incident disambiguation: the two MACs from issue
+// #92 (b0:69:6e:f2:3a:08 and e8:9f:a9:f2:3a:08) share their trailing
+// three octets. A trailing-4 disambiguator would render `3A08` on both
+// and defeat the entire point. The leading 4 (`B069` / `E89F`) actually
+// differ. This test pins the right side of that choice.
+describe('ModulePanel MAC disambiguation for same-batch hardware', () => {
+  it('renders distinct prefixes for the issue-#92 field-collision MAC pair', async () => {
+    // Render module A and assert its prefix.
+    nextModuleDetail = {
+      ...baseModule,
+      id: parseModuleId('b0696ef23a08'),
+    };
+    const { unmount } = render(
+      <LanguageProvider>
+        <ModulePanel
+          module={{
+            id: parseModuleId('b0696ef23a08'),
+            name: baseModule.name,
+            displayName: baseModule.displayName,
+            status: baseModule.status,
+          }}
+          onClose={() => undefined}
+          onError={() => undefined}
+        />
+      </LanguageProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText('B069')).toBeInTheDocument();
+    });
+    // Trailing-4 (the broken-disambiguator choice) would have been
+    // 3A08 — if it appears here, the prefix swap regressed.
+    expect(screen.queryByText('3A08')).not.toBeInTheDocument();
+    unmount();
+
+    // Now module B from the same batch — its trailing octets are
+    // identical (f2:3a:08), so only the prefix saves us.
+    nextModuleDetail = {
+      ...baseModule,
+      id: parseModuleId('e89fa9f23a08'),
+    };
+    render(
+      <LanguageProvider>
+        <ModulePanel
+          module={{
+            id: parseModuleId('e89fa9f23a08'),
+            name: baseModule.name,
+            displayName: baseModule.displayName,
+            status: baseModule.status,
+          }}
+          onClose={() => undefined}
+          onError={() => undefined}
+        />
+      </LanguageProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText('E89F')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('B069')).not.toBeInTheDocument();
   });
 });

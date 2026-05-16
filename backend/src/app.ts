@@ -177,6 +177,15 @@ app.patch('/api/modules/:id/name', async (req, res) => {
     res.status(400).json({ error: "body must include 'display_name' (string or null)" });
     return;
   }
+  // Type-check at the proxy too — duckdb-service rejects non-string/
+  // non-null with its own 400, but catching here saves an upstream
+  // round trip and gives a uniformly-shaped error body. Defence-in-
+  // depth, not a hard requirement.
+  const dn: unknown = req.body.display_name;
+  if (dn !== null && typeof dn !== 'string') {
+    res.status(400).json({ error: "'display_name' must be a string or null" });
+    return;
+  }
   try {
     const upstream = await fetch(`${DUCKDB_URL}/modules/${encodeURIComponent(id)}/display_name`, {
       method: 'PATCH',

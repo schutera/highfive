@@ -86,9 +86,15 @@ every label-rendering surface
 ([`ModulePanel`](../../homepage/src/components/ModulePanel.tsx),
 [`DashboardPage`](../../homepage/src/pages/DashboardPage.tsx),
 [`AdminPage`](../../homepage/src/pages/AdminPage.tsx)). The MAC's
-last four hex chars (uppercased) ride along as a subtitle in every
-list and panel so two modules sharing a label remain visually distinct
-even before an operator runs the rename flow.
+**leading** four hex chars (uppercased) ride along as a subtitle in
+every list and panel so two modules sharing a label remain visually
+distinct even before an operator runs the rename flow. The leading
+nibbles are the right choice here, not the trailing ones: same-batch
+ESP32 hardware shares its _trailing_ MAC octets — the field-incident
+MACs `b0:69:6e:f2:3a:08` and `e8:9f:a9:f2:3a:08` share `f2:3a:08`, so
+a trailing-4 disambiguator would render `3A08` on both and defeat the
+whole purpose. The unique-prefix octets (`B069` vs `E89F`) are what
+actually differ.
 
 The DuckDB `ADD COLUMN ... UNIQUE` form is rejected by the v1.4
 parser; the additive migration in

@@ -285,11 +285,12 @@ export default function DashboardPage() {
                       <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
                         {module.displayName ?? module.name}
                       </h3>
-                      {/* MAC suffix subtitle so two same-named modules
-                          stay distinguishable. Uppercased hex to read
-                          as a label. See ADR-011 and issue #93. */}
+                      {/* Leading 4 hex of the MAC — same-batch hardware
+                          shares the *trailing* octets (issue #92 field
+                          incident), so the prefix is the disambiguator.
+                          See ADR-011. */}
                       <p className="text-[10px] font-mono tracking-wider text-hf-fg-mute">
-                        {module.id.slice(-4).toUpperCase()}
+                        {module.id.slice(0, 4).toUpperCase()}
                       </p>
                     </div>
                     <span
@@ -436,8 +437,10 @@ export default function DashboardPage() {
                             <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
                               {m.displayName ?? m.name}
                             </h3>
+                            {/* Leading 4 hex — see DashboardPage desktop
+                                list comment + ADR-011. */}
                             <p className="text-[10px] font-mono tracking-wider text-hf-fg-mute">
-                              {m.id.slice(-4).toUpperCase()}
+                              {m.id.slice(0, 4).toUpperCase()}
                             </p>
                             <p
                               className="text-hf-xs"

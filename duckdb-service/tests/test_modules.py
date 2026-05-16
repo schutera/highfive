@@ -279,6 +279,45 @@ def test_patch_display_name_rejects_non_string(client, fresh_db):
     assert r.status_code == 400
 
 
+def test_patch_display_name_does_not_bump_updated_at(client, fresh_db):
+    """Renaming is a metadata edit, not a liveness event. `updated_at`
+    drives `Module.lastSeenAt` and the 2 h online window in
+    `backend/src/database.ts::fetchAndAssemble`; bumping it on rename
+    would flip any renamed offline module to "online" for two hours
+    regardless of telemetry. Regression for PR-I senior review."""
+    import time
+
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        before = con.execute(
+            "SELECT updated_at FROM module_configs WHERE id = ?", (TEST_MAC_A,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    # Force a measurable gap so any bump would surface as a non-equal
+    # value, not a sub-second tie.
+    time.sleep(0.01)
+
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name", json={"display_name": "Renamed"}
+    )
+    assert r.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        after = con.execute(
+            "SELECT updated_at FROM module_configs WHERE id = ?", (TEST_MAC_A,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert after == before, (
+        f"updated_at must not move on rename; was {before!r}, is {after!r}"
+    )
+
+
 def test_patch_display_name_treats_empty_string_as_clear(client, fresh_db):
     """An empty/whitespace string clears the override. This matches the
     admin UI's "Save with empty input clears the override" UX."""

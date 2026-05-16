@@ -58,6 +58,19 @@ describe('PATCH /api/modules/:id/name', () => {
     expect(res.body.error).toMatch(/invalid module id/i);
   });
 
+  it('returns 400 when display_name is not a string or null', async () => {
+    // Defence-in-depth check at the proxy layer — duckdb-service also
+    // rejects non-string/non-null, but catching here avoids an
+    // upstream round trip and keeps the error body uniform.
+    const res = await request(app)
+      .patch(`/api/modules/${VALID_ID}/name`)
+      .set('X-API-Key', KEY)
+      .set('X-Admin-Key', KEY)
+      .send({ display_name: 42 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/must be a string or null/i);
+  });
+
   it('returns 400 when body lacks display_name', async () => {
     const res = await request(app)
       .patch(`/api/modules/${VALID_ID}/name`)
@@ -119,6 +132,19 @@ describe('PATCH /api/modules/:id/name', () => {
     // error using the body fields, so dropping fields here silently
     // breaks the UX exactly as PR-42's "Telemetry sidecar envelope
     // drift" lesson warns. See chapter 11.
+    //
+    // Cross-service contract chain (read together when changing the
+    // 409 body shape):
+    //   - duckdb-service emits: duckdb-service/tests/test_modules.py
+    //     :: test_patch_display_name_collision_returns_409 (pins
+    //     display_name + conflicting_module_id keys)
+    //   - backend proxies (this test): structurally identical body
+    //   - homepage consumes: homepage/src/services/api.ts::
+    //     renameModule's RenameConflictError construction (reads
+    //     body.display_name and body.conflicting_module_id)
+    // Drift any one of these three and the other two go stale. The
+    // upstream pytest is the canonical pin; this test verifies the
+    // proxy is a no-op on the body it receives.
     const upstream409 = {
       error: 'display_name already in use',
       display_name: 'Garden Bee',

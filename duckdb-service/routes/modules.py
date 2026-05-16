@@ -138,8 +138,11 @@ def _resolve_unique_firmware_name(con, mac_str: str, requested: str) -> str:
     ).fetchone()
     if existing is None:
         return requested
-    # Respect the schema's VARCHAR(100) cap so a long base name plus a
-    # suffix can't overflow on insert.
+    # Keep the suffixed name within the 100-char *intent* of the
+    # column (DuckDB does not actually enforce `VARCHAR(N)` lengths —
+    # verified by direct insert of an over-length string — but a
+    # predictable label length is what the dashboard's truncate-on-
+    # overflow CSS expects, and what the schema documents).
     max_base_len = 100 - len("-99")
     base = requested[:max_base_len]
     for n in range(2, 100):
@@ -233,9 +236,19 @@ def set_display_name(module_id):
                         409,
                     )
 
+            # Do NOT bump `updated_at`. That column is the liveness
+            # timestamp the backend's `fetchAndAssemble` folds into
+            # `lastSeenAt` (max of last_image_at / updated_at /
+            # latestHeartbeat.receivedAt) and uses to derive
+            # `Module.status` within a 2 h window. An admin edit of
+            # the *label* is not a heartbeat-equivalent event; bumping
+            # `updated_at` here would flip any renamed offline module
+            # to "online" for two hours regardless of telemetry.
+            # See `contracts/src/index.ts` Module.updatedAt — "set on
+            # every registration/UPSERT" — which this route honours by
+            # leaving it alone.
             con.execute(
-                "UPDATE module_configs SET display_name = ?, updated_at = NOW() "
-                "WHERE id = ?",
+                "UPDATE module_configs SET display_name = ? WHERE id = ?",
                 (new_value, canonical),
             )
             con.commit()

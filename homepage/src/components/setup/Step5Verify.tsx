@@ -116,7 +116,9 @@ export default function Step5Verify({
           style={{ borderColor: 'color-mix(in oklch, var(--hf-success) 35%, transparent)' }}
         >
           <div className="flex items-center justify-between mb-3">
-            <span className="font-bold text-hf-fg text-hf-md">{detectedModule.name}</span>
+            <span className="font-bold text-hf-fg text-hf-md">
+              {detectedModule.displayName ?? detectedModule.name}
+            </span>
             <span
               className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-hf-xs font-medium"
               style={{ background: 'var(--hf-forest-100)', color: 'var(--hf-forest-700)' }}

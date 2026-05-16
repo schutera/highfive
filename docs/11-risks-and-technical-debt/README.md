@@ -77,6 +77,62 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### `updated_at` carried two unrelated semantics; a metadata UPDATE silently corrupted the liveness signal (PR-I round-1 review)
+
+**What happened.** PR I's first cut of the new
+`PATCH /modules/<id>/display_name` route in
+`duckdb-service/routes/modules.py::set_display_name` set
+`display_name = ?, updated_at = NOW()` in the same UPDATE — the kind of
+"bump the row's modified timestamp on any write" pattern that looks
+harmless until you read the consumer. `backend/src/database.ts::fetchAndAssemble`
+folds `updated_at` into
+`lastSeenAt = max(last_image_at, updated_at, latestHeartbeat.receivedAt)`,
+and `Module.status` is derived from a 2 h window on that value. So
+renaming an offline module via the admin UI would have flipped it to
+`'online'` on the dashboard for two hours, with no telemetry behind
+the signal. The senior-reviewer subagent caught this on round 1
+before merge; round 2 dropped the `updated_at` bump and added a
+before/after regression test
+(`duckdb-service/tests/test_modules.py::test_patch_display_name_does_not_bump_updated_at`).
+
+**Why it happened.** `module_configs.updated_at` carries two
+semantically distinct roles that the DDL doesn't separate:
+
+1. **Row-metadata timestamp** — "when was this row last written?"
+   This is the obvious read of the column name; any write naturally
+   bumps it.
+2. **Per-module liveness signal** — folded into `lastSeenAt` by the
+   read path, used to derive `Module.status`. Only writes that
+   represent the _device_ being heard from (registration UPSERT,
+   post-upload aggregate heartbeat) should bump it.
+
+The column comment (in the DDL) names neither role explicitly. The
+read-path role lives a service away in TypeScript. An author writing
+the new route, looking only at the DDL, has no way to know they're
+about to corrupt the liveness signal — and the test suite at the time
+had no invariant pinning the "metadata edits do not bump updated_at"
+half of the contract.
+
+**How to avoid it next time.**
+
+- **Treat any column whose value is folded into a derived signal in
+  another service as a tripwire.** Either rename it to make the read
+  role visible (`last_heartbeat_or_upload_at`), split it into two
+  columns (one for row metadata, one for liveness), or — at minimum —
+  pin an invariant test on every write path that the column isn't
+  bumped when the write isn't a liveness event. We added the third
+  here but the first or second would be more robust long-term; logged
+  for a follow-up.
+- **When writing a route that UPDATEs a `module_configs` column, read
+  `backend/src/database.ts::fetchAndAssemble` first.** Until the
+  liveness derivation moves into duckdb-service or becomes an
+  explicit view, the contract on `updated_at` lives across a service
+  boundary that DDL alone won't show you.
+- **The senior-reviewer subagent's "the column's read-path role is
+  X" line of inquiry is the one that caught this.** Worth burning a
+  review cycle on any PR that adds a write to a column whose name
+  doesn't fully describe its read-path semantics.
+
 ### Same-batch ESP firmwares collided on the auto-generated module name (issues #91, #92, #93, #94)
 
 **What happened.** Two distinct modules with MACs `b0:69:6e:f2:3a:08`

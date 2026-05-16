@@ -328,3 +328,30 @@ def test_patch_display_name_treats_empty_string_as_clear(client, fresh_db):
     )
     assert r.status_code == 200
     assert r.get_json()["display_name"] is None
+
+
+def test_add_module_rejects_module_name_over_100_chars(client, fresh_db):
+    """`ModuleData.module_name` is bounded at 100 chars by Pydantic
+    `Field(max_length=100)` so a misbehaving firmware can't bypass the
+    schema's intent. Round-2 PR-I senior-review nit: previously the
+    cap only fired in the collision path of
+    `_resolve_unique_firmware_name`, so the front-door entry was
+    unbounded. Pin the rejection here."""
+    over_long = "x" * 101
+    r = client.post("/new_module", json=_payload(TEST_MAC_A, over_long))
+    assert r.status_code == 400
+    body = r.get_json()
+    # Pydantic v2 emits errors under "error" key (see add_module's
+    # `cleaned` block); each error has a `msg` field.
+    assert any(
+        "100" in (e.get("msg") or "") or "length" in (e.get("msg") or "").lower()
+        for e in body.get("error", [])
+    ), body
+
+
+def test_add_module_accepts_module_name_at_100_chars(client, fresh_db):
+    """The boundary is inclusive — 100 chars is fine, 101 is not."""
+    exactly_100 = "y" * 100
+    r = client.post("/new_module", json=_payload(TEST_MAC_A, exactly_100))
+    assert r.status_code == 200
+    assert r.get_json()["name"] == exactly_100

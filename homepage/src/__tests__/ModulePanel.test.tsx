@@ -231,5 +231,9 @@ describe('ModulePanel MAC disambiguation for same-batch hardware', () => {
       expect(screen.getByText('E89F')).toBeInTheDocument();
     });
     expect(screen.queryByText('B069')).not.toBeInTheDocument();
+    // Same broken-disambiguator check as the first render — the
+    // trailing-4 value (`3A08`) is identical for both same-batch
+    // MACs, so its absence is what proves we're using leading-4.
+    expect(screen.queryByText('3A08')).not.toBeInTheDocument();
   });
 });

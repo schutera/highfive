@@ -131,29 +131,21 @@ describe('RenameModuleModal', () => {
   // --- 401: AdminKeyForm appears, retry succeeds ------------------------
 
   it('shows the admin-key form on 401 and retries after the key is submitted', async () => {
-    // Real retry flow: the modal opens with a stored key, user types a
-    // name and clicks Save, the first api call rejects with
-    // 'unauthorized' (and api.renameModule has already cleared the key
-    // from sessionStorage by then), the modal flips to AdminKeyForm,
-    // user submits a fresh key, the modal auto-retries with the same
-    // draft and succeeds.
+    // Retry flow at the *modal* layer: the modal opens with a stored
+    // key, the user types a name and clicks Save, the api call
+    // rejects with `Error('unauthorized')`, the modal flips to
+    // AdminKeyForm, the user submits a fresh key, and the modal
+    // auto-retries `performRename` with the unchanged draft.
+    //
+    // The key-clearing side-effect on 401 lives in `api.renameModule`,
+    // not in this modal — see `homepage/src/services/api.ts`. That
+    // invariant is pinned by a separate api-layer test (added in PR I
+    // round 2) so the boundary between "api layer clears the key" and
+    // "modal reacts to the cleared key" stays grep-able. Mocking the
+    // api here means we exercise the modal half only.
     (api.renameModule as ReturnType<typeof vi.fn>)
       .mockRejectedValueOnce(new Error('unauthorized'))
       .mockResolvedValueOnce(undefined);
-    // The real api.renameModule clears the key on 401; the mock above
-    // does not, so simulate that side-effect here by clearing in a
-    // mockImplementation wrapper for the first call only.
-    const firstCall = (api.renameModule as ReturnType<typeof vi.fn>).getMockImplementation();
-    let calls = 0;
-    (api.renameModule as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      calls += 1;
-      if (calls === 1) {
-        sessionStorage.removeItem('hf_admin_key');
-        throw new Error('unauthorized');
-      }
-      return undefined;
-    });
-    void firstCall;
 
     const onSaved = vi.fn();
     const onClose = vi.fn();
@@ -164,21 +156,28 @@ describe('RenameModuleModal', () => {
       </LanguageProvider>,
     );
 
-    // First attempt with the stored key — rejects with 'unauthorized'.
+    // First attempt — the api stub rejects with 'unauthorized'.
     await userEvent.type(screen.getByLabelText(/display name/i), 'Garden Bee');
     await userEvent.click(screen.getByRole('button', { name: /save/i }));
 
-    // Modal should now be showing the AdminKeyForm.
+    // Modal flips to the AdminKeyForm branch on the message-string
+    // match. (No assertion on sessionStorage state here — that's the
+    // api layer's responsibility, not the modal's.)
     const keyInput = await screen.findByPlaceholderText(/enter admin key/i);
     await userEvent.type(keyInput, 'hf_dev_key_2026');
     await userEvent.click(screen.getByRole('button', { name: /unlock/i }));
 
-    // Retry fired with the same draft and succeeded.
+    // submitAdminKey wrote the typed key to sessionStorage, then
+    // auto-retried with the unchanged draft. Both side-effects below
+    // pin those steps; if a refactor moved key storage into the modal
+    // OR moved the auto-retry trigger elsewhere, exactly one of these
+    // would fail loudly.
     await waitFor(() => {
       expect(onSaved).toHaveBeenCalledWith('Garden Bee');
       expect(onClose).toHaveBeenCalled();
     });
     expect(api.renameModule).toHaveBeenCalledTimes(2);
+    expect(api.renameModule).toHaveBeenNthCalledWith(2, mockModule.id, 'Garden Bee');
     expect(sessionStorage.getItem('hf_admin_key')).toBe('hf_dev_key_2026');
   });
 

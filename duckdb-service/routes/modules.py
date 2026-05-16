@@ -138,11 +138,11 @@ def _resolve_unique_firmware_name(con, mac_str: str, requested: str) -> str:
     ).fetchone()
     if existing is None:
         return requested
-    # Keep the suffixed name within the 100-char *intent* of the
-    # column (DuckDB does not actually enforce `VARCHAR(N)` lengths —
-    # verified by direct insert of an over-length string — but a
-    # predictable label length is what the dashboard's truncate-on-
-    # overflow CSS expects, and what the schema documents).
+    # The 100-char cap is enforced at the front door by
+    # `ModuleData.module_name`'s `max_length=100` Pydantic constraint
+    # (see `models/module.py`). Truncate to leave room for a `-99`
+    # suffix so the resulting candidate stays within the same envelope
+    # — `requested` is already ≤ 100 chars at this point.
     max_base_len = 100 - len("-99")
     base = requested[:max_base_len]
     for n in range(2, 100):

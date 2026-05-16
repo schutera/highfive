@@ -91,7 +91,9 @@ Returns an array of `Module` objects shaped for the dashboard:
 collisions auto-suffixed by `duckdb-service` `add_module`). `displayName`
 is an optional admin-settable override; null when the operator has not
 renamed the module. Dashboard surfaces render `displayName ?? name`,
-with the last 4 hex chars of `id` as a visual subtitle. See
+with the **leading** 4 hex chars of `id` as a visual subtitle (the
+trailing octets are shared by same-batch hardware — see ADR-011 for
+the rationale). See
 [ADR-011](09-architecture-decisions/adr-011-module-display-name-override.md).
 
 `status` is one of `'online' | 'offline' | 'unknown'` and is computed
@@ -151,7 +153,7 @@ Status codes:
 - **404** — module id is well-formed but not registered.
 - **409** — another module already holds this `display_name`. Body:
   `{ error, display_name, conflicting_module_id }`. The homepage's
-  `RenameModuleModal` surfaces the conflicting module's last 4 hex
+  `RenameModuleModal` surfaces the conflicting module's leading 4 hex
   inline so the operator can pick a different name.
 - **502** — `duckdb-service` unreachable.
 

@@ -10,8 +10,9 @@ FROM node:22-alpine
 WORKDIR /app
 
 # Copy lockfile + every workspace package.json so `npm ci` can resolve
-# the workspace graph without needing the rest of the source.
-COPY package.json package-lock.json ./
+# the workspace graph without needing the rest of the source. The
+# `.npmrc` carries `engine-strict=true` (see ADR-009).
+COPY package.json package-lock.json .npmrc ./
 COPY contracts/package.json ./contracts/package.json
 COPY backend/package.json ./backend/package.json
 COPY homepage/package.json ./homepage/package.json

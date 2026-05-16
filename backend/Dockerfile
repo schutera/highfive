@@ -9,8 +9,11 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Copy lockfile + every workspace package.json so `npm ci` can resolve
-# the workspace graph without needing the rest of the source.
-COPY package.json package-lock.json ./
+# the workspace graph without needing the rest of the source. The
+# `.npmrc` carries `engine-strict=true` (see ADR-009) so a future
+# base-image swap to a sub-22.12 Node would hard-fail here instead of
+# silently warning.
+COPY package.json package-lock.json .npmrc ./
 COPY contracts/package.json ./contracts/package.json
 COPY backend/package.json ./backend/package.json
 COPY homepage/package.json ./homepage/package.json
@@ -47,8 +50,9 @@ FROM node:22-alpine
 WORKDIR /app
 
 # Re-install with --omit=dev for a slim runtime image. Workspace
-# package.jsons must be present so the contracts symlink resolves.
-COPY package.json package-lock.json ./
+# package.jsons + .npmrc must be present so the contracts symlink
+# resolves and `engine-strict=true` (ADR-009) is respected.
+COPY package.json package-lock.json .npmrc ./
 COPY contracts/package.json ./contracts/package.json
 COPY backend/package.json ./backend/package.json
 COPY homepage/package.json ./homepage/package.json

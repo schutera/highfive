@@ -167,11 +167,13 @@ describe('RenameModuleModal', () => {
     await userEvent.type(keyInput, 'hf_dev_key_2026');
     await userEvent.click(screen.getByRole('button', { name: /unlock/i }));
 
-    // submitAdminKey wrote the typed key to sessionStorage, then
-    // auto-retried with the unchanged draft. Both side-effects below
-    // pin those steps; if a refactor moved key storage into the modal
-    // OR moved the auto-retry trigger elsewhere, exactly one of these
-    // would fail loudly.
+    // submitAdminKey wrote the typed key to sessionStorage (modal-
+    // owned side effect), then triggered an auto-retry that called
+    // api.renameModule a second time with the unchanged draft. The
+    // three assertions pin both invariants: a refactor that moved
+    // key storage *out* of the modal would break the sessionStorage
+    // check, and a refactor that dropped the auto-retry trigger would
+    // break the call-count + nth-arg checks.
     await waitFor(() => {
       expect(onSaved).toHaveBeenCalledWith('Garden Bee');
       expect(onClose).toHaveBeenCalled();

@@ -121,8 +121,9 @@ half of the contract.
   columns (one for row metadata, one for liveness), or — at minimum —
   pin an invariant test on every write path that the column isn't
   bumped when the write isn't a liveness event. We added the third
-  here but the first or second would be more robust long-term; logged
-  for a follow-up.
+  here but the first or second would be more robust long-term; the
+  long-term fix is tracked at
+  [issue #97](https://github.com/schutera/highfive/issues/97).
 - **When writing a route that UPDATEs a `module_configs` column, read
   `backend/src/database.ts::fetchAndAssemble` first.** Until the
   liveness derivation moves into duckdb-service or becomes an

@@ -318,10 +318,24 @@ Content-Type: application/json
 Returns:
 
 ```json
-{ "id": "b0696ef23a08", "message": "Module added successfully" }
+{ "id": "b0696ef23a08", "name": "Garden-Hive", "message": "Module added successfully" }
 ```
 
+The response echoes the actually-stored `name`. If another module
+already holds the requested `module_name`, the server auto-suffixes
+(`Garden-Hive-2`, `Garden-Hive-3`, …, capped at `-99`) — the echoed
+value is the disambiguated form so the firmware can observe it.
+
 A module with the same identifier is replaced.
+
+**Validation errors (HTTP 400):**
+
+- `module_name` longer than 100 chars — bounded by the Pydantic entry-
+  point model so a non-colliding 200-char name cannot reach the DB
+  (DuckDB does not enforce `VARCHAR(N)` lengths on its own).
+- `esp_id` not 12 lowercase hex chars after canonicalisation — see
+  issue #39.
+- `battery_level` outside `[0, 100]`.
 
 ## 3.3 List modules
 

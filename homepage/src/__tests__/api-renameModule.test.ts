@@ -73,6 +73,31 @@ describe('api.renameModule', () => {
     expect(sessionStorage.getItem('hf_admin_key')).toBe('hf_dev_key_2026');
   });
 
+  it('serialises display_name: <string> on the happy path', async () => {
+    // The most-trafficked combination (200 + non-null name). The null
+    // branch lives in its own test below; the modal coalesces these
+    // two through `value === '' ? null : value` so pinning both ends
+    // here catches a future api-layer regression that, e.g., started
+    // sending the trimmed value or wrapping in a top-level key.
+    sessionStorage.setItem('hf_admin_key', 'hf_dev_key_2026');
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: '...', display_name: 'Garden Bee' }),
+    });
+
+    await api.renameModule(VALID_ID, 'Garden Bee');
+
+    const [calledUrl, opts] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(calledUrl).toContain('/modules/');
+    expect(calledUrl).toContain('/name');
+    expect(opts.method).toBe('PATCH');
+    expect(JSON.parse(opts.body as string)).toEqual({ display_name: 'Garden Bee' });
+  });
+
   it('sends the X-Admin-Key header from sessionStorage', async () => {
     sessionStorage.setItem('hf_admin_key', 'hf_dev_key_2026');
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({

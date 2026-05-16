@@ -341,10 +341,12 @@ def test_add_module_rejects_module_name_over_100_chars(client, fresh_db):
     r = client.post("/new_module", json=_payload(TEST_MAC_A, over_long))
     assert r.status_code == 400
     body = r.get_json()
-    # Pydantic v2 emits errors under "error" key (see add_module's
-    # `cleaned` block); each error has a `msg` field.
+    # Assert on the structured Pydantic v2 error code rather than the
+    # human-readable `msg`, which has changed between minor versions.
+    # `string_too_long` is the stable type emitted for `max_length`
+    # violations on string fields; loc names which field tripped it.
     assert any(
-        "100" in (e.get("msg") or "") or "length" in (e.get("msg") or "").lower()
+        e.get("type") == "string_too_long" and "module_name" in e.get("loc", [])
         for e in body.get("error", [])
     ), body
 

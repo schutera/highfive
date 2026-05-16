@@ -110,10 +110,19 @@ void initNewModuleOnServer(esp_config_t *esp_config);
 // schedules retries every HF_GEOLOCATION_DEFERRED_RETRY_MS while the
 // boot fix is missing; on success the next heartbeat carries the
 // fix to the server. Sendable-by-heartbeat state lives in
-// `esp_init.cpp` as file-local globals; this pair of accessors is the
+// `esp_init.cpp` as file-local globals; this set of accessors is the
 // only API the heartbeat path needs.
+//
+// The peek/commit split (round-1 senior-review P1): a transient
+// heartbeat POST failure used to lose the recovered fix entirely
+// (consume-on-build cleared the flag before the POST landed). The
+// new contract is "peek to build body, commit only after POST
+// returns 2xx" — so a server outage just means the same fix rides
+// the next heartbeat, and we don't fall back to a 24-h daily-reboot
+// recovery latency on a 5-minute server hiccup.
 bool hasPendingGeolocationFixToReport();
-geolocation_t consumePendingGeolocationFixForHeartbeat();
+geolocation_t peekPendingGeolocationFixForHeartbeat();
+void commitPendingGeolocationFixReported();
 void markGeolocationFixNeedsRetry();
 void tickGeolocationDeferredRetry(esp_config_t *esp_config);
 

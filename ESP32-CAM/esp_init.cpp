@@ -673,7 +673,7 @@ bool getGeolocation(esp_config_t *esp_config) {
     }
   }
   Serial.println("[getGeolocation] 3 attempts exhausted — no plausible fix this boot");
-  // Leave esp_config->geolocation at the sentinel set by setupConfig
+  // Leave esp_config->geolocation at the sentinel set by `loadConfig`
   // so downstream code sees (0,0,0) — the heartbeat-side recovery
   // will pick this up on the deferred retry path.
   return false;
@@ -694,10 +694,17 @@ bool hasPendingGeolocationFixToReport() {
   return g_has_pending_fix_to_report;
 }
 
-geolocation_t consumePendingGeolocationFixForHeartbeat() {
-  geolocation_t out = g_pending_geolocation_fix;
+// peek/commit split — see esp_init.h for the contract. A transient
+// heartbeat POST failure must NOT lose the recovered fix; the caller
+// peeks the value into the body, sends the POST, and only commits
+// (clears the flag) when the POST returned a 2xx. If the POST fails,
+// next heartbeat will re-send the same body via the same peek.
+geolocation_t peekPendingGeolocationFixForHeartbeat() {
+  return g_pending_geolocation_fix;
+}
+
+void commitPendingGeolocationFixReported() {
   g_has_pending_fix_to_report = false;
-  return out;
 }
 
 void tickGeolocationDeferredRetry(esp_config_t *esp_config) {

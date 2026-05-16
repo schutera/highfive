@@ -4,6 +4,13 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useState } from 'react';
 import type { Module } from '@highfive/contracts';
+import { hasPlausibleLocation } from '../lib/location';
+// Re-export for callers that still import from this module — round-1
+// senior-review P2: the predicate now lives in `src/lib/location.ts`
+// (three consumers, only one is map-related). Keep the re-export so
+// the existing import surface in AdminPage/DashboardPage/ModulePanel
+// doesn't churn in two PRs.
+export { hasPlausibleLocation };
 
 // Create a badge icon for clusters
 function createBadgeIcon(count: number, hasOnline: boolean) {
@@ -69,24 +76,10 @@ function fuzzLocation(location: { lat: number; lng: number }, moduleId: string):
   return [location.lat + offsetLat, location.lng + offsetLng];
 }
 
-// Reject a module's location reading that looks like the (0,0) "no
-// fix" sentinel set by the firmware when getGeolocation fails (issue
-// #89), an out-of-range value, or NaN. Mirrors `hf::isPlausibleFix`
-// on the firmware side and `_is_plausible_fix` on the server side —
-// same rule on all three layers so a deliberate "render at Null
-// Island" can't sneak in from any direction. Used to (a) gate the
-// map's center derivation, (b) filter (0,0) modules out of the
-// rendered circle set, and (c) drive the "Location pending" pill
-// rendering in the side-list (PR II / issue #49).
-export function hasPlausibleLocation(
-  loc: { lat: number; lng: number } | null | undefined,
-): boolean {
-  if (!loc) return false;
-  if (!Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return false;
-  if (loc.lat === 0 && loc.lng === 0) return false;
-  if (Math.abs(loc.lat) > 90 || Math.abs(loc.lng) > 180) return false;
-  return true;
-}
+// `hasPlausibleLocation` lives in `src/lib/location.ts` now — see
+// the import + re-export near the top of this file. Round-1 senior-
+// review P2 moved it out so AdminPage / ModulePanel can import the
+// predicate without pulling in the leaflet-bound MapView module.
 
 // Interpolate between colors based on hatches
 // emerald → amber → rose gradient for nature/activity visualization
@@ -355,9 +348,17 @@ export default function MapView({
     [modules],
   );
 
-  // Filter modules visible in current map bounds
+  // Filter modules visible in current map bounds. The pre-bounds
+  // fallback (first render, before MapController's useEffect fires)
+  // ALSO filters (0,0) modules so the dashboard side-list stays
+  // consistent with the marker set in both states. Without this,
+  // the first render of the dashboard would briefly include (0,0)
+  // modules in `visibleModules`, then drop them once bounds came
+  // in — visible flicker, and in practice
+  // `onVisibleModulesChange` is gated on `bounds` so the leak
+  // didn't reach DashboardPage today; round-1 senior-review P2.
   const visibleModules = useMemo(() => {
-    if (!bounds) return modules;
+    if (!bounds) return modules.filter((m) => hasPlausibleLocation(m.location));
     return fuzzedModules.filter((module) =>
       bounds.contains(L.latLng(module.fuzzedLocation[0], module.fuzzedLocation[1])),
     );

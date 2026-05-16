@@ -299,7 +299,10 @@ export default function DashboardPage() {
                           retry. Filtered out of the map's marker set
                           by `hasPlausibleLocation` in MapView. */}
                       {!hasPlausibleLocation(module.location) && (
-                        <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider bg-hf-fg/[0.06] text-hf-fg-mute">
+                        <span
+                          className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider bg-hf-fg/[0.06] text-hf-fg-mute"
+                          title={t('dashboard.locationPendingTooltip')}
+                        >
                           {t('dashboard.locationPending')}
                         </span>
                       )}
@@ -454,7 +457,10 @@ export default function DashboardPage() {
                               {m.id.slice(0, 4).toUpperCase()}
                             </p>
                             {!hasPlausibleLocation(m.location) && (
-                              <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider bg-hf-fg/[0.06] text-hf-fg-mute">
+                              <span
+                                className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider bg-hf-fg/[0.06] text-hf-fg-mute"
+                                title={t('dashboard.locationPendingTooltip')}
+                              >
                                 {t('dashboard.locationPending')}
                               </span>
                             )}

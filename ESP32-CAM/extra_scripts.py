@@ -65,12 +65,30 @@ version = (
 # `ESP32-CAM/SEQUENCE`. The Arduino-IDE fallback (no SEQUENCE file at
 # all) emits ``0`` so the firmware's `shouldOtaUpdate` refuses to OTA
 # from a dev build — see ``esp_init.h``'s `FIRMWARE_SEQUENCE` fallback.
+#
+# Loud-fail on a present-but-malformed SEQUENCE file. Mirrors the
+# `build.sh` policy exactly: a dev who ran `pio run -e esp32cam`
+# against a `SEQUENCE` file containing `abc` or `-1` would otherwise
+# silently get a `FIRMWARE_SEQUENCE=0` firmware that refuses every
+# OTA from a properly-built fleet — diagnosable, but the loud-fail
+# behaviour is the better default (round-1 senior-review P2:
+# "two builders, two policies").
 sequence_file = project_dir / "SEQUENCE"
 if sequence_file.exists():
     try:
         sequence = int(_strip_all_whitespace(sequence_file.read_text(encoding="utf-8")))
-    except ValueError:
-        sequence = 0
+    except ValueError as exc:
+        # Use Exit() so the PIO log surfaces the cause; print first so
+        # the operator sees what was wrong, then abort the build.
+        print(
+            f"[extra_scripts] ERROR: {sequence_file} is not a valid integer: {exc}"
+        )
+        Exit(1)  # noqa: F821 — PIO global
+    if sequence < 1:
+        print(
+            f"[extra_scripts] ERROR: SEQUENCE must be >= 1; got {sequence} from {sequence_file}"
+        )
+        Exit(1)  # noqa: F821
 else:
     sequence = 0
 

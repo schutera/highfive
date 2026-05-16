@@ -334,6 +334,21 @@ static void test_parse_allow_downgrade_quoted_true_defaults_false(void) {
     TEST_ASSERT_FALSE(m.allow_downgrade);
 }
 
+static void test_parse_allow_downgrade_prefix_match_rejected(void) {
+    // Round-1 senior-review P2: the original `parseBoolLiteral` checked
+    // only the first 4 bytes, so `truer` or `truefoobar` would have
+    // been accepted as `true` (the 5th byte was ignored). The
+    // terminator-boundary guard rejects that.
+    const char *json =
+        "{\"version\":\"wallpaper\","
+        "\"app_md5\":\"0123456789abcdef0123456789abcdef\","
+        "\"app_size\":1024,\"sequence\":1,"
+        "\"allow_downgrade\":truer}";
+    OtaManifest m{};
+    TEST_ASSERT_TRUE(parseOtaManifest(json, &m));
+    TEST_ASSERT_FALSE(m.allow_downgrade);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_should_update_returns_false_on_equal_version);
@@ -366,5 +381,6 @@ int main(int, char**) {
     RUN_TEST(test_parse_allow_downgrade_absent_defaults_false);
     RUN_TEST(test_parse_allow_downgrade_garbage_defaults_false);
     RUN_TEST(test_parse_allow_downgrade_quoted_true_defaults_false);
+    RUN_TEST(test_parse_allow_downgrade_prefix_match_rejected);
     return UNITY_END();
 }

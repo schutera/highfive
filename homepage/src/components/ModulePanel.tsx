@@ -263,7 +263,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           {!hasPlausibleLocation(moduleDetail.location) && (
             <span
               className="inline-block mb-2 md:mb-3 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-white/15 text-white/85"
-              title="Module registered without a usable geolocation fix; will recover on the next successful heartbeat retry."
+              title={t('dashboard.locationPendingTooltip')}
             >
               {t('dashboard.locationPending')}
             </span>

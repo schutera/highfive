@@ -415,6 +415,20 @@ sides at once.
   and reinstalled elsewhere will keep reporting heartbeats with the
   new fix; the server ignores them. A future feature could lift this
   via an explicit operator "relocate" gesture in the admin UI.
+- `module_configs.lat`/`lng` has two writers — `/new_module`'s
+  UPSERT and `/heartbeat`'s UPDATE — each carrying the (0,0)-
+  preservation invariant inline. PR II's first round shipped the
+  guard on the heartbeat side only; the senior-review caught that
+  the register-side UPSERT also clobbers, so the same inline
+  CASE/preserve logic now lives in `routes/modules.py` too. Two
+  copies of the same rule. Clean fix: extract a single repository
+  method `try_patch_module_location(mac, lat, lng, acc)` that both
+  call sites delegate to. Out of scope for PR II — refactor with
+  its own scope. The cross-test that pins the invariant is in
+  `tests/test_modules.py::test_new_module_re_registration_does_not_clobber_recovered_location`
+  paired with the heartbeat-side test in
+  `tests/test_heartbeats_endpoint.py`. If a future refactor merges
+  the two writers, both tests should keep passing.
 
 ### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
 

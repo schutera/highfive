@@ -83,21 +83,35 @@ bool parseUint32(const char* json, long long start, uint32_t* out) {
 }
 
 // Read a literal JSON boolean at `start`. Returns true and sets *out
-// only for the exact byte sequence `true`. The literal `false` and
-// every other non-true input (numbers, quoted strings, garbage) sets
-// *out=false and still returns true — i.e. "the field was present and
-// we parsed it". The narrow acceptance for `true` is the safety
-// invariant: an operator typo in the manifest must NEVER accidentally
-// enable a downgrade. Combined with "absent field → false" at the
-// caller, the contract is "literal true, anywhere else false".
+// only for the EXACT 4-byte sequence `true` followed by a JSON
+// terminator (`,`, `}`, whitespace, or NUL). Any prefix-match like
+// `truer` or `truefoobar` falls through to `*out=false`. The literal
+// `false` and every other non-true input (numbers, quoted strings,
+// garbage) sets *out=false and still returns true — i.e. "the field
+// was present and we parsed it". The narrow acceptance for `true`
+// is the safety invariant: an operator typo in the manifest must
+// NEVER accidentally enable a downgrade. Combined with "absent
+// field → false" at the caller, the contract is "literal `true`,
+// anywhere else false".
+//
+// The strncmp-then-boundary-check pattern (rather than reading 4
+// bytes blindly) keeps the OOB-safe behaviour from the previous
+// version: short_circuit-from-NUL inside the firmware's bounded
+// manifest body means we never read past EOF.
 bool parseBoolLiteral(const char* json, long long start, bool* out) {
     if (start < 0 || !json || !out) return false;
     size_t i = static_cast<size_t>(start);
-    if (json[i] == 't' && json[i + 1] == 'r' && json[i + 2] == 'u' && json[i + 3] == 'e') {
-        *out = true;
+    if (json[i] != 't' || json[i + 1] != 'r' || json[i + 2] != 'u' || json[i + 3] != 'e') {
+        *out = false;
         return true;
     }
-    *out = false;
+    // Trailing-byte guard: `truer` must NOT match `true`. JSON's
+    // terminator alphabet here is comma/close-brace/whitespace/NUL.
+    const char next = json[i + 4];
+    const bool atTerminator = (next == ',' || next == '}' || next == ' ' ||
+                               next == '\t' || next == '\n' || next == '\r' ||
+                               next == '\0');
+    *out = atTerminator;
     return true;
 }
 

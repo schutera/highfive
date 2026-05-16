@@ -82,6 +82,24 @@ def add_module():
             # than silently storing a 100th lookalike.
             stored_name = _resolve_unique_firmware_name(con, mac_str, data.module_name)
             now = datetime.now().strftime("%Y-%m-%d")
+            # PR II / issue #89 follow-up: the firmware calls
+            # `initNewModuleOnServer` on EVERY boot, registering at the
+            # (0,0) sentinel when boot-time getGeolocation fails. The
+            # original UPSERT clobbered lat/lng with EXCLUDED unconditionally,
+            # which would erase a heartbeat-side-recovered location on
+            # the next daily reboot whose boot fix failed. The CASE
+            # below preserves the existing lat/lng iff:
+            #   - the incoming row is at (0,0) (no fix this boot), AND
+            #   - the existing row is NOT at (0,0) (real fix landed
+            #     previously via heartbeat-side recovery OR earlier
+            #     successful boot).
+            # Symmetric with `routes/heartbeats.py::post_heartbeat`'s
+            # "only patch from (0,0)" rule — both writers respect the
+            # same invariant: a deliberately-placed module is never
+            # clobbered, and a (0,0) row is patched up to a real fix
+            # from either side. Pinned by
+            # `test_new_module_re_registration_does_not_clobber_recovered_location`
+            # in `tests/test_modules.py`.
             con.execute(
                 """
                 INSERT INTO module_configs
@@ -89,8 +107,18 @@ def add_module():
                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
-                    lat = EXCLUDED.lat,
-                    lng = EXCLUDED.lng,
+                    lat = CASE
+                        WHEN EXCLUDED.lat = 0 AND EXCLUDED.lng = 0
+                             AND NOT (module_configs.lat = 0 AND module_configs.lng = 0)
+                        THEN module_configs.lat
+                        ELSE EXCLUDED.lat
+                    END,
+                    lng = CASE
+                        WHEN EXCLUDED.lat = 0 AND EXCLUDED.lng = 0
+                             AND NOT (module_configs.lat = 0 AND module_configs.lng = 0)
+                        THEN module_configs.lng
+                        ELSE EXCLUDED.lng
+                    END,
                     battery_level = EXCLUDED.battery_level,
                     email = EXCLUDED.email,
                     updated_at = NOW()

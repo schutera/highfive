@@ -64,6 +64,8 @@ const translations = {
       // PR II / issue #89 \u2014 see homepage/src/components/MapView.tsx
       // for the matching `hasPlausibleLocation` helper.
       locationPending: 'Location pending',
+      locationPendingTooltip:
+        'Module registered without a usable geolocation fix; will recover on the next successful heartbeat retry.',
     },
 
     // ---- Module Panel ----
@@ -448,6 +450,8 @@ const translations = {
       statusOnline: '\u25CF Online',
       statusOffline: '\u25CB Offline',
       locationPending: 'Standort ausstehend',
+      locationPendingTooltip:
+        'Modul ohne nutzbaren Standort registriert; wird beim n\u00E4chsten erfolgreichen Heartbeat-Retry wiederhergestellt.',
     },
 
     // ---- Module Panel ----

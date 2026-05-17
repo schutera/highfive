@@ -42,6 +42,40 @@ describe('LanguageContext', () => {
     expect(online).not.toBe('common.online');
   });
 
+  it('selects the singular plural branch for count=1 (en + de)', () => {
+    function PluralProbe() {
+      const { lang, setLang, t } = useTranslation();
+      return (
+        <div>
+          <span data-testid="plural-1">{t('dashboard.modulesListed', { count: 1 })}</span>
+          <span data-testid="plural-3">{t('dashboard.modulesListed', { count: 3 })}</span>
+          <button onClick={() => setLang(lang === 'en' ? 'de' : 'en')}>toggle</button>
+          <span data-testid="lang">{lang}</span>
+        </div>
+      );
+    }
+    render(
+      <LanguageProvider>
+        <PluralProbe />
+      </LanguageProvider>,
+    );
+
+    // Default en: "1 module listed" vs "3 modules listed".
+    expect(screen.getByTestId('plural-1').textContent).toBe('1 module listed');
+    expect(screen.getByTestId('plural-3').textContent).toBe('3 modules listed');
+
+    act(() => {
+      screen.getByText('toggle').click();
+    });
+
+    // de: "1 aufgelistetes Modul" (singular adjective + singular noun) vs
+    // "3 aufgelistete Module" (plural adjective + plural noun). The
+    // pre-plural string "1 aufgelistete Module" would have been
+    // ungrammatical — both adjective ending and noun number wrong.
+    expect(screen.getByTestId('plural-1').textContent).toBe('1 aufgelistetes Modul');
+    expect(screen.getByTestId('plural-3').textContent).toBe('3 aufgelistete Module');
+  });
+
   it('switches language when setLang is called and updates t() output', () => {
     render(
       <LanguageProvider>

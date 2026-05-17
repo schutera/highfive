@@ -600,14 +600,17 @@ by `MapView`. PR 1 removed the coupling:
    grow without bound — if this becomes painful, the right answer is
    pagination or a separate "needs attention" surface, not re-coupling
    to viewport (which is what PR 1 explicitly walked away from).
-3. **The integration test pins both invariants.**
+3. **The integration test pins the full ordering invariant.**
    [`DashboardPage.test.tsx`'s `DashboardPage Location-pending
    side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
-   mounts `DashboardPage` with the pending module deliberately listed
-   first in the source fixture; a regression to a no-op sort would
-   land it at index 0 and fail the "last `<li>` is the pending module"
-   assertion. The same test pins the pill render and the header-
-   counter parity.
+   uses a three-module fixture (`pending-null-island`, `real-bodensee`,
+   `alpha-foo`) deliberately ordered to distinguish three regression
+   shapes: a no-op sort, a pending-last-only sort, and the current
+   pending-last-plus-alphabetical sort. Indices 0 through 2 are pinned
+   to `alpha-foo`, `real-bodensee`, `pending-null-island` by exact
+   text, so any regression in either sort layer fails loudly. The same
+   test pins the "Location pending" pill render and the header-counter
+   parity.
 
 The deferred follow-ups (renamed copy + defensive disjointness test)
 that the original PR II entry mentioned both landed in PR 1: the copy

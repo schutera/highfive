@@ -6,16 +6,6 @@ Orientation for the **HiveHive** (a.k.a. `highfive`) bee-monitoring monorepo. De
 
 HiveHive monitors wild-bee nesting activity. ESP32-CAM modules upload images to a Python image service, a Python DuckDB service owns persistence, a Node/Express backend aggregates for the UI, and a React + Vite homepage renders dashboard, map, and setup wizard. Dev-side everything runs under `docker compose` on the shared bridge network `net`.
 
-## In-flight multi-PR plan (self-removes when complete)
-
-A 3-PR series is in progress to clear cofade's open issues. Update the bullets as PRs land; delete this entire section when all three are merged.
-
-- **PR 1 — Dashboard side-list rework** (closes #103, #102, #101): in progress on `claude/analyze-github-issues-wiqYS`
-- **PR 2 — Windows host parity** (closes #100, #99): not started
-- **PR 3 — `module_configs.updated_at` semantic split** (closes #97): not started
-
-Out of repo: #80 (nginx HSTS on production — server config, not a code change here).
-
 ## Service map
 
 | Service          | Stack                           | Host:Container | Directory         |

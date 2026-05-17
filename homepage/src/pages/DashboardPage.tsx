@@ -9,7 +9,7 @@ import { api } from '../services/api';
 import type { Module } from '@highfive/contracts';
 
 export default function DashboardPage() {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const location = useLocation();
   const [modules, setModules] = useState<Module[]>([]);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
@@ -66,22 +66,34 @@ export default function DashboardPage() {
   // marker-rendering filter internally (#103 — MapView no longer emits
   // list-shaped data back to the parent).
   //
-  // The secondary sort is alphabetical by display name so the in-
-  // bucket order is deterministic regardless of what duckdb-service's
-  // `get_modules` happens to return (no ORDER BY there today). Without
-  // the secondary sort, two re-renders could legitimately flip
-  // adjacent rows when the backend response order changes — confusing
-  // for the operator and unpinnable in tests.
-  const sideListModules = useMemo(
-    () =>
-      [...modules].sort((a, b) => {
-        const aPending = Number(!hasPlausibleLocation(a.location));
-        const bPending = Number(!hasPlausibleLocation(b.location));
-        if (aPending !== bPending) return aPending - bPending;
-        return (a.displayName ?? a.name).localeCompare(b.displayName ?? b.name);
-      }),
-    [modules],
-  );
+  // The sort is fully deterministic — no fallthrough to JS stable-sort
+  // order, which would otherwise leak the nondeterminism of duckdb-
+  // service's `get_modules` (no ORDER BY there) into operator-visible
+  // behaviour:
+  //   1. pending-location modules sink to the bottom
+  //   2. within each bucket, sort by display name using the active
+  //      language's collator (locale-aware lexical order — e.g. `Ä`
+  //      sorts near `A` for de; default Anglo order for en)
+  //   3. final tie-break on module id — collisions on (1) + (2) are
+  //      rare (display name is server-side UNIQUE, the post-#94 auto-
+  //      suffix on `name` makes name collisions improbable) but the id
+  //      tie-break makes the determinism claim structurally true.
+  //
+  // `displayName?.trim() || name` defends against a `""` displayName
+  // (the wire contract permits it; duckdb-service normalises empty-
+  // after-strip to NULL but the type system doesn't enforce it).
+  const sideListModules = useMemo(() => {
+    const collator = new Intl.Collator(lang);
+    const label = (m: Module) => m.displayName?.trim() || m.name;
+    return [...modules].sort((a, b) => {
+      const aPending = Number(!hasPlausibleLocation(a.location));
+      const bPending = Number(!hasPlausibleLocation(b.location));
+      if (aPending !== bPending) return aPending - bPending;
+      const byLabel = collator.compare(label(a), label(b));
+      if (byLabel !== 0) return byLabel;
+      return a.id.localeCompare(b.id);
+    });
+  }, [modules, lang]);
 
   /**
    * Status pill for the header — live region so screen readers hear updates

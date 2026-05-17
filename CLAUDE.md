@@ -163,7 +163,7 @@ The user's shell is **PowerShell 5.1** on Windows. When providing manual testing
 - Set ports/hosts as variables first: `$PORT = "COM9"` — never use angle-bracket placeholders like `<COMx>` (PowerShell parses `<` as a redirection operator).
 - Write files with explicit encoding: `"value" | Out-File -NoNewline -Encoding ascii path\to\file` — PowerShell's default `>` redirect writes UTF-16 LE with BOM, which breaks Python `read_text(encoding="utf-8")`.
 - No `&&` chaining — use `;` or `if ($?) { ... }`.
-- Bash scripts (`build.sh`, `make`) run via `bash <script>` from PowerShell.
+- Bash scripts (`build.sh`, `make`) run via `bash <script>` from PowerShell. `ESP32-CAM/build.sh` auto-detects `%LOCALAPPDATA%/Arduino15`, `esptool.exe`, and `python` (vs `python3`) on Windows, so `bash ESP32-CAM/build.sh` works with arduino-cli's default install — no env overrides or manual `esptool.py` copy needed (#99).
 
 ## Dev helper scripts
 

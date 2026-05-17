@@ -86,6 +86,80 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### `displayName ?? name` lived in seven docs and eight render sites; six review rounds to extinguish (PR 1 / issues #103, #102, #101)
+
+**What happened.** The "operator-visible module label" rule —
+"prefer `displayName` over `name`" — was implemented at eight render
+sites in the homepage tree
+([DashboardPage](../../homepage/src/pages/DashboardPage.tsx) ×3,
+[ModulePanel](../../homepage/src/components/ModulePanel.tsx),
+[AdminPage](../../homepage/src/pages/AdminPage.tsx) ×5,
+[RenameModuleModal](../../homepage/src/components/RenameModuleModal.tsx),
+[Step5Verify](../../homepage/src/components/setup/Step5Verify.tsx))
+and described as `displayName ?? name` in seven prose locations
+([api-reference.md](../api-reference.md) ×2,
+[glossary](../12-glossary/README.md),
+[ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md),
+[building-block-view/duckdb-service.md](../05-building-block-view/duckdb-service.md),
+[api-contracts.md](../08-crosscutting-concepts/api-contracts.md),
+[contracts/src/index.ts](../../contracts/src/index.ts)). PR 1 found a
+defense gap (the wire shape permits `displayName: ""`, but `??` only
+short-circuits on `null` — so an empty-string override would render
+as a blank `<h3>` "ghost row") and went round-by-round closing it.
+Round 3 fixed the sort key in `DashboardPage`. Round 4 noticed two
+`<h3>` render sites in the same file still used `??`. Round 5
+promoted the fix to a shared helper
+([`homepage/src/lib/displayLabel.ts`](../../homepage/src/lib/displayLabel.ts))
+and swept seven sites in homepage plus six prose citations. Round 6
+caught two more prose citations (a backend code comment and a
+building-block-view doc) the round-5 sweep had missed by enumerating
+six known sites rather than re-grepping.
+
+**Why it happened.** A behavioural rule that's also a prose
+contract accretes copies. Every doc that documents the wire shape
+restates the rule, every render site implements its own coalesce
+inline, and the next behaviour change has to be applied N times.
+N grew silently from "a few" to thirteen across this codebase.
+Splitting one fix across N rounds is the symptom; the root cause is
+that the rule had no canonical home — until round 5 promoted
+`displayLabel` to `homepage/src/lib/`, there was no single place to
+point at, so every doc and every render site became its own source
+of truth.
+
+**How to avoid it next time.**
+1. **Make the rule a callable, then point at it.** The structural
+   fix that closed this PR was `homepage/src/lib/displayLabel.ts`
+   with `Pick<Module, 'name' | 'displayName'>` as its parameter type
+   and one `it()` per branch in
+   [`displayLabel.test.ts`](../../homepage/src/__tests__/displayLabel.test.ts).
+   Every prose citation now points at the helper file instead of
+   restating the rule. The next behaviour change is one edit, not
+   thirteen.
+2. **Use a trip-wire grep to enforce single-source-of-truth.** When
+   you promote a rule to a helper, the cost is "every prose copy of
+   the old rule is now drift". A one-liner grep
+   (`git grep -nE "display_name \?\?|displayName \?\?" -- docs/
+   backend/ duckdb-service/ contracts/ image-service/
+   homepage/src/`) finds every survivor; folding that grep into
+   `make check-citations` (see `scripts/check-doc-citations.sh`)
+   turns the round-N senior-review ritual into a CI check that
+   catches the drift at commit time. Done in PR 1 as part of the
+   round-6 wrap-up.
+3. **When sweeping doc citations of a rule you just removed, grep
+   first, enumerate second.** PR 1's round-4 commit enumerated six
+   doc sites it had updated; rounds 5 and 6 each found one more the
+   enumeration missed. Same pattern as PR-II's "Three layers, one
+   rule was actually four surfaces" — author confidence that the
+   sweep is complete is not a substitute for the grep.
+
+The meta-lesson is the same as the
+[Three layers, one rule](#three-layers-one-rule-was-actually-four-surfaces--the-dashboard-side-list-silently-filtered-pending-modules-pr-ii-final-pass-smoke)
+entry's, just with a longer tail: a behavioural contract restated in
+prose at N sites and enforced inconsistently at N render sites is
+not a contract — it is N wishes. Make one of them callable, point
+the other (N-1) at it, and add a grep so the rule's structural
+position is auditable.
+
 ### `updated_at` carried two unrelated semantics; a metadata UPDATE silently corrupted the liveness signal (PR-I round-1 review)
 
 **What happened.** PR I's first cut of the new

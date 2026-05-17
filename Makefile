@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware test test-esp test-esp-native test-e2e test-e2e-deps check-citations check-stale-reset-prose check-no-hardcoded-api-keys
+.PHONY: help firmware test test-esp test-esp-native test-e2e test-e2e-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys
 
 help:
 	@echo "HiveHive — available make targets"
@@ -18,6 +18,8 @@ help:
 	@echo "  make check-citations    Verify path:line citations in docs/ + CLAUDE.md still resolve"
 	@echo "  make check-stale-reset-prose"
 	@echo "                          Catch broken pre-#40 'hold IO0 for N seconds' factory-reset prose"
+	@echo "  make check-stale-display-name-rule"
+	@echo "                          Catch the deprecated 'displayName ?? name' rule re-emerging outside its allow-list (PR 1)"
 	@echo "  make check-no-hardcoded-api-keys"
 	@echo "                          Catch a hardcoded Google API key literal in source (issue #18)"
 	@echo ""
@@ -60,6 +62,10 @@ check-citations:
 check-stale-reset-prose:
 	@echo ">>> bash scripts/check-stale-reset-prose.sh"
 	@bash scripts/check-stale-reset-prose.sh
+
+check-stale-display-name-rule:
+	@echo ">>> bash scripts/check-stale-display-name-rule.sh"
+	@bash scripts/check-stale-display-name-rule.sh
 
 check-no-hardcoded-api-keys:
 	@echo ">>> bash scripts/check-no-hardcoded-api-keys.sh"

@@ -126,12 +126,19 @@ the inline UNIQUE (CREATE TABLE does support it).
 **Costs:**
 
 - Two columns means two write paths: `add_module` writes `name`,
-  `set_display_name` writes `display_name`. Code that reads the label
-  must remember to coalesce; a single test missing the `displayName`
-  branch leaves a silent dashboard regression where the override
-  doesn't apply. The
-  [`homepage/src/__tests__/ModulePanel.test.tsx`](../../homepage/src/__tests__/ModulePanel.test.tsx)
-  fixture and the four-branch coverage there is the structural guard.
+  `set_display_name` writes `display_name`. Resolution into the
+  operator-visible label is the responsibility of one helper,
+  [`homepage/src/lib/displayLabel.ts`](../../homepage/src/lib/displayLabel.ts),
+  which every label-rendering surface must call. The structural pin
+  is
+  [`homepage/src/__tests__/displayLabel.test.ts`](../../homepage/src/__tests__/displayLabel.test.ts) —
+  one `it()` per documented branch (null / `""` / whitespace-only /
+  non-empty / surrounding-whitespace trim) — composed with
+  per-surface integration tests
+  ([`DashboardPage.test.tsx`](../../homepage/src/__tests__/DashboardPage.test.tsx),
+  [`ModulePanel.test.tsx`](../../homepage/src/__tests__/ModulePanel.test.tsx))
+  that pin "this specific render site routes through the helper, not
+  around it".
 - The auto-suffix cap (`-99`) is arbitrary. A pathological collision
   rate raises rather than silently storing a 100th lookalike, which
   is the right failure mode but does mean a misbehaving fleet can

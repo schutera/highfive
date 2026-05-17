@@ -82,8 +82,8 @@ export async function flashEsp(
     for (const part of build.parts) {
       const firmwareResp = await fetch(part.path);
       if (!firmwareResp.ok) throw new Error(`Failed to fetch firmware: ${part.path}`);
+      await assertFirmwareResponse(firmwareResp, part.path);
       const blob = await firmwareResp.blob();
-      await assertFirmwareResponse(firmwareResp, blob, part.path);
       const data = await blobToBinaryString(blob);
       fileArray.push({ data, address: part.offset });
     }
@@ -180,11 +180,7 @@ export const ESP_IMAGE_MAGIC = 0xe9;
  *
  * See issue #43.
  */
-export async function assertFirmwareResponse(
-  resp: Response,
-  blob: Blob,
-  path: string,
-): Promise<void> {
+export async function assertFirmwareResponse(resp: Response, path: string): Promise<void> {
   const ctype = resp.headers.get('content-type') || '';
   if (/text\/html/i.test(ctype)) {
     throw new Error(
@@ -192,12 +188,18 @@ export async function assertFirmwareResponse(
     );
   }
 
-  if (blob.size === 0) {
+  // resp.clone() is required because the caller consumes the original body
+  // via firmwareResp.blob() right after this returns. We read via Response
+  // (not Blob) because jsdom 25's Blob prototype is missing arrayBuffer()
+  // entirely — vitest's jsdom env then shadows globalThis.Blob, so any
+  // blob.slice().arrayBuffer() or blob.arrayBuffer() path throws TypeError
+  // under tests (issue #100). Native Response.arrayBuffer() is unaffected.
+  const buf = await resp.clone().arrayBuffer();
+  if (buf.byteLength === 0) {
     throw new Error(`Firmware at ${path} is empty.`);
   }
 
-  const headBuf = await blob.slice(0, 1).arrayBuffer();
-  const head = new Uint8Array(headBuf)[0];
+  const head = new Uint8Array(buf, 0, 1)[0];
   if (head !== ESP_IMAGE_MAGIC) {
     const hex = head.toString(16).padStart(2, '0').toUpperCase();
     throw new Error(

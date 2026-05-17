@@ -2,9 +2,10 @@ import { MapContainer, TileLayer, useMap, Circle, useMapEvents, Marker } from 'r
 import L from 'leaflet';
 // Co-located stylesheet so it ships in the dashboard's lazy chunk only.
 import 'leaflet/dist/leaflet.css';
-import { useEffect, useMemo, useState } from 'react';
-import type { Module } from '@highfive/contracts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Module, UserLocation } from '@highfive/contracts';
 import { hasPlausibleLocation } from '../lib/location';
+import { useTranslation } from '../i18n/LanguageContext';
 
 // Create a badge icon for clusters
 function createBadgeIcon(count: number, hasOnline: boolean) {
@@ -173,21 +174,45 @@ interface MapViewProps {
   selectedModule: Module | null;
   onModuleSelect: (module: Module) => void;
   onVisibleModulesChange?: (modules: Module[]) => void;
+  // Permissionless IP-based location hint (issue #14). When this changes
+  // from null to a value the map flies to it at regional zoom — at most
+  // once. Subsequent map moves (user pan, module-selected flyTo) are
+  // unaffected. Null means "no hint" → keep the default centre.
+  userLocationHint?: UserLocation | null;
 }
 
 // Component to track zoom level and handle map interactions
 function MapController({
   selectedModule,
   selectedFuzzedLocation,
+  userLocationHint,
+  hasInitialPlausibleCentre,
   onZoomChange,
   onBoundsChange,
 }: {
   selectedModule: Module | null;
   selectedFuzzedLocation: [number, number] | null;
+  userLocationHint: UserLocation | null | undefined;
+  hasInitialPlausibleCentre: boolean;
   onZoomChange: (zoom: number) => void;
   onBoundsChange: (bounds: L.LatLngBounds) => void;
 }) {
   const map = useMap();
+  // The hint should recentre the map at most once — if the user has
+  // already panned/zoomed (or selected a module) by the time the hint
+  // arrives, we'd be yanking their viewport. Ref instead of state so the
+  // gate doesn't trigger a re-render.
+  //
+  // When MapView mounts with at least one plausibly-located module,
+  // `MapContainer` is already centred on it (PR II / #49 `firstPlausible`
+  // logic in the parent). A late-arriving IP-geo hint would then yank
+  // the operator off a real module onto a coarser regional centroid —
+  // the opposite of the #49 "don't jump the dashboard away from real
+  // modules" guarantee. Pre-flip the latch so the hint is suppressed
+  // in that case. The hint still wins when no module has a plausible
+  // location yet (cold deploy, first ESP onboarding, all modules at
+  // (0,0) sentinel) — that's the case it was designed for.
+  const hintApplied = useRef(hasInitialPlausibleCentre);
 
   useMapEvents({
     zoomend: () => {
@@ -210,8 +235,177 @@ function MapController({
       map.flyTo(selectedFuzzedLocation, 14, {
         duration: 1.5,
       });
+      // Selecting a module is a deliberate user intent — don't override it
+      // with a late-arriving IP-geo hint.
+      hintApplied.current = true;
     }
   }, [selectedModule, selectedFuzzedLocation, map]);
+
+  useEffect(() => {
+    if (userLocationHint && !hintApplied.current) {
+      hintApplied.current = true;
+      map.flyTo([userLocationHint.lat, userLocationHint.lng], 11, {
+        duration: 1.5,
+      });
+    }
+  }, [userLocationHint, map]);
+
+  return null;
+}
+
+// Material-Design "my_location" SVG — visually the same icon Google Maps
+// uses for its locate-me button.
+const LOCATE_ICON_SVG = `
+  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="currentColor">
+    <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+  </svg>
+`;
+
+// Imperative Leaflet control rendered into MapContainer's corner. Sits
+// outside React's DOM tree (Leaflet appends to the map's control pane),
+// so it can't use hooks — state is managed via plain DOM mutation. The
+// click handler runs `navigator.geolocation.getCurrentPosition` and
+// flies the map to the precise (permission-gated) GPS fix.
+function LocateControl() {
+  const map = useMap();
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    const idleTitle = t('dashboard.locateMe');
+    const deniedTitle = t('dashboard.locateMeDenied');
+    const unsupportedTitle = t('dashboard.locateMeUnsupported');
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'hf-locate-btn';
+    button.setAttribute('aria-label', idleTitle);
+    button.title = idleTitle;
+    button.innerHTML = LOCATE_ICON_SVG;
+
+    let busy = false;
+    let resetTitle: number | undefined;
+    let resetDeniedClass: number | undefined;
+    // Geolocation callbacks fire asynchronously — the user can navigate
+    // away or switch language (which tears down this effect) before the
+    // browser resolves the request. Without an abort guard the callbacks
+    // would touch a detached button and call `map.flyTo` on a disposed
+    // Leaflet instance, the latter of which throws in real browsers.
+    let aborted = false;
+
+    const setTitle = (label: string) => {
+      button.title = label;
+      button.setAttribute('aria-label', label);
+    };
+
+    // Show a transient state on the button — title/aria + visible button-
+    // side feedback + a short reset back to idle. Used for every non-
+    // success path. The class-based feedback is critical for the denied
+    // path: tooltips don't refresh while the pointer is stationary over
+    // the button, so a click-while-hovering would otherwise look like a
+    // silent no-op. CSS hook lives in homepage/src/style.css.
+    const flashState = (label: string) => {
+      setTitle(label);
+      clearTimeout(resetTitle);
+      resetTitle = window.setTimeout(() => {
+        if (aborted) return;
+        setTitle(idleTitle);
+      }, 3000);
+      // Re-trigger the shake animation by removing + re-adding the class.
+      // Forcing a reflow between the two is the standard trick for
+      // restarting a CSS animation; reading offsetWidth flushes pending
+      // style mutations so the browser observes the class actually went
+      // off before coming back on.
+      button.classList.remove('hf-locate-btn--denied');
+      void button.offsetWidth;
+      button.classList.add('hf-locate-btn--denied');
+      clearTimeout(resetDeniedClass);
+      resetDeniedClass = window.setTimeout(() => {
+        if (aborted) return;
+        button.classList.remove('hf-locate-btn--denied');
+      }, 1800);
+    };
+
+    const onClick = async (e: Event) => {
+      e.stopPropagation();
+      if (busy) return;
+      if (!('geolocation' in navigator)) {
+        flashState(unsupportedTitle);
+        return;
+      }
+      // Claim the guard BEFORE the first await — a synchronous second
+      // click while the Permissions API query is in flight would
+      // otherwise sail past `if (busy)` and double-invoke. Every early
+      // return below this line MUST clear `busy`, UNLESS the cleanup
+      // already fired (`aborted` paths skip restoration because the
+      // button DOM is being removed anyway).
+      busy = true;
+
+      // Permissions API short-circuit: once the user has denied geolocation
+      // for the origin, `getCurrentPosition()` fires its error callback
+      // synchronously with no re-prompt and no visible state change — the
+      // button feels dead. Detect that state up front and skip straight
+      // to the actionable tooltip. Safari support is iffy; the try/catch
+      // falls through to the original code path on unsupported browsers.
+      if ('permissions' in navigator) {
+        try {
+          const status = await navigator.permissions.query({ name: 'geolocation' });
+          if (aborted) return;
+          if (status.state === 'denied') {
+            busy = false;
+            flashState(deniedTitle);
+            return;
+          }
+        } catch {
+          // Permissions API unavailable or rejected our query — fall
+          // through to getCurrentPosition's own error handling.
+        }
+      }
+
+      // Spinner only goes on for the actual geolocation fetch, not the
+      // microsecond-fast Permissions API query.
+      button.classList.add('hf-locate-btn--busy');
+      button.setAttribute('aria-busy', 'true');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (aborted) return;
+          busy = false;
+          button.classList.remove('hf-locate-btn--busy');
+          button.removeAttribute('aria-busy');
+          map.flyTo([pos.coords.latitude, pos.coords.longitude], 14, { duration: 1.5 });
+        },
+        () => {
+          if (aborted) return;
+          busy = false;
+          button.classList.remove('hf-locate-btn--busy');
+          button.removeAttribute('aria-busy');
+          flashState(deniedTitle);
+        },
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
+      );
+    };
+
+    button.addEventListener('click', onClick);
+
+    const LocateControlImpl = L.Control.extend({
+      options: { position: 'topright' as L.ControlPosition },
+      onAdd() {
+        // Stop click/scroll from bubbling into the map's pan/zoom handlers.
+        L.DomEvent.disableClickPropagation(button);
+        L.DomEvent.disableScrollPropagation(button);
+        return button;
+      },
+    });
+    const control = new LocateControlImpl();
+    map.addControl(control);
+
+    return () => {
+      aborted = true;
+      button.removeEventListener('click', onClick);
+      clearTimeout(resetTitle);
+      clearTimeout(resetDeniedClass);
+      map.removeControl(control);
+    };
+  }, [map, t]);
 
   return null;
 }
@@ -308,6 +502,7 @@ export default function MapView({
   selectedModule,
   onModuleSelect,
   onVisibleModulesChange,
+  userLocationHint,
 }: MapViewProps) {
   const [zoom, setZoom] = useState(13);
   const [bounds, setBounds] = useState<L.LatLngBounds | null>(null);
@@ -397,9 +592,13 @@ export default function MapView({
             ? fuzzedModules.find((m) => m.id === selectedModule.id)?.fuzzedLocation || null
             : null
         }
+        userLocationHint={userLocationHint ?? null}
+        hasInitialPlausibleCentre={Boolean(firstPlausible)}
         onZoomChange={setZoom}
         onBoundsChange={setBounds}
       />
+
+      <LocateControl />
 
       {showClusters
         ? // Show clustered circles with badges

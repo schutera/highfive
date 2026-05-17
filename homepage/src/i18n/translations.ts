@@ -66,6 +66,9 @@ const translations = {
       locationPending: 'Location pending',
       locationPendingTooltip:
         'Module registered without a usable geolocation fix; will recover on the next successful heartbeat retry.',
+      locateMe: 'Show my location',
+      locateMeDenied: 'Location blocked — allow in browser site settings',
+      locateMeUnsupported: 'Geolocation not supported in this browser',
     },
 
     // ---- Module Panel ----
@@ -452,6 +455,9 @@ const translations = {
       locationPending: 'Standort ausstehend',
       locationPendingTooltip:
         'Modul ohne nutzbaren Standort registriert; wird beim n\u00E4chsten erfolgreichen Heartbeat-Retry wiederhergestellt.',
+      locateMe: 'Meinen Standort anzeigen',
+      locateMeDenied: 'Standortzugriff blockiert \u2014 in den Browser-Einstellungen erlauben',
+      locateMeUnsupported: 'Geolokalisierung in diesem Browser nicht unterst\u00FCtzt',
     },
 
     // ---- Module Panel ----

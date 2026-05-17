@@ -1,24 +1,163 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { LanguageProvider } from '../i18n/LanguageContext';
 import { hasPlausibleLocation } from '../lib/location';
+import type { Module } from '@highfive/contracts';
+import { parseModuleId } from '@highfive/contracts';
+
+// One shared mock map per test file — vi.mock factories cannot reference
+// out-of-scope state, so we expose it via a module-level ref and reset
+// in beforeEach. The shape mirrors only the pieces MapView actually uses.
+const mockMap = {
+  flyTo: vi.fn(),
+  addControl: vi.fn(),
+  removeControl: vi.fn(),
+  getBounds: () => ({ contains: () => true }),
+  getZoom: () => 13,
+};
+
+vi.mock('react-leaflet', () => {
+  const Pass = ({ children }: { children?: React.ReactNode }) => (
+    <div data-testid="leaflet-stub">{children}</div>
+  );
+  return {
+    MapContainer: Pass,
+    TileLayer: () => null,
+    Marker: () => null,
+    Circle: () => null,
+    useMap: () => mockMap,
+    useMapEvents: () => ({}),
+  };
+});
+
+// MapView talks to L.Control.extend(), L.DomEvent.{disableClickPropagation,
+// disableScrollPropagation}, and mutates L.Marker.prototype.options.icon at
+// import time. The mock implements just enough of each to let the real
+// LocateControl onAdd() run and produce a button.
+vi.mock('leaflet', () => {
+  const divIcon = () => ({});
+  const icon = () => ({});
+
+  const Marker = function () {} as unknown as { prototype: { options: { icon: unknown } } };
+  Marker.prototype = { options: { icon: null } };
+
+  type ControlProto = {
+    options?: Record<string, unknown>;
+    onAdd?: (map: unknown) => HTMLElement;
+  };
+  const Control = function (this: ControlProto, opts?: Record<string, unknown>) {
+    this.options = { ...(this.options ?? {}), ...(opts ?? {}) };
+  } as unknown as {
+    new (opts?: Record<string, unknown>): ControlProto;
+    extend(proto: ControlProto): {
+      new (opts?: Record<string, unknown>): ControlProto;
+    };
+  };
+  Control.extend = (proto: ControlProto) => {
+    const Sub = function (this: ControlProto, opts?: Record<string, unknown>) {
+      Object.assign(this, proto);
+      this.options = { ...(proto.options ?? {}), ...(opts ?? {}) };
+    } as unknown as { new (opts?: Record<string, unknown>): ControlProto };
+    return Sub;
+  };
+
+  const L = {
+    divIcon,
+    icon,
+    Marker,
+    Control,
+    DomEvent: {
+      disableClickPropagation: vi.fn(),
+      disableScrollPropagation: vi.fn(),
+    },
+    LatLngBounds: class {
+      contains() {
+        return true;
+      }
+    },
+    LatLng: class {
+      constructor(
+        public lat: number,
+        public lng: number,
+      ) {}
+    },
+    latLng: (lat: number, lng: number) => ({ lat, lng }),
+  };
+  return { default: L, ...L };
+});
+
+import MapView from '../components/MapView';
+
+// `navigator` in jsdom exposes its properties via prototype getters, so
+// `{ ...navigator, geolocation: x }` strips `language` and breaks
+// LanguageProvider's detectLanguage(). Override only the geolocation slot
+// via defineProperty so the rest of the navigator stays intact.
+function stubGeolocation(impl: Partial<Geolocation>) {
+  Object.defineProperty(globalThis.navigator, 'geolocation', {
+    configurable: true,
+    value: {
+      getCurrentPosition: vi.fn(),
+      watchPosition: vi.fn(),
+      clearWatch: vi.fn(),
+      ...impl,
+    },
+  });
+}
+
+// Stub the Permissions API the same way. jsdom doesn't ship it, so leaving
+// it undefined makes the `'permissions' in navigator` check short-circuit
+// to the legacy getCurrentPosition path (existing tests rely on this).
+function stubPermissions(state: PermissionState) {
+  Object.defineProperty(globalThis.navigator, 'permissions', {
+    configurable: true,
+    value: {
+      query: vi.fn().mockResolvedValue({ state }),
+    },
+  });
+}
+
+beforeEach(() => {
+  mockMap.flyTo.mockReset();
+  mockMap.addControl.mockReset();
+  mockMap.removeControl.mockReset();
+  // addControl actually wires the button into the DOM so RTL queries can
+  // find it — mirrors what real Leaflet does inside the control-container.
+  mockMap.addControl.mockImplementation((control: { onAdd?: (map: unknown) => HTMLElement }) => {
+    const el = control.onAdd?.(mockMap);
+    if (el) document.body.appendChild(el);
+  });
+});
+
+afterEach(() => {
+  document.body.innerHTML = '';
+  // Drop the geolocation + permissions overrides so later tests see the
+  // jsdom default (neither API available).
+  Object.defineProperty(globalThis.navigator, 'geolocation', {
+    configurable: true,
+    value: undefined,
+  });
+  Object.defineProperty(globalThis.navigator, 'permissions', {
+    configurable: true,
+    value: undefined,
+  });
+});
+
+function renderMap() {
+  return render(
+    <LanguageProvider>
+      <MapView modules={[]} selectedModule={null} onModuleSelect={() => undefined} />
+    </LanguageProvider>,
+  );
+}
 
 // Pure unit tests for `hasPlausibleLocation`. The helper mirrors the
-// `hf::isPlausibleFix` rule on the firmware side (PR II / issue #89)
-// and the `_is_plausible_fix` rule on the server side
+// `hf::isPlausibleFix` rule on the firmware side (issue #89) and the
+// `_is_plausible_fix` rule on the server side
 // (`duckdb-service/routes/heartbeats.py`). Same rule on all three
 // layers — a refactor that drifts one without the other is a
 // regression these tests catch.
-//
-// MapView itself is harder to mount under jsdom (react-leaflet
-// requires a canvas-capable env). The component-level tests for the
-// "Location pending" pill render (the user-visible consequence of
-// `hasPlausibleLocation` returning false) live in
-// `ModulePanel.test.tsx`'s `describe('ModulePanel location-pending
-// pill')` block, which mounts the panel with `(0,0)` and out-of-
-// range fixtures and asserts on the pill text.
 
 describe('hasPlausibleLocation', () => {
-  // --- rejection cases --------------------------------------------------
-
   it('rejects Null Island (0,0)', () => {
     expect(hasPlausibleLocation({ lat: 0, lng: 0 })).toBe(false);
   });
@@ -56,8 +195,6 @@ describe('hasPlausibleLocation', () => {
     expect(hasPlausibleLocation({ lat: Infinity, lng: 9.61 })).toBe(false);
   });
 
-  // --- acceptance cases -------------------------------------------------
-
   it('accepts Bodensee coords', () => {
     expect(hasPlausibleLocation({ lat: 47.78, lng: 9.61 })).toBe(true);
   });
@@ -82,5 +219,304 @@ describe('hasPlausibleLocation', () => {
   it('accepts boundary coords', () => {
     expect(hasPlausibleLocation({ lat: 90, lng: 180 })).toBe(true);
     expect(hasPlausibleLocation({ lat: -90, lng: -180 })).toBe(true);
+  });
+});
+
+describe('MapView locate control', () => {
+  it('renders the locate button with an accessible label', () => {
+    renderMap();
+    expect(screen.getByLabelText('Show my location')).toBeInTheDocument();
+  });
+
+  it('flies the map to the user position on a successful geolocation call', () => {
+    const getCurrentPosition = vi.fn((ok: PositionCallback) => {
+      ok({
+        coords: {
+          latitude: 52.52,
+          longitude: 13.405,
+          accuracy: 50,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        timestamp: Date.now(),
+      } as GeolocationPosition);
+    });
+    stubGeolocation({ getCurrentPosition });
+
+    renderMap();
+    fireEvent.click(screen.getByLabelText('Show my location'));
+
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    expect(mockMap.flyTo).toHaveBeenCalledWith([52.52, 13.405], 14, { duration: 1.5 });
+  });
+
+  it('ignores a late geolocation success after the component unmounts (abort guard)', () => {
+    // Capture the success callback without invoking it. We then unmount
+    // MapView (the LocateControl effect's cleanup runs and flips
+    // `aborted`) and finally fire the callback to simulate the browser
+    // resolving after the user navigated away.
+    let captured: PositionCallback | undefined;
+    const getCurrentPosition = vi.fn((ok: PositionCallback) => {
+      captured = ok;
+    });
+    stubGeolocation({ getCurrentPosition });
+
+    const { unmount } = renderMap();
+    fireEvent.click(screen.getByLabelText('Show my location'));
+    expect(captured).toBeDefined();
+
+    unmount();
+    captured!({
+      coords: {
+        latitude: 99,
+        longitude: 99,
+        accuracy: 50,
+        altitude: null,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null,
+      },
+      timestamp: Date.now(),
+    } as GeolocationPosition);
+
+    // The abort guard short-circuits the callback — no flyTo on a
+    // disposed map.
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+  });
+
+  it('shows a denied tooltip when geolocation rejects, without flying the map', () => {
+    const getCurrentPosition = vi.fn((_ok: PositionCallback, err?: PositionErrorCallback) => {
+      err?.({ code: 1, message: 'denied', PERMISSION_DENIED: 1 } as GeolocationPositionError);
+    });
+    stubGeolocation({ getCurrentPosition });
+
+    renderMap();
+    const btn = screen.getByLabelText('Show my location');
+    fireEvent.click(btn);
+
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+    expect(btn.title).toBe('Location blocked — allow in browser site settings');
+    // Hover-independent feedback: the button must visibly indicate the
+    // denied state on every click, because the tooltip alone doesn't
+    // refresh while the pointer is stationary over the button (T4 manual
+    // testing regression — click felt dead even though the title changed).
+    expect(btn.classList.contains('hf-locate-btn--denied')).toBe(true);
+  });
+
+  it('short-circuits via Permissions API when geolocation was previously denied', async () => {
+    // Reproduces the T6 manual-test bug: after a prior deny, the browser
+    // rejects getCurrentPosition synchronously with no UI feedback. The
+    // Permissions API pre-check catches this and flashes the actionable
+    // tooltip without spinning the busy indicator on/off invisibly.
+    const getCurrentPosition = vi.fn();
+    stubGeolocation({ getCurrentPosition });
+    stubPermissions('denied');
+
+    renderMap();
+    const btn = screen.getByLabelText('Show my location');
+    fireEvent.click(btn);
+
+    // The handler is async — wait for the pre-check microtask to flush
+    // before asserting the tooltip transitioned.
+    await waitFor(() => {
+      expect(btn.title).toBe('Location blocked — allow in browser site settings');
+    });
+    expect(getCurrentPosition).not.toHaveBeenCalled();
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+    expect(btn.classList.contains('hf-locate-btn--busy')).toBe(false);
+    // Hover-independent feedback also fires on the Permissions-API
+    // short-circuit path — every denied click flashes the visible class,
+    // not just the tooltip text.
+    expect(btn.classList.contains('hf-locate-btn--denied')).toBe(true);
+  });
+
+  it('guards against a synchronous double-click during the Permissions API query', async () => {
+    // The Permissions API query is async — without a busy guard claimed
+    // *before* the await, a fast second click sails past the `if (busy)`
+    // check and double-invokes getCurrentPosition. We control when the
+    // query resolves so the race window is wide open during the second
+    // click.
+    const getCurrentPosition = vi.fn((ok: PositionCallback) => {
+      ok({
+        coords: {
+          latitude: 1,
+          longitude: 2,
+          accuracy: 10,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        timestamp: Date.now(),
+      } as GeolocationPosition);
+    });
+    stubGeolocation({ getCurrentPosition });
+
+    let resolveQuery!: (status: { state: PermissionState }) => void;
+    const queryPromise = new Promise<{ state: PermissionState }>((r) => {
+      resolveQuery = r;
+    });
+    Object.defineProperty(globalThis.navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockReturnValue(queryPromise) },
+    });
+
+    renderMap();
+    const btn = screen.getByLabelText('Show my location');
+    fireEvent.click(btn);
+    fireEvent.click(btn); // race: second click while the first query is in flight
+
+    resolveQuery({ state: 'prompt' });
+    await waitFor(() => {
+      expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('proceeds to getCurrentPosition when Permissions API reports prompt state', async () => {
+    const getCurrentPosition = vi.fn((ok: PositionCallback) => {
+      ok({
+        coords: {
+          latitude: 1,
+          longitude: 2,
+          accuracy: 10,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        timestamp: Date.now(),
+      } as GeolocationPosition);
+    });
+    stubGeolocation({ getCurrentPosition });
+    stubPermissions('prompt');
+
+    renderMap();
+    fireEvent.click(screen.getByLabelText('Show my location'));
+
+    await waitFor(() => {
+      expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    });
+    expect(mockMap.flyTo).toHaveBeenCalledWith([1, 2], 14, { duration: 1.5 });
+  });
+});
+
+function makeModule(args: { id: string; location: { lat: number; lng: number } }): Module {
+  return {
+    id: parseModuleId(args.id),
+    name: 'fierce-apricot-specht',
+    displayName: null,
+    location: args.location,
+    status: 'online',
+    lastApiCall: '2026-05-16T20:00:00.000Z',
+    batteryLevel: 88,
+    firstOnline: '2026-05-16',
+    totalHatches: 0,
+    imageCount: 0,
+    email: null,
+    updatedAt: '2026-05-16T20:00:00.000Z',
+    lastSeenAt: '2026-05-16T20:00:00.000Z',
+    latestHeartbeat: null,
+  };
+}
+
+describe('MapView userLocationHint', () => {
+  it('flies to the hint at regional zoom when it arrives', () => {
+    const { rerender } = render(
+      <LanguageProvider>
+        <MapView
+          modules={[]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={null}
+        />
+      </LanguageProvider>,
+    );
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+
+    rerender(
+      <LanguageProvider>
+        <MapView
+          modules={[]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={{ lat: 48.137, lng: 11.575 }}
+        />
+      </LanguageProvider>,
+    );
+
+    expect(mockMap.flyTo).toHaveBeenCalledWith([48.137, 11.575], 11, { duration: 1.5 });
+  });
+
+  // Regression for the rebase interaction between PR II's `firstPlausible`
+  // initial centre (#49) and PR #78's IP-geo hint flyTo. If the dashboard
+  // already mounts the map centred on a real module, a late-arriving hint
+  // must NOT yank the viewport to a coarser regional centroid. The latch
+  // pre-flips when `hasInitialPlausibleCentre` is true at mount.
+  it('does not fly to the hint when the map already opened on a plausible module', () => {
+    const realModule = makeModule({
+      id: '000000000001',
+      location: { lat: 47.78, lng: 9.61 },
+    });
+    const { rerender } = render(
+      <LanguageProvider>
+        <MapView
+          modules={[realModule]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={null}
+        />
+      </LanguageProvider>,
+    );
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+
+    rerender(
+      <LanguageProvider>
+        <MapView
+          modules={[realModule]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={{ lat: 48.137, lng: 11.575 }}
+        />
+      </LanguageProvider>,
+    );
+
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+  });
+
+  // A (0,0) sentinel module does not count as a plausible centre, so the
+  // hint should still fire. Pins the symmetric edge of the latch rule:
+  // pending-only fleets are the case the hint was designed for.
+  it('flies to the hint when modules exist but none have a plausible location', () => {
+    const pendingModule = makeModule({
+      id: 'aabbccddeeff',
+      location: { lat: 0, lng: 0 },
+    });
+    const { rerender } = render(
+      <LanguageProvider>
+        <MapView
+          modules={[pendingModule]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={null}
+        />
+      </LanguageProvider>,
+    );
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+
+    rerender(
+      <LanguageProvider>
+        <MapView
+          modules={[pendingModule]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={{ lat: 48.137, lng: 11.575 }}
+        />
+      </LanguageProvider>,
+    );
+
+    expect(mockMap.flyTo).toHaveBeenCalledWith([48.137, 11.575], 11, { duration: 1.5 });
   });
 });

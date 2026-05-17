@@ -12,7 +12,6 @@ export default function DashboardPage() {
   const { t } = useTranslation();
   const location = useLocation();
   const [modules, setModules] = useState<Module[]>([]);
-  const [visibleModules, setVisibleModules] = useState<Module[]>([]);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,25 +56,23 @@ export default function DashboardPage() {
 
   const onlineCount = modules.filter((m) => m.status === 'online').length;
 
-  // Side-list = bounds-filtered plausible modules (from MapView's
-  // `onVisibleModulesChange`) PLUS every module without a plausible
-  // location. Pending-location modules have no spatial relationship
-  // to the map bounds, so the side-list is the only surface where the
-  // operator can spot a module stuck at the (0,0) sentinel after a
-  // failed first-boot getGeolocation (#89). MapView itself stays
-  // strict (only renders markers for plausible coords); the union
-  // happens here so MapView's name "visible" keeps meaning "rendered
-  // on the map". The two sets are disjoint by construction —
-  // pendingModules = !plausible, visibleModules ⊆ plausible — so no
-  // dedup needed. Pinned by DashboardPage.test.tsx's
-  // "renders Location pending pill" test.
-  const pendingModules = useMemo(
-    () => modules.filter((m) => !hasPlausibleLocation(m.location)),
-    [modules],
-  );
+  // The side-list shows every module the operator should attend to,
+  // not just what's currently plottable on the map viewport. Pending-
+  // location modules (stuck at the (0,0) sentinel after a failed
+  // first-boot getGeolocation; #89) are sorted to the bottom so the
+  // map-rendered modules dominate the top of the list, with pending
+  // modules surfaced as a tail bucket carrying the "Location pending"
+  // pill. MapView consumes `modules` as a prop and derives its own
+  // marker-rendering filter internally (#103 — MapView no longer emits
+  // list-shaped data back to the parent).
   const sideListModules = useMemo(
-    () => [...visibleModules, ...pendingModules],
-    [visibleModules, pendingModules],
+    () =>
+      [...modules].sort(
+        (a, b) =>
+          Number(!hasPlausibleLocation(a.location)) -
+          Number(!hasPlausibleLocation(b.location)),
+      ),
+    [modules],
   );
 
   /**
@@ -184,7 +181,6 @@ export default function DashboardPage() {
                 modules={modules}
                 selectedModule={selectedModule}
                 onModuleSelect={handleModuleSelect}
-                onVisibleModulesChange={setVisibleModules}
               />
             )}
 
@@ -287,7 +283,7 @@ export default function DashboardPage() {
               {t('common.hiveModules')}
             </h2>
             <p className="text-hf-xs text-hf-fg-mute mt-0.5">
-              {t('dashboard.modulesInView', { count: sideListModules.length })}
+              {t('dashboard.modulesListed', { count: sideListModules.length })}
             </p>
           </div>
           <ul className="overflow-y-auto flex-1 p-3 space-y-1.5">
@@ -378,7 +374,7 @@ export default function DashboardPage() {
                       {t('common.hiveModules')}
                     </div>
                     <div className="text-hf-xs text-hf-fg-mute">
-                      {t('dashboard.inViewTap', { count: sideListModules.length })}
+                      {t('dashboard.listedTap', { count: sideListModules.length })}
                     </div>
                   </div>
                 </div>
@@ -421,7 +417,7 @@ export default function DashboardPage() {
                   <div>
                     <h2 className="font-bold text-hf-fg">{t('common.hiveModules')}</h2>
                     <p className="text-hf-xs text-hf-fg-mute">
-                      {t('dashboard.modulesInView', { count: sideListModules.length })}
+                      {t('dashboard.modulesListed', { count: sideListModules.length })}
                     </p>
                   </div>
                   <button

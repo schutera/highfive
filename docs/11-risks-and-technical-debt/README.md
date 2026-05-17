@@ -594,15 +594,28 @@ entry — the wire-shape-mismatch story there was the same shape:
 docs + types + code all individually correct, but the cross-layer
 contract was wishful.
 
-**Deferred follow-ups (tracked as separate issues):**
+**Closeout (PR 1 / issues #103, #102, #101).** The two deferred
+follow-ups below and the underlying coupling that necessitated the
+union were addressed together. `DashboardPage` now owns the
+authoritative `modules` set; the side-list is derived directly via a
+single sort that sinks pending modules to the bottom. `MapView` no
+longer emits list-shaped data — it consumes `modules` as a prop and
+filters internally for marker rendering only. The two-set union is
+gone, so the disjointness defense (#102) is structurally unnecessary
+and #102 closes obsolete. The dashboard copy was renamed
+`dashboard.modulesInView` → `dashboard.modulesListed` (en: "X modules
+listed", de: "X aufgelistete Module") to be honest about what the
+list now contains.
 
-- The German copy `dashboard.modulesInView` resolves to "X Module
+**Deferred follow-ups (closed by PR 1):**
+
+- ~~The German copy `dashboard.modulesInView` resolves to "X Module
   sichtbar" — "sichtbar on the map" is semantically false when X
   includes a non-on-map pending module. The English "in view" has
   the same lie. Worth a rename to `dashboard.modulesListed` ("X
   modules listed" / "X gelistet") or a split into "X in view + Y
-  pending". Filed separately so this PR's scope stays small.
-- The current `sideListModules` test relies on `visibleModules` and
+  pending". Filed separately so this PR's scope stays small.~~ Done in PR 1 (#101).
+- ~~The current `sideListModules` test relies on `visibleModules` and
   `pendingModules` being disjoint at runtime, an invariant enforced
   by MapView's `fuzzedModules` filter. No unit test fires if a
   future MapView refactor loosens that filter — `sideListModules`
@@ -611,7 +624,7 @@ contract was wishful.
   assertion still passes because there's still one pill per pending
   module. A defensive test that feeds a pending module through a
   mocked `onVisibleModulesChange` callback (instead of going through
-  the real `MapView` mount) would catch this. Filed separately.
+  the real `MapView` mount) would catch this. Filed separately.~~ Obsolete after PR 1 (#102): no union remains to defend.
 
 ### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
 

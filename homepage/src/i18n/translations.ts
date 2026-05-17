@@ -48,8 +48,8 @@ const translations = {
     // ---- Dashboard ----
     dashboard: {
       title: 'Dashboard',
-      modulesInView: '{count} modules in view',
-      inViewTap: '{count} in view \u2022 Tap to expand',
+      modulesListed: '{count} modules listed',
+      listedTap: '{count} listed \u2022 Tap to expand',
       moduleDetails: 'Module Details',
       errorTitle: "It's not you, it's us!",
       errorSubtitle: 'Our worker bees are already on it.',
@@ -438,8 +438,8 @@ const translations = {
     // ---- Dashboard ----
     dashboard: {
       title: 'Dashboard',
-      modulesInView: '{count} Module sichtbar',
-      inViewTap: '{count} sichtbar \u2022 Antippen zum \u00D6ffnen',
+      modulesListed: '{count} aufgelistete Module',
+      listedTap: '{count} aufgelistet \u2022 Antippen zum \u00D6ffnen',
       moduleDetails: 'Moduldetails',
       errorTitle: 'Es liegt nicht an dir, es liegt an uns!',
       errorSubtitle: 'Unsere Arbeitsbienen sind bereits dran.',

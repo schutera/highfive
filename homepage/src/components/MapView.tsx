@@ -172,7 +172,6 @@ interface MapViewProps {
   modules: Module[];
   selectedModule: Module | null;
   onModuleSelect: (module: Module) => void;
-  onVisibleModulesChange?: (modules: Module[]) => void;
 }
 
 // Component to track zoom level and handle map interactions
@@ -180,29 +179,18 @@ function MapController({
   selectedModule,
   selectedFuzzedLocation,
   onZoomChange,
-  onBoundsChange,
 }: {
   selectedModule: Module | null;
   selectedFuzzedLocation: [number, number] | null;
   onZoomChange: (zoom: number) => void;
-  onBoundsChange: (bounds: L.LatLngBounds) => void;
 }) {
   const map = useMap();
 
   useMapEvents({
     zoomend: () => {
       onZoomChange(map.getZoom());
-      onBoundsChange(map.getBounds());
-    },
-    moveend: () => {
-      onBoundsChange(map.getBounds());
     },
   });
-
-  useEffect(() => {
-    // Initial bounds
-    onBoundsChange(map.getBounds());
-  }, []);
 
   useEffect(() => {
     if (selectedModule && selectedFuzzedLocation) {
@@ -307,10 +295,8 @@ export default function MapView({
   modules,
   selectedModule,
   onModuleSelect,
-  onVisibleModulesChange,
 }: MapViewProps) {
   const [zoom, setZoom] = useState(13);
-  const [bounds, setBounds] = useState<L.LatLngBounds | null>(null);
   const CLUSTER_ZOOM_THRESHOLD = 13; // Show clusters below this zoom level
 
   // Center map on first module with a plausible location, falling
@@ -331,7 +317,7 @@ export default function MapView({
   // (with the "Location pending" pill), but no marker is plotted at
   // Null Island. The filter happens at the fuzzedModules construction
   // step so every downstream consumer (clustering, individual
-  // circles, the visibleModules useMemo) sees a clean list.
+  // circles) sees a clean list.
   const fuzzedModules = useMemo(
     () =>
       modules
@@ -342,29 +328,6 @@ export default function MapView({
         })),
     [modules],
   );
-
-  // Filter modules visible in current map bounds. The pre-bounds
-  // fallback (first render, before MapController's useEffect fires)
-  // ALSO filters (0,0) modules so the dashboard side-list stays
-  // consistent with the marker set in both states. Without this,
-  // the first render of the dashboard would briefly include (0,0)
-  // modules in `visibleModules`, then drop them once bounds came
-  // in — visible flicker, and in practice
-  // `onVisibleModulesChange` is gated on `bounds` so the leak
-  // didn't reach DashboardPage today; round-1 senior-review P2.
-  const visibleModules = useMemo(() => {
-    if (!bounds) return modules.filter((m) => hasPlausibleLocation(m.location));
-    return fuzzedModules.filter((module) =>
-      bounds.contains(L.latLng(module.fuzzedLocation[0], module.fuzzedLocation[1])),
-    );
-  }, [bounds, fuzzedModules, modules]);
-
-  // Notify parent of visible modules
-  useEffect(() => {
-    if (onVisibleModulesChange && bounds) {
-      onVisibleModulesChange(visibleModules);
-    }
-  }, [visibleModules, onVisibleModulesChange, bounds]);
 
   // Create clusters
   const clusters = useMemo(() => clusterModules(fuzzedModules), [fuzzedModules]);
@@ -398,7 +361,6 @@ export default function MapView({
             : null
         }
         onZoomChange={setZoom}
-        onBoundsChange={setBounds}
       />
 
       {showClusters

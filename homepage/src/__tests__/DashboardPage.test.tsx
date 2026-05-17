@@ -146,28 +146,28 @@ describe('DashboardPage smoke', () => {
 });
 
 // PR II / issue #89 — the side-list must include modules without a
-// plausible location (the (0,0) Null Island sentinel) so operators can
-// spot a module that failed boot-time getGeolocation and hasn't yet
-// recovered via heartbeat. MapView itself filters them out of the
-// rendered marker set (`hasPlausibleLocation` in
-// homepage/src/lib/location.ts) — DashboardPage adds them back to the
-// side-list as the union of bounds-filtered visible + all pending.
-// Without this test, the round-1 senior-review fix that tightened the
-// MapView pre-bounds fallback to ALSO filter pending modules silently
-// dropped them from the side-list entirely. Found during manual
-// dev-stack smoke before PR-II merge: AdminPage showed the module
-// with the pill, header counter showed 6/6, but the dashboard side-
-// list said "5 sichtbar" and the operator had no way to find the
-// pending module from the dashboard view.
+// plausible location (the (0,0) Null Island sentinel) so operators
+// can spot a module that failed boot-time getGeolocation and hasn't
+// yet recovered via heartbeat. Post-#103, DashboardPage owns the
+// authoritative `modules` set and renders the side-list directly from
+// it; MapView no longer emits list-shaped data. Pending-location
+// modules sink to the bottom of the rendered list so the map-rendered
+// modules dominate the top. MapView itself still filters them out of
+// the marker set (`hasPlausibleLocation`).
 describe('DashboardPage Location-pending side-list', () => {
-  it('shows pending-location modules in the side-list with the Location pending pill', async () => {
+  it('shows pending-location modules in the side-list with the Location pending pill, sorted to the bottom', async () => {
     nextDashboardModules = [
+      // Pending listed FIRST in the source array on purpose: the sort
+      // contract is "pending sinks to the bottom regardless of input
+      // order". If the sort regresses to a no-op, this fixture lands
+      // the pending module above the plausible one and the
+      // "last child" assertion below fails loudly.
+      makeModule({ id: 'aabbccddeeff', name: 'pending-null-island', location: { lat: 0, lng: 0 } }),
       makeModule({
         id: '000000000001',
         name: 'real-bodensee',
         location: { lat: 47.78, lng: 9.61 },
       }),
-      makeModule({ id: 'aabbccddeeff', name: 'pending-null-island', location: { lat: 0, lng: 0 } }),
     ];
     render(
       <LanguageProvider>
@@ -178,50 +178,27 @@ describe('DashboardPage Location-pending side-list', () => {
     );
 
     await waitFor(() => {
-      // The pending module's firmware name renders in the side-list.
-      // If this fails, the operator-visible regression is back —
-      // pending modules are invisible from the dashboard.
+      // Both modules render in the side-list. Post-#103 the side-list
+      // is derived directly from `modules` (no longer bounds-filtered
+      // through MapView's callback), so the plausible module is no
+      // longer flaky to assert on.
       expect(screen.getByText('pending-null-island')).toBeInTheDocument();
+      expect(screen.getByText('real-bodensee')).toBeInTheDocument();
     });
 
-    // Scope the pill assertion to the desktop side-list (`<ul>` →
-    // `getByRole('list')`). Under fresh jsdom mount, only the desktop
-    // side-list renders a `<ul>` — the mobile bottom-sheet's `<ul>` is
-    // gated by `mobileListExpanded` (user input, false at mount), and
-    // the mobile collapsed-pill markup renders a `<button>` without a
-    // `<ul>` and contains only the "X in view • Tap to expand" copy,
-    // not a per-module pill. Scoping by role gives the assertion two
-    // guarantees the unscoped `getAllByText('Location pending')`
-    // didn't: (1) the pill renders inside the side-list `<ul>`, not
-    // in some unrelated surface, and (2) a future change that ever
-    // moves the pill markup into the mobile collapsed pill (e.g. "show
-    // a small dot when there's a pending module") fails this
-    // assertion with a clear "found 0 in <ul>" message rather than
-    // silently bumping the count past 1. Pin: exactly one pill per
-    // pending module, rendered inside the side-list.
+    // Scope to the desktop side-list `<ul>`. Pin: exactly one
+    // "Location pending" pill, rendered inside the list.
     const sideList = screen.getByRole('list');
     expect(within(sideList).getAllByText('Location pending')).toHaveLength(1);
 
-    // Header counter includes BOTH modules (2/2 online). Before this
-    // fix the side-list said "1 sichtbar" while the header still
-    // counted 2/2 — the asymmetry between the two surfaces is what
-    // the operator-visible bug looked like.
-    expect(screen.getByLabelText(/2 of 2 modules online/i)).toBeInTheDocument();
+    // Sort invariant: the pending module is the LAST <li> child.
+    // Regression that drops the sort would land 'pending-null-island'
+    // at the top (matching the fixture's source order) and fail here.
+    const items = within(sideList).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(items[items.length - 1]).toHaveTextContent('pending-null-island');
 
-    // The plausible-location fixture is intentionally not asserted on
-    // here. In this jsdom env the react-leaflet mocks don't propagate
-    // MapView's `onVisibleModulesChange` callback synchronously enough
-    // for the visible-half of the union to land in the rendered DOM
-    // before the test reads it, so a getByText('real-bodensee') would
-    // flake. Keeping the fixture in `nextDashboardModules` ensures the
-    // `pendingModules = modules.filter(!plausible)` logic is exercised
-    // against a *mixed* input — a regression that lumped plausible
-    // modules into the pending bucket would surface a stray
-    // 'real-bodensee' Location-pending pill above, which the strict
-    // single-pill assertion would still catch indirectly. The visible-
-    // half of the union is exercised end-to-end by the manual smoke
-    // documented in
-    // docs/10-quality-requirements/manual-tests-field-reliability.md
-    // (Part 2 of the field-reliability runbook).
+    // Header counter includes BOTH modules (2/2 online).
+    expect(screen.getByLabelText(/2 of 2 modules online/i)).toBeInTheDocument();
   });
 });

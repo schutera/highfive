@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import type { Module } from '@highfive/contracts';
 import { useTranslation } from '../../i18n/LanguageContext';
+import { displayLabel } from '../../lib/displayLabel';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -117,7 +118,7 @@ export default function Step5Verify({
         >
           <div className="flex items-center justify-between mb-3">
             <span className="font-bold text-hf-fg text-hf-md">
-              {detectedModule.displayName ?? detectedModule.name}
+              {displayLabel(detectedModule)}
             </span>
             <span
               className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-hf-xs font-medium"

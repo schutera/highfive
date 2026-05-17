@@ -271,4 +271,49 @@ describe('DashboardPage Location-pending side-list', () => {
     const heading = within(sideList).getByRole('heading', { level: 3 });
     expect(heading).toHaveTextContent('fallback-firmware-name');
   });
+
+  // Chapter 11's "Current design" entry sells the id tie-break as
+  // "what makes the determinism claim structurally true" — without
+  // it, two modules with identical displayLabel would fall through
+  // to JS Array stable-sort, which would in turn leak the
+  // nondeterministic order of duckdb-service's `get_modules` into
+  // operator-visible behaviour. Pin the tie-break with a fixture pair
+  // sharing a label but differing on id (round-4 senior-review P2).
+  it('breaks displayLabel ties by module id (deterministic regardless of source order)', async () => {
+    nextDashboardModules = [
+      // Source order intentionally reverses id-ascending order — a
+      // regression to two-step sort would land 'ffff…' first. Ids are
+      // 12 lowercase hex chars per `parseModuleId`'s contract.
+      makeModule({
+        id: 'ffffffffffff',
+        name: 'shared-label',
+        location: { lat: 47.78, lng: 9.61 },
+      }),
+      makeModule({
+        id: 'aaaaaaaaaaaa',
+        name: 'shared-label',
+        location: { lat: 47.78, lng: 9.61 },
+      }),
+    ];
+
+    render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('shared-label')).toHaveLength(2);
+    });
+
+    const sideList = screen.getByRole('list');
+    const items = within(sideList).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    // Tie-break: id ascending → 'aaaa…' before 'ffff…'. The MAC-prefix
+    // subtitle (first 4 hex, uppercased) is the visible differentiator.
+    expect(items[0]).toHaveTextContent('AAAA');
+    expect(items[1]).toHaveTextContent('FFFF');
+  });
 });

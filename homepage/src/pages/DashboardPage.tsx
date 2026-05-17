@@ -2,23 +2,12 @@ import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import MapView from '../components/MapView';
 import { hasPlausibleLocation } from '../lib/location';
+import { displayLabel } from '../lib/displayLabel';
 import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
 import { useTranslation } from '../i18n/LanguageContext';
 import { api } from '../services/api';
 import type { Module, UserLocation } from '@highfive/contracts';
-
-// Display label for a module — every surface that shows a module name
-// MUST go through this. The wire contract `Module.displayName: string
-// | null` permits `""` (duckdb-service's `set_display_name` normalises
-// empty-after-strip to NULL server-side, but the type system doesn't
-// enforce it). Splitting the defense across surfaces — e.g. sort key
-// vs rendered `<h3>` — would reproduce the "Three layers, one rule
-// was actually four surfaces" failure pattern in chapter 11. Use
-// `displayLabel(m)` everywhere.
-function displayLabel(m: Module): string {
-  return m.displayName?.trim() || m.name;
-}
 
 export default function DashboardPage() {
   const { t, lang } = useTranslation();

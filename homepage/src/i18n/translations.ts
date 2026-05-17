@@ -803,12 +803,4 @@ const translations = {
 } as const;
 
 export type Language = keyof typeof translations;
-// Leaves can be one of: string, `{ one: string, other: string }`
-// (plural-aware — selected via `Intl.PluralRules` in
-// `LanguageContext.tsx`'s `t`), or a string[] (use `useTranslationRaw`
-// to read array-valued keys; `t()` returns the path string for
-// non-string leaves). No current consumer outside `LanguageContext.tsx`;
-// keep the export so future tooling (Storybook, doc generators, etc.)
-// can pin against the catalog shape without re-deriving.
-export type TranslationKeys = typeof translations.en;
 export default translations;

@@ -86,6 +86,61 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Windows host parity: build.sh tripped on three path assumptions and a unit test depended on a jsdom polyfill that doesn't exist (PR 2 / issues #99, #100)
+
+**What happened.** A contributor on Windows 11 + Git Bash + Node 22 +
+arduino-cli 1.x hit two unrelated parity gaps in the same week.
+[`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh) failed three different
+ways before producing artifacts: the hardcoded `$HOME/.arduino15`
+arduino-cli data dir was wrong (Windows uses `%LOCALAPPDATA%/Arduino15`),
+the hardcoded `esptool.py` invocation was wrong (Windows arduino-cli
+prefers `esptool.exe` because the shipped `esptool.py` crashes against
+a newer pip-installed `esptool` module), and `python3` was wrong
+(Windows ships an MS Store stub at `python3.exe` that is on PATH so
+`command -v python3` finds it, but it exits non-zero with "Python wurde
+nicht gefunden" when invoked). Separately,
+[`homepage/src/__tests__/flashEsp.test.ts`](../../homepage/src/__tests__/flashEsp.test.ts)
+reported `3 failed | 76 passed`: the validator at
+[`flashEsp.ts`'s `assertFirmwareResponse`](../../homepage/src/components/setup/flashEsp.ts)
+called `blob.slice(0, 1).arrayBuffer()`, and jsdom 25.0.1's
+[`Blob-impl.js`](../../node_modules/jsdom/lib/jsdom/living/file-api/Blob-impl.js)
+defines `slice()` but **no `arrayBuffer()` anywhere on the Blob
+prototype**. Vitest's jsdom env shadows `globalThis.Blob`, so the
+entire blob round-trip path throws under tests. CI passed on Linux for
+environmental reasons orthogonal to local.
+
+**Why it happened.** Both gaps are the same anti-pattern: an implicit
+"the dev box looks like the maintainer's box" assumption. The shell
+script assumed a POSIX-shaped install layout because that's what the
+author ran. The unit test reached for a Web API (`Blob.arrayBuffer`)
+that's documented in MDN, looked plausible in the test runner, and was
+silently absent from the polyfill the runner actually uses. Neither
+gap was caught by CI because CI runs on Linux only, where both
+assumptions happen to hold.
+
+**How to avoid it next time.**
+
+1. **Probe, don't assume.** Whenever a shell script reaches outside
+   the repo (env vars, system paths, executables), probe with
+   `command -v` and `${VAR:-}` and `for candidate in …`. The cost of
+   one extra branch beats one extra hour of a contributor unwinding
+   inline workarounds — and the workarounds always rot back. Validate
+   probed executables by actually invoking them (`--version`) before
+   committing; PATH-presence is not interpreter-existence on Windows.
+2. **When a unit test depends on a Web API method, inspect the
+   polyfill's prototype, not MDN.** `Object.getOwnPropertyNames(SomeClass.prototype)`
+   tells the truth about what jsdom actually implements; MDN tells
+   the truth about what browsers implement. The two diverge silently.
+   Prefer reading the response body via `Response.arrayBuffer()` (Node
+   native, unaffected by jsdom polyfills) over the `Blob` round-trip
+   when feasible.
+3. **"CI passes on Linux" does not entail "this works on Windows + Git Bash".**
+   The mandatory senior-reviewer subagent gate is where the "what
+   platforms has this been exercised on?" question lands. Add a
+   Windows runner to CI if the cost of running parity locally is high
+   enough; treat it as a follow-up, not a bundle into the parity fix
+   itself.
+
 ### `displayName ?? name` lived in seven docs and eight render sites; six review rounds to extinguish (PR 1 / issues #103, #102, #101)
 
 **What happened.** The "operator-visible module label" rule —
@@ -127,6 +182,7 @@ point at, so every doc and every render site became its own source
 of truth.
 
 **How to avoid it next time.**
+
 1. **Make the rule a callable, then point at it.** The structural
    fix that closed this PR was `homepage/src/lib/displayLabel.ts`
    with `Pick<Module, 'name' | 'displayName'>` as its parameter type
@@ -139,8 +195,8 @@ of truth.
    you promote a rule to a helper, the cost is "every prose copy of
    the old rule is now drift". A one-liner grep
    (`git grep -nE "display_name \?\?|displayName \?\?" -- docs/
-   backend/ duckdb-service/ contracts/ image-service/
-   homepage/src/`) finds every survivor; folding that grep into
+backend/ duckdb-service/ contracts/ image-service/
+homepage/src/`) finds every survivor; folding that grep into
    `make check-citations` (see `scripts/check-doc-citations.sh`)
    turns the round-N senior-review ritual into a CI check that
    catches the drift at commit time. Done in PR 1 as part of the
@@ -688,7 +744,7 @@ by `MapView`. PR 1 removed the coupling:
    to viewport (which is what PR 1 explicitly walked away from).
 3. **The integration test pins the full ordering invariant.**
    [`DashboardPage.test.tsx`'s `DashboardPage Location-pending
-   side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
+side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
    uses a three-module fixture (`pending-null-island`, `real-bodensee`,
    `alpha-foo`) deliberately ordered to distinguish three regression
    shapes: a no-op sort, a pending-last-only sort, and the current

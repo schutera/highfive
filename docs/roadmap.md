@@ -15,7 +15,7 @@ three are merged.
 - **PR 1 — Dashboard side-list rework** (addresses #103, #102, #101):
   on `claude/analyze-github-issues-wiqYS` (the bullet's own closeout
   ships in PR 1's final commit)
-- **PR 2 — Windows host parity** (addresses #100, #99): not started
+- **PR 2 — Windows host parity** (addresses #100, #99): in review
 - **PR 3 — `module_configs.updated_at` semantic split** (addresses
   #97): not started
 

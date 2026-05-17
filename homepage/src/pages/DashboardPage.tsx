@@ -65,13 +65,21 @@ export default function DashboardPage() {
   // pill. MapView consumes `modules` as a prop and derives its own
   // marker-rendering filter internally (#103 — MapView no longer emits
   // list-shaped data back to the parent).
+  //
+  // The secondary sort is alphabetical by display name so the in-
+  // bucket order is deterministic regardless of what duckdb-service's
+  // `get_modules` happens to return (no ORDER BY there today). Without
+  // the secondary sort, two re-renders could legitimately flip
+  // adjacent rows when the backend response order changes — confusing
+  // for the operator and unpinnable in tests.
   const sideListModules = useMemo(
     () =>
-      [...modules].sort(
-        (a, b) =>
-          Number(!hasPlausibleLocation(a.location)) -
-          Number(!hasPlausibleLocation(b.location)),
-      ),
+      [...modules].sort((a, b) => {
+        const aPending = Number(!hasPlausibleLocation(a.location));
+        const bPending = Number(!hasPlausibleLocation(b.location));
+        if (aPending !== bPending) return aPending - bPending;
+        return (a.displayName ?? a.name).localeCompare(b.displayName ?? b.name);
+      }),
     [modules],
   );
 

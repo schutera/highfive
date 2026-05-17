@@ -155,18 +155,23 @@ describe('DashboardPage smoke', () => {
 // modules dominate the top. MapView itself still filters them out of
 // the marker set (`hasPlausibleLocation`).
 describe('DashboardPage Location-pending side-list', () => {
-  it('shows pending-location modules in the side-list with the Location pending pill, sorted to the bottom', async () => {
+  it('shows pending-location modules at the bottom; plausible modules sorted alphabetically by display name', async () => {
+    // Fixture chosen to distinguish three possible sort behaviours:
+    //   - no-op:               [pending-null-island, real-bodensee, alpha-foo]
+    //   - pending-last only:   [real-bodensee, alpha-foo, pending-null-island]
+    //   - pending-last + abc:  [alpha-foo,    real-bodensee, pending-null-island]
+    // The assertions below pin the third (current) shape.
     nextDashboardModules = [
-      // Pending listed FIRST in the source array on purpose: the sort
-      // contract is "pending sinks to the bottom regardless of input
-      // order". If the sort regresses to a no-op, this fixture lands
-      // the pending module above the plausible one and the
-      // "last child" assertion below fails loudly.
       makeModule({ id: 'aabbccddeeff', name: 'pending-null-island', location: { lat: 0, lng: 0 } }),
       makeModule({
         id: '000000000001',
         name: 'real-bodensee',
         location: { lat: 47.78, lng: 9.61 },
+      }),
+      makeModule({
+        id: '111111111111',
+        name: 'alpha-foo',
+        location: { lat: 47.79, lng: 9.62 },
       }),
     ];
     render(
@@ -178,12 +183,9 @@ describe('DashboardPage Location-pending side-list', () => {
     );
 
     await waitFor(() => {
-      // Both modules render in the side-list. Post-#103 the side-list
-      // is derived directly from `modules` (no longer bounds-filtered
-      // through MapView's callback), so the plausible module is no
-      // longer flaky to assert on.
       expect(screen.getByText('pending-null-island')).toBeInTheDocument();
       expect(screen.getByText('real-bodensee')).toBeInTheDocument();
+      expect(screen.getByText('alpha-foo')).toBeInTheDocument();
     });
 
     // Scope to the desktop side-list `<ul>`. Pin: exactly one
@@ -191,14 +193,14 @@ describe('DashboardPage Location-pending side-list', () => {
     const sideList = screen.getByRole('list');
     expect(within(sideList).getAllByText('Location pending')).toHaveLength(1);
 
-    // Sort invariant: the pending module is the LAST <li> child.
-    // Regression that drops the sort would land 'pending-null-island'
-    // at the top (matching the fixture's source order) and fail here.
+    // Full ordering invariant.
     const items = within(sideList).getAllByRole('listitem');
-    expect(items).toHaveLength(2);
-    expect(items[items.length - 1]).toHaveTextContent('pending-null-island');
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveTextContent('alpha-foo');
+    expect(items[1]).toHaveTextContent('real-bodensee');
+    expect(items[2]).toHaveTextContent('pending-null-island');
 
-    // Header counter includes BOTH modules (2/2 online).
-    expect(screen.getByLabelText(/2 of 2 modules online/i)).toBeInTheDocument();
+    // Header counter includes ALL modules (3/3 online).
+    expect(screen.getByLabelText(/3 of 3 modules online/i)).toBeInTheDocument();
   });
 });

@@ -317,7 +317,7 @@ export default function MapView({
   // (with the "Location pending" pill), but no marker is plotted at
   // Null Island. The filter happens at the fuzzedModules construction
   // step so every downstream consumer (clustering, individual
-  // circles) sees a clean list.
+  // circles, the `selectedFuzzedLocation` lookup) sees a clean list.
   const fuzzedModules = useMemo(
     () =>
       modules

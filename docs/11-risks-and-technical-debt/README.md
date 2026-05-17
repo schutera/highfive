@@ -556,28 +556,6 @@ asymmetry between admin/header (correct) and dashboard list
    DOM. So the prose claim that the side-list shows pending modules
    had no build-time gate to disagree with the prose claim itself.
 
-**How to avoid it next time.** Pinned by
-[`homepage/src/__tests__/DashboardPage.test.tsx`'s `DashboardPage Location-pending side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
-(commit `e9b0345`):
-
-1. **The side-list logic itself**: `DashboardPage` now derives
-   `sideListModules = visibleModules ∪ pendingModules`, where
-   `pendingModules = modules.filter(!hasPlausibleLocation)`. The two
-   sets are disjoint by construction (visible ⊆ plausible, pending =
-   !plausible), so no dedup is needed at the call site. MapView's
-   `visibleModules` stays strict — its semantic of "rendered on the
-   map" is unchanged; the union happens in DashboardPage because the
-   side-list semantic is distinct from the map-marker semantic.
-2. **Cross-surface assertion in the test**: the new test fixture has
-   one plausible + one pending module; the assertion checks that the
-   pending module's firmware name AND the "Location pending" pill
-   text are both in the rendered DOM, with the header counter
-   reading `2 of 2 modules online`. Before the fix, the side-list
-   would have rendered 0 modules (`visibleModules` is `[]` on
-   initial render before MapView's bounds callback fires, and `[]`
-   contains no pending modules), so the assertion would have failed
-   with `Unable to find an element with the text: pending-null-island`.
-
 **The meta-lesson.** **A behavioural contract asserted only in a
 comment block, a PR description, or a chapter-11 entry is not a
 contract — it is a wish.** PR II's prose said "pending modules show
@@ -587,44 +565,54 @@ made that impossible. Two senior-review rounds, a CLAUDE.md
 entry all referenced the contract while it was structurally false.
 The only thing that caught it was an operator opening the dashboard
 during pre-merge manual smoke. Pin cross-surface contracts with a
-mount-and-render integration test (here:
-`DashboardPage.test.tsx::DashboardPage Location-pending side-list`).
-Same pattern as PR-42's [Telemetry sidecar envelope drift](#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field)
+mount-and-render integration test. Same pattern as PR-42's
+[Telemetry sidecar envelope drift](#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field)
 entry — the wire-shape-mismatch story there was the same shape:
 docs + types + code all individually correct, but the cross-layer
 contract was wishful.
 
-**Closeout (PR 1 / issues #103, #102, #101).** The two deferred
-follow-ups below and the underlying coupling that necessitated the
-union were addressed together. `DashboardPage` now owns the
-authoritative `modules` set; the side-list is derived directly via a
-single sort that sinks pending modules to the bottom. `MapView` no
-longer emits list-shaped data — it consumes `modules` as a prop and
-filters internally for marker rendering only. The two-set union is
-gone, so the disjointness defense (#102) is structurally unnecessary
-and #102 closes obsolete. The dashboard copy was renamed
-`dashboard.modulesInView` → `dashboard.modulesListed` (en: "X modules
-listed", de: "X aufgelistete Module") to be honest about what the
-list now contains.
+**Current design (PR 1 / issues #103, #102, #101 — supersedes the
+union-based fix.)** The original PR II patch closed the symptom by
+defining `sideListModules = visibleModules ∪ pendingModules` in
+`DashboardPage` — but that union was itself a smell, requiring
+`DashboardPage` to reconstitute its own truth from a callback emitted
+by `MapView`. PR 1 removed the coupling:
 
-**Deferred follow-ups (closed by PR 1):**
+1. **DashboardPage owns the authoritative module set, MapView is a
+   pure renderer.**
+   [`homepage/src/pages/DashboardPage.tsx`](../../homepage/src/pages/DashboardPage.tsx)'s
+   `sideListModules` is a single derivation from `modules` — a stable
+   sort that sinks pending-location modules to the bottom (primary
+   sort) and orders within each bucket alphabetically by display name
+   (secondary sort, deterministic so the in-bucket order doesn't
+   depend on what `duckdb-service/routes/modules.py::get_modules`
+   happens to return).
+   [`homepage/src/components/MapView.tsx`](../../homepage/src/components/MapView.tsx)
+   consumes `modules` as a prop, filters via `fuzzedModules` for marker
+   rendering, and emits no list-shaped data back. There is no
+   `onVisibleModulesChange` and no `bounds` state.
+2. **The side-list is no longer viewport-coupled** — operator-visible
+   UX shift: panning/zooming the map does not change what the side-
+   list shows. The list always contains every module. Two consequences
+   to keep in mind: (a) the side-list count and the map marker count
+   can legitimately differ (the count text was renamed to "X listed"
+   to be honest about this); (b) for large fleets the side-list will
+   grow without bound — if this becomes painful, the right answer is
+   pagination or a separate "needs attention" surface, not re-coupling
+   to viewport (which is what PR 1 explicitly walked away from).
+3. **The integration test pins both invariants.**
+   [`DashboardPage.test.tsx`'s `DashboardPage Location-pending
+   side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
+   mounts `DashboardPage` with the pending module deliberately listed
+   first in the source fixture; a regression to a no-op sort would
+   land it at index 0 and fail the "last `<li>` is the pending module"
+   assertion. The same test pins the pill render and the header-
+   counter parity.
 
-- ~~The German copy `dashboard.modulesInView` resolves to "X Module
-  sichtbar" — "sichtbar on the map" is semantically false when X
-  includes a non-on-map pending module. The English "in view" has
-  the same lie. Worth a rename to `dashboard.modulesListed` ("X
-  modules listed" / "X gelistet") or a split into "X in view + Y
-  pending". Filed separately so this PR's scope stays small.~~ Done in PR 1 (#101).
-- ~~The current `sideListModules` test relies on `visibleModules` and
-  `pendingModules` being disjoint at runtime, an invariant enforced
-  by MapView's `fuzzedModules` filter. No unit test fires if a
-  future MapView refactor loosens that filter — `sideListModules`
-  would silently double-render the (0,0) module once as "visible"
-  and once as "pending", and the existing `toHaveLength(1)` pill
-  assertion still passes because there's still one pill per pending
-  module. A defensive test that feeds a pending module through a
-  mocked `onVisibleModulesChange` callback (instead of going through
-  the real `MapView` mount) would catch this. Filed separately.~~ Obsolete after PR 1 (#102): no union remains to defend.
+The deferred follow-ups (renamed copy + defensive disjointness test)
+that the original PR II entry mentioned both landed in PR 1: the copy
+rename was applied as described, and the disjointness defense became
+structurally unnecessary once the union itself was removed.
 
 ### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
 

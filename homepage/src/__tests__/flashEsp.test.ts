@@ -60,4 +60,20 @@ describe('assertFirmwareResponse', () => {
     const resp = bin([ESP_IMAGE_MAGIC, 0x01]);
     await expect(assertFirmwareResponse(resp, '/firmware.bin')).resolves.toBeUndefined();
   });
+
+  it('leaves the original Response body readable after validation (pins resp.clone() invariant)', async () => {
+    // Pins the production sequence at flashEsp.ts's flashEsp():
+    //   await assertFirmwareResponse(firmwareResp, part.path);
+    //   const blob = await firmwareResp.blob();
+    // A future refactor that drops `resp.clone()` from the validator
+    // would still pass the 6 cases above (they discard the response)
+    // but would break this round-trip because Response bodies can only
+    // be consumed once. Issue #100.
+    const resp = bin([ESP_IMAGE_MAGIC, 0x00, 0x10, 0x20], {
+      'content-type': 'application/octet-stream',
+    });
+    await assertFirmwareResponse(resp, '/firmware.bin');
+    const blob = await resp.blob();
+    expect(blob.size).toBe(4);
+  });
 });

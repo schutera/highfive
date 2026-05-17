@@ -167,8 +167,13 @@ fi
 # version is installed per core, but if the user has multiple cores
 # installed there could be multiple esptool_py versions. We pick the
 # highest by sort -V; merge_bin's CLI is stable across the 4.x line so
-# this is safe.
-ESPTOOL_DIR="$(find "${ARDUINO_DATA_DIR}/packages/esp32/tools/esptool_py" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V -r | head -1)"
+# this is safe. The `|| true` is required because `set -o pipefail`
+# would otherwise abort the script when the esptool_py directory
+# doesn't exist (Windows user has arduino-cli but not the esp32 core)
+# — find exits 1, pipefail propagates, and the helpful error message
+# below never fires. Empty result flows into the ESPTOOL existence
+# check.
+ESPTOOL_DIR="$(find "${ARDUINO_DATA_DIR}/packages/esp32/tools/esptool_py" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V -r | head -1 || true)"
 # arduino-cli ships esptool.py on Linux/macOS and (typically) both
 # esptool.exe and esptool.py on Windows. Prefer the .exe when present:
 # it bundles a matching Python interpreter and esptool module, whereas

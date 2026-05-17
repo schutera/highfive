@@ -102,12 +102,20 @@ nicht gefunden" when invoked). Separately,
 [`homepage/src/__tests__/flashEsp.test.ts`](../../homepage/src/__tests__/flashEsp.test.ts)
 reported `3 failed | 76 passed`: the validator at
 [`flashEsp.ts`'s `assertFirmwareResponse`](../../homepage/src/components/setup/flashEsp.ts)
-called `blob.slice(0, 1).arrayBuffer()`, and jsdom 25.0.1's
-[`Blob-impl.js`](../../node_modules/jsdom/lib/jsdom/living/file-api/Blob-impl.js)
-defines `slice()` but **no `arrayBuffer()` anywhere on the Blob
-prototype**. Vitest's jsdom env shadows `globalThis.Blob`, so the
-entire blob round-trip path throws under tests. CI passed on Linux for
-environmental reasons orthogonal to local.
+called `blob.slice(0, 1).arrayBuffer()`, and jsdom 25.0.1 (pinned via
+[`package-lock.json`](../../package-lock.json)) defines `slice()` on
+its `Blob` polyfill but **no `arrayBuffer()` anywhere on the Blob
+prototype** — `Object.getOwnPropertyNames(Blob.prototype)` returns
+just `['constructor', 'slice', 'size', 'type']`. Vitest's jsdom env
+shadows `globalThis.Blob`, so the entire blob round-trip path throws
+under tests. The build.sh failures don't reproduce in CI because
+GitHub Actions Ubuntu runners have a `python3` that resolves to a
+real interpreter (no MS Store stub) and an arduino-cli that installs
+under `~/.arduino15` — both trip-wires were latent there. The
+`flashEsp.test.ts` failures didn't reproduce in CI either; the exact
+discriminator between CI and local-Windows isn't pinned down (likely
+Node 22's native `Blob` shadowing jsdom's polyfill differently across
+OS / Node-minor combinations) and the refactor makes the question moot.
 
 **Why it happened.** Both gaps are the same anti-pattern: an implicit
 "the dev box looks like the maintainer's box" assumption. The shell
@@ -194,9 +202,10 @@ of truth.
 2. **Use a trip-wire grep to enforce single-source-of-truth.** When
    you promote a rule to a helper, the cost is "every prose copy of
    the old rule is now drift". A one-liner grep
+   <!-- prettier-ignore -->
    (`git grep -nE "display_name \?\?|displayName \?\?" -- docs/
-backend/ duckdb-service/ contracts/ image-service/
-homepage/src/`) finds every survivor; folding that grep into
+   backend/ duckdb-service/ contracts/ image-service/
+   homepage/src/`) finds every survivor; folding that grep into
    `make check-citations` (see `scripts/check-doc-citations.sh`)
    turns the round-N senior-review ritual into a CI check that
    catches the drift at commit time. Done in PR 1 as part of the
@@ -743,8 +752,9 @@ by `MapView`. PR 1 removed the coupling:
    pagination or a separate "needs attention" surface, not re-coupling
    to viewport (which is what PR 1 explicitly walked away from).
 3. **The integration test pins the full ordering invariant.**
+   <!-- prettier-ignore -->
    [`DashboardPage.test.tsx`'s `DashboardPage Location-pending
-side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
+   side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
    uses a three-module fixture (`pending-null-island`, `real-bodensee`,
    `alpha-foo`) deliberately ordered to distinguish three regression
    shapes: a no-op sort, a pending-last-only sort, and the current

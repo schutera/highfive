@@ -112,10 +112,17 @@ under tests. The build.sh failures don't reproduce in CI because
 GitHub Actions Ubuntu runners have a `python3` that resolves to a
 real interpreter (no MS Store stub) and an arduino-cli that installs
 under `~/.arduino15` — both trip-wires were latent there. The
-`flashEsp.test.ts` failures didn't reproduce in CI either; the exact
-discriminator between CI and local-Windows isn't pinned down (likely
-Node 22's native `Blob` shadowing jsdom's polyfill differently across
-OS / Node-minor combinations) and the refactor makes the question moot.
+`flashEsp.test.ts` failures don't reproduce in CI either, but CI runs
+the same jsdom 25.0.1 pin on the same Node 22 — so the discriminator
+must be either OS-level (Linux's Node-vs-jsdom Blob class shadowing
+order differs from Windows) or job-shape (the homepage unit job doesn't
+exercise the failing assertions). This was NOT pinned down before
+shipping the refactor; the next contributor who edits these tests
+should `gh run download` the homepage-unit log from an Ubuntu run and
+confirm whether the 6 `assertFirmwareResponse` cases actually ran and
+passed there, or whether they were skipped silently. Logging the gap
+because the refactor sidesteps the question — but the lesson is
+incomplete until somebody answers it.
 
 **Why it happened.** Both gaps are the same anti-pattern: an implicit
 "the dev box looks like the maintainer's box" assumption. The shell

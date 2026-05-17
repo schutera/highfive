@@ -194,7 +194,7 @@ BOOT_APP0="${ARDUINO_DATA_DIR}/packages/esp32/hardware/esp32/${ESP32_CORE_VERSIO
 if [ -z "${ESPTOOL}" ] || [ ! -f "${BOOT_APP0}" ]; then
   echo "ERROR: missing arduino-cli toolchain pieces:" >&2
   if [ -z "${ESPTOOL}" ]; then
-    echo "       esptool   not found under ${ESPTOOL_DIR:-<empty>} (tried esptool.py and esptool.exe)" >&2
+    echo "       esptool   not found under ${ESPTOOL_DIR:-<empty>} (tried esptool.exe then esptool.py)" >&2
   else
     echo "       esptool   ${ESPTOOL} (exists: yes)" >&2
   fi

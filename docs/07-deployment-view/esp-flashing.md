@@ -313,6 +313,11 @@ bash build.sh
 # Then deploy the updated homepage/public/* artifacts to the host.
 ```
 
+`build.sh` runs unmodified on Linux, macOS, and Windows 11 + Git Bash;
+the script auto-detects `%LOCALAPPDATA%/Arduino15`, `esptool.exe`, and
+the right Python interpreter (rejecting the MS Store stub at
+`python3.exe`) so no env overrides are needed on Windows (#99).
+
 `build.sh` writes both `homepage/public/firmware.bin` (merged, for
 the web installer) and `homepage/public/firmware.app.bin` (app-only,
 for the OTA fetch), plus a `firmware.json` manifest carrying both

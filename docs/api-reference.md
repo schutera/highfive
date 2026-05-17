@@ -90,10 +90,13 @@ Returns an array of `Module` objects shaped for the dashboard:
 `name` is the firmware-reported value (mutable on every UPSERT; same-batch
 collisions auto-suffixed by `duckdb-service` `add_module`). `displayName`
 is an optional admin-settable override; null when the operator has not
-renamed the module. Dashboard surfaces render `displayName ?? name`,
-with the **leading** 4 hex chars of `id` as a visual subtitle (the
-trailing octets are shared by same-batch hardware — see ADR-011 for
-the rationale). See
+renamed the module. Frontend surfaces resolve the operator-visible label
+via the shared helper
+[`homepage/src/lib/displayLabel.ts`](../homepage/src/lib/displayLabel.ts),
+which trims `displayName` and falls back to `name` on null / empty /
+whitespace-only. The **leading** 4 hex chars of `id` ride along as a
+visual subtitle (the trailing octets are shared by same-batch hardware
+— see ADR-011 for the rationale). See
 [ADR-011](09-architecture-decisions/adr-011-module-display-name-override.md).
 
 `status` is one of `'online' | 'offline' | 'unknown'` and is computed
@@ -139,9 +142,11 @@ Body: { "display_name": "Garden Bee" }   # or null to clear
 
 Sets or clears the operator-settable `display_name` override (ADR-011).
 Backend proxies to `duckdb-service` `PATCH /modules/<id>/display_name`,
-which enforces a UNIQUE constraint at the DB layer. The dashboard renders
-`displayName ?? name`, so this is the endpoint to call when an operator
-wants to rename a module without re-flashing it.
+which enforces a UNIQUE constraint at the DB layer. Frontend surfaces
+resolve the label via
+[`homepage/src/lib/displayLabel.ts`](../homepage/src/lib/displayLabel.ts),
+so this is the endpoint to call when an operator wants to rename a
+module without re-flashing it.
 
 Status codes:
 

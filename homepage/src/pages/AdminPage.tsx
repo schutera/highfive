@@ -4,6 +4,7 @@ import { api, ImageUpload } from '../services/api';
 import type { Module } from '@highfive/contracts';
 import RenameModuleModal from '../components/RenameModuleModal';
 import { hasPlausibleLocation } from '../lib/location';
+import { displayLabel } from '../lib/displayLabel';
 
 const SESSION_KEY = 'highfive_admin_auth';
 
@@ -118,18 +119,19 @@ export default function AdminPage() {
     }
   };
 
-  // Coalesces the operator-settable override over the firmware-reported
-  // name. Falls back to the bare MAC if the module is unknown to this
-  // page (e.g. an image label for a module that's since been deleted).
-  // See ADR-011 / issue #93.
+  // Returns the operator-visible label for an image's module, falling
+  // back to the bare MAC if the module is unknown to this page (e.g.
+  // an image label for a module that's since been deleted). For
+  // module objects in hand, prefer `displayLabel(m)` directly — this
+  // wrapper exists for the module-id-only callers.
   const getModuleLabel = (moduleId: string) => {
     const mod = modules.find((m) => m.id === moduleId);
     if (!mod) return moduleId;
-    return mod.displayName ?? mod.name;
+    return displayLabel(mod);
   };
 
   const handleDeleteModule = async (mod: Module) => {
-    const label = mod.displayName ?? mod.name;
+    const label = displayLabel(mod);
     if (!confirm(`Delete module "${label}" (${mod.id}) and all its data?`)) return;
     try {
       await api.deleteModule(mod.id);
@@ -256,8 +258,8 @@ export default function AdminPage() {
                       onClick={() => setSelectedModule(selectedModule === m.id ? '' : m.id)}
                     >
                       <td className="px-4 py-3 font-medium text-gray-900">
-                        {m.displayName ?? m.name}
-                        {m.displayName && (
+                        {displayLabel(m)}
+                        {m.displayName?.trim() && (
                           <span
                             className="ml-2 text-[10px] font-normal text-gray-400"
                             title={`Firmware-reported name: ${m.name}`}
@@ -345,7 +347,7 @@ export default function AdminPage() {
                             }}
                             className="text-gray-400 hover:text-amber-600 transition-colors"
                             title="Rename module (sets display_name override)"
-                            aria-label={`Rename module ${m.displayName ?? m.name}`}
+                            aria-label={`Rename module ${displayLabel(m)}`}
                           >
                             <svg
                               className="w-4 h-4"
@@ -406,7 +408,7 @@ export default function AdminPage() {
                 <option value="">All modules</option>
                 {modules.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {(m.displayName ?? m.name) + ' (' + m.id + ')'}
+                    {displayLabel(m) + ' (' + m.id + ')'}
                   </option>
                 ))}
               </select>

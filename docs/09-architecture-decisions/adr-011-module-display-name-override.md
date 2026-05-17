@@ -81,20 +81,27 @@ Alternatives considered:
   collisions surface as HTTP 409 carrying the conflicting MAC so the
   admin UI can render a useful inline error.
 
-The frontend coalesces — `module.displayName ?? module.name` — in
-every label-rendering surface
-([`ModulePanel`](../../homepage/src/components/ModulePanel.tsx),
-[`DashboardPage`](../../homepage/src/pages/DashboardPage.tsx),
-[`AdminPage`](../../homepage/src/pages/AdminPage.tsx)). The MAC's
-**leading** four hex chars (uppercased) ride along as a subtitle in
-every list and panel so two modules sharing a label remain visually
-distinct even before an operator runs the rename flow. The leading
-nibbles are the right choice here, not the trailing ones: same-batch
-ESP32 hardware shares its _trailing_ MAC octets — the field-incident
-MACs `b0:69:6e:f2:3a:08` and `e8:9f:a9:f2:3a:08` share `f2:3a:08`, so
-a trailing-4 disambiguator would render `3A08` on both and defeat the
-whole purpose. The unique-prefix octets (`B069` vs `E89F`) are what
-actually differ.
+Every frontend surface that renders a module label routes through the
+shared helper
+[`homepage/src/lib/displayLabel.ts`](../../homepage/src/lib/displayLabel.ts).
+The helper trims `displayName` and falls back to `name` on null, empty,
+or whitespace-only — so an `""` displayName (which the wire contract
+permits even though `duckdb-service` normalises it to NULL server-side)
+cannot produce a blank-label "ghost row". One helper, one defense,
+every surface calls it; the single-source-of-truth rule is what keeps
+this from being a re-occurrence of the "Three layers, one rule was
+actually four surfaces" pattern recorded in
+[chapter 11](../11-risks-and-technical-debt/README.md).
+
+The MAC's **leading** four hex chars (uppercased) ride along as a
+subtitle in every list and panel so two modules sharing a label remain
+visually distinct even before an operator runs the rename flow. The
+leading nibbles are the right choice here, not the trailing ones:
+same-batch ESP32 hardware shares its _trailing_ MAC octets — the
+field-incident MACs `b0:69:6e:f2:3a:08` and `e8:9f:a9:f2:3a:08` share
+`f2:3a:08`, so a trailing-4 disambiguator would render `3A08` on both
+and defeat the whole purpose. The unique-prefix octets (`B069` vs
+`E89F`) are what actually differ.
 
 The DuckDB `ADD COLUMN ... UNIQUE` form is rejected by the v1.4
 parser; the additive migration in
@@ -119,12 +126,19 @@ the inline UNIQUE (CREATE TABLE does support it).
 **Costs:**
 
 - Two columns means two write paths: `add_module` writes `name`,
-  `set_display_name` writes `display_name`. Code that reads the label
-  must remember to coalesce; a single test missing the `displayName`
-  branch leaves a silent dashboard regression where the override
-  doesn't apply. The
-  [`homepage/src/__tests__/ModulePanel.test.tsx`](../../homepage/src/__tests__/ModulePanel.test.tsx)
-  fixture and the four-branch coverage there is the structural guard.
+  `set_display_name` writes `display_name`. Resolution into the
+  operator-visible label is the responsibility of one helper,
+  [`homepage/src/lib/displayLabel.ts`](../../homepage/src/lib/displayLabel.ts),
+  which every label-rendering surface must call. The structural pin
+  is
+  [`homepage/src/__tests__/displayLabel.test.ts`](../../homepage/src/__tests__/displayLabel.test.ts) —
+  one `it()` per documented branch (null / `""` / whitespace-only /
+  non-empty / surrounding-whitespace trim) — composed with
+  per-surface integration tests
+  ([`DashboardPage.test.tsx`](../../homepage/src/__tests__/DashboardPage.test.tsx),
+  [`ModulePanel.test.tsx`](../../homepage/src/__tests__/ModulePanel.test.tsx))
+  that pin "this specific render site routes through the helper, not
+  around it".
 - The auto-suffix cap (`-99`) is arbitrary. A pathological collision
   rate raises rather than silently storing a 100th lookalike, which
   is the right failure mode but does mean a misbehaving fleet can

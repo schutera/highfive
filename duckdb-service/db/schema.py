@@ -30,8 +30,10 @@ _MODULE_CONFIGS_DDL = """
 # `name` stores the firmware-reported value (mutable on every UPSERT, no
 # UNIQUE — same-batch firmware can collide and `add_module` auto-suffixes
 # to disambiguate). `display_name` is an admin-settable override with a
-# UNIQUE constraint so two modules cannot share a label; the read path
-# coalesces `display_name ?? name` at the client. See ADR-011 and #93.
+# UNIQUE constraint so two modules cannot share a label; the operator-
+# visible label resolves client-side via
+# `homepage/src/lib/displayLabel.ts` (trims `display_name`, falls back to
+# `name` on null/empty/whitespace-only). See ADR-011 and #93.
 _MODULE_CONFIGS_COLUMNS = (
     "id, name, display_name, lat, lng, first_online, battery_level, "
     "image_count, email, updated_at, last_silence_alert_at"

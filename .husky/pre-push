@@ -13,6 +13,14 @@ bash scripts/check-doc-citations.sh || exit 1
 # docs/11-risks-and-technical-debt/README.md "GPIO0 is a strap pin".
 bash scripts/check-stale-reset-prose.sh || exit 1
 
+# Catch the deprecated `displayName ?? name` rule re-emerging in prose
+# or code outside its legitimate allow-list. The label resolves via
+# `homepage/src/lib/displayLabel.ts` (.trim() || name); `??` only
+# short-circuits on null, missing the empty-string defense. See
+# docs/11-risks-and-technical-debt/README.md
+# "`displayName ?? name` lived in seven docs and eight render sites".
+bash scripts/check-stale-display-name-rule.sh || exit 1
+
 # Catch a hardcoded Google API key literal — the failure mode of
 # issue #18. See docs/11-risks-and-technical-debt/README.md
 # "Third-party API keys belong in build-time macros, not source".

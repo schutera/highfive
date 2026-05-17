@@ -52,6 +52,32 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       if (value === undefined) {
         value = resolve(translations.en, path);
       }
+      // Plural form: keys can be `{ one: string, other: string }` and the
+      // branch is selected via `Intl.PluralRules` against `params.count`.
+      // Required to render grammatical German singulars: "1 aufgelistetes
+      // Modul" vs. "N aufgelistete Module" (the agreement-by-count rule
+      // can't be sidestepped with a single string). English uses the same
+      // mechanism for symmetry. Falls back to `.other` when count is
+      // missing or not numeric.
+      if (
+        value &&
+        typeof value === 'object' &&
+        'other' in (value as Record<string, unknown>) &&
+        typeof (value as Record<string, unknown>).other === 'string'
+      ) {
+        const branches = value as Record<string, string>;
+        const count = typeof params?.count === 'number' ? params.count : undefined;
+        const rule =
+          count !== undefined
+            ? new Intl.PluralRules(lang).select(count)
+            : 'other';
+        const fallbackEn = resolve(translations.en, path);
+        const fallbackBranches =
+          fallbackEn && typeof fallbackEn === 'object'
+            ? (fallbackEn as Record<string, string>)
+            : {};
+        value = branches[rule] ?? fallbackBranches[rule] ?? branches.other;
+      }
       // Non-string leaves (e.g. array-valued setup.stepLabels) collapse to
       // the path key — t() can't return arrays. Use useTranslationRaw() for
       // those and pluck the field directly.

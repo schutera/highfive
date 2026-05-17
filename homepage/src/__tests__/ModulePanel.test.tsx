@@ -73,7 +73,6 @@ const renderPanel = () =>
         module={{
           id: baseModule.id,
           name: baseModule.name,
-          displayName: baseModule.displayName,
           status: baseModule.status,
         }}
         onClose={() => undefined}
@@ -121,9 +120,12 @@ describe('ModulePanel firmware pill', () => {
 });
 
 // Pin the post-PR-I label/MAC behaviour (ADR-011 / issues #91, #92, #93,
-// #94). The dashboard renders `displayName ?? name`, and the last 4 hex
-// chars of the MAC ride along as a subtitle so two modules sharing a
-// label remain visually distinct.
+// #94). Every label-rendering surface resolves the operator-visible
+// label via `homepage/src/lib/displayLabel.ts` — `displayName` wins
+// when non-empty after trim, else `name`. The *leading* 4 hex chars
+// of the MAC ride along as a subtitle so two modules sharing a label
+// remain visually distinct (leading, not trailing — same-batch
+// hardware shares its trailing octets per the field incident in #92).
 describe('ModulePanel display-name override', () => {
   beforeEach(() => {
     nextModuleDetail = null;
@@ -147,6 +149,23 @@ describe('ModulePanel display-name override', () => {
     await waitFor(() => {
       expect(screen.getByText('fierce-apricot-specht')).toBeInTheDocument();
     });
+  });
+
+  // The wire contract permits `displayName: ""` even though duckdb-
+  // service normalises empty-after-strip to NULL server-side. The
+  // shared `displayLabel` helper exists exactly for this case — without
+  // its `.trim() || name` defense, the header `<h2>` would render
+  // empty. Pin the defense at this render site, not just at the sort
+  // key in DashboardPage (round-3 senior-review P1: same defense, all
+  // surfaces).
+  it('falls back to firmware name when displayName is the empty string', async () => {
+    nextModuleDetail = { ...baseModule, displayName: '' };
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText('fierce-apricot-specht')).toBeInTheDocument();
+    });
+    const header = screen.getByRole('heading', { level: 2 });
+    expect(header).toHaveTextContent('fierce-apricot-specht');
   });
 
   it('renders the MAC-prefix subtitle in uppercase hex', async () => {
@@ -191,7 +210,6 @@ describe('ModulePanel MAC disambiguation for same-batch hardware', () => {
           module={{
             id: parseModuleId('b0696ef23a08'),
             name: baseModule.name,
-            displayName: baseModule.displayName,
             status: baseModule.status,
           }}
           onClose={() => undefined}
@@ -219,7 +237,6 @@ describe('ModulePanel MAC disambiguation for same-batch hardware', () => {
           module={{
             id: parseModuleId('e89fa9f23a08'),
             name: baseModule.name,
-            displayName: baseModule.displayName,
             status: baseModule.status,
           }}
           onClose={() => undefined}

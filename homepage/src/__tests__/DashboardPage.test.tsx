@@ -174,28 +174,33 @@ describe('DashboardPage smoke', () => {
 });
 
 // PR II / issue #89 — the side-list must include modules without a
-// plausible location (the (0,0) Null Island sentinel) so operators can
-// spot a module that failed boot-time getGeolocation and hasn't yet
-// recovered via heartbeat. MapView itself filters them out of the
-// rendered marker set (`hasPlausibleLocation` in
-// homepage/src/lib/location.ts) — DashboardPage adds them back to the
-// side-list as the union of bounds-filtered visible + all pending.
-// Without this test, the round-1 senior-review fix that tightened the
-// MapView pre-bounds fallback to ALSO filter pending modules silently
-// dropped them from the side-list entirely. Found during manual
-// dev-stack smoke before PR-II merge: AdminPage showed the module
-// with the pill, header counter showed 6/6, but the dashboard side-
-// list said "5 sichtbar" and the operator had no way to find the
-// pending module from the dashboard view.
+// plausible location (the (0,0) Null Island sentinel) so operators
+// can spot a module that failed boot-time getGeolocation and hasn't
+// yet recovered via heartbeat. Post-#103, DashboardPage owns the
+// authoritative `modules` set and renders the side-list directly from
+// it; MapView no longer emits list-shaped data. Pending-location
+// modules sink to the bottom of the rendered list so the map-rendered
+// modules dominate the top. MapView itself still filters them out of
+// the marker set (`hasPlausibleLocation`).
 describe('DashboardPage Location-pending side-list', () => {
-  it('shows pending-location modules in the side-list with the Location pending pill', async () => {
+  it('shows pending-location modules at the bottom; plausible modules sorted alphabetically by display name', async () => {
+    // Fixture chosen to distinguish three possible sort behaviours:
+    //   - no-op:               [pending-null-island, real-bodensee, alpha-foo]
+    //   - pending-last only:   [real-bodensee, alpha-foo, pending-null-island]
+    //   - pending-last + abc:  [alpha-foo,    real-bodensee, pending-null-island]
+    // The assertions below pin the third (current) shape.
     nextDashboardModules = [
+      makeModule({ id: 'aabbccddeeff', name: 'pending-null-island', location: { lat: 0, lng: 0 } }),
       makeModule({
         id: '000000000001',
         name: 'real-bodensee',
         location: { lat: 47.78, lng: 9.61 },
       }),
-      makeModule({ id: 'aabbccddeeff', name: 'pending-null-island', location: { lat: 0, lng: 0 } }),
+      makeModule({
+        id: '111111111111',
+        name: 'alpha-foo',
+        location: { lat: 47.79, lng: 9.62 },
+      }),
     ];
     render(
       <LanguageProvider>
@@ -206,50 +211,109 @@ describe('DashboardPage Location-pending side-list', () => {
     );
 
     await waitFor(() => {
-      // The pending module's firmware name renders in the side-list.
-      // If this fails, the operator-visible regression is back —
-      // pending modules are invisible from the dashboard.
       expect(screen.getByText('pending-null-island')).toBeInTheDocument();
+      expect(screen.getByText('real-bodensee')).toBeInTheDocument();
+      expect(screen.getByText('alpha-foo')).toBeInTheDocument();
     });
 
-    // Scope the pill assertion to the desktop side-list (`<ul>` →
-    // `getByRole('list')`). Under fresh jsdom mount, only the desktop
-    // side-list renders a `<ul>` — the mobile bottom-sheet's `<ul>` is
-    // gated by `mobileListExpanded` (user input, false at mount), and
-    // the mobile collapsed-pill markup renders a `<button>` without a
-    // `<ul>` and contains only the "X in view • Tap to expand" copy,
-    // not a per-module pill. Scoping by role gives the assertion two
-    // guarantees the unscoped `getAllByText('Location pending')`
-    // didn't: (1) the pill renders inside the side-list `<ul>`, not
-    // in some unrelated surface, and (2) a future change that ever
-    // moves the pill markup into the mobile collapsed pill (e.g. "show
-    // a small dot when there's a pending module") fails this
-    // assertion with a clear "found 0 in <ul>" message rather than
-    // silently bumping the count past 1. Pin: exactly one pill per
-    // pending module, rendered inside the side-list.
+    // Scope to the desktop side-list `<ul>`. Pin: exactly one
+    // "Location pending" pill, rendered inside the list.
     const sideList = screen.getByRole('list');
     expect(within(sideList).getAllByText('Location pending')).toHaveLength(1);
 
-    // Header counter includes BOTH modules (2/2 online). Before this
-    // fix the side-list said "1 sichtbar" while the header still
-    // counted 2/2 — the asymmetry between the two surfaces is what
-    // the operator-visible bug looked like.
-    expect(screen.getByLabelText(/2 of 2 modules online/i)).toBeInTheDocument();
+    // Full ordering invariant.
+    const items = within(sideList).getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveTextContent('alpha-foo');
+    expect(items[1]).toHaveTextContent('real-bodensee');
+    expect(items[2]).toHaveTextContent('pending-null-island');
 
-    // The plausible-location fixture is intentionally not asserted on
-    // here. In this jsdom env the react-leaflet mocks don't propagate
-    // MapView's `onVisibleModulesChange` callback synchronously enough
-    // for the visible-half of the union to land in the rendered DOM
-    // before the test reads it, so a getByText('real-bodensee') would
-    // flake. Keeping the fixture in `nextDashboardModules` ensures the
-    // `pendingModules = modules.filter(!plausible)` logic is exercised
-    // against a *mixed* input — a regression that lumped plausible
-    // modules into the pending bucket would surface a stray
-    // 'real-bodensee' Location-pending pill above, which the strict
-    // single-pill assertion would still catch indirectly. The visible-
-    // half of the union is exercised end-to-end by the manual smoke
-    // documented in
-    // docs/10-quality-requirements/manual-tests-field-reliability.md
-    // (Part 2 of the field-reliability runbook).
+    // Header counter includes ALL modules (3/3 online).
+    expect(screen.getByLabelText(/3 of 3 modules online/i)).toBeInTheDocument();
+  });
+
+  // The wire contract `Module.displayName: string | null` permits `""`.
+  // `duckdb-service`'s `set_display_name` normalises empty-after-strip
+  // to NULL server-side, so this is theoretical today — but the
+  // `displayLabel` defense in DashboardPage.tsx exists explicitly for
+  // this case. Without it, the previous `??`-only short-circuit would
+  // sort by `name` (defense applied to the sort) while rendering a
+  // blank `<h3>` (defense NOT applied to render) — a ghost row. Round-3
+  // senior-review P1: walk the fixture through the rendered DOM, not
+  // just the sort key.
+  it('renders the firmware name when displayName is the empty string (no ghost row)', async () => {
+    nextDashboardModules = [
+      makeModule({
+        id: '222222222222',
+        name: 'fallback-firmware-name',
+        location: { lat: 47.78, lng: 9.61 },
+      }),
+    ];
+    // Patch the displayName on the fixture to `""` — `makeModule`'s
+    // default is `null`, but we want to exercise the empty-string path
+    // specifically (the `??` operator would short-circuit on `null` but
+    // not on `""`).
+    nextDashboardModules[0] = { ...nextDashboardModules[0], displayName: '' };
+
+    render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('fallback-firmware-name')).toBeInTheDocument();
+    });
+
+    const sideList = screen.getByRole('list');
+    const heading = within(sideList).getByRole('heading', { level: 3 });
+    expect(heading).toHaveTextContent('fallback-firmware-name');
+  });
+
+  // Chapter 11's "Current design" entry sells the id tie-break as
+  // "what makes the determinism claim structurally true" — without
+  // it, two modules with identical displayLabel would fall through
+  // to JS Array stable-sort, which would in turn leak the
+  // nondeterministic order of duckdb-service's `get_modules` into
+  // operator-visible behaviour. Pin the tie-break with a fixture pair
+  // sharing a label but differing on id (round-4 senior-review P2).
+  it('breaks displayLabel ties by module id (deterministic regardless of source order)', async () => {
+    nextDashboardModules = [
+      // Source order intentionally reverses id-ascending order — a
+      // regression to two-step sort would land 'ffff…' first. Ids are
+      // 12 lowercase hex chars per `parseModuleId`'s contract.
+      makeModule({
+        id: 'ffffffffffff',
+        name: 'shared-label',
+        location: { lat: 47.78, lng: 9.61 },
+      }),
+      makeModule({
+        id: 'aaaaaaaaaaaa',
+        name: 'shared-label',
+        location: { lat: 47.78, lng: 9.61 },
+      }),
+    ];
+
+    render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('shared-label')).toHaveLength(2);
+    });
+
+    const sideList = screen.getByRole('list');
+    const items = within(sideList).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    // Tie-break: id ascending → 'aaaa…' before 'ffff…'. The MAC-prefix
+    // subtitle (first 4 hex, uppercased) is the visible differentiator.
+    expect(items[0]).toHaveTextContent('AAAA');
+    expect(items[1]).toHaveTextContent('FFFF');
   });
 });

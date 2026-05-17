@@ -86,6 +86,80 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### `displayName ?? name` lived in seven docs and eight render sites; six review rounds to extinguish (PR 1 / issues #103, #102, #101)
+
+**What happened.** The "operator-visible module label" rule —
+"prefer `displayName` over `name`" — was implemented at eight render
+sites in the homepage tree
+([DashboardPage](../../homepage/src/pages/DashboardPage.tsx) ×3,
+[ModulePanel](../../homepage/src/components/ModulePanel.tsx),
+[AdminPage](../../homepage/src/pages/AdminPage.tsx) ×5,
+[RenameModuleModal](../../homepage/src/components/RenameModuleModal.tsx),
+[Step5Verify](../../homepage/src/components/setup/Step5Verify.tsx))
+and described as `displayName ?? name` in seven prose locations
+([api-reference.md](../api-reference.md) ×2,
+[glossary](../12-glossary/README.md),
+[ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md),
+[building-block-view/duckdb-service.md](../05-building-block-view/duckdb-service.md),
+[api-contracts.md](../08-crosscutting-concepts/api-contracts.md),
+[contracts/src/index.ts](../../contracts/src/index.ts)). PR 1 found a
+defense gap (the wire shape permits `displayName: ""`, but `??` only
+short-circuits on `null` — so an empty-string override would render
+as a blank `<h3>` "ghost row") and went round-by-round closing it.
+Round 3 fixed the sort key in `DashboardPage`. Round 4 noticed two
+`<h3>` render sites in the same file still used `??`. Round 5
+promoted the fix to a shared helper
+([`homepage/src/lib/displayLabel.ts`](../../homepage/src/lib/displayLabel.ts))
+and swept seven sites in homepage plus six prose citations. Round 6
+caught two more prose citations (a backend code comment and a
+building-block-view doc) the round-5 sweep had missed by enumerating
+six known sites rather than re-grepping.
+
+**Why it happened.** A behavioural rule that's also a prose
+contract accretes copies. Every doc that documents the wire shape
+restates the rule, every render site implements its own coalesce
+inline, and the next behaviour change has to be applied N times.
+N grew silently from "a few" to thirteen across this codebase.
+Splitting one fix across N rounds is the symptom; the root cause is
+that the rule had no canonical home — until round 5 promoted
+`displayLabel` to `homepage/src/lib/`, there was no single place to
+point at, so every doc and every render site became its own source
+of truth.
+
+**How to avoid it next time.**
+1. **Make the rule a callable, then point at it.** The structural
+   fix that closed this PR was `homepage/src/lib/displayLabel.ts`
+   with `Pick<Module, 'name' | 'displayName'>` as its parameter type
+   and one `it()` per branch in
+   [`displayLabel.test.ts`](../../homepage/src/__tests__/displayLabel.test.ts).
+   Every prose citation now points at the helper file instead of
+   restating the rule. The next behaviour change is one edit, not
+   thirteen.
+2. **Use a trip-wire grep to enforce single-source-of-truth.** When
+   you promote a rule to a helper, the cost is "every prose copy of
+   the old rule is now drift". A one-liner grep
+   (`git grep -nE "display_name \?\?|displayName \?\?" -- docs/
+   backend/ duckdb-service/ contracts/ image-service/
+   homepage/src/`) finds every survivor; folding that grep into
+   `make check-citations` (see `scripts/check-doc-citations.sh`)
+   turns the round-N senior-review ritual into a CI check that
+   catches the drift at commit time. Done in PR 1 as part of the
+   round-6 wrap-up.
+3. **When sweeping doc citations of a rule you just removed, grep
+   first, enumerate second.** PR 1's round-4 commit enumerated six
+   doc sites it had updated; rounds 5 and 6 each found one more the
+   enumeration missed. Same pattern as PR-II's "Three layers, one
+   rule was actually four surfaces" — author confidence that the
+   sweep is complete is not a substitute for the grep.
+
+The meta-lesson is the same as the
+[Three layers, one rule](#three-layers-one-rule-was-actually-four-surfaces--the-dashboard-side-list-silently-filtered-pending-modules-pr-ii-final-pass-smoke)
+entry's, just with a longer tail: a behavioural contract restated in
+prose at N sites and enforced inconsistently at N render sites is
+not a contract — it is N wishes. Make one of them callable, point
+the other (N-1) at it, and add a grep so the rule's structural
+position is auditable.
+
 ### `updated_at` carried two unrelated semantics; a metadata UPDATE silently corrupted the liveness signal (PR-I round-1 review)
 
 **What happened.** PR I's first cut of the new
@@ -565,28 +639,6 @@ asymmetry between admin/header (correct) and dashboard list
    DOM. So the prose claim that the side-list shows pending modules
    had no build-time gate to disagree with the prose claim itself.
 
-**How to avoid it next time.** Pinned by
-[`homepage/src/__tests__/DashboardPage.test.tsx`'s `DashboardPage Location-pending side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
-(commit `e9b0345`):
-
-1. **The side-list logic itself**: `DashboardPage` now derives
-   `sideListModules = visibleModules ∪ pendingModules`, where
-   `pendingModules = modules.filter(!hasPlausibleLocation)`. The two
-   sets are disjoint by construction (visible ⊆ plausible, pending =
-   !plausible), so no dedup is needed at the call site. MapView's
-   `visibleModules` stays strict — its semantic of "rendered on the
-   map" is unchanged; the union happens in DashboardPage because the
-   side-list semantic is distinct from the map-marker semantic.
-2. **Cross-surface assertion in the test**: the new test fixture has
-   one plausible + one pending module; the assertion checks that the
-   pending module's firmware name AND the "Location pending" pill
-   text are both in the rendered DOM, with the header counter
-   reading `2 of 2 modules online`. Before the fix, the side-list
-   would have rendered 0 modules (`visibleModules` is `[]` on
-   initial render before MapView's bounds callback fires, and `[]`
-   contains no pending modules), so the assertion would have failed
-   with `Unable to find an element with the text: pending-null-island`.
-
 **The meta-lesson.** **A behavioural contract asserted only in a
 comment block, a PR description, or a chapter-11 entry is not a
 contract — it is a wish.** PR II's prose said "pending modules show
@@ -596,31 +648,60 @@ made that impossible. Two senior-review rounds, a CLAUDE.md
 entry all referenced the contract while it was structurally false.
 The only thing that caught it was an operator opening the dashboard
 during pre-merge manual smoke. Pin cross-surface contracts with a
-mount-and-render integration test (here:
-`DashboardPage.test.tsx::DashboardPage Location-pending side-list`).
-Same pattern as PR-42's [Telemetry sidecar envelope drift](#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field)
+mount-and-render integration test. Same pattern as PR-42's
+[Telemetry sidecar envelope drift](#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field)
 entry — the wire-shape-mismatch story there was the same shape:
 docs + types + code all individually correct, but the cross-layer
 contract was wishful.
 
-**Deferred follow-ups (tracked as separate issues):**
+**Current design (PR 1 / issues #103, #102, #101 — supersedes the
+union-based fix.)** The original PR II patch closed the symptom by
+defining `sideListModules = visibleModules ∪ pendingModules` in
+`DashboardPage` — but that union was itself a smell, requiring
+`DashboardPage` to reconstitute its own truth from a callback emitted
+by `MapView`. PR 1 removed the coupling:
 
-- The German copy `dashboard.modulesInView` resolves to "X Module
-  sichtbar" — "sichtbar on the map" is semantically false when X
-  includes a non-on-map pending module. The English "in view" has
-  the same lie. Worth a rename to `dashboard.modulesListed` ("X
-  modules listed" / "X gelistet") or a split into "X in view + Y
-  pending". Filed separately so this PR's scope stays small.
-- The current `sideListModules` test relies on `visibleModules` and
-  `pendingModules` being disjoint at runtime, an invariant enforced
-  by MapView's `fuzzedModules` filter. No unit test fires if a
-  future MapView refactor loosens that filter — `sideListModules`
-  would silently double-render the (0,0) module once as "visible"
-  and once as "pending", and the existing `toHaveLength(1)` pill
-  assertion still passes because there's still one pill per pending
-  module. A defensive test that feeds a pending module through a
-  mocked `onVisibleModulesChange` callback (instead of going through
-  the real `MapView` mount) would catch this. Filed separately.
+1. **DashboardPage owns the authoritative module set, MapView is a
+   pure renderer.**
+   [`homepage/src/pages/DashboardPage.tsx`](../../homepage/src/pages/DashboardPage.tsx)'s
+   `sideListModules` is a single derivation from `modules` — a three-
+   step deterministic sort: (1) pending-location modules sink to the
+   bottom; (2) within each bucket, sort by `displayLabel` via a locale-
+   pinned `Intl.Collator(lang)`; (3) final tie-break on `id`. The
+   tertiary tie-break is what makes the determinism claim structurally
+   true — without it, two modules with identical display names would
+   fall through to JS stable-sort, which would in turn leak the
+   nondeterministic order of `duckdb-service/routes/modules.py::get_modules`
+   (no `ORDER BY` there today) into operator-visible behaviour.
+   [`homepage/src/components/MapView.tsx`](../../homepage/src/components/MapView.tsx)
+   consumes `modules` as a prop, filters via `fuzzedModules` for marker
+   rendering, and emits no list-shaped data back. There is no
+   `onVisibleModulesChange` and no `bounds` state.
+2. **The side-list is no longer viewport-coupled** — operator-visible
+   UX shift: panning/zooming the map does not change what the side-
+   list shows. The list always contains every module. Two consequences
+   to keep in mind: (a) the side-list count and the map marker count
+   can legitimately differ (the count text was renamed to "X listed"
+   to be honest about this); (b) for large fleets the side-list will
+   grow without bound — if this becomes painful, the right answer is
+   pagination or a separate "needs attention" surface, not re-coupling
+   to viewport (which is what PR 1 explicitly walked away from).
+3. **The integration test pins the full ordering invariant.**
+   [`DashboardPage.test.tsx`'s `DashboardPage Location-pending
+   side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
+   uses a three-module fixture (`pending-null-island`, `real-bodensee`,
+   `alpha-foo`) deliberately ordered to distinguish three regression
+   shapes: a no-op sort, a pending-last-only sort, and the current
+   pending-last-plus-alphabetical sort. Indices 0 through 2 are pinned
+   to `alpha-foo`, `real-bodensee`, `pending-null-island` by exact
+   text, so any regression in either sort layer fails loudly. The same
+   test pins the "Location pending" pill render and the header-counter
+   parity.
+
+The deferred follow-ups (renamed copy + defensive disjointness test)
+that the original PR II entry mentioned both landed in PR 1: the copy
+rename was applied as described, and the disjointness defense became
+structurally unnecessary once the union itself was removed.
 
 ### Operator-vigilance rule was unenforced — dev API key was the active admin gate in production (PR #84)
 

@@ -271,10 +271,11 @@ export class ModuleReadModel {
         name: m.name,
         // `?? null` because old duckdb-service builds (pre-PR-I) won't
         // include the field at all — keep the contract's `string | null`
-        // shape honest in skew scenarios. The homepage coalesces
-        // `displayName ?? name` so a null here just means "fall back
-        // to the firmware-reported name", which is the right behaviour
-        // for modules that have never been renamed.
+        // shape honest in skew scenarios. The homepage resolves the
+        // operator-visible label via `homepage/src/lib/displayLabel.ts`
+        // (falls back to `name` on null / empty / whitespace-only), so a
+        // null here lands on the firmware-reported name — the right
+        // behaviour for modules that have never been renamed.
         displayName: m.display_name ?? null,
         location: { lat: Number(m.lat), lng: Number(m.lng) },
         status,

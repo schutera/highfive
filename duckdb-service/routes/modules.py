@@ -400,8 +400,10 @@ def get_modules():
         # `module_configs` cannot silently leak through to the wire
         # shape without a deliberate edit here. The backend's
         # `ApiModule` TS interface mirrors this list. The client
-        # (homepage) coalesces `display_name ?? name` — we deliberately
-        # do not do that server-side so the admin UI can show both.
+        # (homepage) resolves the operator-visible label via
+        # `homepage/src/lib/displayLabel.ts` — we deliberately do not
+        # collapse `display_name`/`name` server-side so the admin UI
+        # can show both.
         modules = query_all(
             """
             SELECT m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Module } from '@highfive/contracts';
 import { api, RenameConflictError } from '../services/api';
+import { displayLabel } from '../lib/displayLabel';
 import AdminKeyForm from './AdminKeyForm';
 
 const ADMIN_KEY_STORAGE = 'hf_admin_key';
@@ -98,7 +99,7 @@ export default function RenameModuleModal({ module, onClose, onSaved }: RenameMo
     void performRename();
   };
 
-  const currentLabel = module.displayName ?? module.name;
+  const currentLabel = displayLabel(module);
 
   return (
     <div

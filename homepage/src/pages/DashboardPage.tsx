@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import MapView from '../components/MapView';
 import { hasPlausibleLocation } from '../lib/location';
+import { displayLabel } from '../lib/displayLabel';
 import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
 import { useTranslation } from '../i18n/LanguageContext';
@@ -9,10 +10,9 @@ import { api } from '../services/api';
 import type { Module, UserLocation } from '@highfive/contracts';
 
 export default function DashboardPage() {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const location = useLocation();
   const [modules, setModules] = useState<Module[]>([]);
-  const [visibleModules, setVisibleModules] = useState<Module[]>([]);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,26 +75,41 @@ export default function DashboardPage() {
 
   const onlineCount = modules.filter((m) => m.status === 'online').length;
 
-  // Side-list = bounds-filtered plausible modules (from MapView's
-  // `onVisibleModulesChange`) PLUS every module without a plausible
-  // location. Pending-location modules have no spatial relationship
-  // to the map bounds, so the side-list is the only surface where the
-  // operator can spot a module stuck at the (0,0) sentinel after a
-  // failed first-boot getGeolocation (#89). MapView itself stays
-  // strict (only renders markers for plausible coords); the union
-  // happens here so MapView's name "visible" keeps meaning "rendered
-  // on the map". The two sets are disjoint by construction —
-  // pendingModules = !plausible, visibleModules ⊆ plausible — so no
-  // dedup needed. Pinned by DashboardPage.test.tsx's
-  // "renders Location pending pill" test.
-  const pendingModules = useMemo(
-    () => modules.filter((m) => !hasPlausibleLocation(m.location)),
-    [modules],
-  );
-  const sideListModules = useMemo(
-    () => [...visibleModules, ...pendingModules],
-    [visibleModules, pendingModules],
-  );
+  // The side-list shows every module the operator should attend to,
+  // not just what's currently plottable on the map viewport. Pending-
+  // location modules (stuck at the (0,0) sentinel after a failed
+  // first-boot getGeolocation; #89) are sorted to the bottom so the
+  // map-rendered modules dominate the top of the list, with pending
+  // modules surfaced as a tail bucket carrying the "Location pending"
+  // pill. MapView consumes `modules` as a prop and derives its own
+  // marker-rendering filter internally (#103 — MapView no longer emits
+  // list-shaped data back to the parent).
+  //
+  // The sort is fully deterministic — no fallthrough to JS stable-sort
+  // order, which would otherwise leak the nondeterminism of duckdb-
+  // service's `get_modules` (no ORDER BY there) into operator-visible
+  // behaviour:
+  //   1. pending-location modules sink to the bottom
+  //   2. within each bucket, sort by `displayLabel` using a locale-
+  //      pinned `Intl.Collator(lang)` — pinning the locale rules out
+  //      drift from the runtime's default collation (the old
+  //      no-args `localeCompare()` behaved differently across Node
+  //      versions and on operator browsers in different locales).
+  //   3. final tie-break on module id — collisions on (1) + (2) are
+  //      rare (display name is server-side UNIQUE, the post-#94 auto-
+  //      suffix on `name` makes name collisions improbable) but the id
+  //      tie-break makes the determinism claim structurally true.
+  const sideListModules = useMemo(() => {
+    const collator = new Intl.Collator(lang);
+    return [...modules].sort((a, b) => {
+      const aPending = Number(!hasPlausibleLocation(a.location));
+      const bPending = Number(!hasPlausibleLocation(b.location));
+      if (aPending !== bPending) return aPending - bPending;
+      const byLabel = collator.compare(displayLabel(a), displayLabel(b));
+      if (byLabel !== 0) return byLabel;
+      return a.id.localeCompare(b.id);
+    });
+  }, [modules, lang]);
 
   /**
    * Status pill for the header — live region so screen readers hear updates
@@ -202,7 +217,6 @@ export default function DashboardPage() {
                 modules={modules}
                 selectedModule={selectedModule}
                 onModuleSelect={handleModuleSelect}
-                onVisibleModulesChange={setVisibleModules}
                 userLocationHint={userLocationHint}
               />
             )}
@@ -306,7 +320,7 @@ export default function DashboardPage() {
               {t('common.hiveModules')}
             </h2>
             <p className="text-hf-xs text-hf-fg-mute mt-0.5">
-              {t('dashboard.modulesInView', { count: sideListModules.length })}
+              {t('dashboard.modulesListed', { count: sideListModules.length })}
             </p>
           </div>
           <ul className="overflow-y-auto flex-1 p-3 space-y-1.5">
@@ -324,7 +338,7 @@ export default function DashboardPage() {
                   <div className="flex items-center justify-between">
                     <div className="min-w-0 flex-1">
                       <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
-                        {module.displayName ?? module.name}
+                        {displayLabel(module)}
                       </h3>
                       {/* Leading 4 hex of the MAC — same-batch hardware
                           shares the *trailing* octets (issue #92 field
@@ -397,7 +411,7 @@ export default function DashboardPage() {
                       {t('common.hiveModules')}
                     </div>
                     <div className="text-hf-xs text-hf-fg-mute">
-                      {t('dashboard.inViewTap', { count: sideListModules.length })}
+                      {t('dashboard.listedTap', { count: sideListModules.length })}
                     </div>
                   </div>
                 </div>
@@ -440,7 +454,7 @@ export default function DashboardPage() {
                   <div>
                     <h2 className="font-bold text-hf-fg">{t('common.hiveModules')}</h2>
                     <p className="text-hf-xs text-hf-fg-mute">
-                      {t('dashboard.modulesInView', { count: sideListModules.length })}
+                      {t('dashboard.modulesListed', { count: sideListModules.length })}
                     </p>
                   </div>
                   <button
@@ -490,7 +504,7 @@ export default function DashboardPage() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
-                              {m.displayName ?? m.name}
+                              {displayLabel(m)}
                             </h3>
                             {/* Leading 4 hex — see DashboardPage desktop
                                 list comment + ADR-011. */}

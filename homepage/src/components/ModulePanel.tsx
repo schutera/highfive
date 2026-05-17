@@ -5,6 +5,7 @@ import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
 import { hasPlausibleLocation } from '../lib/location';
+import { displayLabel } from '../lib/displayLabel';
 
 const ADMIN_KEY_STORAGE = 'hf_admin_key';
 
@@ -31,12 +32,7 @@ interface ModulePanelProps {
   // out of sync with the wire shape (#31 reviewer P2). 'unknown' is set
   // when the heartbeat fetch failed and the module would otherwise have
   // been classified as 'offline' — see backend/src/database.ts.
-  //
-  // `displayName` is included so the loading-state header (rendered
-  // before `moduleDetail` resolves) can already show the operator-
-  // chosen label rather than briefly flashing the firmware name. See
-  // ADR-011 and issue #93.
-  module: Pick<Module, 'id' | 'name' | 'displayName' | 'status'>;
+  module: Pick<Module, 'id' | 'name' | 'status'>;
   onClose: () => void;
   onError: (error: string) => void;
 }
@@ -235,7 +231,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
 
         <div className="pr-0 md:pr-8">
           <h2 className="font-bold" style={{ fontSize: 'var(--fs-lg)' }}>
-            {moduleDetail.displayName ?? moduleDetail.name}
+            {displayLabel(moduleDetail)}
           </h2>
           {/* MAC-prefix subtitle (first 4 hex chars) so two modules
               that share a label stay visually distinct on the dashboard.

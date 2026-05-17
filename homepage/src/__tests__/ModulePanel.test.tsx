@@ -210,7 +210,7 @@ describe('ModulePanel MAC disambiguation for same-batch hardware', () => {
           module={{
             id: parseModuleId('b0696ef23a08'),
             name: baseModule.name,
-              status: baseModule.status,
+            status: baseModule.status,
           }}
           onClose={() => undefined}
           onError={() => undefined}
@@ -237,7 +237,7 @@ describe('ModulePanel MAC disambiguation for same-batch hardware', () => {
           module={{
             id: parseModuleId('e89fa9f23a08'),
             name: baseModule.name,
-              status: baseModule.status,
+            status: baseModule.status,
           }}
           onClose={() => undefined}
           onError={() => undefined}

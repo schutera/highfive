@@ -146,7 +146,7 @@ Registers a new module in the system.
 
 ### GET /modules
 
-Returns all registered modules. Each row includes both `name` (firmware-reported, mutable) and `display_name` (admin-settable override, UNIQUE; null by default). The homepage coalesces `display_name ?? name`. See [ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md).
+Returns all registered modules. Each row includes both `name` (firmware-reported, mutable) and `display_name` (admin-settable override, UNIQUE; null by default). The homepage resolves the operator-visible label via [`homepage/src/lib/displayLabel.ts`](../../homepage/src/lib/displayLabel.ts) (trims `display_name`, falls back to `name` on null / empty / whitespace-only). See [ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md).
 
 ### PATCH /modules/&lt;module_id&gt;/display_name
 

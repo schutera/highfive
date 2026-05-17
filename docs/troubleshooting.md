@@ -71,7 +71,7 @@ The frontend treats both as "no hint" and falls back to the default centre — b
 If you want to verify the backend path:
 
 ```powershell
-curl -H "X-API-Key: hf_dev_key_2026" http://localhost:3002/api/user-location -i
+curl.exe -H "X-API-Key: hf_dev_key_2026" http://localhost:3002/api/user-location -i
 ```
 
 Status `204` confirms private-IP short-circuit; status `503` confirms the upstream is down; status `200` with a JSON body means the hint should be reaching the map — file an issue with the request/response.

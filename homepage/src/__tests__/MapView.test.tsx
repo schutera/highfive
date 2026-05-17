@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { LanguageProvider } from '../i18n/LanguageContext';
 import { hasPlausibleLocation } from '../lib/location';
+import type { Module } from '@highfive/contracts';
+import { parseModuleId } from '@highfive/contracts';
 
 // One shared mock map per test file — vi.mock factories cannot reference
 // out-of-scope state, so we expose it via a module-level ref and reset
@@ -392,6 +394,25 @@ describe('MapView locate control', () => {
   });
 });
 
+function makeModule(args: { id: string; location: { lat: number; lng: number } }): Module {
+  return {
+    id: parseModuleId(args.id),
+    name: 'fierce-apricot-specht',
+    displayName: null,
+    location: args.location,
+    status: 'online',
+    lastApiCall: '2026-05-16T20:00:00.000Z',
+    batteryLevel: 88,
+    firstOnline: '2026-05-16',
+    totalHatches: 0,
+    imageCount: 0,
+    email: null,
+    updatedAt: '2026-05-16T20:00:00.000Z',
+    lastSeenAt: '2026-05-16T20:00:00.000Z',
+    latestHeartbeat: null,
+  };
+}
+
 describe('MapView userLocationHint', () => {
   it('flies to the hint at regional zoom when it arrives', () => {
     const { rerender } = render(
@@ -410,6 +431,76 @@ describe('MapView userLocationHint', () => {
       <LanguageProvider>
         <MapView
           modules={[]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={{ lat: 48.137, lng: 11.575 }}
+        />
+      </LanguageProvider>,
+    );
+
+    expect(mockMap.flyTo).toHaveBeenCalledWith([48.137, 11.575], 11, { duration: 1.5 });
+  });
+
+  // Regression for the rebase interaction between PR II's `firstPlausible`
+  // initial centre (#49) and PR #78's IP-geo hint flyTo. If the dashboard
+  // already mounts the map centred on a real module, a late-arriving hint
+  // must NOT yank the viewport to a coarser regional centroid. The latch
+  // pre-flips when `hasInitialPlausibleCentre` is true at mount.
+  it('does not fly to the hint when the map already opened on a plausible module', () => {
+    const realModule = makeModule({
+      id: '000000000001',
+      location: { lat: 47.78, lng: 9.61 },
+    });
+    const { rerender } = render(
+      <LanguageProvider>
+        <MapView
+          modules={[realModule]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={null}
+        />
+      </LanguageProvider>,
+    );
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+
+    rerender(
+      <LanguageProvider>
+        <MapView
+          modules={[realModule]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={{ lat: 48.137, lng: 11.575 }}
+        />
+      </LanguageProvider>,
+    );
+
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+  });
+
+  // A (0,0) sentinel module does not count as a plausible centre, so the
+  // hint should still fire. Pins the symmetric edge of the latch rule:
+  // pending-only fleets are the case the hint was designed for.
+  it('flies to the hint when modules exist but none have a plausible location', () => {
+    const pendingModule = makeModule({
+      id: 'aabbccddeeff',
+      location: { lat: 0, lng: 0 },
+    });
+    const { rerender } = render(
+      <LanguageProvider>
+        <MapView
+          modules={[pendingModule]}
+          selectedModule={null}
+          onModuleSelect={() => undefined}
+          userLocationHint={null}
+        />
+      </LanguageProvider>,
+    );
+    expect(mockMap.flyTo).not.toHaveBeenCalled();
+
+    rerender(
+      <LanguageProvider>
+        <MapView
+          modules={[pendingModule]}
           selectedModule={null}
           onModuleSelect={() => undefined}
           userLocationHint={{ lat: 48.137, lng: 11.575 }}

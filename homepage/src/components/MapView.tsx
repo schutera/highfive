@@ -186,12 +186,14 @@ function MapController({
   selectedModule,
   selectedFuzzedLocation,
   userLocationHint,
+  hasInitialPlausibleCentre,
   onZoomChange,
   onBoundsChange,
 }: {
   selectedModule: Module | null;
   selectedFuzzedLocation: [number, number] | null;
   userLocationHint: UserLocation | null | undefined;
+  hasInitialPlausibleCentre: boolean;
   onZoomChange: (zoom: number) => void;
   onBoundsChange: (bounds: L.LatLngBounds) => void;
 }) {
@@ -200,7 +202,17 @@ function MapController({
   // already panned/zoomed (or selected a module) by the time the hint
   // arrives, we'd be yanking their viewport. Ref instead of state so the
   // gate doesn't trigger a re-render.
-  const hintApplied = useRef(false);
+  //
+  // When MapView mounts with at least one plausibly-located module,
+  // `MapContainer` is already centred on it (PR II / #49 `firstPlausible`
+  // logic in the parent). A late-arriving IP-geo hint would then yank
+  // the operator off a real module onto a coarser regional centroid —
+  // the opposite of the #49 "don't jump the dashboard away from real
+  // modules" guarantee. Pre-flip the latch so the hint is suppressed
+  // in that case. The hint still wins when no module has a plausible
+  // location yet (cold deploy, first ESP onboarding, all modules at
+  // (0,0) sentinel) — that's the case it was designed for.
+  const hintApplied = useRef(hasInitialPlausibleCentre);
 
   useMapEvents({
     zoomend: () => {
@@ -563,6 +575,7 @@ export default function MapView({
             : null
         }
         userLocationHint={userLocationHint ?? null}
+        hasInitialPlausibleCentre={Boolean(firstPlausible)}
         onZoomChange={setZoom}
         onBoundsChange={setBounds}
       />

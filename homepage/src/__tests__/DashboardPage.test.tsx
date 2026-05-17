@@ -203,4 +203,44 @@ describe('DashboardPage Location-pending side-list', () => {
     // Header counter includes ALL modules (3/3 online).
     expect(screen.getByLabelText(/3 of 3 modules online/i)).toBeInTheDocument();
   });
+
+  // The wire contract `Module.displayName: string | null` permits `""`.
+  // `duckdb-service`'s `set_display_name` normalises empty-after-strip
+  // to NULL server-side, so this is theoretical today — but the
+  // `displayLabel` defense in DashboardPage.tsx exists explicitly for
+  // this case. Without it, the previous `??`-only short-circuit would
+  // sort by `name` (defense applied to the sort) while rendering a
+  // blank `<h3>` (defense NOT applied to render) — a ghost row. Round-3
+  // senior-review P1: walk the fixture through the rendered DOM, not
+  // just the sort key.
+  it('renders the firmware name when displayName is the empty string (no ghost row)', async () => {
+    nextDashboardModules = [
+      makeModule({
+        id: '222222222222',
+        name: 'fallback-firmware-name',
+        location: { lat: 47.78, lng: 9.61 },
+      }),
+    ];
+    // Patch the displayName on the fixture to `""` — `makeModule`'s
+    // default is `null`, but we want to exercise the empty-string path
+    // specifically (the `??` operator would short-circuit on `null` but
+    // not on `""`).
+    nextDashboardModules[0] = { ...nextDashboardModules[0], displayName: '' };
+
+    render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('fallback-firmware-name')).toBeInTheDocument();
+    });
+
+    const sideList = screen.getByRole('list');
+    const heading = within(sideList).getByRole('heading', { level: 3 });
+    expect(heading).toHaveTextContent('fallback-firmware-name');
+  });
 });

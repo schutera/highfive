@@ -48,14 +48,21 @@ const translations = {
     // ---- Dashboard ----
     dashboard: {
       title: 'Dashboard',
+      // Plural-aware: German singular ("1 aufgelistetes Modul") and
+      // plural ("X aufgelistete Module") have different adjective
+      // endings AND different noun forms; a single `{count}`-templated
+      // string can't be grammatical for both.
       modulesListed: {
         one: '{count} module listed',
         other: '{count} modules listed',
       },
-      listedTap: {
-        one: '{count} listed \u2022 Tap to expand',
-        other: '{count} listed \u2022 Tap to expand',
-      },
+      // `listedTap` stays a single string: the abbreviated mobile pill
+      // copy ("X listed \u2022 Tap to expand" / "X aufgelistet \u2022 Antippen
+      // zum \u00d6ffnen") uses the past participle alone with no following
+      // noun, so the singular/plural forms collapse to the same surface
+      // text in both languages. Promote to a plural object if a future
+      // translator needs to disambiguate.
+      listedTap: '{count} listed \u2022 Tap to expand',
       moduleDetails: 'Module Details',
       errorTitle: "It's not you, it's us!",
       errorSubtitle: 'Our worker bees are already on it.',
@@ -448,10 +455,7 @@ const translations = {
         one: '{count} aufgelistetes Modul',
         other: '{count} aufgelistete Module',
       },
-      listedTap: {
-        one: '{count} aufgelistet \u2022 Antippen zum \u00D6ffnen',
-        other: '{count} aufgelistet \u2022 Antippen zum \u00D6ffnen',
-      },
+      listedTap: '{count} aufgelistet \u2022 Antippen zum \u00D6ffnen',
       moduleDetails: 'Moduldetails',
       errorTitle: 'Es liegt nicht an dir, es liegt an uns!',
       errorSubtitle: 'Unsere Arbeitsbienen sind bereits dran.',
@@ -793,5 +797,12 @@ const translations = {
 } as const;
 
 export type Language = keyof typeof translations;
+// Leaves can be one of: string, `{ one: string, other: string }`
+// (plural-aware — selected via `Intl.PluralRules` in
+// `LanguageContext.tsx`'s `t`), or a string[] (use `useTranslationRaw`
+// to read array-valued keys; `t()` returns the path string for
+// non-string leaves). No current consumer outside `LanguageContext.tsx`;
+// keep the export so future tooling (Storybook, doc generators, etc.)
+// can pin against the catalog shape without re-deriving.
 export type TranslationKeys = typeof translations.en;
 export default translations;

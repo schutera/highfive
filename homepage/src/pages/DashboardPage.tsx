@@ -8,6 +8,18 @@ import { useTranslation } from '../i18n/LanguageContext';
 import { api } from '../services/api';
 import type { Module } from '@highfive/contracts';
 
+// Display label for a module — every surface that shows a module name
+// MUST go through this. The wire contract `Module.displayName: string
+// | null` permits `""` (duckdb-service's `set_display_name` normalises
+// empty-after-strip to NULL server-side, but the type system doesn't
+// enforce it). Splitting the defense across surfaces — e.g. sort key
+// vs rendered `<h3>` — would reproduce the "Three layers, one rule
+// was actually four surfaces" failure pattern in chapter 11. Use
+// `displayLabel(m)` everywhere.
+function displayLabel(m: Module): string {
+  return m.displayName?.trim() || m.name;
+}
+
 export default function DashboardPage() {
   const { t, lang } = useTranslation();
   const location = useLocation();
@@ -71,25 +83,22 @@ export default function DashboardPage() {
   // service's `get_modules` (no ORDER BY there) into operator-visible
   // behaviour:
   //   1. pending-location modules sink to the bottom
-  //   2. within each bucket, sort by display name using the active
-  //      language's collator (locale-aware lexical order — e.g. `Ä`
-  //      sorts near `A` for de; default Anglo order for en)
+  //   2. within each bucket, sort by `displayLabel` using a locale-
+  //      pinned `Intl.Collator(lang)` — pinning the locale rules out
+  //      drift from the runtime's default collation (the old
+  //      no-args `localeCompare()` behaved differently across Node
+  //      versions and on operator browsers in different locales).
   //   3. final tie-break on module id — collisions on (1) + (2) are
   //      rare (display name is server-side UNIQUE, the post-#94 auto-
   //      suffix on `name` makes name collisions improbable) but the id
   //      tie-break makes the determinism claim structurally true.
-  //
-  // `displayName?.trim() || name` defends against a `""` displayName
-  // (the wire contract permits it; duckdb-service normalises empty-
-  // after-strip to NULL but the type system doesn't enforce it).
   const sideListModules = useMemo(() => {
     const collator = new Intl.Collator(lang);
-    const label = (m: Module) => m.displayName?.trim() || m.name;
     return [...modules].sort((a, b) => {
       const aPending = Number(!hasPlausibleLocation(a.location));
       const bPending = Number(!hasPlausibleLocation(b.location));
       if (aPending !== bPending) return aPending - bPending;
-      const byLabel = collator.compare(label(a), label(b));
+      const byLabel = collator.compare(displayLabel(a), displayLabel(b));
       if (byLabel !== 0) return byLabel;
       return a.id.localeCompare(b.id);
     });
@@ -321,7 +330,7 @@ export default function DashboardPage() {
                   <div className="flex items-center justify-between">
                     <div className="min-w-0 flex-1">
                       <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
-                        {module.displayName ?? module.name}
+                        {displayLabel(module)}
                       </h3>
                       {/* Leading 4 hex of the MAC — same-batch hardware
                           shares the *trailing* octets (issue #92 field
@@ -487,7 +496,7 @@ export default function DashboardPage() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <h3 className="font-semibold text-hf-fg truncate text-hf-sm">
-                              {m.displayName ?? m.name}
+                              {displayLabel(m)}
                             </h3>
                             {/* Leading 4 hex — see DashboardPage desktop
                                 list comment + ADR-011. */}

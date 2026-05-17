@@ -581,12 +581,15 @@ by `MapView`. PR 1 removed the coupling:
 1. **DashboardPage owns the authoritative module set, MapView is a
    pure renderer.**
    [`homepage/src/pages/DashboardPage.tsx`](../../homepage/src/pages/DashboardPage.tsx)'s
-   `sideListModules` is a single derivation from `modules` — a stable
-   sort that sinks pending-location modules to the bottom (primary
-   sort) and orders within each bucket alphabetically by display name
-   (secondary sort, deterministic so the in-bucket order doesn't
-   depend on what `duckdb-service/routes/modules.py::get_modules`
-   happens to return).
+   `sideListModules` is a single derivation from `modules` — a three-
+   step deterministic sort: (1) pending-location modules sink to the
+   bottom; (2) within each bucket, sort by `displayLabel` via a locale-
+   pinned `Intl.Collator(lang)`; (3) final tie-break on `id`. The
+   tertiary tie-break is what makes the determinism claim structurally
+   true — without it, two modules with identical display names would
+   fall through to JS stable-sort, which would in turn leak the
+   nondeterministic order of `duckdb-service/routes/modules.py::get_modules`
+   (no `ORDER BY` there today) into operator-visible behaviour.
    [`homepage/src/components/MapView.tsx`](../../homepage/src/components/MapView.tsx)
    consumes `modules` as a prop, filters via `fuzzedModules` for marker
    rendering, and emits no list-shaped data back. There is no

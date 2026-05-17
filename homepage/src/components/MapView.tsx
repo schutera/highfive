@@ -284,6 +284,7 @@ function LocateControl() {
 
     let busy = false;
     let resetTitle: number | undefined;
+    let resetDeniedClass: number | undefined;
     // Geolocation callbacks fire asynchronously — the user can navigate
     // away or switch language (which tears down this effect) before the
     // browser resolves the request. Without an abort guard the callbacks
@@ -296,9 +297,12 @@ function LocateControl() {
       button.setAttribute('aria-label', label);
     };
 
-    // Show a transient state on the button — title/aria + a short reset
-    // back to idle. Used for every non-success path so the user gets
-    // visible feedback on hover.
+    // Show a transient state on the button — title/aria + visible button-
+    // side feedback + a short reset back to idle. Used for every non-
+    // success path. The class-based feedback is critical for the denied
+    // path: tooltips don't refresh while the pointer is stationary over
+    // the button, so a click-while-hovering would otherwise look like a
+    // silent no-op. CSS hook lives in homepage/src/style.css.
     const flashState = (label: string) => {
       setTitle(label);
       clearTimeout(resetTitle);
@@ -306,6 +310,19 @@ function LocateControl() {
         if (aborted) return;
         setTitle(idleTitle);
       }, 3000);
+      // Re-trigger the shake animation by removing + re-adding the class.
+      // Forcing a reflow between the two is the standard trick for
+      // restarting a CSS animation; reading offsetWidth flushes pending
+      // style mutations so the browser observes the class actually went
+      // off before coming back on.
+      button.classList.remove('hf-locate-btn--denied');
+      void button.offsetWidth;
+      button.classList.add('hf-locate-btn--denied');
+      clearTimeout(resetDeniedClass);
+      resetDeniedClass = window.setTimeout(() => {
+        if (aborted) return;
+        button.classList.remove('hf-locate-btn--denied');
+      }, 1800);
     };
 
     const onClick = async (e: Event) => {
@@ -385,6 +402,7 @@ function LocateControl() {
       aborted = true;
       button.removeEventListener('click', onClick);
       clearTimeout(resetTitle);
+      clearTimeout(resetDeniedClass);
       map.removeControl(control);
     };
   }, [map, t]);

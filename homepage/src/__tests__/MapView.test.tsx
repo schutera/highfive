@@ -299,6 +299,11 @@ describe('MapView locate control', () => {
     expect(getCurrentPosition).toHaveBeenCalledTimes(1);
     expect(mockMap.flyTo).not.toHaveBeenCalled();
     expect(btn.title).toBe('Location blocked — allow in browser site settings');
+    // Hover-independent feedback: the button must visibly indicate the
+    // denied state on every click, because the tooltip alone doesn't
+    // refresh while the pointer is stationary over the button (T4 manual
+    // testing regression — click felt dead even though the title changed).
+    expect(btn.classList.contains('hf-locate-btn--denied')).toBe(true);
   });
 
   it('short-circuits via Permissions API when geolocation was previously denied', async () => {
@@ -322,6 +327,10 @@ describe('MapView locate control', () => {
     expect(getCurrentPosition).not.toHaveBeenCalled();
     expect(mockMap.flyTo).not.toHaveBeenCalled();
     expect(btn.classList.contains('hf-locate-btn--busy')).toBe(false);
+    // Hover-independent feedback also fires on the Permissions-API
+    // short-circuit path — every denied click flashes the visible class,
+    // not just the tooltip text.
+    expect(btn.classList.contains('hf-locate-btn--denied')).toBe(true);
   });
 
   it('guards against a synchronous double-click during the Permissions API query', async () => {

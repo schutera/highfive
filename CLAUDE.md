@@ -182,9 +182,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed
 
 ## In-flight multi-PR series
 
-Two PRs to clear cofade's remaining open issues, grouped by cohesion. Auto-close keywords (`closes` / `fixes` / `resolves`) are intentionally avoided in this section — see the "Critical rules" entry above on auto-close-keyword leakage. Each bullet ships with a self-removal clause: when a PR lands, that bullet is removed in the PR's final commit. When both PRs land, this whole section goes too.
-
-- **PR A — Step 2 wizard end-to-end on Windows** (addresses #99, #100, #107): not started. Revives branch `fix/windows-host-parity` (`adf1a08`, 5 commits already on origin from the closed PR #106 attempt) and adds an #107 fix on top so [`flashEsp.ts`'s `assertFirmwareResponse`](homepage/src/components/setup/flashEsp.ts) accepts the `merge_bin` byte-0 layout (byte 0 = 0xFF + byte 0x1000 = 0xE9). T7 of the test plan — hardware-side Step 2 flash on a real ESP32-CAM — is the acceptance gate, not optional. _This bullet ships removed in PR A's final commit._
+One PR remaining to clear cofade's open issues (PR A merged — addressed #99, #100, #107). Auto-close keywords (`closes` / `fixes` / `resolves`) are intentionally avoided in this section — see the "Critical rules" entry above on auto-close-keyword leakage. The bullet ships with a self-removal clause: when PR B lands, this whole section goes too.
 
 - **PR B — `module_configs` write-path semantics** (addresses #97, #105): not started. Two commits, one PR. Commit 1 splits `updated_at`'s overloaded semantics (#97 — row-metadata vs liveness signal; today every metadata UPDATE silently bumps `lastSeenAt` in [`backend/src/database.ts`'s `fetchAndAssemble`](backend/src/database.ts)). Commit 2 fixes [`duckdb-service/routes/modules.py`'s `set_display_name`](duckdb-service/routes/modules.py) so it works on modules with `nest_data` rows (#105 — DuckDB FK quirk surfaced through a Flask stacked-rollback bug). Regression tests pin both shapes. _This bullet ships removed in PR B's final commit._
 

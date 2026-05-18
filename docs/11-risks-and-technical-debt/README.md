@@ -156,6 +156,52 @@ assumptions happen to hold.
    enough; treat it as a follow-up, not a bundle into the parity fix
    itself.
 
+### Step 2 wizard validator rejected the only firmware.bin the build produces (PR A / issue #107)
+
+**What happened.** The wizard's pre-flash validator at
+[`flashEsp.ts`'s `assertFirmwareResponse`](../../homepage/src/components/setup/flashEsp.ts)
+gated on `firmware.bin[0] === 0xE9` and rejected every artefact
+produced by [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh):
+`esptool merge_bin` emits a blob whose first 0x1000 bytes are 0xFF
+flash-erase padding, with the bootloader (the byte that actually is
+0xE9) at offset 0x1000. The bug was invisible in CI because every
+test fixture in
+[`flashEsp.test.ts`](../../homepage/src/__tests__/flashEsp.test.ts)
+started with 0xE9 by construction; it surfaced on the first
+Windows-host hardware smoke (T7 of PR #106's test plan), where Step
+2 reported "Flashen fehlgeschlagen" against a freshly built
+firmware.bin.
+
+**Why it happened.** The validator was added in PR #104 alongside a
+confidently-worded docstring that asserted "the merged single-blob
+produced by esptool.py merge_bin all begin with 0xE9." Nobody on the
+review chain held the actual bytes against the claim — the reviewer
+trusted the docstring; the docstring trusted the author's mental
+model; the author's mental model came from app-only OTA payloads
+(which DO start with 0xE9) and over-generalised to the merged blob.
+The first real merged-blob bytes touched the validator under
+hardware test, where the false claim broke immediately.
+
+**How to avoid it next time.**
+
+1. **For any byte-gate on a binary artefact, the test fixture must
+   contain bytes from a real build of that artefact at least once.**
+   Synthetic 4-byte fixtures starting with the expected magic only
+   test the validator's logic against itself. If a real-bytes fixture
+   would couple the unit test to the build pipeline (it would here —
+   `firmware.bin` is built by `build.sh`, not by `vitest`), capture a
+   hex dump of the first 0x2000 bytes in the lessons-learned entry or
+   alongside the validator so the next contributor has ground truth.
+2. **When a docstring asserts a layout fact ("X begins with byte Y"),
+   cite the source of the fact.** esptool's `merge_bin` source or
+   `esp_image_format.h` line — uncited layout claims are guesses, and
+   a citation forces the author to verify before writing.
+3. **"CI passes" + "build script succeeds" together do not exercise
+   the producer ↔ validator wire shape** unless the test environment
+   actually feeds the producer's bytes into the validator. The
+   hardware-side T7 smoke is the cheapest moment to catch this gap;
+   it must remain a gate, not optional.
+
 ### `displayName ?? name` lived in seven docs and eight render sites; six review rounds to extinguish (PR 1 / issues #103, #102, #101)
 
 **What happened.** The "operator-visible module label" rule —

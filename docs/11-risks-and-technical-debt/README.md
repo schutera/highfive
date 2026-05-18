@@ -86,6 +86,147 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Windows host parity: build.sh tripped on three path assumptions and a unit test depended on a jsdom polyfill that doesn't exist (PR 2 / issues #99, #100)
+
+**What happened.** A contributor on Windows 11 + Git Bash + Node 22 +
+arduino-cli 1.x hit two unrelated parity gaps in the same week.
+[`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh) failed three different
+ways before producing artifacts: the hardcoded `$HOME/.arduino15`
+arduino-cli data dir was wrong (Windows uses `%LOCALAPPDATA%/Arduino15`),
+the hardcoded `esptool.py` invocation was wrong (Windows arduino-cli
+prefers `esptool.exe` because the shipped `esptool.py` crashes against
+a newer pip-installed `esptool` module), and `python3` was wrong
+(Windows ships an MS Store stub at `python3.exe` that is on PATH so
+`command -v python3` finds it, but it exits non-zero with "Python wurde
+nicht gefunden" when invoked). Separately,
+[`homepage/src/__tests__/flashEsp.test.ts`](../../homepage/src/__tests__/flashEsp.test.ts)
+reported `3 failed | 76 passed`: the validator at
+[`flashEsp.ts`'s `assertFirmwareResponse`](../../homepage/src/components/setup/flashEsp.ts)
+called `blob.slice(0, 1).arrayBuffer()`, and jsdom 25.0.1 (pinned via
+[`package-lock.json`](../../package-lock.json)) defines `slice()` on
+its `Blob` polyfill but **no `arrayBuffer()` anywhere on the Blob
+prototype** — `Object.getOwnPropertyNames(Blob.prototype)` returns
+just `['constructor', 'slice', 'size', 'type']`. Vitest's jsdom env
+shadows `globalThis.Blob`, so the entire blob round-trip path throws
+under tests. The build.sh failures don't reproduce in CI because
+GitHub Actions Ubuntu runners have a `python3` that resolves to a
+real interpreter (no MS Store stub) and an arduino-cli that installs
+under `~/.arduino15` — both trip-wires were latent there. The
+`flashEsp.test.ts` failures don't reproduce in CI either, but CI runs
+the same jsdom 25.0.1 pin on the same Node 22 — so the discriminator
+must be either OS-level (Linux's Node-vs-jsdom Blob class shadowing
+order differs from Windows) or job-shape (the homepage unit job doesn't
+exercise the failing assertions). This was NOT pinned down before
+shipping the refactor; the next contributor who edits these tests
+should `gh run download` the homepage-unit log from an Ubuntu run and
+confirm whether the 6 `assertFirmwareResponse` cases (PR #106's count
+at the time of this incident — PR #106 itself later added a 7th case
+for the `resp.clone()` invariant in `4891e6e`, and PR A added three
+more for the merge_bin layout for a current total of 10; see the
+entry just below) actually ran and passed there, or whether they
+were skipped silently. Logging the gap because the refactor sidesteps
+the question — but the lesson is incomplete until somebody answers
+it.
+
+**Why it happened.** Both gaps are the same anti-pattern: an implicit
+"the dev box looks like the maintainer's box" assumption. The shell
+script assumed a POSIX-shaped install layout because that's what the
+author ran. The unit test reached for a Web API (`Blob.arrayBuffer`)
+that's documented in MDN, looked plausible in the test runner, and was
+silently absent from the polyfill the runner actually uses. Neither
+gap was caught by CI because CI runs on Linux only, where both
+assumptions happen to hold.
+
+**How to avoid it next time.**
+
+1. **Probe, don't assume.** Whenever a shell script reaches outside
+   the repo (env vars, system paths, executables), probe with
+   `command -v` and `${VAR:-}` and `for candidate in …`. The cost of
+   one extra branch beats one extra hour of a contributor unwinding
+   inline workarounds — and the workarounds always rot back. Validate
+   probed executables by actually invoking them (`--version`) before
+   committing; PATH-presence is not interpreter-existence on Windows.
+2. **When a unit test depends on a Web API method, inspect the
+   polyfill's prototype, not MDN.** `Object.getOwnPropertyNames(SomeClass.prototype)`
+   tells the truth about what jsdom actually implements; MDN tells
+   the truth about what browsers implement. The two diverge silently.
+   Prefer reading the response body via `Response.arrayBuffer()` (Node
+   native, unaffected by jsdom polyfills) over the `Blob` round-trip
+   when feasible.
+3. **"CI passes on Linux" does not entail "this works on Windows + Git Bash".**
+   The mandatory senior-reviewer subagent gate is where the "what
+   platforms has this been exercised on?" question lands. Add a
+   Windows runner to CI if the cost of running parity locally is high
+   enough; treat it as a follow-up, not a bundle into the parity fix
+   itself.
+
+### Step 2 wizard validator rejected the only firmware.bin the build produces (PR A / issue #107)
+
+**What happened.** The wizard's pre-flash validator at
+[`flashEsp.ts`'s `assertFirmwareResponse`](../../homepage/src/components/setup/flashEsp.ts)
+gated on `firmware.bin[0] === 0xE9` and rejected every artefact
+produced by [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh):
+`esptool merge_bin` emits a blob whose first 0x1000 bytes are 0xFF
+flash-erase padding, with the bootloader (the byte that actually is
+0xE9) at offset 0x1000. The byte-level evidence from the failing
+hardware smoke (captured against a freshly built firmware.bin, PR
+#106 T7):
+
+```
+firmware.bin size:            1226832
+firmware.bin[0x0000]:         0xFF   ← flash-erase pad (rejected by old validator)
+firmware.bin[0x1000]:         0xE9   ← bootloader magic (the one the new validator reads)
+firmware.bin[0x8000-0x8001]:  0xAA 0x50   ← partition-table magic
+firmware.bin[0xe000]:         0x01
+firmware.bin[0x10000]:        0xE9   ← app magic
+
+firmware.app.bin size:        1161296
+firmware.app.bin[0x0000]:     0xE9   ← raw app, no padding (the byte-0=0xE9 accept path)
+```
+
+The bug was invisible in CI because every test fixture in
+[`flashEsp.test.ts`](../../homepage/src/__tests__/flashEsp.test.ts)
+started with 0xE9 by construction; it surfaced on the first
+Windows-host hardware smoke (T7 of PR #106's test plan), where Step
+2 reported "Flashen fehlgeschlagen" against a freshly built
+firmware.bin.
+
+**Why it happened.** The validator was added in PR #104 alongside a
+confidently-worded docstring that asserted "the merged single-blob
+produced by esptool.py merge_bin all begin with 0xE9." Nobody on the
+review chain held the actual bytes against the claim — the reviewer
+trusted the docstring; the docstring trusted the author's mental
+model; the author's mental model came from app-only OTA payloads
+(which DO start with 0xE9) and over-generalised to the merged blob.
+The first real merged-blob bytes touched the validator under
+hardware test, where the false claim broke immediately.
+
+**How to avoid it next time.**
+
+1. **For any byte-gate on a binary artefact, the test fixture must
+   contain bytes from a real build of that artefact at least once.**
+   Synthetic 4-byte fixtures starting with the expected magic only
+   test the validator's logic against itself. If a real-bytes fixture
+   would couple the unit test to the build pipeline (it would here —
+   `firmware.bin` is built by `build.sh`, not by `vitest`), capture
+   the wire-shape evidence in the lessons-learned entry alongside the
+   validator — either as a hex dump of the first 0x2000 bytes, or as
+   the annotated key-offset summary used above. The point is "ground
+   truth from a real build", not the specific dump format.
+2. **When a docstring asserts a layout fact ("X begins with byte Y"),
+   cite the file where the `#define` actually lives, not a transitive
+   `#include` consumer.** For ESP-IDF 5.x, `ESP_IMAGE_HEADER_MAGIC` is
+   defined in `components/bootloader_support/include/esp_app_format.h`;
+   `esp_image_format.h` just re-exports it. esptool's `merge_bin`
+   source is the authority for the merged-blob layout itself.
+   Uncited layout claims are guesses, and the citation forces the
+   author to verify before writing.
+3. **"CI passes" + "build script succeeds" together do not exercise
+   the producer ↔ validator wire shape** unless the test environment
+   actually feeds the producer's bytes into the validator. The
+   hardware-side T7 smoke is the cheapest moment to catch this gap;
+   it must remain a gate, not optional.
+
 ### `displayName ?? name` lived in seven docs and eight render sites; six review rounds to extinguish (PR 1 / issues #103, #102, #101)
 
 **What happened.** The "operator-visible module label" rule —
@@ -127,6 +268,7 @@ point at, so every doc and every render site became its own source
 of truth.
 
 **How to avoid it next time.**
+
 1. **Make the rule a callable, then point at it.** The structural
    fix that closed this PR was `homepage/src/lib/displayLabel.ts`
    with `Pick<Module, 'name' | 'displayName'>` as its parameter type
@@ -138,6 +280,7 @@ of truth.
 2. **Use a trip-wire grep to enforce single-source-of-truth.** When
    you promote a rule to a helper, the cost is "every prose copy of
    the old rule is now drift". A one-liner grep
+   <!-- prettier-ignore -->
    (`git grep -nE "display_name \?\?|displayName \?\?" -- docs/
    backend/ duckdb-service/ contracts/ image-service/
    homepage/src/`) finds every survivor; folding that grep into
@@ -687,6 +830,7 @@ by `MapView`. PR 1 removed the coupling:
    pagination or a separate "needs attention" surface, not re-coupling
    to viewport (which is what PR 1 explicitly walked away from).
 3. **The integration test pins the full ordering invariant.**
+   <!-- prettier-ignore -->
    [`DashboardPage.test.tsx`'s `DashboardPage Location-pending
    side-list` block](../../homepage/src/__tests__/DashboardPage.test.tsx)
    uses a three-module fixture (`pending-null-island`, `real-bodensee`,

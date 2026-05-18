@@ -148,19 +148,56 @@ echo "Verified: FIRMWARE_VERSION=${VERSION} is in the binary as a plain string."
 # rather than guess: a wrong-core merge produces a binary that boots on
 # some AI Thinker units and bricks others.
 ESP32_CORE_VERSION="${ESP32_CORE_VERSION:-2.0.17}"
-ARDUINO_DATA_DIR="${ARDUINO_DATA_DIR:-$HOME/.arduino15}"
+# Cross-platform default for arduino-cli's data directory: Windows
+# stores it under %LOCALAPPDATA%/Arduino15; macOS under
+# ~/Library/Arduino15; Linux under ~/.arduino15. Honour an explicit
+# ARDUINO_DATA_DIR override first (CI sets this), else probe in that
+# order. The :- defaults are required because set -u is on (line 2).
+if [ -z "${ARDUINO_DATA_DIR:-}" ]; then
+  if [ -n "${LOCALAPPDATA:-}" ] && [ -d "${LOCALAPPDATA}/Arduino15" ]; then
+    ARDUINO_DATA_DIR="${LOCALAPPDATA}/Arduino15"
+  elif [ -d "${HOME}/Library/Arduino15" ]; then
+    ARDUINO_DATA_DIR="${HOME}/Library/Arduino15"
+  else
+    ARDUINO_DATA_DIR="${HOME}/.arduino15"
+  fi
+fi
 # boot_app0 is core-version-pinned (lives under the core install dir).
 # esptool_py is shipped as a separate tool by arduino-cli; only one
 # version is installed per core, but if the user has multiple cores
 # installed there could be multiple esptool_py versions. We pick the
 # highest by sort -V; merge_bin's CLI is stable across the 4.x line so
-# this is safe.
-ESPTOOL_DIR="$(find "${ARDUINO_DATA_DIR}/packages/esp32/tools/esptool_py" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V -r | head -1)"
-ESPTOOL="${ESPTOOL_DIR}/esptool.py"
+# this is safe. The `|| true` is required because `set -o pipefail`
+# would otherwise abort the script when the esptool_py directory
+# doesn't exist (Windows user has arduino-cli but not the esp32 core)
+# — find exits 1, pipefail propagates, and the helpful error message
+# below never fires. Empty result flows into the ESPTOOL existence
+# check.
+ESPTOOL_DIR="$(find "${ARDUINO_DATA_DIR}/packages/esp32/tools/esptool_py" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V -r | head -1 || true)"
+# arduino-cli ships esptool.py on Linux/macOS and (typically) both
+# esptool.exe and esptool.py on Windows. Prefer the .exe when present:
+# it bundles a matching Python interpreter and esptool module, whereas
+# .py depends on the system Python having a compatible `esptool`
+# module installed — on a box where pip installs a newer esptool, the
+# vendored 4.5.1 esptool.py crashes with `module 'esptool' has no
+# attribute '_main'`. On Linux/macOS there is no .exe so the loop
+# falls through to .py with no behaviour change. The existence check
+# below catches the "core not installed" case.
+ESPTOOL=""
+for candidate in "${ESPTOOL_DIR}/esptool.exe" "${ESPTOOL_DIR}/esptool.py"; do
+  if [ -f "${candidate}" ]; then
+    ESPTOOL="${candidate}"
+    break
+  fi
+done
 BOOT_APP0="${ARDUINO_DATA_DIR}/packages/esp32/hardware/esp32/${ESP32_CORE_VERSION}/tools/partitions/boot_app0.bin"
-if [ ! -f "${ESPTOOL}" ] || [ ! -f "${BOOT_APP0}" ]; then
+if [ -z "${ESPTOOL}" ] || [ ! -f "${BOOT_APP0}" ]; then
   echo "ERROR: missing arduino-cli toolchain pieces:" >&2
-  echo "       esptool   ${ESPTOOL} (exists: $([ -f "${ESPTOOL}" ] && echo yes || echo NO))" >&2
+  if [ -z "${ESPTOOL}" ]; then
+    echo "       esptool   not found under ${ESPTOOL_DIR:-<empty>} (tried esptool.exe then esptool.py)" >&2
+  else
+    echo "       esptool   ${ESPTOOL} (exists: yes)" >&2
+  fi
   echo "       boot_app0 ${BOOT_APP0} (exists: $([ -f "${BOOT_APP0}" ] && echo yes || echo NO))" >&2
   echo "       Run: arduino-cli core install esp32:esp32@${ESP32_CORE_VERSION}" >&2
   exit 1
@@ -176,7 +213,38 @@ FLASH_MODE="${FLASH_MODE:-dio}"
 FLASH_FREQ="${FLASH_FREQ:-80m}"
 FLASH_SIZE="${FLASH_SIZE:-4MB}"
 
-python3 "${ESPTOOL}" --chip esp32 merge_bin \
+# Resolve a working interpreter. On Linux/macOS this is python3. On
+# Windows-from-python.org it is `python`. We MUST validate each
+# candidate by actually running `--version` because Windows ships an
+# MS Store stub at python3.exe that is on PATH (so `command -v` finds
+# it) but exits non-zero with "Python wurde nicht gefunden" when
+# invoked. Probing with --version catches the stub. If ESPTOOL is the
+# Windows .exe we invoke it directly and skip Python entirely.
+if [[ "${ESPTOOL}" == *.exe ]]; then
+  MERGE_CMD=( "${ESPTOOL}" )
+else
+  PYTHON=""
+  for candidate in python3 python; do
+    candidate_path="$(command -v "${candidate}" || true)"
+    if [ -n "${candidate_path}" ] && "${candidate_path}" --version >/dev/null 2>&1; then
+      PYTHON="${candidate_path}"
+      break
+    fi
+  done
+  if [ -z "${PYTHON}" ]; then
+    echo "ERROR: no working python3/python interpreter found on PATH." >&2
+    echo "       Tried: python3, python (in that order). Each was either" >&2
+    echo "       absent or failed --version (the Microsoft Store stub at" >&2
+    echo "       python3.exe is a known offender: on PATH but exits non-zero" >&2
+    echo "       with 'Python wurde nicht gefunden')." >&2
+    echo "       On Windows, install Python from python.org and ensure it" >&2
+    echo "       is on PATH ahead of the MS Store alias." >&2
+    exit 1
+  fi
+  MERGE_CMD=( "${PYTHON}" "${ESPTOOL}" )
+fi
+
+"${MERGE_CMD[@]}" --chip esp32 merge_bin \
   -o "${BUILD_DIR}/ESP32-CAM.ino.merged.bin" \
   --flash_mode "${FLASH_MODE}" --flash_freq "${FLASH_FREQ}" --flash_size "${FLASH_SIZE}" \
   0x1000  "${BUILD_DIR}/ESP32-CAM.ino.bootloader.bin" \

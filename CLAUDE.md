@@ -55,7 +55,7 @@ Per-service unit tests (what CI runs):
 
 ```bash
 cd backend        && npm ci && npm test                       # vitest + supertest, 17 tests
-cd homepage       && npm ci && npm test                       # vitest + jsdom, 8 smoke tests
+cd homepage       && npm ci && npm test                       # vitest + jsdom, 102 tests (17 files)
 cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 24 tests
 cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 31 tests
 cd ESP32-CAM      && pio test -e native                       # Unity host tests, 114 tests
@@ -132,6 +132,7 @@ These are the most-violated rules from past incidents. Full list in [`docs/02-co
 - **Never hardcode `localhost`** in inter-service URLs — use the Docker service name.
 - **Never ship the dev API key (`hf_dev_key_2026`)** as a production fallback. Override `HIGHFIVE_API_KEY`. Code-side guards catch the obvious shapes; the residual gap (`NODE_ENV=development` is an intentional off-ramp the operator owns) is the reason this prose entry stays. Full off-ramp semantics: [auth.md → "The secret"](docs/08-crosscutting-concepts/auth.md#the-secret).
 - **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. — commit messages summarise intent, not what shipped. Prefer `path's <symbol>` or `path::symbol` over `path:line`; the latter drift silently. Run `make check-citations` before invoking the reviewer. Lesson recorded in [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned".
+- **Never write `close[sd]?` / `fix(es|ed)?` / `resolve[sd]?` next to `#N` in commit message _bodies_ or PR _descriptions_ — only in titles.** GitHub's auto-close scanner regex-matches the literal pattern anywhere in a merging PR's text without reading context, so a commit body explaining why an auto-close-keyword leak is bad — by quoting `(closes #100, #99)` — still closes #100 on merge. When discussing the mechanism, use `addresses` / `references` / `for #N` (no keyword); save the actual `closes #N` for the PR title and the commit-subject line of the implementing commit. Verify before push: `git log <merge-base>..HEAD --pretty=full | grep -nE "(close[sd]?|fix(es|ed)?|resolve[sd]?)\s+#"` — every match must be in a subject line or PR title, never a body paragraph. Incident: PR #104's fix commit body documented the buggy `(closes #100, #99)` antipattern by quoting it verbatim; the quoted occurrence closed #100 _and_ #97 prematurely on merge.
 
 ## Mandatory end-of-implementation gate
 
@@ -163,7 +164,7 @@ The user's shell is **PowerShell 5.1** on Windows. When providing manual testing
 - Set ports/hosts as variables first: `$PORT = "COM9"` — never use angle-bracket placeholders like `<COMx>` (PowerShell parses `<` as a redirection operator).
 - Write files with explicit encoding: `"value" | Out-File -NoNewline -Encoding ascii path\to\file` — PowerShell's default `>` redirect writes UTF-16 LE with BOM, which breaks Python `read_text(encoding="utf-8")`.
 - No `&&` chaining — use `;` or `if ($?) { ... }`.
-- Bash scripts (`build.sh`, `make`) run via `bash <script>` from PowerShell.
+- Bash scripts (`build.sh`, `make`) run via `bash <script>` from PowerShell. `ESP32-CAM/build.sh` auto-detects `%LOCALAPPDATA%/Arduino15`, `esptool.exe`, and `python` (vs `python3`) on Windows, so `bash ESP32-CAM/build.sh` works with arduino-cli's default install — no env overrides or manual `esptool.py` copy needed (#99).
 
 ## Dev helper scripts
 
@@ -178,3 +179,11 @@ See [`scripts/README.md`](scripts/README.md) for the full list and prerequisites
 ## Branch model
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed prefix (`feat/`, `fix/`, `docs/`, `refactor/`, `chore/`, `test/`, `ci/`); first commit line `<type>: <imperative summary>` ≤ ~72 chars; PRs require all CI green.
+
+## In-flight multi-PR series
+
+One PR remaining to clear cofade's open issues; when PR B lands, this whole section goes too. Auto-close keywords (`closes` / `fixes` / `resolves`) are intentionally avoided in this section — see the "Critical rules" entry above on auto-close-keyword leakage.
+
+- **PR B — `module_configs` write-path semantics** (addresses #97, #105): not started. Two commits, one PR. Commit 1 splits `updated_at`'s overloaded semantics (#97 — row-metadata vs liveness signal; today every metadata UPDATE silently bumps `lastSeenAt` in [`backend/src/database.ts`'s `fetchAndAssemble`](backend/src/database.ts)). Commit 2 fixes [`duckdb-service/routes/modules.py`'s `set_display_name`](duckdb-service/routes/modules.py) so it works on modules with `nest_data` rows (#105 — DuckDB FK quirk surfaced through a Flask stacked-rollback bug). Regression tests pin both shapes. _This bullet ships removed in PR B's final commit._
+
+Out of repo: #80 (nginx HSTS on production — server config, not a code change here).

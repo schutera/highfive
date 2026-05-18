@@ -242,9 +242,19 @@ def set_display_name(module_id):
             400,
         )
 
-    with lock:
-        con = get_conn()
-        try:
+    # Switched from manual `con = get_conn() / con.commit() /
+    # con.rollback()` to the project's `write_transaction()` helper as
+    # part of #105's fix. DuckDB defaults to autocommit; calling
+    # `con.rollback()` in an exception handler with no active
+    # transaction raises a secondary `TransactionException` which
+    # Flask surfaces as its HTML 500 page — backend's JSON parser then
+    # chokes on the `<!doctype ...` prefix and the operator sees
+    # "Unexpected token '<'" instead of the actual error.
+    # `write_transaction` (db/repository.py) swallows the
+    # "no active transaction" rollback gracefully, so the route's
+    # exception path is now clean.
+    try:
+        with write_transaction() as con:
             existing = con.execute(
                 "SELECT id FROM module_configs WHERE id = ?", (canonical,)
             ).fetchone()
@@ -263,6 +273,9 @@ def set_display_name(module_id):
                     (new_value, canonical),
                 ).fetchone()
                 if clash is not None:
+                    # Returning a non-200 inside the with-block is fine
+                    # — write_transaction commits the empty (no
+                    # mutation) transaction and closes cleanly.
                     return (
                         jsonify(
                             {
@@ -284,12 +297,100 @@ def set_display_name(module_id):
             # module to "online" for two hours regardless of telemetry.
             # See chapter 11 "updated_at semantic overload" and issue #97
             # for the split rationale; PR B carries the fix.
+            #
+            # FK-enforcement workaround for #105: DuckDB 1.4.4 (and 1.5.2,
+            # verified at PR B execution) rejects this UPDATE on any
+            # `module_configs` row whose `id` is referenced by a child
+            # table, even though `display_name` is neither the PK nor an
+            # FK column. The error surfaces as
+            # `ConstraintException: Violates foreign key constraint
+            # because key "module_id: ..." is still referenced`.
+            #
+            # The DuckDB workarounds the issue's reporter suggested don't
+            # exist in DuckDB:
+            #   - `PRAGMA foreign_keys = OFF` is a SQLite pragma, not a
+            #     DuckDB one (DuckDB returns "Catalog Error: unrecognized
+            #     configuration parameter").
+            #   - `ALTER TABLE nest_data DROP CONSTRAINT ...` raises
+            #     `NotImplementedException: No support for that ALTER
+            #     TABLE option yet`.
+            #   - `INSERT INTO module_configs ... ON CONFLICT (id) DO
+            #     UPDATE` hits the SAME FK over-enforcement (DuckDB
+            #     treats the UPSERT branch as a regular UPDATE for FK
+            #     purposes).
+            #
+            # The only workaround DuckDB accepts is to temporarily move
+            # the referencing child rows out of the way: snapshot
+            # `nest_data` + `daily_progress` rows for this module,
+            # delete them in reverse-FK order, run the UPDATE on the
+            # now-unreferenced parent, then re-insert the children. The
+            # full sequence runs inside `write_transaction` so it's
+            # atomic — any failure rolls back to the original state and
+            # the FK invariant is preserved end-to-end.
+            #
+            # Safe because:
+            #   - `display_name` is a non-FK, non-PK column. The end
+            #     state preserves every `nest_data.module_id →
+            #     module_configs.id` reference (children re-inserted
+            #     with identical `module_id`).
+            #   - duckdb-service uses a single shared connection guarded
+            #     by a global `lock` (db/connection.py); write_transaction
+            #     holds the lock for the with-block, so no concurrent
+            #     reader sees the half-deleted state.
+            #   - Bounded blast radius: only this module's children
+            #     move (the `WHERE module_id = ?` filter pins it).
+            #     Typical modules carry <20 nests and <200 progress
+            #     rows over their lifetime.
+            #
+            # See chapter 11 "Admin rename failed silently on seeded
+            # modules" for the incident and the workaround discovery
+            # path.
+            #
+            # Snapshot daily_progress for this module's nests (the
+            # grandchild FK chain).
+            progress_rows = con.execute(
+                """
+                SELECT dp.progress_id, dp.nest_id, dp.date,
+                       dp.empty, dp.sealed, dp.hatched
+                  FROM daily_progress dp
+                  JOIN nest_data n ON n.nest_id = dp.nest_id
+                 WHERE n.module_id = ?
+                """,
+                (canonical,),
+            ).fetchall()
+            nest_rows = con.execute(
+                "SELECT nest_id, module_id, beeType FROM nest_data WHERE module_id = ?",
+                (canonical,),
+            ).fetchall()
+            # Delete in reverse-FK order so each statement is FK-clean
+            # in isolation (DuckDB checks per-statement).
             con.execute(
-                "UPDATE module_configs SET display_name = ?, updated_at = NOW() "
-                "WHERE id = ?",
+                "DELETE FROM daily_progress WHERE nest_id IN "
+                "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
+                (canonical,),
+            )
+            con.execute(
+                "DELETE FROM nest_data WHERE module_id = ?",
+                (canonical,),
+            )
+            con.execute(
+                "UPDATE module_configs SET display_name = ?, "
+                "updated_at = NOW() WHERE id = ?",
                 (new_value, canonical),
             )
-            con.commit()
+            for nest in nest_rows:
+                con.execute(
+                    "INSERT INTO nest_data (nest_id, module_id, beeType) "
+                    "VALUES (?, ?, ?)",
+                    nest,
+                )
+            for prog in progress_rows:
+                con.execute(
+                    "INSERT INTO daily_progress "
+                    "(progress_id, nest_id, date, empty, sealed, hatched) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    prog,
+                )
             return (
                 jsonify(
                     {
@@ -300,11 +401,9 @@ def set_display_name(module_id):
                 ),
                 200,
             )
-        except Exception as e:
-            con.rollback()
-            return jsonify({"error": str(e)}), 500
-        finally:
-            con.close()
+    except Exception as e:
+        print(f"[set_display_name] {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
 
 
 @modules_bp.delete("/modules/<module_id>")

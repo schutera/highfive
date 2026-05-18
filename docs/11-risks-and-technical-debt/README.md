@@ -360,7 +360,102 @@ half of the contract.
   review cycle on any PR that adds a write to a column whose name
   doesn't fully describe its read-path semantics.
 
-**Resolved in PR B (closes #97).** The split shipped: `module_configs`
+### Admin rename failed silently on seeded modules — DuckDB FK over-enforcement + stacked rollback (PR B / issue #105)
+
+**What happened.** Operators trying to rename one of the five seeded
+modules (`Garten 12` and friends) via the admin UI got "Save failed.
+Please try again." Backend logs showed a JSON parse error (`Unexpected
+token '<'`) — duckdb-service was returning Flask's HTML 500 page.
+Beneath the HTML body, duckdb-service had logged two stacked
+exceptions: a `ConstraintException: Violates foreign key constraint
+because key "module_id: 000000000002" is still referenced by a foreign
+key in a different table`, immediately followed by a
+`TransactionException: cannot rollback - no transaction is active`.
+Both bugs were live simultaneously; the second masked the first.
+
+**Why it happened.**
+
+1. **DuckDB FK over-enforcement** (the primary bug). DuckDB 1.4.4 (and
+   1.5.2, verified during the fix) rejects `UPDATE module_configs SET
+display_name = ?` whenever the targeted row's `id` is referenced
+   by `nest_data.module_id`, _even though_ the UPDATE doesn't touch
+   `id` and would not break referential integrity. The behaviour is a
+   conservative reading of the SQL standard's "updates that affect
+   referenced rows must be propagated" rule. Seeded modules all carry
+   `nest_data` rows so all five were unrenamable out of the box; an
+   ESP that registered post-seed with no nests yet would have renamed
+   fine — the test suite seeded the latter and missed the former.
+2. **Stacked rollback** (the secondary bug). The route used manual
+   `con = get_conn() / con.commit() / con.rollback()` instead of the
+   project's `write_transaction()` helper. DuckDB defaults to
+   autocommit; `con.rollback()` in the exception handler — with no
+   active transaction — raised a `TransactionException` whose
+   traceback escaped the route's wrapper, so Flask served its
+   default HTML 500 page instead of the JSON the backend's parser
+   expected.
+
+**The workaround.** The fixes the issue's reporter listed
+(`PRAGMA foreign_keys = OFF`, `ALTER TABLE DROP CONSTRAINT`,
+INSERT ... ON CONFLICT DO UPDATE) all turned out to be inapplicable
+in DuckDB:
+
+- `PRAGMA foreign_keys` is a SQLite pragma. DuckDB returns
+  `Catalog Error: unrecognized configuration parameter
+"foreign_keys"`.
+- `ALTER TABLE nest_data DROP CONSTRAINT ...` raises
+  `NotImplementedException: No support for that ALTER TABLE option
+yet`.
+- `INSERT INTO module_configs ... ON CONFLICT (id) DO UPDATE` hits
+  the same FK over-enforcement — DuckDB treats the UPSERT branch as
+  a regular UPDATE for FK purposes (even though `add_module`'s
+  fresh-row UPSERT works because no `nest_data` rows reference a
+  not-yet-inserted module).
+
+The only path through DuckDB's FK over-enforcement is to temporarily
+move the referencing child rows out of the way: snapshot
+`daily_progress` + `nest_data` rows for this module, delete them in
+reverse-FK order, run the UPDATE on the now-unreferenced parent, then
+re-insert the children. The full sequence runs inside
+`write_transaction()` so it's atomic — any failure rolls back to the
+original state and the FK invariant is preserved end-to-end. Bounded
+blast radius: only the renamed module's children move (the `WHERE
+module_id = ?` filter pins it).
+
+**How to avoid it next time.**
+
+- **Use `write_transaction()` for every duckdb-service route that
+  mutates state.** The helper at
+  [`duckdb-service/db/repository.py`](../../duckdb-service/db/repository.py)'s
+  `write_transaction` handles the autocommit-rollback case
+  gracefully (`try: con.rollback() except: pass` for the
+  no-active-transaction path). Manual `con.commit() / con.rollback()`
+  lifecycles are a smell — they bypass the helper's safety net and
+  recreate the bug.
+- **Test fixtures must seed the realistic precondition for the route
+  under test, not the minimum that lets the happy path pass.** The
+  five seeded modules all carry `nest_data`; any `set_display_name`
+  test that doesn't reproduce that shape is exercising a fictional
+  schema. The new regression test
+  (`test_set_display_name_works_on_module_with_nest_data`) seeds the
+  FK reference explicitly. Same lesson the
+  `assertFirmwareResponse` byte-0 incident (#107) taught: a
+  validator's test fixture must contain bytes / rows from a
+  realistic source at least once.
+- **When a backend response surfaces "Unexpected token '<' ... is
+  not valid JSON", the upstream almost certainly fell back to Flask's
+  default HTML 500 page.** That means an exception escaped the
+  route's wrapper. Logging the upstream body (not just status) in
+  backend error paths makes this grep-able.
+- **DuckDB's FK enforcement is conservative.** Any UPDATE on a row
+  whose PK is FK-referenced will trip the over-enforcement,
+  regardless of whether the UPDATE touches the FK column. Plan
+  for it on any rename / metadata-edit route, not just `display_name`.
+  The DELETE-children-and-restore dance is the supported workaround
+  until DuckDB relaxes the constraint (which 1.5.2 did NOT — checked).
+
+### Resolved — `updated_at` semantic overload split into two columns (PR B / issue #97)
+
+The split shipped: `module_configs`
 now carries `updated_at` (row-metadata, bumped on every UPDATE) and
 `last_seen_at` (device-liveness, bumped only on `add_module`'s per-boot
 registration UPSERT). The backend's `fetchAndAssemble` reads

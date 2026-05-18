@@ -549,6 +549,120 @@ def test_add_module_re_registration_bumps_both_timestamps(client, fresh_db):
     )
 
 
+def test_set_display_name_works_on_module_with_nest_data(client, fresh_db):
+    """Issue #105 regression. Pre-fix, DuckDB 1.4.4 rejected
+    `UPDATE module_configs SET display_name = ?` on any row whose `id`
+    was referenced by `nest_data.module_id`, even though the UPDATE
+    didn't touch the FK column. The compose stack seeds five modules
+    all with `nest_data` rows, so all five were unrenamable out of
+    the box.
+
+    Test: seed a module via the normal `/new_module` path, INSERT a
+    `nest_data` row pointing at it, then PATCH `display_name`. Must
+    return 200 + the new label."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        # Insert a nest_data row pointing at this module — this is what
+        # would have tripped the FK over-enforcement pre-fix.
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-test-a", TEST_MAC_A, "blackmasked"),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name",
+        json={"display_name": "RenamedWithNest"},
+    )
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["display_name"] == "RenamedWithNest"
+
+    # Confirm the rename actually persisted (FK workaround must not
+    # silently no-op the UPDATE).
+    rows = client.get("/modules").get_json()["modules"]
+    row = next(m for m in rows if m["id"] == TEST_MAC_A)
+    assert row["display_name"] == "RenamedWithNest"
+
+    # Confirm the FK invariant still holds — nest_data.module_id still
+    # points at a real module_configs row.
+    con = fresh_db.connection.get_conn()
+    try:
+        orphans = con.execute(
+            "SELECT COUNT(*) FROM nest_data n "
+            "LEFT JOIN module_configs m ON m.id = n.module_id "
+            "WHERE m.id IS NULL"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert orphans == 0, "the FK invariant must hold after the workaround"
+
+
+def test_set_display_name_409_collision_still_works_with_nest_data(client, fresh_db):
+    """The FK workaround for #105 must not regress the existing UNIQUE
+    collision contract. Seed two modules — both with nest_data rows —
+    rename module 1 to a label, try to rename module 2 to the same
+    label; must 409 (not 500), and the body must carry the
+    conflicting MAC."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    client.post("/new_module", json=_payload(TEST_MAC_B, "BeeTwo"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-test-a", TEST_MAC_A, "blackmasked"),
+        )
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-test-b", TEST_MAC_B, "blackmasked"),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    r1 = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name",
+        json={"display_name": "Shared Label"},
+    )
+    assert r1.status_code == 200
+
+    r2 = client.patch(
+        f"/modules/{TEST_MAC_B}/display_name",
+        json={"display_name": "Shared Label"},
+    )
+    assert r2.status_code == 409, r2.get_json()
+    body = r2.get_json()
+    assert body["display_name"] == "Shared Label"
+    assert body["conflicting_module_id"] == TEST_MAC_A
+
+
+def test_set_display_name_handles_missing_module_with_clean_rollback(client, fresh_db):
+    """Pinning the fix for #105's Bug 2 (the stacked rollback). The
+    route's old shape called `con.rollback()` in its exception handler
+    even though DuckDB was in autocommit mode; that raised a secondary
+    `TransactionException` which masked the real error and surfaced
+    Flask's HTML 500 page to the operator. The fix switches the route
+    to the project's `write_transaction()` helper, which handles the
+    "no active transaction" rollback gracefully.
+
+    Test: PATCH a non-existent module — the early-return 404 path must
+    NOT crash on rollback. We assert (a) status 404, (b) body is JSON
+    (not HTML), (c) body carries the expected error key."""
+    r = client.patch(
+        "/modules/ffffffffffff/display_name",
+        json={"display_name": "Doesn't matter"},
+    )
+    assert r.status_code == 404
+    # JSON, not HTML — if write_transaction's rollback path is broken,
+    # Flask falls back to its default HTML 500.
+    assert r.content_type.startswith("application/json"), r.data[:200]
+    assert r.get_json()["error"] == "Module not found"
+
+
 def test_legacy_heartbeat_bumps_updated_at_not_last_seen_at(client, fresh_db):
     """The legacy `/modules/<id>/heartbeat` route updates battery +
     image_count metadata; it does NOT represent a registration event.

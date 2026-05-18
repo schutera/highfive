@@ -76,4 +76,48 @@ describe('assertFirmwareResponse', () => {
     const blob = await resp.blob();
     expect(blob.size).toBe(4);
   });
+
+  it('accepts the esptool merge_bin layout (0xFF pad at byte 0, 0xE9 bootloader at 0x1000)', async () => {
+    // Production wire shape: build.sh's `esptool merge_bin` invocation
+    // places the bootloader at 0x1000 and pads bytes [0, 0x1000) with
+    // 0xFF (flash-erase pattern). The pre-#107 validator rejected this
+    // because it only inspected byte 0; the new validator reaches the
+    // bootloader byte and accepts. Issue #107.
+    const bytes = new Uint8Array(0x1001).fill(0xff);
+    bytes[0x1000] = ESP_IMAGE_MAGIC;
+    const resp = new Response(bytes, {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' },
+    });
+    await expect(assertFirmwareResponse(resp, '/firmware.bin')).resolves.toBeUndefined();
+  });
+
+  it('rejects a merge_bin-shaped body truncated before the bootloader offset', async () => {
+    // A short body whose byte 0 looks like the merge_bin pad (0xFF) but
+    // doesn't reach offset 0x1000 must be rejected — otherwise the
+    // bootloader byte read would index past the buffer.
+    const bytes = new Uint8Array(0x800).fill(0xff);
+    const resp = new Response(bytes, {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' },
+    });
+    await expect(assertFirmwareResponse(resp, '/firmware.bin')).rejects.toThrow(
+      /truncated.*2048 bytes/,
+    );
+  });
+
+  it('rejects 0xFF pad with wrong bootloader magic at 0x1000', async () => {
+    // A mis-merged blob (e.g., partition-table magic 0xAA where the
+    // bootloader should be) is the realistic failure mode if merge_bin's
+    // offset args got reordered. The validator catches it.
+    const bytes = new Uint8Array(0x1001).fill(0xff);
+    bytes[0x1000] = 0xaa;
+    const resp = new Response(bytes, {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' },
+    });
+    await expect(assertFirmwareResponse(resp, '/firmware.bin')).rejects.toThrow(
+      /byte 0x1000 is 0xAA.*expected 0xE9/,
+    );
+  });
 });

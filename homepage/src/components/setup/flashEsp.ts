@@ -150,14 +150,16 @@ export async function flashEsp(
 
 /**
  * ESP32 application image header magic byte (esp_image_format.h
- * `ESP_IMAGE_HEADER_MAGIC`). The bootloader, every app slot, and
- * the merged single-blob produced by `esptool.py merge_bin` all
- * begin with 0xE9. Other artefacts in a multi-part flash layout
- * have different magics — partition tables start with 0xAA 0x50.
- * The current Step2Flash manifest is a single merged part at
- * offset 0, so 0xE9 is the right gate; if anyone splits the
- * manifest into bootloader + partitions + app, this validator
- * needs to learn the per-offset allow-list.
+ * `ESP_IMAGE_HEADER_MAGIC`). The bootloader and every app slot
+ * begin with 0xE9. Partition tables have a different magic
+ * (0xAA 0x50 — `ESP_PARTITION_MAGIC`).
+ *
+ * Important: the merged single-blob produced by `esptool merge_bin`
+ * does NOT begin with 0xE9. Its first 0x1000 bytes are 0xFF —
+ * flash-erase padding placed before the bootloader, which lives at
+ * 0x1000 in the merged layout. `assertFirmwareResponse` therefore
+ * accepts two byte-0 patterns; see issue #107 and chapter 11
+ * "Lessons learned" for the wire-shape evidence.
  */
 export const ESP_IMAGE_MAGIC = 0xe9;
 
@@ -199,13 +201,37 @@ export async function assertFirmwareResponse(resp: Response, path: string): Prom
     throw new Error(`Firmware at ${path} is empty.`);
   }
 
-  const head = new Uint8Array(buf, 0, 1)[0];
-  if (head !== ESP_IMAGE_MAGIC) {
-    const hex = head.toString(16).padStart(2, '0').toUpperCase();
+  const bytes = new Uint8Array(buf);
+  const head = bytes[0];
+
+  // Two valid layouts (see issue #107 and chapter 11 "Lessons learned"):
+  //   1. byte 0 == 0xE9 — a raw ESP image (app-only, or a future manifest
+  //      that points at the bootloader offset directly).
+  //   2. byte 0 == 0xFF AND byte 0x1000 == 0xE9 — an esptool merge_bin
+  //      output. The bytes [0, 0x1000) are flash-erase padding placed
+  //      BEFORE the bootloader. This is what build.sh produces today and
+  //      what the wizard's in-app manifest fetches at offset 0.
+  if (head === ESP_IMAGE_MAGIC) {
+    return;
+  }
+  if (head === 0xff) {
+    if (bytes.length <= 0x1000) {
+      throw new Error(
+        `Firmware at ${path} looks like an esptool merge_bin output but is truncated (${bytes.length} bytes, need at least 4097 to reach the bootloader at 0x1000). Rebuild with "make firmware".`,
+      );
+    }
+    if (bytes[0x1000] === ESP_IMAGE_MAGIC) {
+      return;
+    }
+    const bootHex = bytes[0x1000].toString(16).padStart(2, '0').toUpperCase();
     throw new Error(
-      `Firmware at ${path} is not a valid ESP32 image (first byte 0x${hex}, expected 0xE9). Rebuild with "make firmware".`,
+      `Firmware at ${path} starts with the merge_bin pad (0xFF) but byte 0x1000 is 0x${bootHex} (expected 0xE9 for the ESP32 bootloader). Rebuild with "make firmware".`,
     );
   }
+  const hex = head.toString(16).padStart(2, '0').toUpperCase();
+  throw new Error(
+    `Firmware at ${path} is not a valid ESP32 image (first byte 0x${hex}, expected 0xE9 for a raw image or 0xFF for an esptool merge_bin output with bootloader at 0x1000). Rebuild with "make firmware".`,
+  );
 }
 
 /** Convert a Blob to a binary string (each char = one byte). */

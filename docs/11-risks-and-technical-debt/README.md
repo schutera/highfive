@@ -120,10 +120,13 @@ exercise the failing assertions). This was NOT pinned down before
 shipping the refactor; the next contributor who edits these tests
 should `gh run download` the homepage-unit log from an Ubuntu run and
 confirm whether the 6 `assertFirmwareResponse` cases (PR #106's count
-— PR A added three more for the merge_bin layout, see the entry just
-below) actually ran and passed there, or whether they were skipped
-silently. Logging the gap because the refactor sidesteps the question
-— but the lesson is incomplete until somebody answers it.
+at the time of this incident — PR #106 itself later added a 7th case
+for the `resp.clone()` invariant in `4891e6e`, and PR A added three
+more for the merge_bin layout for a current total of 10; see the
+entry just below) actually ran and passed there, or whether they
+were skipped silently. Logging the gap because the refactor sidesteps
+the question — but the lesson is incomplete until somebody answers
+it.
 
 **Why it happened.** Both gaps are the same anti-pattern: an implicit
 "the dev box looks like the maintainer's box" assumption. The shell
@@ -194,9 +197,13 @@ hardware test, where the false claim broke immediately.
    hex dump of the first 0x2000 bytes in the lessons-learned entry or
    alongside the validator so the next contributor has ground truth.
 2. **When a docstring asserts a layout fact ("X begins with byte Y"),
-   cite the source of the fact.** esptool's `merge_bin` source or
-   `esp_image_format.h` line — uncited layout claims are guesses, and
-   a citation forces the author to verify before writing.
+   cite the file where the `#define` actually lives, not a transitive
+   `#include` consumer.** For ESP-IDF 5.x, `ESP_IMAGE_HEADER_MAGIC` is
+   defined in `components/bootloader_support/include/esp_app_format.h`;
+   `esp_image_format.h` just re-exports it. esptool's `merge_bin`
+   source is the authority for the merged-blob layout itself.
+   Uncited layout claims are guesses, and the citation forces the
+   author to verify before writing.
 3. **"CI passes" + "build script succeeds" together do not exercise
    the producer ↔ validator wire shape** unless the test environment
    actually feeds the producer's bytes into the validator. The

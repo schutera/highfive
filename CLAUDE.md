@@ -182,7 +182,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed
 
 ## In-flight multi-PR series
 
-One PR remaining to clear cofade's open issues. PR A (Step 2 wizard end-to-end on Windows — addressed #99, #100, #107) shipped its bullet-removal in its final commit; when PR B lands, this whole section goes too. Auto-close keywords (`closes` / `fixes` / `resolves`) are intentionally avoided in this section — see the "Critical rules" entry above on auto-close-keyword leakage.
+One PR remaining to clear cofade's open issues; when PR B lands, this whole section goes too. Auto-close keywords (`closes` / `fixes` / `resolves`) are intentionally avoided in this section — see the "Critical rules" entry above on auto-close-keyword leakage.
 
 - **PR B — `module_configs` write-path semantics** (addresses #97, #105): not started. Two commits, one PR. Commit 1 splits `updated_at`'s overloaded semantics (#97 — row-metadata vs liveness signal; today every metadata UPDATE silently bumps `lastSeenAt` in [`backend/src/database.ts`'s `fetchAndAssemble`](backend/src/database.ts)). Commit 2 fixes [`duckdb-service/routes/modules.py`'s `set_display_name`](duckdb-service/routes/modules.py) so it works on modules with `nest_data` rows (#105 — DuckDB FK quirk surfaced through a Flask stacked-rollback bug). Regression tests pin both shapes. _This bullet ships removed in PR B's final commit._
 

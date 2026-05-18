@@ -168,8 +168,23 @@ gated on `firmware.bin[0] === 0xE9` and rejected every artefact
 produced by [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh):
 `esptool merge_bin` emits a blob whose first 0x1000 bytes are 0xFF
 flash-erase padding, with the bootloader (the byte that actually is
-0xE9) at offset 0x1000. The bug was invisible in CI because every
-test fixture in
+0xE9) at offset 0x1000. The byte-level evidence from the failing
+hardware smoke (captured against a freshly built firmware.bin, PR
+#106 T7):
+
+```
+firmware.bin size:            1226832
+firmware.bin[0x0000]:         0xFF   ← flash-erase pad (rejected by old validator)
+firmware.bin[0x1000]:         0xE9   ← bootloader magic (the one the new validator reads)
+firmware.bin[0x8000-0x8001]:  0xAA 0x50   ← partition-table magic
+firmware.bin[0xe000]:         0x01
+firmware.bin[0x10000]:        0xE9   ← app magic
+
+firmware.app.bin size:        1161296
+firmware.app.bin[0x0000]:     0xE9   ← raw app, no padding (the byte-0=0xE9 accept path)
+```
+
+The bug was invisible in CI because every test fixture in
 [`flashEsp.test.ts`](../../homepage/src/__tests__/flashEsp.test.ts)
 started with 0xE9 by construction; it surfaced on the first
 Windows-host hardware smoke (T7 of PR #106's test plan), where Step
@@ -193,9 +208,11 @@ hardware test, where the false claim broke immediately.
    Synthetic 4-byte fixtures starting with the expected magic only
    test the validator's logic against itself. If a real-bytes fixture
    would couple the unit test to the build pipeline (it would here —
-   `firmware.bin` is built by `build.sh`, not by `vitest`), capture a
-   hex dump of the first 0x2000 bytes in the lessons-learned entry or
-   alongside the validator so the next contributor has ground truth.
+   `firmware.bin` is built by `build.sh`, not by `vitest`), capture
+   the wire-shape evidence in the lessons-learned entry alongside the
+   validator — either as a hex dump of the first 0x2000 bytes, or as
+   the annotated key-offset summary used above. The point is "ground
+   truth from a real build", not the specific dump format.
 2. **When a docstring asserts a layout fact ("X begins with byte Y"),
    cite the file where the `#define` actually lives, not a transitive
    `#include` consumer.** For ESP-IDF 5.x, `ESP_IMAGE_HEADER_MAGIC` is

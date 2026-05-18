@@ -601,6 +601,215 @@ def test_set_display_name_works_on_module_with_nest_data(client, fresh_db):
     assert orphans == 0, "the FK invariant must hold after the workaround"
 
 
+def test_set_display_name_preserves_full_fk_chain_nest_and_progress(client, fresh_db):
+    """Issue #105 — the temp-table dance must restore BOTH FK arms:
+    `nest_data` AND `daily_progress`. The dance deletes in reverse-FK
+    order (daily_progress first, nest_data second) and re-inserts in
+    forward-FK order. This test seeds both arms and asserts they
+    survive the rename intact.
+
+    Without this test, a refactor that only restored nest_data would
+    pass `test_set_display_name_works_on_module_with_nest_data` but
+    silently drop the operator's image-classification history."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-fc-1", TEST_MAC_A, "blackmasked"),
+        )
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-fc-2", TEST_MAC_A, "resin"),
+        )
+        con.execute(
+            "INSERT INTO daily_progress "
+            "(progress_id, nest_id, date, empty, sealed, hatched) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("prog-fc-1", "nest-fc-1", "2026-05-01", 3, 12, 4),
+        )
+        con.execute(
+            "INSERT INTO daily_progress "
+            "(progress_id, nest_id, date, empty, sealed, hatched) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("prog-fc-2", "nest-fc-2", "2026-05-02", 5, 7, 2),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name",
+        json={"display_name": "DanceFull"},
+    )
+    assert r.status_code == 200, r.get_json()
+
+    # Both FK arms must survive intact — IDs, FK references, and the
+    # payload columns (empty/sealed/hatched) all preserved verbatim.
+    con = fresh_db.connection.get_conn()
+    try:
+        nests = sorted(
+            con.execute(
+                "SELECT nest_id, module_id, beeType FROM nest_data "
+                "WHERE module_id = ? ORDER BY nest_id",
+                (TEST_MAC_A,),
+            ).fetchall()
+        )
+        progress = sorted(
+            con.execute(
+                "SELECT progress_id, nest_id, date, empty, sealed, hatched "
+                "FROM daily_progress WHERE nest_id IN "
+                "(SELECT nest_id FROM nest_data WHERE module_id = ?) "
+                "ORDER BY progress_id",
+                (TEST_MAC_A,),
+            ).fetchall()
+        )
+    finally:
+        con.close()
+
+    assert len(nests) == 2
+    assert nests[0][0] == "nest-fc-1" and nests[0][2] == "blackmasked"
+    assert nests[1][0] == "nest-fc-2" and nests[1][2] == "resin"
+    assert len(progress) == 2
+    # Payload columns survive verbatim through the snapshot+restore.
+    assert progress[0][3:] == (3, 12, 4), progress
+    assert progress[1][3:] == (5, 7, 2), progress
+
+
+def test_set_display_name_restores_children_on_mid_dance_failure(client, fresh_db):
+    """Issue #105 / senior-review round 1 — pin the compensating-restore
+    contract. If the dance fails partway through (e.g. the re-insert
+    phase trips a constraint), the route MUST restore the children
+    from the snapshot before the 500 surfaces.
+
+    Without compensating restore, a partial failure would leave the
+    operator with a module that's lost its nests/progress permanently —
+    the worst kind of silent data loss because the operator just sees
+    'Save failed' and retries with no idea anything else broke.
+
+    We force a mid-dance failure by monkey-patching the route's
+    `_restore_children` upcall: NO — that wouldn't be representative.
+    Instead we trigger a real failure: seed a `nest_data` row with a
+    pre-existing `nest_id` that will collide on re-insert (the dance
+    DELETEs and re-INSERTs by snapshot; a PK collision can't happen
+    on the same snapshot it was read from, so we synthesise one by
+    pre-inserting a sibling `nest_data` row whose `nest_id` matches
+    one in the snapshot).
+
+    Actually the cleanest forcing function is via the `daily_progress`
+    arm: insert a `daily_progress` row whose `progress_id` matches a
+    snapshotted progress_id. After the snapshot, before the dance, we
+    inject a row that ISN'T deleted (different nest_id, same
+    progress_id) so when the dance's re-insert phase runs, the PK
+    collision fires. The compensating restore must put the original
+    children back."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    client.post("/new_module", json=_payload(TEST_MAC_B, "BeeTwo"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        # Seed module A with one nest + one progress row.
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-rescue-1", TEST_MAC_A, "blackmasked"),
+        )
+        con.execute(
+            "INSERT INTO daily_progress "
+            "(progress_id, nest_id, date, empty, sealed, hatched) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("prog-rescue-1", "nest-rescue-1", "2026-05-01", 3, 12, 4),
+        )
+        # Seed module B with a nest whose nest_id matches what we'll
+        # need NOT to collide with — actually, the cleanest forcing
+        # path is to monkey-patch `con.execute` at the route level
+        # rather than from outside. We can't easily monkey-patch the
+        # route's connection from here because get_conn() returns a
+        # fresh con per call. Instead, we lean on a different forcing
+        # function: insert a `nest_data` row referencing module B but
+        # using nest_id "nest-rescue-1" — that's not possible because
+        # `nest_id` is a PRIMARY KEY, so the seed insertion above
+        # blocks any duplicate. The forcing function is therefore
+        # synthetic: corrupt the snapshot path by patching the
+        # connection's `execute` method just before the re-insert
+        # phase. This is a unit-test fault-injection, not a
+        # representative failure mode, but it exercises the same code
+        # path the operator-visible failure would trigger.
+        con.commit()
+    finally:
+        con.close()
+
+    # Take an in-route fault-injection approach: wrap the duckdb
+    # connection in a thin proxy that fails on the FIRST
+    # "INSERT INTO nest_data" call (the dance's first re-insert in
+    # phase 3). Direct attribute-patching of a DuckDBPyConnection
+    # doesn't work because its attributes are read-only, so we use
+    # a wrapper class that delegates everything except `execute`.
+    import routes.modules as routes_modules
+
+    real_get_conn = routes_modules.get_conn
+    call_counter = {"nest_inserts": 0}
+
+    class _FaultInjectingConn:
+        def __init__(self, real_con):
+            self._con = real_con
+
+        def execute(self, sql, params=None):
+            if "INSERT INTO nest_data" in sql:
+                call_counter["nest_inserts"] += 1
+                if call_counter["nest_inserts"] == 1:
+                    raise RuntimeError("injected fault: re-insert failure")
+            if params is None:
+                return self._con.execute(sql)
+            return self._con.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+    def patched_get_conn():
+        return _FaultInjectingConn(real_get_conn())
+
+    import unittest.mock as _mock
+
+    with _mock.patch.object(routes_modules, "get_conn", patched_get_conn):
+        r = client.patch(
+            f"/modules/{TEST_MAC_A}/display_name",
+            json={"display_name": "ShouldFail"},
+        )
+
+    assert r.status_code == 500, r.get_json()
+
+    # Now the critical assertion: the children must be restored, even
+    # though the dance failed mid-re-insert.
+    con = fresh_db.connection.get_conn()
+    try:
+        nest_count = con.execute(
+            "SELECT COUNT(*) FROM nest_data WHERE module_id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()[0]
+        progress_count = con.execute(
+            "SELECT COUNT(*) FROM daily_progress WHERE nest_id IN "
+            "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
+            (TEST_MAC_A,),
+        ).fetchone()[0]
+        orphans = con.execute(
+            "SELECT COUNT(*) FROM nest_data n "
+            "LEFT JOIN module_configs m ON m.id = n.module_id "
+            "WHERE m.id IS NULL"
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    assert nest_count == 1, (
+        f"compensating restore must put the snapshotted nest back; found {nest_count}"
+    )
+    assert progress_count == 1, (
+        f"compensating restore must put the snapshotted progress back; "
+        f"found {progress_count}"
+    )
+    assert orphans == 0, "FK invariant must hold after the rescue"
+
+
 def test_set_display_name_409_collision_still_works_with_nest_data(client, fresh_db):
     """The FK workaround for #105 must not regress the existing UNIQUE
     collision contract. Seed two modules — both with nest_data rows —

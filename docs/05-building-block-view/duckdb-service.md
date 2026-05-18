@@ -214,12 +214,18 @@ iff the optional lat/lng/accuracy fields parsed plausible (matching
 the `_is_plausible_fix` rule — same shape as `hf::isPlausibleFix`
 on the firmware side) AND the existing `module_configs` row sits at
 the `(0,0)` sentinel. The "only patch from (0,0)" rule means a
-deliberately-placed module is never clobbered. The handler does
-**not** touch `module_configs.updated_at` — that column has dual
-semantics (issue #97). Liveness derivation in the backend reads
-`module_configs.updated_at`, the latest `module_heartbeats.received_at`,
+deliberately-placed module is never clobbered. The handler bumps
+`module_configs.updated_at` (row-metadata: the row was touched) but
+NOT `module_configs.last_seen_at` — the heartbeat is already recorded
+in `module_heartbeats` (where the backend folds it into liveness
+separately), so bumping `last_seen_at` here would double-count the
+same event. Liveness derivation in the backend reads
+`module_configs.last_seen_at`, the latest `module_heartbeats.received_at`,
 and the latest `image_uploads.uploaded_at` separately and takes the
-freshest (`backend/src/database.ts`'s `fetchAndAssemble`). The most
+freshest (`backend/src/database.ts`'s `fetchAndAssemble`). Prior to
+PR B (issue #97), `module_configs.updated_at` carried both the
+row-metadata role AND the liveness signal; chapter 11 has the
+split rationale. The most
 recent `module_heartbeats` row is materialised on the wire as
 `Module.latestHeartbeat`
 (shape: [`HeartbeatSnapshot`](../08-crosscutting-concepts/api-contracts.md))

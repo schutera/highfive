@@ -415,22 +415,55 @@ The only path through DuckDB's FK over-enforcement is to temporarily
 move the referencing child rows out of the way: snapshot
 `daily_progress` + `nest_data` rows for this module, delete them in
 reverse-FK order, run the UPDATE on the now-unreferenced parent, then
-re-insert the children. The full sequence runs inside
-`write_transaction()` so it's atomic — any failure rolls back to the
-original state and the FK invariant is preserved end-to-end. Bounded
-blast radius: only the renamed module's children move (the `WHERE
-module_id = ?` filter pins it).
+re-insert the children. Bounded blast radius: only the renamed
+module's children move (the `WHERE module_id = ?` filter pins it).
+
+**Atomicity caveat (senior-review round 1 finding).** The dance
+CANNOT run inside `write_transaction()`'s explicit `BEGIN/COMMIT`.
+DuckDB's FK enforcement uses a transaction-snapshot view: even after
+DELETing the children in the same transaction, the UPDATE on the
+UNIQUE-constrained `display_name` column sees the snapshotted
+references and trips the same FK exception that motivated the dance.
+The dance therefore runs in autocommit (each DELETE / UPDATE /
+INSERT commits individually) and atomicity is provided at the
+Python layer via a **compensating-restore** handler in the
+exception path: if any phase raises, the handler re-inserts the
+snapshotted children before the 500 surfaces. The global `lock` is
+held for the whole dance so no concurrent writer races with the
+half-deleted state. Pinned by `set_display_name`'s
+fault-injection test (`test_set_display_name_restores_children_on_mid_dance_failure`)
+and the FK-chain preservation test
+(`test_set_display_name_preserves_full_fk_chain_nest_and_progress`).
+
+The PR-B-side correction that surfaced this: `write_transaction`
+itself was missing its `BEGIN`, so multi-statement callers got
+silent partial-write semantics ("rollback on exception" was a
+no-op because DuckDB autocommit had already committed each
+statement). The senior-reviewer caught it; the fix adds explicit
+`BEGIN/COMMIT` for that helper's 4 OTHER callers (add_module,
+record_image, the legacy heartbeat route, add_progress_for_module),
+all of which benefit from real atomicity. set_display_name's dance
+is the one route that opts out of the helper because of the
+DuckDB-snapshot incompatibility. Pinned by
+`tests/test_repository.py`'s `test_write_transaction_rolls_back_partial_writes`.
 
 **How to avoid it next time.**
 
 - **Use `write_transaction()` for every duckdb-service route that
   mutates state.** The helper at
   [`duckdb-service/db/repository.py`](../../duckdb-service/db/repository.py)'s
-  `write_transaction` handles the autocommit-rollback case
-  gracefully (`try: con.rollback() except: pass` for the
-  no-active-transaction path). Manual `con.commit() / con.rollback()`
-  lifecycles are a smell — they bypass the helper's safety net and
-  recreate the bug.
+  `write_transaction` now issues an explicit `BEGIN` so multi-
+  statement callers get real atomicity. Manual `con.commit() /
+con.rollback()` lifecycles are a smell — they bypass the helper's
+  safety net and recreate both bugs.
+- **The one exception is when an UPDATE on a row with FK references
+  has to bypass DuckDB's snapshot-based FK enforcement** (the
+  `display_name` rename being the only known case today). Such
+  routes use a bespoke autocommit + compensating-restore pattern;
+  document it explicitly in the route comment and pin it with a
+  fault-injection test, otherwise a future refactor that switches
+  back to `write_transaction()` reintroduces the FK-over-enforcement
+  symptom.
 - **Test fixtures must seed the realistic precondition for the route
   under test, not the minimum that lets the happy path pass.** The
   five seeded modules all carry `nest_data`; any `set_display_name`

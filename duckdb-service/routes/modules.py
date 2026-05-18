@@ -242,40 +242,82 @@ def set_display_name(module_id):
             400,
         )
 
-    # Switched from manual `con = get_conn() / con.commit() /
-    # con.rollback()` to the project's `write_transaction()` helper as
-    # part of #105's fix. DuckDB defaults to autocommit; calling
-    # `con.rollback()` in an exception handler with no active
-    # transaction raises a secondary `TransactionException` which
-    # Flask surfaces as its HTML 500 page — backend's JSON parser then
-    # chokes on the `<!doctype ...` prefix and the operator sees
-    # "Unexpected token '<'" instead of the actual error.
-    # `write_transaction` (db/repository.py) swallows the
-    # "no active transaction" rollback gracefully, so the route's
-    # exception path is now clean.
-    try:
-        with write_transaction() as con:
+    # Why this route bypasses `write_transaction`. The helper issues an
+    # explicit `BEGIN` to give multi-statement callers real atomicity
+    # (see db/repository.py / test_write_transaction_rolls_back_partial_writes).
+    # Inside an explicit transaction, DuckDB 1.4.4 (and 1.5.2, verified
+    # at PR B execution) trips the FK over-enforcement on
+    # `UPDATE module_configs SET display_name = ?` because the
+    # transaction snapshot still "sees" the `nest_data` references —
+    # even after we DELETE them in the same transaction. So the
+    # only DuckDB-supported workaround for #105's bug (the temp-table
+    # dance) is incompatible with the helper's BEGIN.
+    #
+    # The dance therefore runs in autocommit mode — each DELETE /
+    # UPDATE / INSERT commits individually, which lets DuckDB's FK
+    # enforcement see each statement's effect immediately and lets the
+    # UPDATE proceed past the now-unreferenced parent row. Atomicity
+    # is provided at the Python layer instead: on any failure we
+    # restore the child rows from the in-memory snapshot before
+    # re-raising. The global `lock` is held for the duration so no
+    # concurrent writer can race with the half-deleted state.
+    #
+    # The compensating-restore approach trades full transactional
+    # atomicity for a recovery semantics that's "best-effort and
+    # observable": if the DELETE phase succeeds and the UPDATE then
+    # fails, we re-insert the children before the operator sees the
+    # error. The remaining failure-window is "DELETE succeeded,
+    # UPDATE succeeded, re-insert raised partway" — recovery does a
+    # DELETE-any-partial + re-insert-full-snapshot to converge.
+    # Operator-visible behaviour: success returns 200; any failure
+    # returns 500 AND leaves the row in its pre-dance state. See
+    # chapter 11 "Admin rename failed silently on seeded modules"
+    # for the full workaround discovery path.
+    #
+    # The DuckDB workarounds the issue's reporter suggested don't
+    # exist in DuckDB:
+    #   - `PRAGMA foreign_keys = OFF` is a SQLite pragma, not a
+    #     DuckDB one (DuckDB returns "Catalog Error: unrecognized
+    #     configuration parameter").
+    #   - `ALTER TABLE nest_data DROP CONSTRAINT ...` raises
+    #     `NotImplementedException: No support for that ALTER
+    #     TABLE option yet`.
+    #   - `INSERT INTO module_configs ... ON CONFLICT (id) DO UPDATE`
+    #     hits the SAME FK over-enforcement when the SET clause
+    #     touches a UNIQUE-constrained column (which `display_name`
+    #     is). Verified empirically; chapter 11 has the receipts.
+    #
+    # Safe because:
+    #   - `display_name` is a non-FK, non-PK column. The end state
+    #     preserves every `nest_data.module_id → module_configs.id`
+    #     reference (children re-inserted with identical `module_id`).
+    #   - duckdb-service serialises writes via a global `lock` (see
+    #     db/connection.py); we hold it for the whole dance, so no
+    #     concurrent reader/writer sees the half-deleted state.
+    #   - Bounded blast radius: only this module's children move
+    #     (the `WHERE module_id = ?` filter pins it). Typical modules
+    #     carry <20 nests and <200 progress rows over their lifetime.
+    with lock:
+        con = get_conn()
+        try:
             existing = con.execute(
                 "SELECT id FROM module_configs WHERE id = ?", (canonical,)
             ).fetchone()
             if not existing:
                 return jsonify({"error": "Module not found"}), 404
 
-            # Skip the UPDATE if a *different* module already holds this
-            # display_name. Catching the UNIQUE-constraint exception
-            # works in principle but DuckDB surfaces it through a
-            # generic ConstraintException whose message format isn't
-            # stable; an explicit pre-check gives a clean 409 with the
-            # actual conflicting MAC.
+            # Skip the UPDATE if a *different* module already holds
+            # this display_name. Catching the UNIQUE-constraint
+            # exception works in principle but DuckDB surfaces it
+            # through a generic ConstraintException whose message
+            # format isn't stable; an explicit pre-check gives a
+            # clean 409 with the actual conflicting MAC.
             if new_value is not None:
                 clash = con.execute(
                     "SELECT id FROM module_configs WHERE display_name = ? AND id != ?",
                     (new_value, canonical),
                 ).fetchone()
                 if clash is not None:
-                    # Returning a non-200 inside the with-block is fine
-                    # — write_transaction commits the empty (no
-                    # mutation) transaction and closes cleanly.
                     return (
                         jsonify(
                             {
@@ -287,67 +329,19 @@ def set_display_name(module_id):
                         409,
                     )
 
-            # Bump `updated_at` (row-metadata: the row was touched). Do
-            # NOT bump `last_seen_at` — that column is the device-liveness
-            # signal the backend's `fetchAndAssemble` folds into
-            # `Module.lastSeenAt` (max of last_image_at / last_seen_at /
-            # latestHeartbeat.receivedAt) for the 2 h status window. An
-            # admin edit of the label is not a heartbeat-equivalent event;
-            # bumping `last_seen_at` here would flip any renamed offline
-            # module to "online" for two hours regardless of telemetry.
-            # See chapter 11 "updated_at semantic overload" and issue #97
-            # for the split rationale; PR B carries the fix.
+            # Bump `updated_at` (row-metadata: the row was touched).
+            # Do NOT bump `last_seen_at` — that column is the device-
+            # liveness signal the backend's `fetchAndAssemble` folds
+            # into `Module.lastSeenAt` (max of last_image_at /
+            # last_seen_at / latestHeartbeat.receivedAt) for the 2 h
+            # status window. An admin edit of the label is not a
+            # heartbeat-equivalent event; bumping `last_seen_at` here
+            # would flip any renamed offline module to "online" for
+            # two hours regardless of telemetry. See chapter 11
+            # "updated_at semantic overload" and issue #97 for the
+            # split rationale; PR B carries the fix.
             #
-            # FK-enforcement workaround for #105: DuckDB 1.4.4 (and 1.5.2,
-            # verified at PR B execution) rejects this UPDATE on any
-            # `module_configs` row whose `id` is referenced by a child
-            # table, even though `display_name` is neither the PK nor an
-            # FK column. The error surfaces as
-            # `ConstraintException: Violates foreign key constraint
-            # because key "module_id: ..." is still referenced`.
-            #
-            # The DuckDB workarounds the issue's reporter suggested don't
-            # exist in DuckDB:
-            #   - `PRAGMA foreign_keys = OFF` is a SQLite pragma, not a
-            #     DuckDB one (DuckDB returns "Catalog Error: unrecognized
-            #     configuration parameter").
-            #   - `ALTER TABLE nest_data DROP CONSTRAINT ...` raises
-            #     `NotImplementedException: No support for that ALTER
-            #     TABLE option yet`.
-            #   - `INSERT INTO module_configs ... ON CONFLICT (id) DO
-            #     UPDATE` hits the SAME FK over-enforcement (DuckDB
-            #     treats the UPSERT branch as a regular UPDATE for FK
-            #     purposes).
-            #
-            # The only workaround DuckDB accepts is to temporarily move
-            # the referencing child rows out of the way: snapshot
-            # `nest_data` + `daily_progress` rows for this module,
-            # delete them in reverse-FK order, run the UPDATE on the
-            # now-unreferenced parent, then re-insert the children. The
-            # full sequence runs inside `write_transaction` so it's
-            # atomic — any failure rolls back to the original state and
-            # the FK invariant is preserved end-to-end.
-            #
-            # Safe because:
-            #   - `display_name` is a non-FK, non-PK column. The end
-            #     state preserves every `nest_data.module_id →
-            #     module_configs.id` reference (children re-inserted
-            #     with identical `module_id`).
-            #   - duckdb-service uses a single shared connection guarded
-            #     by a global `lock` (db/connection.py); write_transaction
-            #     holds the lock for the with-block, so no concurrent
-            #     reader sees the half-deleted state.
-            #   - Bounded blast radius: only this module's children
-            #     move (the `WHERE module_id = ?` filter pins it).
-            #     Typical modules carry <20 nests and <200 progress
-            #     rows over their lifetime.
-            #
-            # See chapter 11 "Admin rename failed silently on seeded
-            # modules" for the incident and the workaround discovery
-            # path.
-            #
-            # Snapshot daily_progress for this module's nests (the
-            # grandchild FK chain).
+            # Snapshot in dependency order so restoration can replay it.
             progress_rows = con.execute(
                 """
                 SELECT dp.progress_id, dp.nest_id, dp.date,
@@ -362,35 +356,82 @@ def set_display_name(module_id):
                 "SELECT nest_id, module_id, beeType FROM nest_data WHERE module_id = ?",
                 (canonical,),
             ).fetchall()
-            # Delete in reverse-FK order so each statement is FK-clean
-            # in isolation (DuckDB checks per-statement).
-            con.execute(
-                "DELETE FROM daily_progress WHERE nest_id IN "
-                "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
-                (canonical,),
-            )
-            con.execute(
-                "DELETE FROM nest_data WHERE module_id = ?",
-                (canonical,),
-            )
-            con.execute(
-                "UPDATE module_configs SET display_name = ?, "
-                "updated_at = NOW() WHERE id = ?",
-                (new_value, canonical),
-            )
-            for nest in nest_rows:
+
+            def _restore_children() -> None:
+                """Re-insert the snapshotted children. Called from the
+                exception handler. Idempotent: deletes any partial
+                state first so a re-insert that failed mid-loop on
+                the happy path can be cleanly re-attempted."""
                 con.execute(
-                    "INSERT INTO nest_data (nest_id, module_id, beeType) "
-                    "VALUES (?, ?, ?)",
-                    nest,
+                    "DELETE FROM daily_progress WHERE nest_id IN "
+                    "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
+                    (canonical,),
                 )
-            for prog in progress_rows:
                 con.execute(
-                    "INSERT INTO daily_progress "
-                    "(progress_id, nest_id, date, empty, sealed, hatched) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    prog,
+                    "DELETE FROM nest_data WHERE module_id = ?",
+                    (canonical,),
                 )
+                for nest in nest_rows:
+                    con.execute(
+                        "INSERT INTO nest_data (nest_id, module_id, beeType) "
+                        "VALUES (?, ?, ?)",
+                        nest,
+                    )
+                for prog in progress_rows:
+                    con.execute(
+                        "INSERT INTO daily_progress "
+                        "(progress_id, nest_id, date, empty, sealed, hatched) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        prog,
+                    )
+
+            try:
+                # Phase 1: DELETE children in reverse-FK order.
+                con.execute(
+                    "DELETE FROM daily_progress WHERE nest_id IN "
+                    "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
+                    (canonical,),
+                )
+                con.execute(
+                    "DELETE FROM nest_data WHERE module_id = ?",
+                    (canonical,),
+                )
+                # Phase 2: UPDATE the now-unreferenced parent.
+                con.execute(
+                    "UPDATE module_configs SET display_name = ?, "
+                    "updated_at = NOW() WHERE id = ?",
+                    (new_value, canonical),
+                )
+                # Phase 3: re-insert children.
+                for nest in nest_rows:
+                    con.execute(
+                        "INSERT INTO nest_data (nest_id, module_id, beeType) "
+                        "VALUES (?, ?, ?)",
+                        nest,
+                    )
+                for prog in progress_rows:
+                    con.execute(
+                        "INSERT INTO daily_progress "
+                        "(progress_id, nest_id, date, empty, sealed, hatched) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        prog,
+                    )
+            except Exception:
+                # Compensating action: re-establish the children
+                # snapshot. The parent UPDATE may or may not have
+                # landed; we leave it as-is and let the 500 surface
+                # so the operator can retry. The KEY invariant we
+                # restore is "no orphan or missing children".
+                try:
+                    _restore_children()
+                except Exception as restore_err:
+                    print(
+                        f"[set_display_name] CRITICAL: restore failed for "
+                        f"{canonical}: {type(restore_err).__name__}: "
+                        f"{restore_err}",
+                        flush=True,
+                    )
+                raise
             return (
                 jsonify(
                     {
@@ -401,9 +442,11 @@ def set_display_name(module_id):
                 ),
                 200,
             )
-    except Exception as e:
-        print(f"[set_display_name] {type(e).__name__}: {e}", flush=True)
-        return jsonify({"error": str(e)}), 500
+        except Exception as e:
+            print(f"[set_display_name] {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": str(e)}), 500
+        finally:
+            con.close()
 
 
 @modules_bp.delete("/modules/<module_id>")

@@ -68,15 +68,31 @@ def query_scalar(sql: str, params: tuple = ()) -> Any:
 
 @contextmanager
 def write_transaction() -> Iterator[Any]:
-    """Acquire lock, open conn, yield it, commit on success / rollback on exception, close.
+    """Acquire lock, open conn, BEGIN explicit transaction, yield it,
+    commit on success / rollback on exception, close.
 
-    Yields the live DuckDB connection so callers can run multiple statements
-    in the same transaction (e.g. ``add_progress_for_module`` which inserts
-    nests and progress rows together).
+    Yields the live DuckDB connection so callers can run multiple
+    statements in the same transaction (e.g. ``add_progress_for_module``
+    which inserts nests and progress rows together, or
+    ``set_display_name``'s temp-table-dance which snapshots child rows
+    and restores them around the parent UPDATE).
+
+    The explicit ``BEGIN`` is load-bearing for multi-statement atomicity.
+    DuckDB defaults to autocommit, so every ``con.execute`` outside an
+    explicit transaction commits individually — without ``BEGIN``, a
+    multi-statement caller that raises midway leaves the earlier
+    statements committed AND the ``con.rollback()`` below raises a
+    secondary ``TransactionException: cannot rollback - no transaction
+    is active``. Pre-#105 the helper had no ``BEGIN`` and the rollback
+    was a no-op; the senior-reviewer caught this during PR B and the
+    fix is part of #105's safety contract for the rename-dance.
+    Pinned by ``test_write_transaction_rolls_back_partial_writes`` in
+    ``tests/test_repository.py``.
     """
     c = _conn_module()
     with c.lock:
         con = c.get_conn()
+        con.execute("BEGIN")
         try:
             yield con
             con.commit()
@@ -84,7 +100,9 @@ def write_transaction() -> Iterator[Any]:
             try:
                 con.rollback()
             except Exception:
-                # No active transaction (e.g. DDL auto-committed) — nothing to roll back.
+                # If rollback itself fails the transaction state is
+                # already torn down; surfacing the original exception
+                # is more useful than masking it with a rollback error.
                 pass
             raise
         finally:

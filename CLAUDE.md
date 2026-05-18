@@ -132,6 +132,7 @@ These are the most-violated rules from past incidents. Full list in [`docs/02-co
 - **Never hardcode `localhost`** in inter-service URLs — use the Docker service name.
 - **Never ship the dev API key (`hf_dev_key_2026`)** as a production fallback. Override `HIGHFIVE_API_KEY`. Code-side guards catch the obvious shapes; the residual gap (`NODE_ENV=development` is an intentional off-ramp the operator owns) is the reason this prose entry stays. Full off-ramp semantics: [auth.md → "The secret"](docs/08-crosscutting-concepts/auth.md#the-secret).
 - **Never trust commit messages over code when documenting behaviour.** When writing or reviewing arc42 chapters, ADRs, or runtime-view docs, read the actual files in `ESP32-CAM/`, `duckdb-service/`, etc. — commit messages summarise intent, not what shipped. Prefer `path's <symbol>` or `path::symbol` over `path:line`; the latter drift silently. Run `make check-citations` before invoking the reviewer. Lesson recorded in [chapter 11](docs/11-risks-and-technical-debt/README.md) "Lessons learned".
+- **Never write `close[sd]?` / `fix(es|ed)?` / `resolve[sd]?` next to `#N` in commit message _bodies_ or PR _descriptions_ — only in titles.** GitHub's auto-close scanner regex-matches the literal pattern anywhere in a merging PR's text without reading context, so a commit body explaining why an auto-close-keyword leak is bad — by quoting `(closes #100, #99)` — still closes #100 on merge. When discussing the mechanism, use `addresses` / `references` / `for #N` (no keyword); save the actual `closes #N` for the PR title and the commit-subject line of the implementing commit. Verify before push: `git log <merge-base>..HEAD --pretty=full | grep -nE "(close[sd]?|fix(es|ed)?|resolve[sd]?)\s+#"` — every match must be in a subject line or PR title, never a body paragraph. Incident: PR #104's fix commit body documented the buggy `(closes #100, #99)` antipattern by quoting it verbatim; the quoted occurrence closed #100 _and_ #97 prematurely on merge.
 
 ## Mandatory end-of-implementation gate
 
@@ -178,3 +179,13 @@ See [`scripts/README.md`](scripts/README.md) for the full list and prerequisites
 ## Branch model
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed prefix (`feat/`, `fix/`, `docs/`, `refactor/`, `chore/`, `test/`, `ci/`); first commit line `<type>: <imperative summary>` ≤ ~72 chars; PRs require all CI green.
+
+## In-flight multi-PR series
+
+Two PRs to clear cofade's remaining open issues, grouped by cohesion. Auto-close keywords (`closes` / `fixes` / `resolves`) are intentionally avoided in this section — see the "Critical rules" entry above on auto-close-keyword leakage. Each bullet ships with a self-removal clause: when a PR lands, that bullet is removed in the PR's final commit. When both PRs land, this whole section goes too.
+
+- **PR A — Step 2 wizard end-to-end on Windows** (addresses #99, #100, #107): not started. Revives branch `fix/windows-host-parity` (`adf1a08`, 5 commits already on origin from the closed PR #106 attempt) and adds an #107 fix on top so [`flashEsp.ts`'s `assertFirmwareResponse`](homepage/src/components/setup/flashEsp.ts) accepts the `merge_bin` byte-0 layout (byte 0 = 0xFF + byte 0x1000 = 0xE9). T7 of the test plan — hardware-side Step 2 flash on a real ESP32-CAM — is the acceptance gate, not optional. _This bullet ships removed in PR A's final commit._
+
+- **PR B — `module_configs` write-path semantics** (addresses #97, #105): not started. Two commits, one PR. Commit 1 splits `updated_at`'s overloaded semantics (#97 — row-metadata vs liveness signal; today every metadata UPDATE silently bumps `lastSeenAt` in [`backend/src/database.ts`'s `fetchAndAssemble`](backend/src/database.ts)). Commit 2 fixes [`duckdb-service/routes/modules.py`'s `set_display_name`](duckdb-service/routes/modules.py) so it works on modules with `nest_data` rows (#105 — DuckDB FK quirk surfaced through a Flask stacked-rollback bug). Regression tests pin both shapes. _This bullet ships removed in PR B's final commit._
+
+Out of repo: #80 (nginx HSTS on production — server config, not a code change here).

@@ -93,7 +93,7 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
     // making the test pass for the wrong reason if the threshold ever
     // changes. Same pattern as the third case below.
     getAllModules.mockResolvedValueOnce([
-      { id: 'pre-existing-aabbccddeeff', name: 'Pre-existing', updatedAt: '2024-01-01' },
+      { id: 'pre-existing-aabbccddeeff', name: 'Pre-existing', lastSeenAt: '2024-01-01' },
     ]);
     // First 23 poll attempts fail.
     for (let i = 0; i < 23; i++) {
@@ -125,7 +125,7 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
     // Mount with a non-empty snapshot so startVerification skips its
     // fallback fetch — keeps the call accounting honest.
     getAllModules.mockResolvedValueOnce([
-      { id: 'pre-existing-aabbccddeeff', name: 'Pre-existing', updatedAt: '2024-01-01' },
+      { id: 'pre-existing-aabbccddeeff', name: 'Pre-existing', lastSeenAt: '2024-01-01' },
     ]);
     // First poll succeeds (resets counter to 0)…
     getAllModules.mockResolvedValueOnce([]);

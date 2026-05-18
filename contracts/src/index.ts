@@ -80,9 +80,17 @@ export interface Module {
   totalHatches: number; // Sum of all hatches across all nests
   imageCount: number; // Total images uploaded by this module
   email: string | null;
-  updatedAt?: string; // ISO timestamp — set on every registration/UPSERT
-  // Liveness — derived from max(updatedAt, lastApiCall, latestHeartbeat.receivedAt).
-  // If null, the module has never phoned home.
+  // ISO timestamp — row-metadata; bumped on every UPDATE to
+  // `module_configs` (registration, display-name rename, legacy
+  // heartbeat row-update, heartbeat-side geo-patch). Use `lastSeenAt`
+  // for device-liveness, NOT this — the split shipped in PR B / issue
+  // #97. See chapter 11 "updated_at semantic overload" for why.
+  updatedAt?: string;
+  // Liveness — derived from max(last_seen_at, lastApiCall,
+  // latestHeartbeat.receivedAt). `last_seen_at` is bumped only on
+  // per-boot registration in duckdb-service `add_module`; metadata
+  // writes (rename, geo-patch, legacy heartbeat) do NOT corrupt it
+  // (post-#97 split). If null, the module has never phoned home.
   lastSeenAt: string | null;
   latestHeartbeat: HeartbeatSnapshot | null;
 }

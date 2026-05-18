@@ -100,11 +100,20 @@ def add_module():
             # from either side. Pinned by
             # `test_new_module_re_registration_does_not_clobber_recovered_location`
             # in `tests/test_modules.py`.
+            # `add_module` is the ONLY writer that bumps `last_seen_at` —
+            # that column is the device-liveness signal the backend's
+            # `fetchAndAssemble` folds into `Module.lastSeenAt` for the
+            # 2 h status window (issue #97 / PR B). Every other UPDATE on
+            # `module_configs` (display_name rename, heartbeat row-patch,
+            # heartbeat-side geo-patch) is row-metadata and bumps only
+            # `updated_at`. Re-registration is a "device was heard from"
+            # event, so the UPSERT path bumps both.
             con.execute(
                 """
                 INSERT INTO module_configs
-                    (id, name, lat, lng, first_online, battery_level, email, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+                    (id, name, lat, lng, first_online, battery_level, email,
+                     updated_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     lat = CASE
@@ -121,7 +130,8 @@ def add_module():
                     END,
                     battery_level = EXCLUDED.battery_level,
                     email = EXCLUDED.email,
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    last_seen_at = NOW()
                 """,
                 (
                     mac_str,
@@ -264,19 +274,19 @@ def set_display_name(module_id):
                         409,
                     )
 
-            # Do NOT bump `updated_at`. That column is the liveness
-            # timestamp the backend's `fetchAndAssemble` folds into
-            # `lastSeenAt` (max of last_image_at / updated_at /
-            # latestHeartbeat.receivedAt) and uses to derive
-            # `Module.status` within a 2 h window. An admin edit of
-            # the *label* is not a heartbeat-equivalent event; bumping
-            # `updated_at` here would flip any renamed offline module
-            # to "online" for two hours regardless of telemetry.
-            # See `contracts/src/index.ts` Module.updatedAt — "set on
-            # every registration/UPSERT" — which this route honours by
-            # leaving it alone.
+            # Bump `updated_at` (row-metadata: the row was touched). Do
+            # NOT bump `last_seen_at` — that column is the device-liveness
+            # signal the backend's `fetchAndAssemble` folds into
+            # `Module.lastSeenAt` (max of last_image_at / last_seen_at /
+            # latestHeartbeat.receivedAt) for the 2 h status window. An
+            # admin edit of the label is not a heartbeat-equivalent event;
+            # bumping `last_seen_at` here would flip any renamed offline
+            # module to "online" for two hours regardless of telemetry.
+            # See chapter 11 "updated_at semantic overload" and issue #97
+            # for the split rationale; PR B carries the fix.
             con.execute(
-                "UPDATE module_configs SET display_name = ? WHERE id = ?",
+                "UPDATE module_configs SET display_name = ?, updated_at = NOW() "
+                "WHERE id = ?",
                 (new_value, canonical),
             )
             con.commit()
@@ -407,14 +417,16 @@ def get_modules():
         modules = query_all(
             """
             SELECT m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,
-                   m.battery_level, m.image_count, m.email, m.updated_at,
+                   m.battery_level, m.image_count, m.email,
+                   m.updated_at, m.last_seen_at,
                    m.last_silence_alert_at,
                    COUNT(i.id) AS real_image_count,
                    MAX(i.uploaded_at) AS last_image_at
             FROM module_configs m
             LEFT JOIN image_uploads i ON m.id = i.module_id
             GROUP BY m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,
-                     m.battery_level, m.image_count, m.email, m.updated_at,
+                     m.battery_level, m.image_count, m.email,
+                     m.updated_at, m.last_seen_at,
                      m.last_silence_alert_at
             """
         )
@@ -474,12 +486,20 @@ def heartbeat(module_id):
         # INSERT). The schema declares `NOT NULL`, so this branch is
         # unreachable in production but defensive against legacy /
         # manually-inserted rows. Background: issue #75.
+        #
+        # `updated_at` is bumped (row was touched). `last_seen_at` is
+        # NOT bumped here — the legacy /modules/<id>/heartbeat route
+        # records battery + image_count metadata; the new heartbeat
+        # path (`heartbeats.py::post_heartbeat`) writes to the dedicated
+        # `module_heartbeats` table, which the backend folds into
+        # liveness separately. See issue #97 / PR B split.
         con.execute(
             """
             UPDATE module_configs
             SET battery_level = ?,
                 first_online = COALESCE(first_online, ?),
-                image_count = image_count + 1
+                image_count = image_count + 1,
+                updated_at = NOW()
             WHERE id = ?
             """,
             (battery, now, canonical),

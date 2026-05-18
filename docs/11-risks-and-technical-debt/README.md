@@ -360,6 +360,23 @@ half of the contract.
   review cycle on any PR that adds a write to a column whose name
   doesn't fully describe its read-path semantics.
 
+**Resolved in PR B (closes #97).** The split shipped: `module_configs`
+now carries `updated_at` (row-metadata, bumped on every UPDATE) and
+`last_seen_at` (device-liveness, bumped only on `add_module`'s per-boot
+registration UPSERT). The backend's `fetchAndAssemble` reads
+`last_seen_at` for the 2 h status window; every other write site
+(display-name rename, heartbeat-side geo-patch, legacy heartbeat
+row-update) bumps only `updated_at`. The existing regression test was
+inverted (renamed `test_patch_display_name_bumps_updated_at_not_last_seen_at`)
+and two companion tests pin the new contract end-to-end. What this
+changes for future writers: any new UPDATE on `module_configs` should
+set `updated_at = NOW()` in the SET clause; NEVER write
+`last_seen_at = NOW()` outside `add_module` — that column is the
+contract for "ESP32 just announced itself", and `Module.status`
+depends on it. The setup wizard's verification poll was also switched
+from `m.updatedAt` to `m.lastSeenAt` — the old field is now polluted
+by metadata writes that pre-split couldn't reach it.
+
 ### Same-batch ESP firmwares collided on the auto-generated module name (issues #91, #92, #93, #94)
 
 **What happened.** Two distinct modules with MACs `b0:69:6e:f2:3a:08`

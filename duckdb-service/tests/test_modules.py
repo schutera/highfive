@@ -412,26 +412,31 @@ def test_patch_display_name_rejects_non_string(client, fresh_db):
     assert r.status_code == 400
 
 
-def test_patch_display_name_does_not_bump_updated_at(client, fresh_db):
-    """Renaming is a metadata edit, not a liveness event. `updated_at`
-    drives `Module.lastSeenAt` and the 2 h online window in
-    `backend/src/database.ts::fetchAndAssemble`; bumping it on rename
-    would flip any renamed offline module to "online" for two hours
-    regardless of telemetry. Regression for PR-I senior review."""
+def test_patch_display_name_bumps_updated_at_not_last_seen_at(client, fresh_db):
+    """Post-#97 split: renaming is a row-metadata edit (bumps
+    `updated_at`) but NOT a liveness event (does NOT bump
+    `last_seen_at`). The backend's `fetchAndAssemble` folds
+    `last_seen_at` into `Module.lastSeenAt` for the 2 h status window,
+    so bumping `last_seen_at` on rename would flip any renamed offline
+    module to "online" for two hours regardless of telemetry. This is
+    the inverted form of the pre-#97-split regression test (which
+    pinned `updated_at` unchanged, because back then `updated_at` did
+    double duty for both roles)."""
     import time
 
     client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
 
     con = fresh_db.connection.get_conn()
     try:
-        before = con.execute(
-            "SELECT updated_at FROM module_configs WHERE id = ?", (TEST_MAC_A,)
-        ).fetchone()[0]
+        before_updated, before_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
     finally:
         con.close()
 
-    # Force a measurable gap so any bump would surface as a non-equal
-    # value, not a sub-second tie.
+    # Force a measurable gap so any bump surfaces as a non-equal value,
+    # not a sub-second tie.
     time.sleep(0.01)
 
     r = client.patch(
@@ -441,13 +446,19 @@ def test_patch_display_name_does_not_bump_updated_at(client, fresh_db):
 
     con = fresh_db.connection.get_conn()
     try:
-        after = con.execute(
-            "SELECT updated_at FROM module_configs WHERE id = ?", (TEST_MAC_A,)
-        ).fetchone()[0]
+        after_updated, after_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
     finally:
         con.close()
-    assert after == before, (
-        f"updated_at must not move on rename; was {before!r}, is {after!r}"
+    assert after_updated > before_updated, (
+        f"updated_at must move on rename (row was touched); "
+        f"was {before_updated!r}, is {after_updated!r}"
+    )
+    assert after_seen == before_seen, (
+        f"last_seen_at must NOT move on rename (not a liveness event); "
+        f"was {before_seen!r}, is {after_seen!r}"
     )
 
 
@@ -490,3 +501,94 @@ def test_add_module_accepts_module_name_at_100_chars(client, fresh_db):
     r = client.post("/new_module", json=_payload(TEST_MAC_A, exactly_100))
     assert r.status_code == 200
     assert r.get_json()["name"] == exactly_100
+
+
+def test_add_module_re_registration_bumps_both_timestamps(client, fresh_db):
+    """Post-#97 split: `add_module` is the only writer that bumps
+    `last_seen_at` (the device-liveness signal). It also bumps
+    `updated_at` because the row was touched (the new "bump on every
+    write" rule for row-metadata). Both timestamps must advance on a
+    re-registration UPSERT.
+
+    The companion `test_patch_display_name_bumps_updated_at_not_last_seen_at`
+    pins the inverse for metadata-only writes."""
+    import time
+
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        before_updated, before_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
+    finally:
+        con.close()
+
+    time.sleep(0.01)
+
+    # Re-register the same MAC (the ON CONFLICT path of `add_module`).
+    r = client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    assert r.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        after_updated, after_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert after_updated > before_updated, (
+        f"updated_at must move on re-registration; "
+        f"was {before_updated!r}, is {after_updated!r}"
+    )
+    assert after_seen > before_seen, (
+        f"last_seen_at must move on re-registration (the only writer "
+        f"that bumps it); was {before_seen!r}, is {after_seen!r}"
+    )
+
+
+def test_legacy_heartbeat_bumps_updated_at_not_last_seen_at(client, fresh_db):
+    """The legacy `/modules/<id>/heartbeat` route updates battery +
+    image_count metadata; it does NOT represent a registration event.
+    Post-#97 split, this route bumps `updated_at` (row was touched)
+    but not `last_seen_at` (the new heartbeat path
+    `heartbeats.py::post_heartbeat` writes to `module_heartbeats` and
+    the backend folds that into the derived liveness separately).
+    Pinning the contract so a future refactor that accidentally
+    promotes legacy heartbeat to a liveness signal trips this test."""
+    import time
+
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        before_updated, before_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
+    finally:
+        con.close()
+
+    time.sleep(0.01)
+
+    r = client.post(f"/modules/{TEST_MAC_A}/heartbeat", json={"battery": 73})
+    assert r.status_code == 200, r.get_json()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        after_updated, after_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert after_updated > before_updated, (
+        f"updated_at must move on legacy heartbeat; "
+        f"was {before_updated!r}, is {after_updated!r}"
+    )
+    assert after_seen == before_seen, (
+        f"last_seen_at must NOT move on legacy heartbeat (not a "
+        f"registration event); was {before_seen!r}, is {after_seen!r}"
+    )

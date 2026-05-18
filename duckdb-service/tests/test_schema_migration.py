@@ -430,3 +430,84 @@ def test_display_name_unique_constraint(fresh_db):
             ), f"unexpected exception: {e!r}"
     finally:
         con.close()
+
+
+def test_last_seen_at_migration_backfills_from_updated_at(fresh_db):
+    """Issue #97 / PR B — when an operator volume comes up against a
+    schema that has `updated_at` but not `last_seen_at`, the migration
+    must (a) add `last_seen_at` and (b) backfill it from `updated_at`
+    so the "module last seen" timestamp survives the column split.
+    Without the backfill, every existing module would snap to NOW() on
+    the first boot after the migration and the 2 h status window would
+    lie about every offline module for two hours."""
+    con = fresh_db.connection.get_conn()
+    try:
+        # Drop and recreate without `last_seen_at` to simulate a
+        # deployment that came up before the PR B migration shipped.
+        # FK-dependent tables must be dropped first.
+        con.execute("DROP TABLE IF EXISTS daily_progress")
+        con.execute("DROP TABLE IF EXISTS nest_data")
+        con.execute("DROP TABLE IF EXISTS module_configs")
+        con.execute(
+            """
+            CREATE TABLE module_configs (
+                id VARCHAR(20) PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                display_name VARCHAR(100) UNIQUE,
+                lat DECIMAL(9,6) NOT NULL,
+                lng DECIMAL(9,6) NOT NULL,
+                first_online DATE NOT NULL,
+                battery_level INTEGER,
+                image_count INTEGER NOT NULL DEFAULT 0,
+                email VARCHAR(255),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_silence_alert_at TIMESTAMP
+            )
+            """
+        )
+        # Insert a row with an EXPLICIT updated_at value distinct from
+        # NOW() — this is the pre-split "module last seen" timestamp
+        # the backfill must preserve.
+        con.execute(
+            "INSERT INTO module_configs "
+            "(id, name, lat, lng, first_online, battery_level, image_count, "
+            " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "aabbccddeeff",
+                "TestHive",
+                47.8,
+                9.6,
+                "2024-01-01",
+                80,
+                0,
+                "2024-06-15 12:00:00",
+            ),
+        )
+        cols = [
+            c[1] for c in con.execute("PRAGMA table_info(module_configs)").fetchall()
+        ]
+        assert "last_seen_at" not in cols
+    finally:
+        con.close()
+
+    fresh_db.schema.init_db()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        cols = [
+            c[1] for c in con.execute("PRAGMA table_info(module_configs)").fetchall()
+        ]
+        assert "last_seen_at" in cols, (
+            "last_seen_at should have been added by the additive migration"
+        )
+        # Backfill must copy `updated_at` verbatim, not snap to NOW().
+        row = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            ("aabbccddeeff",),
+        ).fetchone()
+        assert row[0] == row[1], (
+            f"last_seen_at must equal updated_at after backfill; "
+            f"got updated_at={row[0]!r}, last_seen_at={row[1]!r}"
+        )
+    finally:
+        con.close()

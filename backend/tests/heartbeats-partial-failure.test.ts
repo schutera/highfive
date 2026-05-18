@@ -31,6 +31,7 @@ interface UpstreamModule {
   last_image_at: string | null;
   email: string | null;
   updated_at: string | null;
+  last_seen_at: string | null;
 }
 
 function fakeModule(overrides: Partial<UpstreamModule> = {}): UpstreamModule {
@@ -47,6 +48,7 @@ function fakeModule(overrides: Partial<UpstreamModule> = {}): UpstreamModule {
     last_image_at: null,
     email: null,
     updated_at: null,
+    last_seen_at: null,
     ...overrides,
   };
 }
@@ -119,13 +121,13 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
     expect(warnSpy).toHaveBeenCalledWith('⚠️ Failed to fetch heartbeats:', expect.any(Error));
   });
 
-  it("classifies a module with no last_image_at and no updated_at as 'unknown' on heartbeat failure", async () => {
+  it("classifies a module with no last_image_at and no last_seen_at as 'unknown' on heartbeat failure", async () => {
     mockFetch({
       modules: [
         fakeModule({
           id: 'aabbccddeeff',
           last_image_at: null,
-          updated_at: null,
+          last_seen_at: null,
         }),
       ],
       heartbeats: 'reject',
@@ -155,20 +157,22 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
     expect(modules[0].status).toBe('online');
   });
 
-  it("classifies a module with stale image and stale updatedAt as 'unknown' on heartbeat failure (the production case)", async () => {
-    // The case the fix exists for. `updated_at` is set permanently at
+  it("classifies a module with stale image and stale last_seen_at as 'unknown' on heartbeat failure (the production case)", async () => {
+    // The case the fix exists for. `last_seen_at` is bumped on every
     // registration and is days-to-months stale on every healthy module
-    // — gating 'unknown' on `!m.updated_at` (an earlier draft) made the
-    // 'unknown' branch unreachable for the exact population #31 was for.
-    // The right rule: "would-be-offline AND heartbeats failed →
-    // unknown" — we can't rule out the heartbeat from a minute ago that
-    // would have flipped this to online.
+    // — gating 'unknown' on `!m.last_seen_at` (an earlier draft) made
+    // the 'unknown' branch unreachable for the exact population #31
+    // was for. The right rule: "would-be-offline AND heartbeats failed
+    // → unknown" — we can't rule out the heartbeat from a minute ago
+    // that would have flipped this to online. (Pre-#97 split this used
+    // `updated_at` for the same role; the field was renamed to
+    // `last_seen_at` when the row-metadata role was split out.)
     mockFetch({
       modules: [
         fakeModule({
           id: 'aabbccddeeff',
           last_image_at: FRESH(3 * TWO_HOURS_MS),
-          updated_at: FRESH(2 * TWO_HOURS_MS),
+          last_seen_at: FRESH(2 * TWO_HOURS_MS),
         }),
       ],
       heartbeats: 'reject',
@@ -190,7 +194,7 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
         fakeModule({
           id: 'aabbccddeeff',
           last_image_at: null,
-          updated_at: null,
+          last_seen_at: null,
         }),
       ],
       heartbeats: { summary: {} },

@@ -11,6 +11,24 @@ from db.connection import lock, get_conn
 # would silently break the other deploy path. Column lists in
 # `_MODULE_CONFIGS_COLUMNS` are also referenced from the migration's
 # explicit `INSERT ... SELECT ...` so ordinal drift can't corrupt data.
+#
+# `updated_at` vs `last_seen_at` — issue #97 / PR B split.
+#
+# - `updated_at` is the row-metadata timestamp — bumped on every UPDATE
+#   to `module_configs`, DEFAULT CURRENT_TIMESTAMP fires on INSERT.
+#   Useful for ETag-style freshness; do not derive device-liveness from
+#   it.
+# - `last_seen_at` is the device-liveness signal — bumped only on
+#   `add_module` (the firmware's per-boot registration). Backend's
+#   `fetchAndAssemble` folds it into `lastSeenAt = max(last_image_at,
+#   last_seen_at, latestHeartbeat.receivedAt)` and derives
+#   `Module.status` from a 2 h window on that value. Metadata writes
+#   (display_name, heartbeat row-update, geo-patch) must NOT bump it;
+#   only "device was heard from" events should. Prior to the PR B
+#   split, `updated_at` did double duty for both roles, which let a
+#   metadata UPDATE silently flip an offline module to 'online' for
+#   two hours. See chapter 11 "updated_at semantic overload" for the
+#   incident and `issue #97` for the rationale.
 _MODULE_CONFIGS_DDL = """
     CREATE TABLE module_configs (
         id VARCHAR(20) PRIMARY KEY,
@@ -23,6 +41,7 @@ _MODULE_CONFIGS_DDL = """
         image_count INTEGER NOT NULL DEFAULT 0,
         email VARCHAR(255),
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_silence_alert_at TIMESTAMP
     )
 """
@@ -36,7 +55,7 @@ _MODULE_CONFIGS_DDL = """
 # `name` on null/empty/whitespace-only). See ADR-011 and #93.
 _MODULE_CONFIGS_COLUMNS = (
     "id, name, display_name, lat, lng, first_online, battery_level, "
-    "image_count, email, updated_at, last_silence_alert_at"
+    "image_count, email, updated_at, last_seen_at, last_silence_alert_at"
 )
 
 _NEST_DATA_DDL = """
@@ -123,6 +142,31 @@ def init_db():
                 "ALTER TABLE module_configs ADD COLUMN updated_at TIMESTAMP "
                 "DEFAULT CURRENT_TIMESTAMP"
             )
+        # Issue #97 / PR B — split `updated_at`'s overloaded semantics.
+        # Pre-split, `updated_at` carried both row-metadata AND device-
+        # liveness signals; only the registration UPSERT in `add_module`
+        # bumped it. After the split, `last_seen_at` owns the liveness
+        # role, and `updated_at` is freely bumped by every UPDATE.
+        #
+        # Backfill from `updated_at` so operator volumes carrying the
+        # pre-split value preserve their "module last seen" timestamp
+        # across the rename — otherwise every offline module would
+        # snap to NOW() on the first boot after the migration and the
+        # 2 h status window would lie.
+        #
+        # The UPDATE is unconditional (no `WHERE last_seen_at IS NULL`)
+        # because DuckDB's `ALTER TABLE ADD COLUMN ... DEFAULT
+        # CURRENT_TIMESTAMP` pre-populates the new column with NOW()
+        # for every existing row — by the time we reach the UPDATE,
+        # `last_seen_at IS NULL` is empty. The block-level
+        # `"last_seen_at" not in existing_cols` gate already makes the
+        # whole migration a one-shot, so the UPDATE never runs twice.
+        if "last_seen_at" not in existing_cols:
+            con.execute(
+                "ALTER TABLE module_configs ADD COLUMN last_seen_at TIMESTAMP "
+                "DEFAULT CURRENT_TIMESTAMP"
+            )
+            con.execute("UPDATE module_configs SET last_seen_at = updated_at")
         # Track Discord-silence-alert state so we don't spam the channel.
         # Set to NOW() when a silence alert fires, cleared on recovery alert.
         if "last_silence_alert_at" not in existing_cols:

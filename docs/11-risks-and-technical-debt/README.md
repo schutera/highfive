@@ -119,10 +119,11 @@ order differs from Windows) or job-shape (the homepage unit job doesn't
 exercise the failing assertions). This was NOT pinned down before
 shipping the refactor; the next contributor who edits these tests
 should `gh run download` the homepage-unit log from an Ubuntu run and
-confirm whether the 6 `assertFirmwareResponse` cases actually ran and
-passed there, or whether they were skipped silently. Logging the gap
-because the refactor sidesteps the question — but the lesson is
-incomplete until somebody answers it.
+confirm whether the 6 `assertFirmwareResponse` cases (PR #106's count
+— PR A added three more for the merge_bin layout, see the entry just
+below) actually ran and passed there, or whether they were skipped
+silently. Logging the gap because the refactor sidesteps the question
+— but the lesson is incomplete until somebody answers it.
 
 **Why it happened.** Both gaps are the same anti-pattern: an implicit
 "the dev box looks like the maintainer's box" assumption. The shell

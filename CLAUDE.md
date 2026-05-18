@@ -55,7 +55,7 @@ Per-service unit tests (what CI runs):
 
 ```bash
 cd backend        && npm ci && npm test                       # vitest + supertest, 17 tests
-cd homepage       && npm ci && npm test                       # vitest + jsdom, 8 smoke tests
+cd homepage       && npm ci && npm test                       # vitest + jsdom, 102 tests (17 files)
 cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 24 tests
 cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 31 tests
 cd ESP32-CAM      && pio test -e native                       # Unity host tests, 114 tests
@@ -182,7 +182,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Quick form: branch off `main` with typed
 
 ## In-flight multi-PR series
 
-One PR remaining to clear cofade's open issues (PR A merged — addressed #99, #100, #107). Auto-close keywords (`closes` / `fixes` / `resolves`) are intentionally avoided in this section — see the "Critical rules" entry above on auto-close-keyword leakage. The bullet ships with a self-removal clause: when PR B lands, this whole section goes too.
+One PR remaining to clear cofade's open issues. PR A (Step 2 wizard end-to-end on Windows — addressed #99, #100, #107) shipped its bullet-removal in its final commit; when PR B lands, this whole section goes too. Auto-close keywords (`closes` / `fixes` / `resolves`) are intentionally avoided in this section — see the "Critical rules" entry above on auto-close-keyword leakage.
 
 - **PR B — `module_configs` write-path semantics** (addresses #97, #105): not started. Two commits, one PR. Commit 1 splits `updated_at`'s overloaded semantics (#97 — row-metadata vs liveness signal; today every metadata UPDATE silently bumps `lastSeenAt` in [`backend/src/database.ts`'s `fetchAndAssemble`](backend/src/database.ts)). Commit 2 fixes [`duckdb-service/routes/modules.py`'s `set_display_name`](duckdb-service/routes/modules.py) so it works on modules with `nest_data` rows (#105 — DuckDB FK quirk surfaced through a Flask stacked-rollback bug). Regression tests pin both shapes. _This bullet ships removed in PR B's final commit._
 

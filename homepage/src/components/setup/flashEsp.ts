@@ -149,10 +149,12 @@ export async function flashEsp(
 }
 
 /**
- * ESP32 application image header magic byte (esp_image_format.h
- * `ESP_IMAGE_HEADER_MAGIC`). The bootloader and every app slot
- * begin with 0xE9. Partition tables have a different magic
- * (0xAA 0x50 — `ESP_PARTITION_MAGIC`).
+ * ESP32 application image header magic byte (esp-idf 5.x
+ * `components/bootloader_support/include/esp_app_format.h`'s
+ * `ESP_IMAGE_HEADER_MAGIC`; the legacy `esp_image_format.h` simply
+ * re-exports it). The bootloader and every app slot begin with
+ * 0xE9. Partition tables have a different magic (0xAA 0x50 —
+ * `ESP_PARTITION_MAGIC`).
  *
  * Important: the merged single-blob produced by `esptool merge_bin`
  * does NOT begin with 0xE9. Its first 0x1000 bytes are 0xFF —
@@ -205,8 +207,11 @@ export async function assertFirmwareResponse(resp: Response, path: string): Prom
   const head = bytes[0];
 
   // Two valid layouts (see issue #107 and chapter 11 "Lessons learned"):
-  //   1. byte 0 == 0xE9 — a raw ESP image (app-only, or a future manifest
-  //      that points at the bootloader offset directly).
+  //   1. byte 0 == 0xE9 — a raw ESP image. This is the layout of
+  //      firmware.app.bin (consumed by the ESP's OTA path today), or
+  //      any manifest that points the wizard at the bootloader offset
+  //      directly. The wizard's current manifest does NOT use this
+  //      path, but the validator accepts it for forward-compat.
   //   2. byte 0 == 0xFF AND byte 0x1000 == 0xE9 — an esptool merge_bin
   //      output. The bytes [0, 0x1000) are flash-erase padding placed
   //      BEFORE the bootloader. This is what build.sh produces today and

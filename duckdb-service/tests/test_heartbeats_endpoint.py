@@ -281,3 +281,75 @@ def test_heartbeat_with_lat_lng_for_unregistered_module_does_not_crash(
     )
     assert resp.status_code == 200
     # No row to fetch — assertion is just "we didn't 500".
+
+
+def test_heartbeat_geo_patch_bumps_updated_at_not_last_seen_at(client, fresh_db):
+    """Post-#97 split: the (0,0) → real-fix recovery is a row-metadata
+    write (the row was touched). It MUST bump `updated_at` but MUST
+    NOT bump `last_seen_at` — the heartbeat itself is already
+    recorded in the `module_heartbeats` table (which the backend
+    folds into the derived `lastSeenAt` separately), so bumping
+    `last_seen_at` here would double-count the same liveness event.
+
+    The test seeds a module at (0,0) using `add_module` (the normal
+    registration path), waits, fires a plausible-fix heartbeat, and
+    asserts the timestamp deltas."""
+    import time
+
+    # Seed via the normal registration path so both timestamps start
+    # at a known value.
+    resp = client.post(
+        "/new_module",
+        json={
+            "esp_id": CANONICAL_MAC,
+            "module_name": "TestHive",
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "battery_level": 80,
+        },
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        before_updated, before_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (CANONICAL_MAC,),
+        ).fetchone()
+    finally:
+        con.close()
+
+    time.sleep(0.01)
+
+    resp = client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "battery": 50,
+            "latitude": "47.79",
+            "longitude": "9.62",
+            "accuracy": "50",
+        },
+    )
+    assert resp.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        after_updated, after_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (CANONICAL_MAC,),
+        ).fetchone()
+    finally:
+        con.close()
+
+    # Sanity: the geo-patch fired, so lat/lng changed from (0,0).
+    assert _fetch_module_lat_lng(fresh_db, CANONICAL_MAC) == (47.79, 9.62)
+    assert after_updated > before_updated, (
+        f"updated_at must move on geo-patch (row was touched); "
+        f"was {before_updated!r}, is {after_updated!r}"
+    )
+    assert after_seen == before_seen, (
+        f"last_seen_at must NOT move on geo-patch (the liveness was "
+        f"already recorded in module_heartbeats); "
+        f"was {before_seen!r}, is {after_seen!r}"
+    )

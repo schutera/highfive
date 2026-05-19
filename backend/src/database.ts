@@ -38,6 +38,12 @@ interface ApiModule {
   last_image_at: string | null;
   email: string | null;
   updated_at: string | null;
+  // Device-liveness signal — bumped only on `add_module` per-boot
+  // registration in duckdb-service (issue #97 / PR B split).
+  // `fetchAndAssemble` reads this for the 2 h status window via the
+  // `lastSeenAt` derivation; the older `updated_at` is row-metadata
+  // only post-split.
+  last_seen_at: string | null;
 }
 
 interface ApiNestResponse {
@@ -213,10 +219,14 @@ export class ModuleReadModel {
           }
         : null;
 
-      // lastSeenAt = freshest of: image upload, registration, heartbeat
+      // lastSeenAt = freshest of: image upload, registration, heartbeat.
+      // Reads `m.last_seen_at` (bumped only on `add_module`'s per-boot
+      // registration UPSERT). Pre-#97 split this read `m.updated_at`,
+      // but that column is now row-metadata only — see chapter 11
+      // "updated_at semantic overload" for why the rename matters.
       const candidates: number[] = [];
       if (m.last_image_at) candidates.push(new Date(m.last_image_at).getTime());
-      if (m.updated_at) candidates.push(new Date(m.updated_at).getTime());
+      if (m.last_seen_at) candidates.push(new Date(m.last_seen_at).getTime());
       if (latestHeartbeat?.receivedAt)
         candidates.push(new Date(latestHeartbeat.receivedAt).getTime());
       const lastSeenAt =
@@ -235,17 +245,19 @@ export class ModuleReadModel {
       // — we just couldn't ask. Surface 'unknown' (gray) rather than
       // misleading the user with red 'offline'.
       //
-      // Note: an earlier draft gated this on `!m.updated_at`, but
-      // `updated_at` refreshes on every module-registration call via
-      // the `ON CONFLICT (id) DO UPDATE SET ... updated_at = NOW()`
+      // Note: an earlier draft gated this on `!m.last_seen_at`, but
+      // `last_seen_at` refreshes on every module-registration call via
+      // the `ON CONFLICT (id) DO UPDATE SET ... last_seen_at = NOW()`
       // branch in `duckdb-service/routes/modules.py`'s `add_module`,
       // which firmware fires unconditionally in setup() on every
-      // boot. So a `!m.updated_at` guard was unreachable for the
+      // boot. So a `!m.last_seen_at` guard was unreachable for the
       // exact population the fix was for. Switched to gating on the
       // would-be-offline outcome itself. (The first draft of this
       // comment said `updated_at` "never refreshes" — corrected by
-      // the #15 fix's senior-review against the DDL. See chapter-11
-      // "Post-reflash dashboard latency" for the full incident.)
+      // the #15 fix's senior-review against the DDL; the column was
+      // later renamed to `last_seen_at` in PR B / issue #97. See
+      // chapter-11 "Post-reflash dashboard latency" and "updated_at
+      // semantic overload" for full incident context.)
       let status: 'online' | 'offline' | 'unknown';
       if (isOnline) {
         status = 'online';

@@ -3,8 +3,10 @@ Silence watcher — periodic check that fires Discord alerts when a module
 goes quiet, and a recovery message when it comes back.
 
 Considers any of three liveness signals: module re-registration
-(`module_configs.updated_at`), most recent image upload, most recent
-heartbeat. Whichever is freshest wins.
+(`module_configs.last_seen_at`), most recent image upload, most recent
+heartbeat. Whichever is freshest wins. (Pre-#97 split this read
+`module_configs.updated_at`; that column is now row-metadata only —
+see chapter 11 "updated_at semantic overload".)
 """
 
 from datetime import datetime
@@ -38,7 +40,7 @@ def check_silence():
             """
             SELECT m.id,
                    m.name,
-                   m.updated_at,
+                   m.last_seen_at,
                    m.last_silence_alert_at,
                    (SELECT MAX(uploaded_at)
                       FROM image_uploads
@@ -51,11 +53,11 @@ def check_silence():
         ).fetchall()
 
         for row in rows:
-            mid, name, updated_at, alerted_at, last_image_at, last_hb_at = row
+            mid, name, last_seen_at, alerted_at, last_image_at, last_hb_at = row
 
             # lastSeenAt = freshest of the three liveness signals; ignore NULLs.
             candidates = [
-                t for t in (updated_at, last_image_at, last_hb_at) if t is not None
+                t for t in (last_seen_at, last_image_at, last_hb_at) if t is not None
             ]
             if not candidates:
                 continue  # never seen — don't alert; setup is in progress.

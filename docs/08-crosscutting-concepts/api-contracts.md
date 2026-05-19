@@ -105,7 +105,7 @@ wire fields off the duckdb response and takes the freshest:
 ```ts
 // pseudocode of backend/src/database.ts's fetchAndAssemble per-module loop
 const candidates = [
-  m.updated_at, // module_configs.updated_at
+  m.last_seen_at, // module_configs.last_seen_at (registration UPSERT only — issue #97 split; pre-split this was module_configs.updated_at)
   m.last_image_at, // SELECT MAX(uploaded_at) FROM image_uploads ...
   m.latestHeartbeat?.receivedAt, // SELECT MAX(received_at) FROM module_heartbeats ...
 ].filter(Boolean);

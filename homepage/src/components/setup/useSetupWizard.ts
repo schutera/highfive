@@ -96,7 +96,12 @@ export function useSetupWizard() {
   // Load firmware info, detect LAN IP, and snapshot modules on mount.
   // The module snapshot must be taken NOW (before the user configures the ESP)
   // so that when the ESP later calls /new_module, we can detect the changed
-  // updated_at in the verification poll.
+  // `lastSeenAt` in the verification poll. (Pre-#97 split this used
+  // `updatedAt`, which then bumped only on registration; post-split
+  // `updatedAt` bumps on every metadata write — including renames and
+  // heartbeat-side geo-patches — which would cause false positives.
+  // `lastSeenAt` is the derived liveness signal and is the correct
+  // field for "did this module just come alive?".)
   useEffect(() => {
     loadFirmware();
     detectLanIp();
@@ -131,7 +136,9 @@ export function useSetupWizard() {
   const snapshotModules = async () => {
     try {
       const existing = await api.getAllModules();
-      knownModuleSnapshotRef.current = new Map(existing.map((m: Module) => [m.id, m.updatedAt]));
+      knownModuleSnapshotRef.current = new Map(
+        existing.map((m: Module) => [m.id, m.lastSeenAt ?? undefined]),
+      );
       console.log('[SetupWizard] Module snapshot taken on mount:', [
         ...knownModuleSnapshotRef.current.keys(),
       ]);
@@ -277,7 +284,9 @@ export function useSetupWizard() {
     if (knownModuleSnapshotRef.current.size === 0) {
       try {
         const existing = await api.getAllModules();
-        knownModuleSnapshotRef.current = new Map(existing.map((m: Module) => [m.id, m.updatedAt]));
+        knownModuleSnapshotRef.current = new Map(
+          existing.map((m: Module) => [m.id, m.lastSeenAt ?? undefined]),
+        );
         console.log('[Step5] Fallback snapshot:', [...knownModuleSnapshotRef.current.keys()]);
       } catch {
         knownModuleSnapshotRef.current = new Map();
@@ -340,13 +349,14 @@ export function useSetupWizard() {
         const now = Date.now();
         const detectedModule = modules.find((m: Module) => {
           const prevTimestamp = knownModuleSnapshotRef.current.get(m.id);
-          // New ID (not in snapshot) OR re-registered (updatedAt changed)
+          // New ID (not in snapshot) OR re-seen (lastSeenAt changed).
+          // See the mount-effect comment for the post-#97 rationale.
           if (prevTimestamp === undefined) return true;
-          if (m.updatedAt !== prevTimestamp) return true;
+          if ((m.lastSeenAt ?? undefined) !== prevTimestamp) return true;
           // Recency fallback for wizard-reload scenarios
-          if (m.updatedAt) {
-            const updatedMs = Date.parse(m.updatedAt);
-            if (!isNaN(updatedMs) && now - updatedMs < RECENT_MS) return true;
+          if (m.lastSeenAt) {
+            const seenMs = Date.parse(m.lastSeenAt);
+            if (!isNaN(seenMs) && now - seenMs < RECENT_MS) return true;
           }
           return false;
         });

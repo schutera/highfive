@@ -100,11 +100,20 @@ def add_module():
             # from either side. Pinned by
             # `test_new_module_re_registration_does_not_clobber_recovered_location`
             # in `tests/test_modules.py`.
+            # `add_module` is the ONLY writer that bumps `last_seen_at` —
+            # that column is the device-liveness signal the backend's
+            # `fetchAndAssemble` folds into `Module.lastSeenAt` for the
+            # 2 h status window (issue #97 / PR B). Every other UPDATE on
+            # `module_configs` (display_name rename, heartbeat row-patch,
+            # heartbeat-side geo-patch) is row-metadata and bumps only
+            # `updated_at`. Re-registration is a "device was heard from"
+            # event, so the UPSERT path bumps both.
             con.execute(
                 """
                 INSERT INTO module_configs
-                    (id, name, lat, lng, first_online, battery_level, email, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+                    (id, name, lat, lng, first_online, battery_level, email,
+                     updated_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     lat = CASE
@@ -121,7 +130,8 @@ def add_module():
                     END,
                     battery_level = EXCLUDED.battery_level,
                     email = EXCLUDED.email,
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    last_seen_at = NOW()
                 """,
                 (
                     mac_str,
@@ -232,6 +242,61 @@ def set_display_name(module_id):
             400,
         )
 
+    # Why this route bypasses `write_transaction`. The helper issues an
+    # explicit `BEGIN` to give multi-statement callers real atomicity
+    # (see db/repository.py / test_write_transaction_rolls_back_partial_writes).
+    # Inside an explicit transaction, DuckDB 1.4.4 (and 1.5.2, verified
+    # at PR B execution) trips the FK over-enforcement on
+    # `UPDATE module_configs SET display_name = ?` because the
+    # transaction snapshot still "sees" the `nest_data` references —
+    # even after we DELETE them in the same transaction. So the
+    # only DuckDB-supported workaround for #105's bug (the temp-table
+    # dance) is incompatible with the helper's BEGIN.
+    #
+    # The dance therefore runs in autocommit mode — each DELETE /
+    # UPDATE / INSERT commits individually, which lets DuckDB's FK
+    # enforcement see each statement's effect immediately and lets the
+    # UPDATE proceed past the now-unreferenced parent row. Atomicity
+    # is provided at the Python layer instead: on any failure we
+    # restore the child rows from the in-memory snapshot before
+    # re-raising. The global `lock` is held for the duration so no
+    # concurrent writer can race with the half-deleted state.
+    #
+    # The compensating-restore approach trades full transactional
+    # atomicity for a recovery semantics that's "best-effort and
+    # observable": if the DELETE phase succeeds and the UPDATE then
+    # fails, we re-insert the children before the operator sees the
+    # error. The remaining failure-window is "DELETE succeeded,
+    # UPDATE succeeded, re-insert raised partway" — recovery does a
+    # DELETE-any-partial + re-insert-full-snapshot to converge.
+    # Operator-visible behaviour: success returns 200; any failure
+    # returns 500 AND leaves the row in its pre-dance state. See
+    # chapter 11 "Admin rename failed silently on seeded modules"
+    # for the full workaround discovery path.
+    #
+    # The DuckDB workarounds the issue's reporter suggested don't
+    # exist in DuckDB:
+    #   - `PRAGMA foreign_keys = OFF` is a SQLite pragma, not a
+    #     DuckDB one (DuckDB returns "Catalog Error: unrecognized
+    #     configuration parameter").
+    #   - `ALTER TABLE nest_data DROP CONSTRAINT ...` raises
+    #     `NotImplementedException: No support for that ALTER
+    #     TABLE option yet`.
+    #   - `INSERT INTO module_configs ... ON CONFLICT (id) DO UPDATE`
+    #     hits the SAME FK over-enforcement when the SET clause
+    #     touches a UNIQUE-constrained column (which `display_name`
+    #     is). Verified empirically; chapter 11 has the receipts.
+    #
+    # Safe because:
+    #   - `display_name` is a non-FK, non-PK column. The end state
+    #     preserves every `nest_data.module_id → module_configs.id`
+    #     reference (children re-inserted with identical `module_id`).
+    #   - duckdb-service serialises writes via a global `lock` (see
+    #     db/connection.py); we hold it for the whole dance, so no
+    #     concurrent reader/writer sees the half-deleted state.
+    #   - Bounded blast radius: only this module's children move
+    #     (the `WHERE module_id = ?` filter pins it). Typical modules
+    #     carry <20 nests and <200 progress rows over their lifetime.
     with lock:
         con = get_conn()
         try:
@@ -241,12 +306,12 @@ def set_display_name(module_id):
             if not existing:
                 return jsonify({"error": "Module not found"}), 404
 
-            # Skip the UPDATE if a *different* module already holds this
-            # display_name. Catching the UNIQUE-constraint exception
-            # works in principle but DuckDB surfaces it through a
-            # generic ConstraintException whose message format isn't
-            # stable; an explicit pre-check gives a clean 409 with the
-            # actual conflicting MAC.
+            # Skip the UPDATE if a *different* module already holds
+            # this display_name. Catching the UNIQUE-constraint
+            # exception works in principle but DuckDB surfaces it
+            # through a generic ConstraintException whose message
+            # format isn't stable; an explicit pre-check gives a
+            # clean 409 with the actual conflicting MAC.
             if new_value is not None:
                 clash = con.execute(
                     "SELECT id FROM module_configs WHERE display_name = ? AND id != ?",
@@ -264,22 +329,136 @@ def set_display_name(module_id):
                         409,
                     )
 
-            # Do NOT bump `updated_at`. That column is the liveness
-            # timestamp the backend's `fetchAndAssemble` folds into
-            # `lastSeenAt` (max of last_image_at / updated_at /
-            # latestHeartbeat.receivedAt) and uses to derive
-            # `Module.status` within a 2 h window. An admin edit of
-            # the *label* is not a heartbeat-equivalent event; bumping
-            # `updated_at` here would flip any renamed offline module
-            # to "online" for two hours regardless of telemetry.
-            # See `contracts/src/index.ts` Module.updatedAt — "set on
-            # every registration/UPSERT" — which this route honours by
-            # leaving it alone.
-            con.execute(
-                "UPDATE module_configs SET display_name = ? WHERE id = ?",
-                (new_value, canonical),
-            )
-            con.commit()
+            # Snapshot in dependency order so restoration can replay it.
+            progress_rows = con.execute(
+                """
+                SELECT dp.progress_id, dp.nest_id, dp.date,
+                       dp.empty, dp.sealed, dp.hatched
+                  FROM daily_progress dp
+                  JOIN nest_data n ON n.nest_id = dp.nest_id
+                 WHERE n.module_id = ?
+                """,
+                (canonical,),
+            ).fetchall()
+            nest_rows = con.execute(
+                "SELECT nest_id, module_id, beeType FROM nest_data WHERE module_id = ?",
+                (canonical,),
+            ).fetchall()
+
+            def _delete_children() -> None:
+                """DELETE in reverse-FK order so each statement is
+                FK-clean in isolation (DuckDB checks per-statement
+                in autocommit)."""
+                con.execute(
+                    "DELETE FROM daily_progress WHERE nest_id IN "
+                    "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
+                    (canonical,),
+                )
+                con.execute(
+                    "DELETE FROM nest_data WHERE module_id = ?",
+                    (canonical,),
+                )
+
+            def _insert_children() -> None:
+                """INSERT the snapshotted children in forward-FK
+                order (nest_data before daily_progress that
+                references it)."""
+                for nest in nest_rows:
+                    con.execute(
+                        "INSERT INTO nest_data (nest_id, module_id, beeType) "
+                        "VALUES (?, ?, ?)",
+                        nest,
+                    )
+                for prog in progress_rows:
+                    con.execute(
+                        "INSERT INTO daily_progress "
+                        "(progress_id, nest_id, date, empty, sealed, hatched) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        prog,
+                    )
+
+            def _restore_children() -> None:
+                """Compensating-restore: DELETE any partial state
+                from a half-finished dance, then re-INSERT the full
+                snapshot. Idempotent across any intermediate state."""
+                _delete_children()
+                _insert_children()
+
+            try:
+                # Phase 1: DELETE children in reverse-FK order.
+                _delete_children()
+                # Phase 2: UPDATE the now-unreferenced parent. Bump
+                # `updated_at` (row-metadata: the row was touched).
+                # Do NOT bump `last_seen_at` — that column is the
+                # device-liveness signal the backend's
+                # `fetchAndAssemble` folds into `Module.lastSeenAt`
+                # (max of last_image_at / last_seen_at /
+                # latestHeartbeat.receivedAt) for the 2 h status
+                # window. An admin edit of the label is not a
+                # heartbeat-equivalent event; bumping `last_seen_at`
+                # here would flip any renamed offline module to
+                # "online" for two hours regardless of telemetry.
+                # See chapter 11 "updated_at semantic overload" and
+                # issue #97 for the split rationale; PR B carries
+                # the fix.
+                con.execute(
+                    "UPDATE module_configs SET display_name = ?, "
+                    "updated_at = NOW() WHERE id = ?",
+                    (new_value, canonical),
+                )
+                # Phase 3: re-insert children.
+                _insert_children()
+            except Exception as dance_err:
+                # Compensating action: re-establish the children
+                # snapshot. The parent UPDATE may or may not have
+                # landed; we leave it as-is and let the 500 surface
+                # so the operator can retry. The KEY invariant we
+                # restore is "no orphan or missing children".
+                #
+                # If the restore itself raises, the operator needs to
+                # know they've lost data and should restore from
+                # backup — set a flag we'll surface in the response
+                # body. The 500 still fires either way; the body
+                # marker is the difference between "retry the rename"
+                # and "data lost; restore from backup".
+                restore_failed = False
+                restore_err: Exception | None = None
+                try:
+                    _restore_children()
+                except Exception as e:
+                    restore_failed = True
+                    restore_err = e
+                    print(
+                        f"[set_display_name] CRITICAL: restore failed for "
+                        f"{canonical}: {type(e).__name__}: {e}. Original "
+                        f"dance error: {type(dance_err).__name__}: "
+                        f"{dance_err}. nest_data + daily_progress rows "
+                        f"for this module may be lost; restore from "
+                        f"backup.",
+                        flush=True,
+                    )
+                if restore_failed:
+                    return (
+                        jsonify(
+                            {
+                                "error": str(dance_err),
+                                "restore_failed": True,
+                                "restore_error": str(restore_err)
+                                if restore_err is not None
+                                else None,
+                                "module_id": canonical,
+                                "message": (
+                                    "Rename failed AND the compensating "
+                                    "restore of nest_data/daily_progress "
+                                    "raised. Module child rows may be "
+                                    "missing; restore from backup before "
+                                    "retrying."
+                                ),
+                            }
+                        ),
+                        500,
+                    )
+                raise
             return (
                 jsonify(
                     {
@@ -291,7 +470,7 @@ def set_display_name(module_id):
                 200,
             )
         except Exception as e:
-            con.rollback()
+            print(f"[set_display_name] {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": str(e)}), 500
         finally:
             con.close()
@@ -407,14 +586,16 @@ def get_modules():
         modules = query_all(
             """
             SELECT m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,
-                   m.battery_level, m.image_count, m.email, m.updated_at,
+                   m.battery_level, m.image_count, m.email,
+                   m.updated_at, m.last_seen_at,
                    m.last_silence_alert_at,
                    COUNT(i.id) AS real_image_count,
                    MAX(i.uploaded_at) AS last_image_at
             FROM module_configs m
             LEFT JOIN image_uploads i ON m.id = i.module_id
             GROUP BY m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,
-                     m.battery_level, m.image_count, m.email, m.updated_at,
+                     m.battery_level, m.image_count, m.email,
+                     m.updated_at, m.last_seen_at,
                      m.last_silence_alert_at
             """
         )
@@ -474,12 +655,20 @@ def heartbeat(module_id):
         # INSERT). The schema declares `NOT NULL`, so this branch is
         # unreachable in production but defensive against legacy /
         # manually-inserted rows. Background: issue #75.
+        #
+        # `updated_at` is bumped (row was touched). `last_seen_at` is
+        # NOT bumped here — the legacy /modules/<id>/heartbeat route
+        # records battery + image_count metadata; the new heartbeat
+        # path (`heartbeats.py::post_heartbeat`) writes to the dedicated
+        # `module_heartbeats` table, which the backend folds into
+        # liveness separately. See issue #97 / PR B split.
         con.execute(
             """
             UPDATE module_configs
             SET battery_level = ?,
                 first_online = COALESCE(first_online, ?),
-                image_count = image_count + 1
+                image_count = image_count + 1,
+                updated_at = NOW()
             WHERE id = ?
             """,
             (battery, now, canonical),

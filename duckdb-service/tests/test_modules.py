@@ -412,26 +412,31 @@ def test_patch_display_name_rejects_non_string(client, fresh_db):
     assert r.status_code == 400
 
 
-def test_patch_display_name_does_not_bump_updated_at(client, fresh_db):
-    """Renaming is a metadata edit, not a liveness event. `updated_at`
-    drives `Module.lastSeenAt` and the 2 h online window in
-    `backend/src/database.ts::fetchAndAssemble`; bumping it on rename
-    would flip any renamed offline module to "online" for two hours
-    regardless of telemetry. Regression for PR-I senior review."""
+def test_patch_display_name_bumps_updated_at_not_last_seen_at(client, fresh_db):
+    """Post-#97 split: renaming is a row-metadata edit (bumps
+    `updated_at`) but NOT a liveness event (does NOT bump
+    `last_seen_at`). The backend's `fetchAndAssemble` folds
+    `last_seen_at` into `Module.lastSeenAt` for the 2 h status window,
+    so bumping `last_seen_at` on rename would flip any renamed offline
+    module to "online" for two hours regardless of telemetry. This is
+    the inverted form of the pre-#97-split regression test (which
+    pinned `updated_at` unchanged, because back then `updated_at` did
+    double duty for both roles)."""
     import time
 
     client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
 
     con = fresh_db.connection.get_conn()
     try:
-        before = con.execute(
-            "SELECT updated_at FROM module_configs WHERE id = ?", (TEST_MAC_A,)
-        ).fetchone()[0]
+        before_updated, before_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
     finally:
         con.close()
 
-    # Force a measurable gap so any bump would surface as a non-equal
-    # value, not a sub-second tie.
+    # Force a measurable gap so any bump surfaces as a non-equal value,
+    # not a sub-second tie.
     time.sleep(0.01)
 
     r = client.patch(
@@ -441,13 +446,19 @@ def test_patch_display_name_does_not_bump_updated_at(client, fresh_db):
 
     con = fresh_db.connection.get_conn()
     try:
-        after = con.execute(
-            "SELECT updated_at FROM module_configs WHERE id = ?", (TEST_MAC_A,)
-        ).fetchone()[0]
+        after_updated, after_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
     finally:
         con.close()
-    assert after == before, (
-        f"updated_at must not move on rename; was {before!r}, is {after!r}"
+    assert after_updated > before_updated, (
+        f"updated_at must move on rename (row was touched); "
+        f"was {before_updated!r}, is {after_updated!r}"
+    )
+    assert after_seen == before_seen, (
+        f"last_seen_at must NOT move on rename (not a liveness event); "
+        f"was {before_seen!r}, is {after_seen!r}"
     )
 
 
@@ -490,3 +501,472 @@ def test_add_module_accepts_module_name_at_100_chars(client, fresh_db):
     r = client.post("/new_module", json=_payload(TEST_MAC_A, exactly_100))
     assert r.status_code == 200
     assert r.get_json()["name"] == exactly_100
+
+
+def test_add_module_re_registration_bumps_both_timestamps(client, fresh_db):
+    """Post-#97 split: `add_module` is the only writer that bumps
+    `last_seen_at` (the device-liveness signal). It also bumps
+    `updated_at` because the row was touched (the new "bump on every
+    write" rule for row-metadata). Both timestamps must advance on a
+    re-registration UPSERT.
+
+    The companion `test_patch_display_name_bumps_updated_at_not_last_seen_at`
+    pins the inverse for metadata-only writes."""
+    import time
+
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        before_updated, before_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
+    finally:
+        con.close()
+
+    time.sleep(0.01)
+
+    # Re-register the same MAC (the ON CONFLICT path of `add_module`).
+    r = client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    assert r.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        after_updated, after_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert after_updated > before_updated, (
+        f"updated_at must move on re-registration; "
+        f"was {before_updated!r}, is {after_updated!r}"
+    )
+    assert after_seen > before_seen, (
+        f"last_seen_at must move on re-registration (the only writer "
+        f"that bumps it); was {before_seen!r}, is {after_seen!r}"
+    )
+
+
+def test_set_display_name_works_on_module_with_nest_data(client, fresh_db):
+    """Issue #105 regression. Pre-fix, DuckDB 1.4.4 rejected
+    `UPDATE module_configs SET display_name = ?` on any row whose `id`
+    was referenced by `nest_data.module_id`, even though the UPDATE
+    didn't touch the FK column. The compose stack seeds five modules
+    all with `nest_data` rows, so all five were unrenamable out of
+    the box.
+
+    Test: seed a module via the normal `/new_module` path, INSERT a
+    `nest_data` row pointing at it, then PATCH `display_name`. Must
+    return 200 + the new label."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        # Insert a nest_data row pointing at this module — this is what
+        # would have tripped the FK over-enforcement pre-fix.
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-test-a", TEST_MAC_A, "blackmasked"),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name",
+        json={"display_name": "RenamedWithNest"},
+    )
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["display_name"] == "RenamedWithNest"
+
+    # Confirm the rename actually persisted (FK workaround must not
+    # silently no-op the UPDATE).
+    rows = client.get("/modules").get_json()["modules"]
+    row = next(m for m in rows if m["id"] == TEST_MAC_A)
+    assert row["display_name"] == "RenamedWithNest"
+
+    # Confirm the FK invariant still holds — nest_data.module_id still
+    # points at a real module_configs row.
+    con = fresh_db.connection.get_conn()
+    try:
+        orphans = con.execute(
+            "SELECT COUNT(*) FROM nest_data n "
+            "LEFT JOIN module_configs m ON m.id = n.module_id "
+            "WHERE m.id IS NULL"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert orphans == 0, "the FK invariant must hold after the workaround"
+
+
+def test_set_display_name_preserves_full_fk_chain_nest_and_progress(client, fresh_db):
+    """Issue #105 — the temp-table dance must restore BOTH FK arms:
+    `nest_data` AND `daily_progress`. The dance deletes in reverse-FK
+    order (daily_progress first, nest_data second) and re-inserts in
+    forward-FK order. This test seeds both arms and asserts they
+    survive the rename intact.
+
+    Without this test, a refactor that only restored nest_data would
+    pass `test_set_display_name_works_on_module_with_nest_data` but
+    silently drop the operator's image-classification history."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-fc-1", TEST_MAC_A, "blackmasked"),
+        )
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-fc-2", TEST_MAC_A, "resin"),
+        )
+        con.execute(
+            "INSERT INTO daily_progress "
+            "(progress_id, nest_id, date, empty, sealed, hatched) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("prog-fc-1", "nest-fc-1", "2026-05-01", 3, 12, 4),
+        )
+        con.execute(
+            "INSERT INTO daily_progress "
+            "(progress_id, nest_id, date, empty, sealed, hatched) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("prog-fc-2", "nest-fc-2", "2026-05-02", 5, 7, 2),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    r = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name",
+        json={"display_name": "DanceFull"},
+    )
+    assert r.status_code == 200, r.get_json()
+
+    # Both FK arms must survive intact — IDs, FK references, and the
+    # payload columns (empty/sealed/hatched) all preserved verbatim.
+    con = fresh_db.connection.get_conn()
+    try:
+        nests = sorted(
+            con.execute(
+                "SELECT nest_id, module_id, beeType FROM nest_data "
+                "WHERE module_id = ? ORDER BY nest_id",
+                (TEST_MAC_A,),
+            ).fetchall()
+        )
+        progress = sorted(
+            con.execute(
+                "SELECT progress_id, nest_id, date, empty, sealed, hatched "
+                "FROM daily_progress WHERE nest_id IN "
+                "(SELECT nest_id FROM nest_data WHERE module_id = ?) "
+                "ORDER BY progress_id",
+                (TEST_MAC_A,),
+            ).fetchall()
+        )
+    finally:
+        con.close()
+
+    assert len(nests) == 2
+    assert nests[0][0] == "nest-fc-1" and nests[0][2] == "blackmasked"
+    assert nests[1][0] == "nest-fc-2" and nests[1][2] == "resin"
+    assert len(progress) == 2
+    # Payload columns survive verbatim through the snapshot+restore.
+    assert progress[0][3:] == (3, 12, 4), progress
+    assert progress[1][3:] == (5, 7, 2), progress
+
+
+def test_set_display_name_restores_children_on_mid_dance_failure(client, fresh_db):
+    """Issue #105 / senior-review round 1 — pin the compensating-restore
+    contract. If the dance fails partway through (e.g. the re-insert
+    phase raises), the route MUST restore the children from the
+    snapshot before the 500 surfaces.
+
+    Without compensating restore, a partial failure would leave the
+    operator with a module that's lost its nests/progress permanently —
+    the worst kind of silent data loss because the operator just sees
+    'Save failed' and retries with no idea anything else broke.
+
+    We force a mid-dance failure by wrapping the route's connection
+    in a thin proxy that raises on the first ``INSERT INTO nest_data``
+    call — the dance's first re-insert in phase 3. The proxy
+    delegates everything else via ``__getattr__`` because
+    ``DuckDBPyConnection`` attributes are read-only and can't be
+    monkey-patched directly."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    client.post("/new_module", json=_payload(TEST_MAC_B, "BeeTwo"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        # Seed module A with one nest + one progress row.
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-rescue-1", TEST_MAC_A, "blackmasked"),
+        )
+        con.execute(
+            "INSERT INTO daily_progress "
+            "(progress_id, nest_id, date, empty, sealed, hatched) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("prog-rescue-1", "nest-rescue-1", "2026-05-01", 3, 12, 4),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    # Take an in-route fault-injection approach: wrap the duckdb
+    # connection in a thin proxy that fails on the FIRST
+    # "INSERT INTO nest_data" call (the dance's first re-insert in
+    # phase 3). Direct attribute-patching of a DuckDBPyConnection
+    # doesn't work because its attributes are read-only, so we use
+    # a wrapper class that delegates everything except `execute`.
+    import routes.modules as routes_modules
+
+    real_get_conn = routes_modules.get_conn
+    call_counter = {"nest_inserts": 0}
+
+    class _FaultInjectingConn:
+        def __init__(self, real_con):
+            self._con = real_con
+
+        def execute(self, sql, params=None):
+            if "INSERT INTO nest_data" in sql:
+                call_counter["nest_inserts"] += 1
+                if call_counter["nest_inserts"] == 1:
+                    raise RuntimeError("injected fault: re-insert failure")
+            if params is None:
+                return self._con.execute(sql)
+            return self._con.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+    def patched_get_conn():
+        return _FaultInjectingConn(real_get_conn())
+
+    import unittest.mock as _mock
+
+    with _mock.patch.object(routes_modules, "get_conn", patched_get_conn):
+        r = client.patch(
+            f"/modules/{TEST_MAC_A}/display_name",
+            json={"display_name": "ShouldFail"},
+        )
+
+    assert r.status_code == 500, r.get_json()
+
+    # Now the critical assertion: the children must be restored, even
+    # though the dance failed mid-re-insert.
+    con = fresh_db.connection.get_conn()
+    try:
+        nest_count = con.execute(
+            "SELECT COUNT(*) FROM nest_data WHERE module_id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()[0]
+        progress_count = con.execute(
+            "SELECT COUNT(*) FROM daily_progress WHERE nest_id IN "
+            "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
+            (TEST_MAC_A,),
+        ).fetchone()[0]
+        orphans = con.execute(
+            "SELECT COUNT(*) FROM nest_data n "
+            "LEFT JOIN module_configs m ON m.id = n.module_id "
+            "WHERE m.id IS NULL"
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    assert nest_count == 1, (
+        f"compensating restore must put the snapshotted nest back; found {nest_count}"
+    )
+    assert progress_count == 1, (
+        f"compensating restore must put the snapshotted progress back; "
+        f"found {progress_count}"
+    )
+    assert orphans == 0, "FK invariant must hold after the rescue"
+
+
+def test_set_display_name_surfaces_restore_failed_marker_on_double_failure(
+    client, fresh_db
+):
+    """Issue #105 / senior-review round 2 P1 — pin the
+    `restore_failed: true` 500-body marker shape. The compensating
+    restore is best-effort; if it itself raises, the operator needs to
+    know data may be lost. The 500 body must carry a stable
+    machine-readable flag so the backend can render "restore from
+    backup" rather than "retry".
+
+    The fault injection here raises on EVERY ``INSERT INTO nest_data``
+    so both the dance's phase-3 re-insert AND the compensating
+    `_restore_children`'s inner re-insert fail. The outer route then
+    serves a 500 with `restore_failed: true` instead of re-raising the
+    original dance error.
+
+    Without this test, a refactor that drops the `restore_failed` flag
+    (e.g. simplifying the inner-except to a plain ``raise dance_err``)
+    would pass `test_set_display_name_restores_children_on_mid_dance_failure`
+    while silently killing the contract that ADR-013 documents."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-restore-fail-1", TEST_MAC_A, "blackmasked"),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    import routes.modules as routes_modules
+
+    real_get_conn = routes_modules.get_conn
+
+    class _FaultInjectingConnAlways:
+        """Like the proxy in
+        `test_set_display_name_restores_children_on_mid_dance_failure`
+        but raises on EVERY ``INSERT INTO nest_data`` — so the
+        dance's phase-3 re-insert fails AND the compensating restore's
+        inner re-insert also fails, triggering the restore-failed
+        branch."""
+
+        def __init__(self, real_con):
+            self._con = real_con
+
+        def execute(self, sql, params=None):
+            if "INSERT INTO nest_data" in sql:
+                raise RuntimeError("injected fault: restore phase also fails")
+            if params is None:
+                return self._con.execute(sql)
+            return self._con.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+    def patched_get_conn():
+        return _FaultInjectingConnAlways(real_get_conn())
+
+    import unittest.mock as _mock
+
+    with _mock.patch.object(routes_modules, "get_conn", patched_get_conn):
+        r = client.patch(
+            f"/modules/{TEST_MAC_A}/display_name",
+            json={"display_name": "ShouldFailTwice"},
+        )
+
+    assert r.status_code == 500
+    assert r.content_type.startswith("application/json"), r.data[:200]
+    body = r.get_json()
+    # Stable shape the backend will render against — drift on any
+    # of these keys is a contract break.
+    assert body["restore_failed"] is True, body
+    assert body["module_id"] == TEST_MAC_A, body
+    assert "error" in body, body
+    assert "restore_error" in body, body
+    assert "restore from backup" in body["message"].lower(), body
+
+
+def test_set_display_name_409_collision_still_works_with_nest_data(client, fresh_db):
+    """The FK workaround for #105 must not regress the existing UNIQUE
+    collision contract. Seed two modules — both with nest_data rows —
+    rename module 1 to a label, try to rename module 2 to the same
+    label; must 409 (not 500), and the body must carry the
+    conflicting MAC."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+    client.post("/new_module", json=_payload(TEST_MAC_B, "BeeTwo"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-test-a", TEST_MAC_A, "blackmasked"),
+        )
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-test-b", TEST_MAC_B, "blackmasked"),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    r1 = client.patch(
+        f"/modules/{TEST_MAC_A}/display_name",
+        json={"display_name": "Shared Label"},
+    )
+    assert r1.status_code == 200
+
+    r2 = client.patch(
+        f"/modules/{TEST_MAC_B}/display_name",
+        json={"display_name": "Shared Label"},
+    )
+    assert r2.status_code == 409, r2.get_json()
+    body = r2.get_json()
+    assert body["display_name"] == "Shared Label"
+    assert body["conflicting_module_id"] == TEST_MAC_A
+
+
+def test_set_display_name_handles_missing_module_with_clean_rollback(client, fresh_db):
+    """Pinning the fix for #105's Bug 2 (the stacked rollback). The
+    route's old shape called `con.rollback()` in its exception handler
+    even though DuckDB was in autocommit mode; that raised a secondary
+    `TransactionException` which masked the real error and surfaced
+    Flask's HTML 500 page to the operator. The fix switches the route
+    to the project's `write_transaction()` helper, which handles the
+    "no active transaction" rollback gracefully.
+
+    Test: PATCH a non-existent module — the early-return 404 path must
+    NOT crash on rollback. We assert (a) status 404, (b) body is JSON
+    (not HTML), (c) body carries the expected error key."""
+    r = client.patch(
+        "/modules/ffffffffffff/display_name",
+        json={"display_name": "Doesn't matter"},
+    )
+    assert r.status_code == 404
+    # JSON, not HTML — if write_transaction's rollback path is broken,
+    # Flask falls back to its default HTML 500.
+    assert r.content_type.startswith("application/json"), r.data[:200]
+    assert r.get_json()["error"] == "Module not found"
+
+
+def test_legacy_heartbeat_bumps_updated_at_not_last_seen_at(client, fresh_db):
+    """The legacy `/modules/<id>/heartbeat` route updates battery +
+    image_count metadata; it does NOT represent a registration event.
+    Post-#97 split, this route bumps `updated_at` (row was touched)
+    but not `last_seen_at` (the new heartbeat path
+    `heartbeats.py::post_heartbeat` writes to `module_heartbeats` and
+    the backend folds that into the derived liveness separately).
+    Pinning the contract so a future refactor that accidentally
+    promotes legacy heartbeat to a liveness signal trips this test."""
+    import time
+
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        before_updated, before_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
+    finally:
+        con.close()
+
+    time.sleep(0.01)
+
+    r = client.post(f"/modules/{TEST_MAC_A}/heartbeat", json={"battery": 73})
+    assert r.status_code == 200, r.get_json()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        after_updated, after_seen = con.execute(
+            "SELECT updated_at, last_seen_at FROM module_configs WHERE id = ?",
+            (TEST_MAC_A,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert after_updated > before_updated, (
+        f"updated_at must move on legacy heartbeat; "
+        f"was {before_updated!r}, is {after_updated!r}"
+    )
+    assert after_seen == before_seen, (
+        f"last_seen_at must NOT move on legacy heartbeat (not a "
+        f"registration event); was {before_seen!r}, is {after_seen!r}"
+    )

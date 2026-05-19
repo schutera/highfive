@@ -16,10 +16,13 @@ message when the module phones home again
 The watcher needs three things:
 
 1. **Liveness state for every module.** It computes the freshest of
-   `module_configs.updated_at`, the latest `image_uploads.uploaded_at`
+   `module_configs.last_seen_at`, the latest `image_uploads.uploaded_at`
    per module, and the latest `module_heartbeats.received_at` per
    module. The `SELECT` block is at `silence_watcher.py:38-52`; the
-   per-row liveness max is at `silence_watcher.py:60-65`.
+   per-row liveness max is at `silence_watcher.py:60-65`. Pre-PR-B
+   (issue #97), `module_configs.updated_at` did double duty as both
+   row-metadata and liveness signal; the watcher now reads the
+   dedicated `last_seen_at` column.
 2. **A place to record "we already alerted on this silence so don't
    re-fire for `REALERT_INTERVAL_S` seconds"** — done with a single
    nullable `last_silence_alert_at TIMESTAMP` column on

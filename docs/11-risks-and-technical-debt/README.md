@@ -360,6 +360,151 @@ half of the contract.
   review cycle on any PR that adds a write to a column whose name
   doesn't fully describe its read-path semantics.
 
+### Admin rename failed silently on seeded modules — DuckDB FK over-enforcement + stacked rollback (PR B / issue #105)
+
+**What happened.** Operators trying to rename one of the five seeded
+modules (`Garten 12` and friends) via the admin UI got "Save failed.
+Please try again." Backend logs showed a JSON parse error (`Unexpected
+token '<'`) — duckdb-service was returning Flask's HTML 500 page.
+Beneath the HTML body, duckdb-service had logged two stacked
+exceptions: a `ConstraintException: Violates foreign key constraint
+because key "module_id: 000000000002" is still referenced by a foreign
+key in a different table`, immediately followed by a
+`TransactionException: cannot rollback - no transaction is active`.
+Both bugs were live simultaneously; the second masked the first.
+
+**Why it happened.**
+
+1. **DuckDB FK over-enforcement** (the primary bug). DuckDB 1.4.4 (and
+   1.5.2, verified during the fix) rejects `UPDATE module_configs SET
+display_name = ?` whenever the targeted row's `id` is referenced
+   by `nest_data.module_id`, _even though_ the UPDATE doesn't touch
+   `id` and would not break referential integrity. The behaviour is a
+   conservative reading of the SQL standard's "updates that affect
+   referenced rows must be propagated" rule. Seeded modules all carry
+   `nest_data` rows so all five were unrenamable out of the box; an
+   ESP that registered post-seed with no nests yet would have renamed
+   fine — the test suite seeded the latter and missed the former.
+2. **Stacked rollback** (the secondary bug). The route used manual
+   `con = get_conn() / con.commit() / con.rollback()` instead of the
+   project's `write_transaction()` helper. DuckDB defaults to
+   autocommit; `con.rollback()` in the exception handler — with no
+   active transaction — raised a `TransactionException` whose
+   traceback escaped the route's wrapper, so Flask served its
+   default HTML 500 page instead of the JSON the backend's parser
+   expected.
+
+**The workaround.** The fixes the issue's reporter listed
+(`PRAGMA foreign_keys = OFF`, `ALTER TABLE DROP CONSTRAINT`,
+INSERT ... ON CONFLICT DO UPDATE) all turned out to be inapplicable
+in DuckDB:
+
+- `PRAGMA foreign_keys` is a SQLite pragma. DuckDB returns
+  `Catalog Error: unrecognized configuration parameter
+"foreign_keys"`.
+- `ALTER TABLE nest_data DROP CONSTRAINT ...` raises
+  `NotImplementedException: No support for that ALTER TABLE option
+yet`.
+- `INSERT INTO module_configs ... ON CONFLICT (id) DO UPDATE` hits
+  the same FK over-enforcement — DuckDB treats the UPSERT branch as
+  a regular UPDATE for FK purposes (even though `add_module`'s
+  fresh-row UPSERT works because no `nest_data` rows reference a
+  not-yet-inserted module).
+
+The only path through DuckDB's FK over-enforcement is to temporarily
+move the referencing child rows out of the way: snapshot
+`daily_progress` + `nest_data` rows for this module, delete them in
+reverse-FK order, run the UPDATE on the now-unreferenced parent, then
+re-insert the children. Bounded blast radius: only the renamed
+module's children move (the `WHERE module_id = ?` filter pins it).
+
+**Atomicity caveat (senior-review round 1 finding).** The dance
+CANNOT run inside `write_transaction()`'s explicit `BEGIN/COMMIT`.
+DuckDB's FK enforcement uses a transaction-snapshot view: even after
+DELETing the children in the same transaction, the UPDATE on the
+UNIQUE-constrained `display_name` column sees the snapshotted
+references and trips the same FK exception that motivated the dance.
+The dance therefore runs in autocommit (each DELETE / UPDATE /
+INSERT commits individually) and atomicity is provided at the
+Python layer via a **compensating-restore** handler in the
+exception path: if any phase raises, the handler re-inserts the
+snapshotted children before the 500 surfaces. The global `lock` is
+held for the whole dance so no concurrent writer races with the
+half-deleted state. Pinned by `set_display_name`'s
+fault-injection test (`test_set_display_name_restores_children_on_mid_dance_failure`)
+and the FK-chain preservation test
+(`test_set_display_name_preserves_full_fk_chain_nest_and_progress`).
+
+The PR-B-side correction that surfaced this: `write_transaction`
+itself was missing its `BEGIN`, so multi-statement callers got
+silent partial-write semantics ("rollback on exception" was a
+no-op because DuckDB autocommit had already committed each
+statement). The senior-reviewer caught it; the fix adds explicit
+`BEGIN/COMMIT` for that helper's 4 OTHER callers (add_module,
+record_image, the legacy heartbeat route, add_progress_for_module),
+all of which benefit from real atomicity. set_display_name's dance
+is the one route that opts out of the helper because of the
+DuckDB-snapshot incompatibility. Pinned by
+`tests/test_repository.py`'s `test_write_transaction_rolls_back_partial_writes`.
+
+**How to avoid it next time.**
+
+- **Use `write_transaction()` for every duckdb-service route that
+  mutates state.** The helper at
+  [`duckdb-service/db/repository.py`](../../duckdb-service/db/repository.py)'s
+  `write_transaction` now issues an explicit `BEGIN` so multi-
+  statement callers get real atomicity. Manual `con.commit() /
+con.rollback()` lifecycles are a smell — they bypass the helper's
+  safety net and recreate both bugs.
+- **The one exception is when an UPDATE on a row with FK references
+  has to bypass DuckDB's snapshot-based FK enforcement** (the
+  `display_name` rename being the only known case today). Such
+  routes use a bespoke autocommit + compensating-restore pattern;
+  document it explicitly in the route comment and pin it with a
+  fault-injection test, otherwise a future refactor that switches
+  back to `write_transaction()` reintroduces the FK-over-enforcement
+  symptom.
+- **Test fixtures must seed the realistic precondition for the route
+  under test, not the minimum that lets the happy path pass.** The
+  five seeded modules all carry `nest_data`; any `set_display_name`
+  test that doesn't reproduce that shape is exercising a fictional
+  schema. The new regression test
+  (`test_set_display_name_works_on_module_with_nest_data`) seeds the
+  FK reference explicitly. Same lesson the
+  `assertFirmwareResponse` byte-0 incident (#107) taught: a
+  validator's test fixture must contain bytes / rows from a
+  realistic source at least once.
+- **When a backend response surfaces "Unexpected token '<' ... is
+  not valid JSON", the upstream almost certainly fell back to Flask's
+  default HTML 500 page.** That means an exception escaped the
+  route's wrapper. Logging the upstream body (not just status) in
+  backend error paths makes this grep-able.
+- **DuckDB's FK enforcement is conservative.** Any UPDATE on a row
+  whose PK is FK-referenced will trip the over-enforcement,
+  regardless of whether the UPDATE touches the FK column. Plan
+  for it on any rename / metadata-edit route, not just `display_name`.
+  The DELETE-children-and-restore dance is the supported workaround
+  until DuckDB relaxes the constraint (which 1.5.2 did NOT — checked).
+
+### Resolved — `updated_at` semantic overload split into two columns (PR B / issue #97)
+
+The split shipped: `module_configs`
+now carries `updated_at` (row-metadata, bumped on every UPDATE) and
+`last_seen_at` (device-liveness, bumped only on `add_module`'s per-boot
+registration UPSERT). The backend's `fetchAndAssemble` reads
+`last_seen_at` for the 2 h status window; every other write site
+(display-name rename, heartbeat-side geo-patch, legacy heartbeat
+row-update) bumps only `updated_at`. The existing regression test was
+inverted (renamed `test_patch_display_name_bumps_updated_at_not_last_seen_at`)
+and two companion tests pin the new contract end-to-end. What this
+changes for future writers: any new UPDATE on `module_configs` should
+set `updated_at = NOW()` in the SET clause; NEVER write
+`last_seen_at = NOW()` outside `add_module` — that column is the
+contract for "ESP32 just announced itself", and `Module.status`
+depends on it. The setup wizard's verification poll was also switched
+from `m.updatedAt` to `m.lastSeenAt` — the old field is now polluted
+by metadata writes that pre-split couldn't reach it.
+
 ### Same-batch ESP firmwares collided on the auto-generated module name (issues #91, #92, #93, #94)
 
 **What happened.** Two distinct modules with MACs `b0:69:6e:f2:3a:08`

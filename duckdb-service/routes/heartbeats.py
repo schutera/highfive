@@ -129,16 +129,18 @@ def post_heartbeat():
         #     gates this; the server re-checks for safety),
         #  2) an existing module_configs row sits at the (0,0)
         #     sentinel — we never overwrite a placed module.
-        # Tested via `tests/test_heartbeats_endpoint.py`. Note that we
-        # deliberately do NOT touch `module_configs.updated_at` —
-        # that column has dual semantics (row metadata vs liveness),
-        # see chapter-11 "updated_at semantic overload" / issue #97.
+        # Tested via `tests/test_heartbeats_endpoint.py`. Post-#97 split:
+        # we bump `updated_at` (row-metadata: the row was touched) but
+        # NOT `last_seen_at` — the heartbeat itself is already recorded
+        # in the dedicated `module_heartbeats` table (line 117-124
+        # above), which the backend folds into `Module.lastSeenAt`
+        # separately. Bumping `last_seen_at` here would double-count
+        # the same liveness event.
         if _is_plausible_fix(lat, lng, acc):
             # Column names in `module_configs` are `lat`/`lng` (not
             # `latitude`/`longitude`); the contracts-layer rename to
             # `location.lat/lng` happens in the dto in
-            # `backend/src/database.ts`, not in the DB. Don't touch
-            # `updated_at` here — it's a liveness signal (issue #97).
+            # `backend/src/database.ts`, not in the DB.
             row = con.execute(
                 "SELECT lat, lng FROM module_configs WHERE id = ?",
                 [mac],
@@ -148,7 +150,8 @@ def post_heartbeat():
                 existing_lng = float(row[1]) if row[1] is not None else 0.0
                 if existing_lat == 0.0 and existing_lng == 0.0:
                     con.execute(
-                        "UPDATE module_configs SET lat = ?, lng = ? WHERE id = ?",
+                        "UPDATE module_configs SET lat = ?, lng = ?, "
+                        "updated_at = NOW() WHERE id = ?",
                         [lat, lng, mac],
                     )
                     print(

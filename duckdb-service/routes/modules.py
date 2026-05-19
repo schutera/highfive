@@ -329,18 +329,6 @@ def set_display_name(module_id):
                         409,
                     )
 
-            # Bump `updated_at` (row-metadata: the row was touched).
-            # Do NOT bump `last_seen_at` — that column is the device-
-            # liveness signal the backend's `fetchAndAssemble` folds
-            # into `Module.lastSeenAt` (max of last_image_at /
-            # last_seen_at / latestHeartbeat.receivedAt) for the 2 h
-            # status window. An admin edit of the label is not a
-            # heartbeat-equivalent event; bumping `last_seen_at` here
-            # would flip any renamed offline module to "online" for
-            # two hours regardless of telemetry. See chapter 11
-            # "updated_at semantic overload" and issue #97 for the
-            # split rationale; PR B carries the fix.
-            #
             # Snapshot in dependency order so restoration can replay it.
             progress_rows = con.execute(
                 """
@@ -399,7 +387,20 @@ def set_display_name(module_id):
             try:
                 # Phase 1: DELETE children in reverse-FK order.
                 _delete_children()
-                # Phase 2: UPDATE the now-unreferenced parent.
+                # Phase 2: UPDATE the now-unreferenced parent. Bump
+                # `updated_at` (row-metadata: the row was touched).
+                # Do NOT bump `last_seen_at` — that column is the
+                # device-liveness signal the backend's
+                # `fetchAndAssemble` folds into `Module.lastSeenAt`
+                # (max of last_image_at / last_seen_at /
+                # latestHeartbeat.receivedAt) for the 2 h status
+                # window. An admin edit of the label is not a
+                # heartbeat-equivalent event; bumping `last_seen_at`
+                # here would flip any renamed offline module to
+                # "online" for two hours regardless of telemetry.
+                # See chapter 11 "updated_at semantic overload" and
+                # issue #97 for the split rationale; PR B carries
+                # the fix.
                 con.execute(
                     "UPDATE module_configs SET display_name = ?, "
                     "updated_at = NOW() WHERE id = ?",

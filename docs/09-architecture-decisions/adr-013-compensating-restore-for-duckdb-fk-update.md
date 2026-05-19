@@ -166,9 +166,13 @@ happy-path test and silently regress.
   on the same dashboard with the same label leave the operator
   unable to tell them apart (ADR-011 has the full rationale). Not
   negotiable.
-- **A DEFERRED-FK transaction.** DuckDB 1.4.4/1.5.2 has limited
-  support for deferred constraints; the FK over-enforcement we hit
-  fires at statement time regardless of deferral. Same effect.
+- **A DEFERRED-FK transaction.** DuckDB documents deferred
+  constraints as unsupported in the FK enforcement path (the
+  `INITIALLY DEFERRED` clause is parsed but has no behavioural
+  effect on UPDATEs against referenced rows). This alternative was
+  ruled out from the docs rather than via a separate repro; the
+  empirical work focused on the other three alternatives where
+  uncertainty actually existed.
 - **`write_transaction()` with explicit `BEGIN/COMMIT` and the dance
   inside.** The combination this ADR rules out. The DuckDB
   transaction-snapshot view re-trips the FK exception even after the

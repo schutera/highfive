@@ -785,6 +785,86 @@ def test_set_display_name_restores_children_on_mid_dance_failure(client, fresh_d
     assert orphans == 0, "FK invariant must hold after the rescue"
 
 
+def test_set_display_name_surfaces_restore_failed_marker_on_double_failure(
+    client, fresh_db
+):
+    """Issue #105 / senior-review round 2 P1 — pin the
+    `restore_failed: true` 500-body marker shape. The compensating
+    restore is best-effort; if it itself raises, the operator needs to
+    know data may be lost. The 500 body must carry a stable
+    machine-readable flag so the backend can render "restore from
+    backup" rather than "retry".
+
+    The fault injection here raises on EVERY ``INSERT INTO nest_data``
+    so both the dance's phase-3 re-insert AND the compensating
+    `_restore_children`'s inner re-insert fail. The outer route then
+    serves a 500 with `restore_failed: true` instead of re-raising the
+    original dance error.
+
+    Without this test, a refactor that drops the `restore_failed` flag
+    (e.g. simplifying the inner-except to a plain ``raise dance_err``)
+    would pass `test_set_display_name_restores_children_on_mid_dance_failure`
+    while silently killing the contract that ADR-013 documents."""
+    client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
+
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-restore-fail-1", TEST_MAC_A, "blackmasked"),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    import routes.modules as routes_modules
+
+    real_get_conn = routes_modules.get_conn
+
+    class _FaultInjectingConnAlways:
+        """Like the proxy in
+        `test_set_display_name_restores_children_on_mid_dance_failure`
+        but raises on EVERY ``INSERT INTO nest_data`` — so the
+        dance's phase-3 re-insert fails AND the compensating restore's
+        inner re-insert also fails, triggering the restore-failed
+        branch."""
+
+        def __init__(self, real_con):
+            self._con = real_con
+
+        def execute(self, sql, params=None):
+            if "INSERT INTO nest_data" in sql:
+                raise RuntimeError("injected fault: restore phase also fails")
+            if params is None:
+                return self._con.execute(sql)
+            return self._con.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+    def patched_get_conn():
+        return _FaultInjectingConnAlways(real_get_conn())
+
+    import unittest.mock as _mock
+
+    with _mock.patch.object(routes_modules, "get_conn", patched_get_conn):
+        r = client.patch(
+            f"/modules/{TEST_MAC_A}/display_name",
+            json={"display_name": "ShouldFailTwice"},
+        )
+
+    assert r.status_code == 500
+    assert r.content_type.startswith("application/json"), r.data[:200]
+    body = r.get_json()
+    # Stable shape the backend will render against — drift on any
+    # of these keys is a contract break.
+    assert body["restore_failed"] is True, body
+    assert body["module_id"] == TEST_MAC_A, body
+    assert "error" in body, body
+    assert "restore_error" in body, body
+    assert "restore from backup" in body["message"].lower(), body
+
+
 def test_set_display_name_409_collision_still_works_with_nest_data(client, fresh_db):
     """The FK workaround for #105 must not regress the existing UNIQUE
     collision contract. Seed two modules — both with nest_data rows —

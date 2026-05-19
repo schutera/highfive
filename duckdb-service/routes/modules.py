@@ -357,11 +357,10 @@ def set_display_name(module_id):
                 (canonical,),
             ).fetchall()
 
-            def _restore_children() -> None:
-                """Re-insert the snapshotted children. Called from the
-                exception handler. Idempotent: deletes any partial
-                state first so a re-insert that failed mid-loop on
-                the happy path can be cleanly re-attempted."""
+            def _delete_children() -> None:
+                """DELETE in reverse-FK order so each statement is
+                FK-clean in isolation (DuckDB checks per-statement
+                in autocommit)."""
                 con.execute(
                     "DELETE FROM daily_progress WHERE nest_id IN "
                     "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
@@ -371,6 +370,11 @@ def set_display_name(module_id):
                     "DELETE FROM nest_data WHERE module_id = ?",
                     (canonical,),
                 )
+
+            def _insert_children() -> None:
+                """INSERT the snapshotted children in forward-FK
+                order (nest_data before daily_progress that
+                references it)."""
                 for nest in nest_rows:
                     con.execute(
                         "INSERT INTO nest_data (nest_id, module_id, beeType) "
@@ -385,17 +389,16 @@ def set_display_name(module_id):
                         prog,
                     )
 
+            def _restore_children() -> None:
+                """Compensating-restore: DELETE any partial state
+                from a half-finished dance, then re-INSERT the full
+                snapshot. Idempotent across any intermediate state."""
+                _delete_children()
+                _insert_children()
+
             try:
                 # Phase 1: DELETE children in reverse-FK order.
-                con.execute(
-                    "DELETE FROM daily_progress WHERE nest_id IN "
-                    "(SELECT nest_id FROM nest_data WHERE module_id = ?)",
-                    (canonical,),
-                )
-                con.execute(
-                    "DELETE FROM nest_data WHERE module_id = ?",
-                    (canonical,),
-                )
+                _delete_children()
                 # Phase 2: UPDATE the now-unreferenced parent.
                 con.execute(
                     "UPDATE module_configs SET display_name = ?, "
@@ -403,33 +406,56 @@ def set_display_name(module_id):
                     (new_value, canonical),
                 )
                 # Phase 3: re-insert children.
-                for nest in nest_rows:
-                    con.execute(
-                        "INSERT INTO nest_data (nest_id, module_id, beeType) "
-                        "VALUES (?, ?, ?)",
-                        nest,
-                    )
-                for prog in progress_rows:
-                    con.execute(
-                        "INSERT INTO daily_progress "
-                        "(progress_id, nest_id, date, empty, sealed, hatched) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
-                        prog,
-                    )
-            except Exception:
+                _insert_children()
+            except Exception as dance_err:
                 # Compensating action: re-establish the children
                 # snapshot. The parent UPDATE may or may not have
                 # landed; we leave it as-is and let the 500 surface
                 # so the operator can retry. The KEY invariant we
                 # restore is "no orphan or missing children".
+                #
+                # If the restore itself raises, the operator needs to
+                # know they've lost data and should restore from
+                # backup — set a flag we'll surface in the response
+                # body. The 500 still fires either way; the body
+                # marker is the difference between "retry the rename"
+                # and "data lost; restore from backup".
+                restore_failed = False
+                restore_err: Exception | None = None
                 try:
                     _restore_children()
-                except Exception as restore_err:
+                except Exception as e:
+                    restore_failed = True
+                    restore_err = e
                     print(
                         f"[set_display_name] CRITICAL: restore failed for "
-                        f"{canonical}: {type(restore_err).__name__}: "
-                        f"{restore_err}",
+                        f"{canonical}: {type(e).__name__}: {e}. Original "
+                        f"dance error: {type(dance_err).__name__}: "
+                        f"{dance_err}. nest_data + daily_progress rows "
+                        f"for this module may be lost; restore from "
+                        f"backup.",
                         flush=True,
+                    )
+                if restore_failed:
+                    return (
+                        jsonify(
+                            {
+                                "error": str(dance_err),
+                                "restore_failed": True,
+                                "restore_error": str(restore_err)
+                                if restore_err is not None
+                                else None,
+                                "module_id": canonical,
+                                "message": (
+                                    "Rename failed AND the compensating "
+                                    "restore of nest_data/daily_progress "
+                                    "raised. Module child rows may be "
+                                    "missing; restore from backup before "
+                                    "retrying."
+                                ),
+                            }
+                        ),
+                        500,
                     )
                 raise
             return (

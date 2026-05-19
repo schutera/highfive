@@ -680,30 +680,20 @@ def test_set_display_name_preserves_full_fk_chain_nest_and_progress(client, fres
 def test_set_display_name_restores_children_on_mid_dance_failure(client, fresh_db):
     """Issue #105 / senior-review round 1 — pin the compensating-restore
     contract. If the dance fails partway through (e.g. the re-insert
-    phase trips a constraint), the route MUST restore the children
-    from the snapshot before the 500 surfaces.
+    phase raises), the route MUST restore the children from the
+    snapshot before the 500 surfaces.
 
     Without compensating restore, a partial failure would leave the
     operator with a module that's lost its nests/progress permanently —
     the worst kind of silent data loss because the operator just sees
     'Save failed' and retries with no idea anything else broke.
 
-    We force a mid-dance failure by monkey-patching the route's
-    `_restore_children` upcall: NO — that wouldn't be representative.
-    Instead we trigger a real failure: seed a `nest_data` row with a
-    pre-existing `nest_id` that will collide on re-insert (the dance
-    DELETEs and re-INSERTs by snapshot; a PK collision can't happen
-    on the same snapshot it was read from, so we synthesise one by
-    pre-inserting a sibling `nest_data` row whose `nest_id` matches
-    one in the snapshot).
-
-    Actually the cleanest forcing function is via the `daily_progress`
-    arm: insert a `daily_progress` row whose `progress_id` matches a
-    snapshotted progress_id. After the snapshot, before the dance, we
-    inject a row that ISN'T deleted (different nest_id, same
-    progress_id) so when the dance's re-insert phase runs, the PK
-    collision fires. The compensating restore must put the original
-    children back."""
+    We force a mid-dance failure by wrapping the route's connection
+    in a thin proxy that raises on the first ``INSERT INTO nest_data``
+    call — the dance's first re-insert in phase 3. The proxy
+    delegates everything else via ``__getattr__`` because
+    ``DuckDBPyConnection`` attributes are read-only and can't be
+    monkey-patched directly."""
     client.post("/new_module", json=_payload(TEST_MAC_A, "BeeOne"))
     client.post("/new_module", json=_payload(TEST_MAC_B, "BeeTwo"))
 
@@ -720,21 +710,6 @@ def test_set_display_name_restores_children_on_mid_dance_failure(client, fresh_d
             "VALUES (?, ?, ?, ?, ?, ?)",
             ("prog-rescue-1", "nest-rescue-1", "2026-05-01", 3, 12, 4),
         )
-        # Seed module B with a nest whose nest_id matches what we'll
-        # need NOT to collide with — actually, the cleanest forcing
-        # path is to monkey-patch `con.execute` at the route level
-        # rather than from outside. We can't easily monkey-patch the
-        # route's connection from here because get_conn() returns a
-        # fresh con per call. Instead, we lean on a different forcing
-        # function: insert a `nest_data` row referencing module B but
-        # using nest_id "nest-rescue-1" — that's not possible because
-        # `nest_id` is a PRIMARY KEY, so the seed insertion above
-        # blocks any duplicate. The forcing function is therefore
-        # synthetic: corrupt the snapshot path by patching the
-        # connection's `execute` method just before the re-insert
-        # phase. This is a unit-test fault-injection, not a
-        # representative failure mode, but it exercises the same code
-        # path the operator-visible failure would trigger.
         con.commit()
     finally:
         con.close()

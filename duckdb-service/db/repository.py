@@ -83,11 +83,18 @@ def write_transaction() -> Iterator[Any]:
     multi-statement caller that raises midway leaves the earlier
     statements committed AND the ``con.rollback()`` below raises a
     secondary ``TransactionException: cannot rollback - no transaction
-    is active``. Pre-#105 the helper had no ``BEGIN`` and the rollback
-    was a no-op; the senior-reviewer caught this during PR B and the
-    fix is part of #105's safety contract for the rename-dance.
-    Pinned by ``test_write_transaction_rolls_back_partial_writes`` in
+    is active``. The senior-reviewer caught this during PR B; the
+    helper has issued ``BEGIN`` since then. Pinned by
+    ``test_write_transaction_rolls_back_partial_writes`` in
     ``tests/test_repository.py``.
+
+    Note: ``set_display_name`` in ``routes/modules.py`` deliberately
+    BYPASSES this helper — DuckDB's transaction-snapshot view of FK
+    references blocks the temp-table-dance workaround for #105's FK
+    over-enforcement bug. That route uses bespoke autocommit +
+    compensating-restore instead; see
+    [ADR-013](../docs/09-architecture-decisions/adr-013-compensating-restore-for-duckdb-fk-update.md)
+    for when to follow which pattern.
     """
     c = _conn_module()
     with c.lock:

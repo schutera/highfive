@@ -95,11 +95,16 @@ def test_write_transaction_rolls_back_partial_writes(fresh_db):
     row would have been left in the table.
 
     After the fix (the helper now issues ``BEGIN`` before yielding),
-    the rollback restores the empty state. ``set_display_name``'s
-    temp-table-dance (#105) depends on this contract — if the
-    re-insert phase ever raises, the helper must roll back the parent
-    UPDATE AND the child DELETEs together, restoring the row's
-    original state."""
+    the rollback restores the empty state. ``add_module``,
+    ``record_image``, the legacy ``/modules/<id>/heartbeat`` route,
+    and ``add_progress_for_module`` rely on this contract for their
+    own multi-statement writes. ``set_display_name`` deliberately
+    OPTS OUT of ``write_transaction`` (because DuckDB's transaction
+    snapshot view trips the FK over-enforcement that motivated #105's
+    temp-table dance); it provides atomicity at the Python layer
+    via a compensating-restore handler instead — see its in-route
+    comment for the rationale and ``test_set_display_name_restores_
+    children_on_mid_dance_failure`` for the pinning test."""
     repo = importlib.import_module("db.repository")
 
     raised = False

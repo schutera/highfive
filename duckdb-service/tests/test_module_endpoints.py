@@ -281,6 +281,50 @@ def test_record_image_invalid_module_id_returns_400(client):
     assert "error" in resp.get_json()
 
 
+def test_record_image_stamps_uploaded_at_in_utc(client, fresh_db):
+    """Regression pin for ADR-014 review P2: `record_image` stamps UTC,
+    not container-local time. Without this, setting TZ=Europe/Berlin on
+    the container would put rows 1-2 hours past `activity_timeseries`'s
+    window upper bound and the chart would silently drop the most
+    recent uploads. Lesson logged in chapter 11.
+
+    The test asserts the stamp is within a tight window of "now UTC" —
+    any naive-local writer in a non-UTC container would fail this. The
+    container in CI runs UTC, so the test is a "future regression
+    canary" rather than a current-bug repro, which is the right kind
+    of pin to leave behind for a class-of-bug fix.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    _seed_module(fresh_db, TEST_MAC_1)
+    before = datetime.now(timezone.utc).replace(tzinfo=None)
+    resp = client.post(
+        "/record_image",
+        json={"module_id": TEST_MAC_1, "filename": "stamp.jpg"},
+    )
+    assert resp.status_code == 200
+    after = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=1)
+
+    con = fresh_db.connection.get_conn()
+    try:
+        cur = con.execute(
+            "SELECT uploaded_at FROM image_uploads WHERE filename = ?", ("stamp.jpg",)
+        )
+        row = cur.fetchone()
+    finally:
+        con.close()
+
+    assert row is not None
+    stamped = row[0]
+    # DuckDB returns the timestamp as a naive `datetime`. Drop seconds
+    # of slack on either side — the assertion fails iff the stamp is in
+    # the wrong timezone band.
+    assert (before - timedelta(seconds=2)) <= stamped <= after, (
+        f"uploaded_at {stamped!r} not within UTC window "
+        f"[{before!r}, {after!r}] — writer drifted to container-local time?"
+    )
+
+
 # ---------- activity_timeseries ----------
 
 
@@ -316,9 +360,7 @@ def test_activity_timeseries_unknown_module_returns_404(client):
 
 def test_activity_timeseries_invalid_interval_returns_400(client, fresh_db):
     _seed_module(fresh_db, TEST_MAC_1)
-    resp = client.get(
-        f"/modules/{TEST_MAC_1}/activity_timeseries?interval=weekly"
-    )
+    resp = client.get(f"/modules/{TEST_MAC_1}/activity_timeseries?interval=weekly")
     assert resp.status_code == 400
     body = resp.get_json()
     assert body["error"] == "invalid interval"
@@ -326,17 +368,13 @@ def test_activity_timeseries_invalid_interval_returns_400(client, fresh_db):
 
 def test_activity_timeseries_invalid_days_returns_400(client, fresh_db):
     _seed_module(fresh_db, TEST_MAC_1)
-    too_large = client.get(
-        f"/modules/{TEST_MAC_1}/activity_timeseries?days=91"
-    )
+    too_large = client.get(f"/modules/{TEST_MAC_1}/activity_timeseries?days=91")
     assert too_large.status_code == 400
 
     zero = client.get(f"/modules/{TEST_MAC_1}/activity_timeseries?days=0")
     assert zero.status_code == 400
 
-    non_int = client.get(
-        f"/modules/{TEST_MAC_1}/activity_timeseries?days=abc"
-    )
+    non_int = client.get(f"/modules/{TEST_MAC_1}/activity_timeseries?days=abc")
     assert non_int.status_code == 400
 
 

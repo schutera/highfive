@@ -518,9 +518,23 @@ def record_image():
         return err
     try:
         with write_transaction() as con:
+            # UTC, NOT naive-local. The `activity_timeseries` reader
+            # computes its window against `datetime.now(timezone.utc)`;
+            # if the writer stamps in container-local time (which is
+            # what `datetime.now()` does — UTC today only because the
+            # python:3.x-slim image happens to default to UTC), setting
+            # `TZ=Europe/Berlin` on the container in prod would put
+            # writes 1-2 hours past the reader's window upper bound.
+            # The schema's `DEFAULT CURRENT_TIMESTAMP` carries the same
+            # naive-local risk; chapter-11 entry to follow.
+            now_utc = (
+                datetime.now(timezone.utc)
+                .replace(tzinfo=None)
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
             con.execute(
                 "INSERT INTO image_uploads (module_id, filename, uploaded_at) VALUES (?, ?, ?)",
-                (canonical, filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                (canonical, filename, now_utc),
             )
         return jsonify({"message": "Image recorded"}), 200
     except Exception as e:

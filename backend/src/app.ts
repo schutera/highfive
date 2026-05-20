@@ -274,11 +274,21 @@ app.get('/api/modules/:id/activity', async (req, res) => {
   }`;
   try {
     const upstream = await fetch(url);
-    const body = (await upstream.json()) as Record<string, unknown>;
+    // Check `upstream.ok` BEFORE parsing JSON. duckdb-service wraps its
+    // errors as JSON today (and the activity_timeseries route does so
+    // explicitly), but other Flask routes can serve the default HTML
+    // 500 page on uncaught exceptions — see `routes/modules.py`'s
+    // `get_modules` wrapper comment. Trying to `.json()` an HTML body
+    // throws and we'd return 502 instead of bubbling the real upstream
+    // status. Defence-in-depth, not a hard requirement today.
     if (!upstream.ok) {
-      res.status(upstream.status).json(body);
+      const errBody = (await upstream.json().catch(() => ({
+        error: `upstream returned ${upstream.status}`,
+      }))) as Record<string, unknown>;
+      res.status(upstream.status).json(errBody);
       return;
     }
+    const body = (await upstream.json()) as Record<string, unknown>;
     // snake_case → camelCase mapping. Only `module_id` differs from
     // the wire JSON; `buckets` entries (`timestamp`, `count`) and the
     // ISO `start` / `end` strings carry through unchanged.

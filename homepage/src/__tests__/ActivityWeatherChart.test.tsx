@@ -142,7 +142,8 @@ describe('<ActivityWeatherChart>', () => {
     await waitFor(() => {
       expect(getActivity).toHaveBeenLastCalledWith(MODULE_ID, 'daily', 30);
     });
-    expect(fetchHourlyWeather).toHaveBeenLastCalledWith(48.2, 11.77, 30);
+    // Weather fetch is intentionally NOT triggered for daily mode — see
+    // the dedicated daily-mode test below for the rationale.
   });
 
   it('surfaces the "weather unavailable" hint when Open-Meteo returns nothing', async () => {
@@ -172,5 +173,42 @@ describe('<ActivityWeatherChart>', () => {
       ).toBeInTheDocument();
     });
     expect(screen.queryByTestId('recharts-ComposedChart')).not.toBeInTheDocument();
+  });
+
+  it('does NOT fetch Open-Meteo in daily (30d) mode and does not render the weather-unavailable hint', async () => {
+    // Reviewer P1: a stale comment claimed "daily mode skips the
+    // weather merge" while the code merged anyway, painting "midnight
+    // UTC temperature" as if it were the daily value. The fix gates the
+    // fetch on `interval === 'hourly'`. Pinned here so a regression
+    // re-enabling the call shows up at test time.
+    //
+    // The mount-time render is in the default 7d/hourly window — that
+    // call DOES legitimately hit fetchHourlyWeather. We clear the spy
+    // after that initial load so the "did the daily click trigger a
+    // fetch?" assertion below isn't contaminated by the mount call.
+    getActivity.mockResolvedValue(
+      makeActivity([{ timestamp: '2026-05-19T00:00:00', count: 4 }], 'daily'),
+    );
+    fetchHourlyWeather.mockResolvedValue([]);
+
+    renderChart({ lat: 48.2, lng: 11.77 });
+
+    await waitFor(() => {
+      expect(getActivity).toHaveBeenCalledTimes(1);
+    });
+    fetchHourlyWeather.mockClear();
+
+    const range30 = screen.getByRole('radio', { name: /30/i });
+    fireEvent.click(range30);
+
+    await waitFor(() => {
+      expect(getActivity).toHaveBeenLastCalledWith(MODULE_ID, 'daily', 30);
+    });
+    expect(fetchHourlyWeather).not.toHaveBeenCalled();
+    // The "weather unavailable" notice is reserved for "asked, got
+    // nothing" — silent daily mode is by design, not a failure.
+    expect(
+      screen.queryByText(/Weather data unavailable|Wetterdaten nicht verfügbar/i),
+    ).not.toBeInTheDocument();
   });
 });

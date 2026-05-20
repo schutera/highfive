@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { ActivityTimeSeries } from '@highfive/contracts';
+import type { ActivityTimeSeries, Module, ModuleId } from '@highfive/contracts';
 import { api } from '../services/api';
 import { fetchHourlyWeather, type WeatherBucket } from '../services/weather';
 import { hasPlausibleLocation } from '../lib/location';
@@ -18,9 +18,14 @@ import { useTranslation } from '../i18n/LanguageContext';
 
 type Range = 1 | 7 | 30;
 
+// Bound to the contracts shape (mirrors `lib/location.ts::hasPlausibleLocation`)
+// so a future `location.lat → location.latitude` rename in `@highfive/contracts`
+// becomes a compile error here instead of a silent `undefined`-pluck. ADR-004
+// "wire-shape drift becomes a compile error" depends on consumers actually
+// taking the branded/derived types.
 interface ActivityWeatherChartProps {
-  moduleId: string;
-  location: { lat: number; lng: number } | null | undefined;
+  moduleId: ModuleId;
+  location: Pick<Module['location'], 'lat' | 'lng'> | null | undefined;
 }
 
 interface ChartRow {
@@ -54,16 +59,27 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
     setWeatherFailed(false);
     const interval: 'hourly' | 'daily' = range === 30 ? 'daily' : 'hourly';
     const activityPromise = api.getActivity(moduleId, interval, range);
-    const weatherPromise = fetchHourlyWeather(location!.lat, location!.lng, range);
+    // Daily-mode skips the Open-Meteo fetch entirely. Open-Meteo only
+    // emits hourly samples; merging a single midnight-UTC sample onto
+    // each daily bucket (which is what `weatherByTs.get(timestamp)`
+    // accidentally does — daily buckets are at T00:00:00 and so is
+    // Open-Meteo's first sample of each day) would render "midnight
+    // temperature only" as if it were the daily value. Worse than
+    // showing nothing. Aggregating to a daily mean/max client-side is
+    // a defensible future enhancement; for now we suppress the overlay
+    // and let the bars stand alone.
+    const weatherPromise: Promise<WeatherBucket[]> =
+      interval === 'hourly'
+        ? fetchHourlyWeather(location!.lat, location!.lng, range)
+        : Promise.resolve([]);
     Promise.all([activityPromise, weatherPromise.catch(() => [] as WeatherBucket[])])
       .then(([act, wx]) => {
         if (cancelled) return;
         setActivity(act);
         setWeather(wx);
-        // If the location is known but Open-Meteo returned nothing,
-        // surface a soft notice so the operator knows the overlay is
-        // missing rather than thinking the weather was perfectly flat.
-        setWeatherFailed(wx.length === 0);
+        // "Weather unavailable" only fires when we ASKED for weather
+        // and got nothing — silent daily mode is not a failure.
+        setWeatherFailed(interval === 'hourly' && wx.length === 0);
       })
       .catch(() => {
         if (cancelled) return;
@@ -78,9 +94,10 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
     };
   }, [moduleId, range, location?.lat, location?.lng, locationOk]);
 
-  // Merge series by bucket-start timestamp. Daily activity buckets
-  // skip the weather merge (Open-Meteo is hourly) — the chart still
-  // renders the bar series alone in that mode.
+  // Merge series by bucket-start timestamp. In daily mode the weather
+  // array is empty (the effect above skips the fetch), so the merge
+  // collapses to `temperatureC: null` / `precipitationMm: null` on
+  // every row and the Line/Bar for weather render as gaps.
   const rows = useMemo<ChartRow[]>(() => {
     if (!activity) return [];
     const weatherByTs = new Map(weather.map((w) => [w.timestamp, w]));

@@ -38,7 +38,12 @@ export async function fetchHourlyWeather(
   lng: number,
   pastDays: number,
 ): Promise<WeatherBucket[]> {
-  const clampedPast = Math.max(1, Math.min(92, Math.round(pastDays)));
+  // Cap mirrors the backend's `days <= 90` validation in
+  // `duckdb-service/routes/modules.py::activity_timeseries`. Keeping the
+  // two in sync means a future operator-facing window-size bump only
+  // needs one place edited; an asymmetric cap is the kind of drift the
+  // PR-104 reviewer round flagged on other features.
+  const clampedPast = Math.max(1, Math.min(90, Math.round(pastDays)));
   const url =
     `https://api.open-meteo.com/v1/forecast` +
     `?latitude=${encodeURIComponent(lat.toFixed(4))}` +

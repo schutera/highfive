@@ -86,6 +86,37 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### `image_uploads.uploaded_at` stamped in container-local time, new reader assumed UTC (ADR-014 review)
+
+**What happened.** When the `activity_timeseries` endpoint landed
+(ADR-014, weather-correlation chart), the writer
+`duckdb-service/routes/modules.py`'s `record_image` was still
+stamping `uploaded_at` with naive-local `datetime.now()`, while the
+new reader computed its window upper bound from
+`datetime.now(timezone.utc).replace(tzinfo=None)`. The two only
+agree because the `python:3.x-slim` base image defaults to UTC; a
+prod-ops `TZ=Europe/Berlin` override on the container would have
+written rows 1-2 hours past the reader's window upper bound, making
+the most recent uploads silently invisible to the chart.
+
+**Why it happened.** The reader was written timezone-aware (correct);
+the existing writer pre-dated the reader and was timezone-naive
+(formerly correct, because the reader was day-granularity and the
+schema's `DEFAULT CURRENT_TIMESTAMP` was the dominant timestamp
+source). Adding a new consumer with a different timezone discipline
+exposed the latent inconsistency. The schema's
+`DEFAULT CURRENT_TIMESTAMP` on `image_uploads.uploaded_at`
+(`duckdb-service/db/schema.py`'s `_MODULE_CONFIGS_DDL` neighbour
+block) carries the same naive-local risk and is the next thing to
+audit if a TZ-flipped container is ever staged.
+
+**How to avoid it next time.** Pick UTC at the writer for any
+column that crosses service boundaries or feeds an aggregation.
+The fix in `record_image` is two lines (`datetime.now(timezone.utc)`
+instead of `datetime.now()`). When adding a new timezone-aware
+reader against existing data, grep the writers for `datetime.now()`
+(no `tz` arg) first; if any survive, fix them in the same PR.
+
 ### Windows host parity: build.sh tripped on three path assumptions and a unit test depended on a jsdom polyfill that doesn't exist (PR 2 / issues #99, #100)
 
 **What happened.** A contributor on Windows 11 + Git Bash + Node 22 +

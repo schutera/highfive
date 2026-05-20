@@ -84,9 +84,16 @@ The homepage had no chart library before this feature. We picked
 - Permissive license (MIT).
 
 The bundle cost is non-trivial — recharts lands in the dashboard
-chunk. Code-splitting the chart out via `React.lazy` is a follow-up
-if the chunk size becomes painful; for now the chart loads
-eagerly with the rest of the module panel.
+chunk. Specifically, Recharts 3.x transitively pulls in
+`@reduxjs/toolkit`, `react-redux`, `immer`, and `victory-vendor`
+(see `package-lock.json` under `node_modules/recharts`'s
+`dependencies`), so picking Recharts effectively puts a small
+Redux runtime into the dashboard chunk for chart-state purposes.
+That cost was not visible from the package's surface API at
+selection time, but it is real. Code-splitting the chart out via
+`React.lazy` is a follow-up if the chunk size becomes painful;
+for now the chart loads eagerly with the rest of the module
+panel.
 
 ### Dense bucket projection on the server
 

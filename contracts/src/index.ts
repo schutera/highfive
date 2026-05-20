@@ -175,3 +175,30 @@ export interface UserLocation {
   lat: number;
   lng: number;
 }
+
+// ---- Activity time series (weather-correlation feature) ----
+//
+// Returned by `backend GET /api/modules/:id/activity` (camelCase),
+// which proxies `duckdb-service /modules/<id>/activity_timeseries`
+// (snake_case → camelCase mapping happens in the backend).
+//
+// `buckets` covers the requested window densely: a bucket with zero
+// uploads is emitted with `count: 0` rather than omitted, so the
+// homepage chart renders flat regions instead of stitching across
+// gaps. Bucket-start timestamps are UTC ISO 8601; the homepage
+// converts to the browser's locale at render time.
+
+export type ActivityInterval = 'hourly' | 'daily';
+
+export interface ActivityBucket {
+  timestamp: string; // ISO 8601 (UTC), bucket start
+  count: number;
+}
+
+export interface ActivityTimeSeries {
+  moduleId: ModuleId;
+  interval: ActivityInterval;
+  start: string; // ISO 8601 (UTC), inclusive
+  end: string; // ISO 8601 (UTC), exclusive
+  buckets: ActivityBucket[];
+}

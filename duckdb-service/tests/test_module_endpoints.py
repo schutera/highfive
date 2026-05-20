@@ -279,3 +279,139 @@ def test_record_image_invalid_module_id_returns_400(client):
     )
     assert resp.status_code == 400
     assert "error" in resp.get_json()
+
+
+# ---------- activity_timeseries ----------
+
+
+def _seed_image_upload(fresh_db, module_id, filename, uploaded_at):
+    """Insert an image_uploads row with an explicit timestamp.
+
+    Bypasses the route so we can stage timestamps in the past for the
+    bucketing tests — `record_image` always stamps `datetime.now()`.
+    """
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO image_uploads (module_id, filename, uploaded_at) "
+            "VALUES (?, ?, ?)",
+            (module_id, filename, uploaded_at),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def test_activity_timeseries_invalid_module_id_returns_400(client):
+    resp = client.get("/modules/hive-001/activity_timeseries")
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
+def test_activity_timeseries_unknown_module_returns_404(client):
+    resp = client.get("/modules/ffffffffffff/activity_timeseries")
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "Module not found"}
+
+
+def test_activity_timeseries_invalid_interval_returns_400(client, fresh_db):
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.get(
+        f"/modules/{TEST_MAC_1}/activity_timeseries?interval=weekly"
+    )
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert body["error"] == "invalid interval"
+
+
+def test_activity_timeseries_invalid_days_returns_400(client, fresh_db):
+    _seed_module(fresh_db, TEST_MAC_1)
+    too_large = client.get(
+        f"/modules/{TEST_MAC_1}/activity_timeseries?days=91"
+    )
+    assert too_large.status_code == 400
+
+    zero = client.get(f"/modules/{TEST_MAC_1}/activity_timeseries?days=0")
+    assert zero.status_code == 400
+
+    non_int = client.get(
+        f"/modules/{TEST_MAC_1}/activity_timeseries?days=abc"
+    )
+    assert non_int.status_code == 400
+
+
+def test_activity_timeseries_empty_module_fills_zero_buckets(client, fresh_db):
+    """No uploads → every bucket in the window emits count=0.
+
+    Without server-side gap-fill the chart would render an empty
+    series and look indistinguishable from an outage. The dense
+    series with explicit zeros is the contract.
+    """
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.get(
+        f"/modules/{TEST_MAC_1}/activity_timeseries?interval=hourly&days=1"
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["module_id"] == TEST_MAC_1
+    assert body["interval"] == "hourly"
+    # 1 day, hourly → exactly 24 buckets.
+    assert len(body["buckets"]) == 24
+    assert all(b["count"] == 0 for b in body["buckets"])
+
+
+def test_activity_timeseries_groups_uploads_by_hour(client, fresh_db):
+    """Two uploads in the same hour → one bucket with count=2."""
+    from datetime import datetime, timezone, timedelta
+
+    _seed_module(fresh_db, TEST_MAC_1)
+    # Pick a timestamp well inside the default 7-day window.
+    base = datetime.now(timezone.utc).replace(
+        tzinfo=None, minute=0, second=0, microsecond=0
+    ) - timedelta(hours=2)
+
+    _seed_image_upload(fresh_db, TEST_MAC_1, "a.jpg", base + timedelta(minutes=5))
+    _seed_image_upload(fresh_db, TEST_MAC_1, "b.jpg", base + timedelta(minutes=45))
+    _seed_image_upload(
+        fresh_db, TEST_MAC_1, "c.jpg", base + timedelta(hours=1, minutes=10)
+    )
+
+    resp = client.get(
+        f"/modules/{TEST_MAC_1}/activity_timeseries?interval=hourly&days=1"
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    non_zero = [b for b in body["buckets"] if b["count"] > 0]
+    assert len(non_zero) == 2
+    # Two in the earlier hour, one in the next.
+    counts = sorted(b["count"] for b in non_zero)
+    assert counts == [1, 2]
+
+
+def test_activity_timeseries_daily_interval(client, fresh_db):
+    """`interval=daily` returns one bucket per day."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    resp = client.get(
+        f"/modules/{TEST_MAC_1}/activity_timeseries?interval=daily&days=7"
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["interval"] == "daily"
+    assert len(body["buckets"]) == 7
+
+
+def test_activity_timeseries_excludes_other_modules(client, fresh_db):
+    """Activity for another module must not bleed into the result."""
+    from datetime import datetime, timezone, timedelta
+
+    _seed_module(fresh_db, TEST_MAC_1)
+    _seed_module(fresh_db, TEST_MAC_2)
+    recent = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    _seed_image_upload(fresh_db, TEST_MAC_2, "noise.jpg", recent)
+
+    resp = client.get(
+        f"/modules/{TEST_MAC_1}/activity_timeseries?interval=hourly&days=1"
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert all(b["count"] == 0 for b in body["buckets"])

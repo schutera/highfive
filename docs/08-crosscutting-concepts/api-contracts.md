@@ -151,6 +151,58 @@ This is **not** the same concept as `Module.location`:
 Why we don't ship the existing `GEO_API_KEY` to the homepage to make
 the same call directly: [ADR-012](../09-architecture-decisions/adr-012-dashboard-ip-geo-hint.md).
 
+## `ActivityTimeSeries` — bucketed upload counts
+
+Added for the `ActivityWeatherChart` in the module detail panel.
+Served by `GET /api/modules/:id/activity` (backend) which proxies
+`GET /modules/<id>/activity_timeseries` (duckdb-service) and renames
+the top-level `module_id` to `moduleId` on the way out. The type
+lives in `contracts/src/index.ts`:
+
+```ts
+export type ActivityInterval = 'hourly' | 'daily';
+
+export interface ActivityBucket {
+  timestamp: string; // ISO 8601 (UTC), bucket start
+  count: number;
+}
+
+export interface ActivityTimeSeries {
+  moduleId: ModuleId;
+  interval: ActivityInterval;
+  start: string;
+  end: string;
+  buckets: ActivityBucket[];
+}
+```
+
+Two non-obvious contract details:
+
+- **Dense buckets.** Empty hours/days are emitted with `count: 0`
+  rather than omitted. Without this, the chart would silently
+  stitch over silent hours and a quiet 02:00–05:00 stretch would
+  visually become a flat line connecting 01:00 and 06:00 — a
+  misrepresentation. The dense shape is the contract; consumers
+  rely on it.
+- **UTC timestamps, browser-local rendering.** `start`, `end`, and
+  every `bucket.timestamp` are naive UTC ISO 8601. The homepage
+  formats to the visitor's browser locale at render time. Daily
+  buckets in particular MUST be kept in UTC server-side; resolving
+  them to a TZ before the homepage sees them would split a single
+  day across midnight for any non-UTC viewer.
+
+Per ADR-004's "shared package, compile-time drift" rule, the type
+lives in `@highfive/contracts` and is imported by both the backend
+proxy and the homepage chart. A service-local duplicate would be a
+smell and is explicitly avoided.
+
+Weather data overlaid on the chart is fetched **direct from the
+browser** (Open-Meteo, no API key, CORS open) — it is _not_ a
+HiveHive wire shape, so it does not appear here. The Open-Meteo
+client is at `homepage/src/services/weather.ts`. Rationale for
+browser-direct vs. backend-proxy:
+[ADR-014](../09-architecture-decisions/adr-014-weather-correlation.md).
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing

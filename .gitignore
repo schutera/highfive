@@ -257,3 +257,6 @@ homepage/coverage/
 
 # Stray docker-compose / process logs at repo root
 /error.txt
+
+# QR-design experiment outputs (scripts/qr_experiment.py, issue #13)
+scripts/qr_output/

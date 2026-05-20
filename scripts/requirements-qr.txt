@@ -1,0 +1,16 @@
+# Dependencies for scripts/qr_experiment.py (issue #13 — sticker QR design).
+# Not pulled by any service; install only when iterating on the sticker.
+
+segno>=1.5,<2          # base QR matrix generation
+Pillow>=10,<12         # raster rendering of options 3 and 5
+amzqr>=0.0.1           # halftone image-encoded QR (option 4)
+
+# Validators. opencv-python-headless avoids the GUI deps that opencv-python
+# pulls (we never open a cv2 window from this script).
+pyzbar>=0.1.9          # zbar wrapper (approx. Android-camera tolerance)
+opencv-python-headless>=4.8,<5
+
+# Third decoder closer to iOS Camera's behaviour. Requires a Java 11+
+# runtime on PATH; the script reports "skip" gracefully when Java is
+# missing.
+pyzxing>=1.0

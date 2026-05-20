@@ -32,7 +32,25 @@ vi.mock('../services/api', () => ({
   api: {
     getModuleById: vi.fn(() => Promise.resolve(nextModuleDetail)),
     getModuleLogs: vi.fn().mockResolvedValue([]),
+    // ModulePanel now renders <ActivityWeatherChart>, which calls
+    // api.getActivity on mount. Stub it with an empty bucket list so
+    // the chart resolves to its "no activity" branch without an
+    // unhandled rejection from this mock object.
+    getActivity: vi.fn().mockResolvedValue({
+      moduleId: 'e89fa9f23a08',
+      interval: 'hourly',
+      start: '2026-05-13T00:00:00',
+      end: '2026-05-20T00:00:00',
+      buckets: [],
+    }),
   },
+}));
+// fetchHourlyWeather inside <ActivityWeatherChart> calls
+// `fetch('https://api.open-meteo.com/...')` directly. Stub it once at
+// the module scope so each ModulePanel render gets an empty weather
+// series without polluting individual tests with vi.stubGlobal calls.
+vi.mock('../services/weather', () => ({
+  fetchHourlyWeather: vi.fn().mockResolvedValue([]),
 }));
 
 // Static import after the vi.mock above (vitest hoists vi.mock).

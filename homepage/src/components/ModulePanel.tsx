@@ -6,6 +6,7 @@ import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
+import ActivityWeatherChart from './ActivityWeatherChart';
 
 const ADMIN_KEY_STORAGE = 'hf_admin_key';
 
@@ -522,6 +523,8 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
             </article>
           ))}
         </div>
+
+        <ActivityWeatherChart moduleId={moduleDetail.id} location={moduleDetail.location} />
       </div>
     </div>
   );

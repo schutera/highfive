@@ -26,7 +26,7 @@ Cover the following dimensions; only report findings, not the dimensions themsel
 
 1. **Correctness against requirements.** Does the change do what the linked issue / task description / PR title claims? Identify gaps (claimed but not implemented), overreach (scope creep), and silent regressions in adjacent code.
 2. **Code quality and patterns.** Does new code follow the existing patterns in the codebase, or did the author invent a parallel mechanism? Premature abstractions, copy-paste duplication, defensive code for impossible states, swallowed errors, fallbacks that hide failures, half-finished implementations.
-3. **Tests.** Coverage of the risky paths (not happy paths only). Tests that pin behaviour vs tests that assert implementation details. New code paths that are not exercised. Tests that depend on internal constants or timing in a fragile way.
+3. **Tests.** Coverage of the risky paths (not happy paths only). Tests that pin behaviour vs tests that assert implementation details. New code paths that are not exercised. Tests that depend on internal constants or timing in a fragile way. If the diff touches a view that renders wire-shape data — homepage components rendering `Module` / `TelemetryEntry`, dashboard or setup-wizard surfaces, or any new field crossing the backend↔homepage boundary — verify that a corresponding spec exists or was updated under `tests/ui/tests/`. Vitest + jsdom is necessary, not sufficient (CLAUDE.md "Verifying UI claims" rule 4 and ADR-014 codify why: TS-optional fields collapse to `undefined` silently under mocked APIs, and jsdom never exercises SPA routing or nginx serving). A UI-rendering change without a Playwright spec is a P1 by default; escalate to P0 if the missing coverage maps onto one of the chapter-11 regressions the layer was built to pin (telemetry envelope drift, dashboard side-list filtering).
 4. **Documentation accuracy.** Where the change touches behaviour described in docs (CLAUDE.md, arc42 chapters, ADRs, runbooks, READMEs), do the docs still match? Did the author update them per CLAUDE.md's mandatory-update table? Documentation drift is debt that compounds; flag it.
 5. **Cross-document consistency.** When several docs reference the same concept, do they agree after the change, or did the author update one and forget the others? Re-grep for stale references (renamed files, retired modules, old URLs, removed flags).
 6. **Hidden contracts.** Wire shapes between services, NVS keys, environment variables, file paths in volumes — anything that crosses a boundary. Drift between caller and callee is the single biggest source of field bugs in this codebase.
@@ -35,6 +35,7 @@ Cover the following dimensions; only report findings, not the dimensions themsel
    - Are the "never violate" rules respected?
    - Were the mandatory doc updates from the "Updating documentation" table actually performed?
    - For lessons-learned-worthy bugs, was an entry added to chapter 11?
+   - If the diff touches UI rendering or wire-shape boundaries, was a Playwright spec added / updated per CLAUDE.md "Verifying UI claims" rule 4? (See ADR-014.)
 
 ## How to investigate
 

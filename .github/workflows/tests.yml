@@ -1,6 +1,6 @@
 # CI test workflow.
 #
-# Eight parallel jobs:
+# Nine parallel jobs:
 #
 #   esp-native      → host-side Unity tests for the pure C++ helpers
 #                     under ESP32-CAM/lib/. Fast (~1 min cold).
@@ -28,6 +28,12 @@
 #   e2e-pipeline    → boots the four-service docker compose, drives it
 #                     with the Python mock ESP, asserts the upload chain
 #                     works end-to-end. Slower (~5 min cold).
+#
+#   ui-playwright   → boots the four-service stack plus a production-built
+#                     homepage container, seeds UI-specific fixtures, drives
+#                     real Chromium through the SPA. Pins the chapter-11
+#                     regressions (envelope drift, side-list filter) that
+#                     jsdom + mocks could not catch. Slowest (~6 min cold).
 #
 # Triggers on PRs to main and on push to main (badge stays green there)
 # and on push to the chore/test-harness branch so the workflow validates
@@ -281,3 +287,149 @@ jobs:
         run: |
           docker compose -f tests/e2e/docker-compose.test.yml \
                          -p highfive-e2e logs --no-color || true
+
+  ui-playwright:
+    name: UI tests (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # tests/ui/ is intentionally NOT a root workspace (so the
+          # Playwright browser cache stays out of homepage/backend
+          # resolution), so it has its own lockfile.
+          cache: npm
+          cache-dependency-path: tests/ui/package-lock.json
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install UI test deps
+        working-directory: tests/ui
+        run: npm ci
+
+      - name: Install seed-script deps
+        run: pip install -r tests/e2e/requirements.txt
+
+      # The browser binaries Playwright fetches live in
+      # ~/.cache/ms-playwright (~150 MB Chromium). Cache key tracks the
+      # tests/ui lockfile so a Playwright minor bump invalidates the
+      # cache and the runner pays the install cost on the next push.
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('tests/ui/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: tests/ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Chromium system deps (cache hit path)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: tests/ui
+        run: npx playwright install-deps chromium
+
+      - name: Show Docker version
+        run: docker version && docker compose version
+
+      - name: Boot UI stack
+        run: |
+          docker compose -f tests/ui/docker-compose.ui.yml \
+                         -p highfive-ui up -d --build
+          echo "--- containers ---"
+          docker compose -f tests/ui/docker-compose.ui.yml -p highfive-ui ps
+
+      - name: Seed UI-specific fixtures
+        run: python tests/ui/scripts/seed_ui_fixtures.py
+
+      # Probe each surface the specs depend on BEFORE Playwright runs.
+      # If the dashboard renders empty, this section makes the cause
+      # obvious without trace-viewer download (CORS reject vs. empty DB
+      # vs. unreachable backend look very different from this output).
+      #
+      # TODO(#123): remove this step once `ui-playwright` has 5 consecutive
+      # green runs on PRs to main. The probes earned their keep during
+      # iteration-1's first four CI rounds (CORS, wire-shape, strict-mode)
+      # but become noise once the failure modes are familiar.
+      - name: Diagnostic — probe stack from runner
+        run: |
+          set -x
+          echo "--- /api/health (backend, no auth) ---"
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" http://localhost:4002/api/health || true
+          echo "--- /api/modules (backend, X-API-Key) ---"
+          curl -sS -H 'X-API-Key: hf_test_key' http://localhost:4002/api/modules | head -c 600 || true
+          echo ""
+          echo "--- /api/modules (backend, browser-shaped Origin) ---"
+          curl -sS -H 'X-API-Key: hf_test_key' \
+            -H 'Origin: http://localhost:6173' \
+            -D /tmp/api_headers.txt \
+            http://localhost:4002/api/modules -o /dev/null
+          echo "Response headers:"
+          cat /tmp/api_headers.txt || true
+          echo "--- / (homepage nginx) ---"
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" http://localhost:6173/ || true
+          echo "--- /dashboard (homepage SPA fallback) ---"
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" http://localhost:6173/dashboard || true
+          echo "--- homepage bundle env (grep for VITE_API_URL bake) ---"
+          curl -sS http://localhost:6173/ | grep -oE 'assets/[A-Za-z0-9_-]+\.js' | head -1 \
+            | xargs -I {} curl -sS "http://localhost:6173/{}" \
+            | grep -oE '"http://localhost:[0-9]+/api"|hf_test_key|VITE_API' | head -10 || true
+
+      - name: Run Playwright specs
+        working-directory: tests/ui
+        run: npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/ui/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: tests/ui/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Capture compose logs on failure
+        if: failure()
+        run: |
+          for svc in homepage backend image-service duckdb-service; do
+            echo "==================== $svc ===================="
+            docker compose -f tests/ui/docker-compose.ui.yml \
+                           -p highfive-ui logs --no-color "$svc" 2>&1 || true
+          done
+
+      # Cat the JSON report inline so the failure cause is in the log
+      # even when artifact download is unavailable. test-results/
+      # also holds per-failure trace + screenshot + video as siblings.
+      - name: Dump Playwright failure summary on failure
+        if: failure()
+        run: |
+          echo "--- tests/ui/test-results/ tree ---"
+          find tests/ui/test-results -maxdepth 3 -type f 2>/dev/null | head -50 || true
+          echo "--- error-context.md per failure ---"
+          find tests/ui/test-results -name 'error-context.md' -exec sh -c 'echo "===== {} ====="; cat "{}"' \; 2>/dev/null || true
+
+      - name: Tear down UI stack
+        if: always()
+        run: |
+          docker compose -f tests/ui/docker-compose.ui.yml \
+                         -p highfive-ui down -v || true

@@ -6,7 +6,7 @@ enforces on every PR. For the actual CI job manifest, see
 
 ## Testing pyramid
 
-Three layers, each fast and hermetic where possible:
+Four layers, each fast and hermetic where possible:
 
 ### Per-service unit tests (most coverage)
 
@@ -54,6 +54,29 @@ drives it with `tools/mock_esp.py`. Asserts:
 
 Run: `make test-e2e` (after `make test-e2e-deps`).
 
+### UI tests (Playwright)
+
+`tests/ui/` boots the same four backend services plus a production-built
+homepage container, then drives real Chromium through the SPA via
+Playwright. Catches the surface that jsdom + mocked APIs cannot — wire-
+shape drift at the rendered-DOM boundary, SPA route mounting, and
+cross-service contract regressions that pass `npm test && npm run build`
+silently.
+
+Five specs in iteration 1:
+
+- `smoke.spec.ts` — homepage `/`, `/dashboard`, `/setup` mount without console errors.
+- `dashboard-telemetry.spec.ts` — pins the [Telemetry sidecar envelope drift](../11-risks-and-technical-debt/README.md#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field) regression. Asserts TelemetryRow renders literal values, not `—`.
+- `dashboard-side-list.spec.ts` — pins the [Three layers, one rule](../11-risks-and-technical-debt/README.md#three-layers-one-rule-was-actually-four-surfaces--the-dashboard-side-list-silently-filtered-pending-modules-pr-ii-final-pass-smoke) regression. Asserts the Null-Island module appears with the "Location pending" pill.
+- `module-panel-rendering.spec.ts` — header, MAC-prefix, nest grid (4 leafcutter progressbars), and bee-type summary total hatches (64, summed from `daily_progress`) render against real backend data. Image count is deliberately not pinned — see the spec for why.
+- `setup-wizard-happy-path.spec.ts` — Step 1 → 5 via the documented skip branches.
+
+Specs that fixture-type a wire shape import the type from
+`@highfive/contracts` — currently `dashboard-telemetry.spec.ts`
+imports `TelemetryEntry` (see [ADR-014](../09-architecture-decisions/adr-014-playwright-ui-tests.md)).
+
+Run: `make test-ui` (after `make test-ui-deps`).
+
 ### Manual hardware-in-the-loop tests (OTA)
 
 Four OTA flows cannot be exercised on CI because they require a real
@@ -72,9 +95,15 @@ make test               # = make test-esp-native test-e2e
 make test-esp-native    # cd ESP32-CAM && python -m platformio test -e native
 make test-e2e-deps      # pip install -r tests/e2e/requirements.txt
 make test-e2e           # python -m pytest tests/e2e/ -v
+make test-ui-deps       # cd tests/ui && npm ci && npx playwright install --with-deps chromium
+make test-ui            # docker compose up + seed + playwright test + teardown
 ```
+
+`make test-ui` is intentionally not in the `make test` umbrella yet —
+the new gate stacks a few green CI runs before being folded into the
+default `make test` target.
 
 ## CI
 
-Eight parallel jobs gate every PR — see [ci-gates.md](ci-gates.md).
+Nine parallel jobs gate every PR — see [ci-gates.md](ci-gates.md).
 All must be green to merge.

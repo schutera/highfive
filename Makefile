@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware test test-esp test-esp-native test-e2e test-e2e-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys
+.PHONY: help firmware test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys
 
 help:
 	@echo "HiveHive — available make targets"
@@ -15,6 +15,8 @@ help:
 	@echo "  make test-esp-native    Alias for test-esp"
 	@echo "  make test-e2e           Run end-to-end pipeline test (boots docker compose)"
 	@echo "  make test-e2e-deps      Install Python deps for the e2e test"
+	@echo "  make test-ui            Run UI tests in real Chromium (boots docker compose + homepage)"
+	@echo "  make test-ui-deps       Install Node + Playwright + Chromium for the UI tests"
 	@echo "  make check-citations    Verify path:line citations in docs/ + CLAUDE.md still resolve"
 	@echo "  make check-stale-reset-prose"
 	@echo "                          Catch broken pre-#40 'hold IO0 for N seconds' factory-reset prose"
@@ -28,6 +30,8 @@ help:
 	@echo "  test-esp*   →   pip install platformio   (provides 'pio')"
 	@echo "  test-e2e    →   docker + docker compose v2"
 	@echo "                  pip install -r tests/e2e/requirements.txt"
+	@echo "  test-ui     →   docker + docker compose v2, node 22, python 3.11"
+	@echo "                  (cd tests/ui && npm ci && npx playwright install --with-deps chromium)"
 	@echo ""
 
 # Wraps ESP32-CAM/build.sh: arduino-cli compile → merged.bin →
@@ -54,6 +58,34 @@ test-e2e-deps:
 test-e2e:
 	@echo ">>> pytest tests/e2e/ -v"
 	python -m pytest tests/e2e/ -v
+
+# UI tests in real Chromium against the production-built homepage.
+# UI_REUSE_STACK=1 skips boot/teardown - mirrors E2E_REUSE_STACK in
+# tests/e2e/conftest.py. The test-e2e umbrella target deliberately
+# does not pull this in yet (chapter 11 lesson: let a new gate stack
+# a few green CI runs before adding it to `make test`).
+test-ui-deps:
+	@echo ">>> cd tests/ui && npm ci && npx playwright install --with-deps chromium"
+	cd tests/ui && npm ci && npx playwright install --with-deps chromium
+
+# Single-recipe to avoid `ifeq`-vs-recipe parsing edge cases. The shell
+# `if` keeps everything in one process so trap cleanup runs even on
+# spec failure.
+test-ui:
+	@echo ">>> tests/ui Playwright run (boots compose, seeds, runs, tears down)"
+	@set -e; \
+	if [ "$$UI_REUSE_STACK" = "1" ]; then \
+	  echo ">>> UI_REUSE_STACK=1: reusing existing stack"; \
+	  python tests/ui/scripts/seed_ui_fixtures.py; \
+	  cd tests/ui && npx playwright test; \
+	else \
+	  docker compose -f tests/ui/docker-compose.ui.yml -p highfive-ui up -d --build; \
+	  trap 'docker compose -f tests/ui/docker-compose.ui.yml -p highfive-ui logs --no-color; docker compose -f tests/ui/docker-compose.ui.yml -p highfive-ui down -v' EXIT; \
+	  python tests/ui/scripts/seed_ui_fixtures.py; \
+	  ( cd tests/ui && npx playwright test ); \
+	  trap - EXIT; \
+	  docker compose -f tests/ui/docker-compose.ui.yml -p highfive-ui down -v; \
+	fi
 
 check-citations:
 	@echo ">>> bash scripts/check-doc-citations.sh"

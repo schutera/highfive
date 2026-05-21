@@ -59,9 +59,13 @@ resolution.
 UI tests live under `tests/ui/` as a standalone npm package (not a
 root workspace) with the following structural rules:
 
-1. **TypeScript Playwright bindings.** Specs `import` wire-shape
-   types from `@highfive/contracts` so a future contracts rename is a
-   compile error in the spec, not a silent `undefined`-pluck.
+1. **TypeScript Playwright bindings.** Specs **that fixture-type a
+   wire shape** import the type from `@highfive/contracts` so a
+   future contracts rename is a compile error in the spec, not a
+   silent `undefined`-pluck. Specs that only drive the DOM (smoke
+   navigation, side-list visibility, setup-wizard step transitions)
+   don't need the import; only the literal-value telemetry spec
+   currently does.
 2. **Production-built homepage as the test artifact.** Specs run
    against the `homepage/Dockerfile` (nginx-served), not vite dev. The
    production build is what users hit; the test must pin the same

@@ -8,7 +8,12 @@ export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // Iteration-1 keeps retries at 0 even in CI: the seed-script sets up
+  // a single deterministic state, literal-value assertions key on that
+  // state, and retries against the same already-mutated stack would
+  // hide flake instead of surfacing it. Re-evaluate after a few green
+  // runs.
+  retries: 0,
   workers: 1,
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
   use: {

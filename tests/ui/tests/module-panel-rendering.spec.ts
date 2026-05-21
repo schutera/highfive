@@ -43,16 +43,4 @@ test.describe('module panel rendering', () => {
     // renders as "6 mm" per homepage/src/types/index.ts BEE_TYPES.
     await expect(page.locator('article').filter({ hasText: '6 mm' })).toBeVisible();
   });
-
-  test('seeded modules each expose a side-list entry with a status indicator', async ({ page }) => {
-    await page.goto('/dashboard');
-
-    // Pin the structural contract: every side-list button has a
-    // status dot with one of the three known aria-labels. The visual
-    // colour can change without breaking this test; only the contract
-    // ("each module has a labelled status indicator") would.
-    const buttons = page.getByRole('button', { name: /Garten 12|Elias123|Waldrand/ });
-    const visibleCount = await buttons.count();
-    expect(visibleCount).toBeGreaterThanOrEqual(1);
-  });
 });

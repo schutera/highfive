@@ -49,6 +49,8 @@ make test               # = make test-esp-native test-e2e
 make test-esp-native    # cd ESP32-CAM && python -m platformio test -e native
 make test-e2e-deps      # pip install -r tests/e2e/requirements.txt
 make test-e2e           # python -m pytest tests/e2e/ -v
+make test-ui-deps       # cd tests/ui && npm ci && npx playwright install --with-deps chromium
+make test-ui            # boots docker compose + production homepage, seeds, runs Playwright in real Chromium, tears down
 ```
 
 Per-service unit tests (what CI runs):

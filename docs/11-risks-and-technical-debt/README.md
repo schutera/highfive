@@ -942,12 +942,20 @@ entry — the wire-shape-mismatch story there was the same shape:
 docs + types + code all individually correct, but the cross-layer
 contract was wishful.
 
-**Pinned by.** `tests/ui/tests/dashboard-side-list.spec.ts` (Playwright,
-ADR-014). Drives a real browser against the production-built homepage
-with a seeded Null-Island module at `(0,0)` and asserts both that the
-module is present in the side-list and that the "Location pending"
-pill renders. A regression that re-introduces the pre-bounds filter
-fails this spec.
+**Pinned partially by.** `tests/ui/tests/dashboard-side-list.spec.ts`
+(Playwright, ADR-014) drives a real browser against the production-
+built homepage with a seeded Null-Island module at `(0,0)` and asserts
+that the module is visible in the side-list with the "Location
+pending" pill. The spec pins the **structural rule** the side-list
+must obey — "pending modules appear in the operator UI" — but **not**
+the exact pre-104 bug shape, which is no longer possible to regress
+in the same way: after PR-104's "dashboard side-list rework"
+`DashboardPage`'s `sideListModules` is derived from the `/api/modules`
+response with its own pending-bottom sort, not from MapView's
+`visibleModules`. Re-introducing the original `.filter(hasPlausibleLocation)`
+in MapView's `fuzzedModules` would leave the side-list unaffected.
+The new failure mode the spec catches is "`sideListModules` learns
+to filter pending modules out" or "the pill JSX branch is dropped".
 
 **Current design (PR 1 / issues #103, #102, #101 — supersedes the
 union-based fix.)** The original PR II patch closed the symptom by

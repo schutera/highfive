@@ -20,8 +20,11 @@ NOT cover:
 
 Idempotent: re-running against an already-seeded stack is a no-op for the
 Null-Island row (UPSERT) and just adds another sidecar entry for the
-telemetry case (the spec asks for "the latest entry", so an extra row
-is harmless).
+telemetry case. The spec asserts on `logs[0]` (latest entry) AND on
+DOM text via `toContainText`; with N identical entries the DOM renders
+N TelemetryRows, each containing all the literal values, so the
+`toContainText` check still matches. The spec does NOT pin "exactly
+one entry" - it pins "at least one entry contains the expected values".
 """
 
 from __future__ import annotations

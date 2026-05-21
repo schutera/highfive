@@ -71,8 +71,9 @@ Five specs in iteration 1:
 - `module-panel-rendering.spec.ts` — header, MAC-prefix, image count, nest grid all render against real backend data.
 - `setup-wizard-happy-path.spec.ts` — Step 1 → 5 via the documented skip branches.
 
-Wire-shape types (`TelemetryEntry`, `Module`) are imported from
-`@highfive/contracts` (see [ADR-014](../09-architecture-decisions/adr-014-playwright-ui-tests.md)).
+Specs that fixture-type a wire shape import the type from
+`@highfive/contracts` — currently `dashboard-telemetry.spec.ts`
+imports `TelemetryEntry` (see [ADR-014](../09-architecture-decisions/adr-014-playwright-ui-tests.md)).
 
 Run: `make test-ui` (after `make test-ui-deps`).
 

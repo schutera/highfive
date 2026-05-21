@@ -8,14 +8,15 @@ import { test, expect } from '@playwright/test';
 // surfaces here as a broken render.
 
 test.describe('module panel rendering', () => {
-  test('seeded Garten 12 module renders header, MAC prefix, image count, and nest grid', async ({
+  test('seeded Garten 12 module renders header, MAC prefix, nest grid, and bee-type summary', async ({
     page,
   }) => {
     await page.goto('/dashboard');
 
     // Garten 12 is one of the five SEED_DATA modules. id=000000000002,
-    // 4 leafcutter nests, image_count=87. See duckdb-service/db/schema.py
-    // seed block.
+    // 4 leafcutter nests (`nest-009..nest-012`) with daily_progress
+    // rows whose `hatched` values sum to 64 (22+8+19+15). See
+    // duckdb-service/db/schema.py's seed block.
     const sideListButton = page.getByRole('button', { name: /Garten 12/ });
     await expect(sideListButton).toBeVisible();
     await sideListButton.click();
@@ -30,17 +31,28 @@ test.describe('module panel rendering', () => {
     // refactor surfaces here.
     await expect(page.locator('[aria-label="module identifier"]')).toHaveText('0000');
 
-    // Image count - the seed sets 87 and the upload pipeline didn't
-    // touch this module, so the literal value holds.
-    await expect(page.locator('main, [role="main"], body')).toContainText('87');
-
     // Nest grid - 4 progress bars (one per leafcutter nest). The aria-
-    // label pattern "Nest N sealed" is stable across i18n changes.
+    // label pattern "Nest N sealed" is stable across i18n changes. This
+    // pins "the wire-shape returns 4 nests for this module and each
+    // renders a progressbar with its sealed value" - exactly the
+    // backend ↔ homepage contract the seeded fixture certifies.
     const nestBars = page.locator('[role="progressbar"][aria-label^="Nest"]');
     await expect(nestBars).toHaveCount(4);
 
     // The article wrapper carries the bee-type "size" label; leafcutter
     // renders as "6 mm" per homepage/src/types/index.ts BEE_TYPES.
-    await expect(page.locator('article').filter({ hasText: '6 mm' })).toBeVisible();
+    const leafcutterArticle = page.locator('article').filter({ hasText: '6 mm' });
+    await expect(leafcutterArticle).toBeVisible();
+
+    // Total hatches for the leafcutter bee-type summary aggregates the
+    // four nests' `hatched` daily_progress entries: 22+8+19+15 = 64.
+    // This is the literal-value pin against `daily_progress` plumbing
+    // through `getModuleById` -> ModulePanel.beeTypeSummaries.
+    // Backend's `image_count=87` seed value is intentionally NOT pinned
+    // here - the backend coalesces `real_image_count ?? image_count`
+    // and the `??` short-circuits on 0, so seeded modules with no
+    // actual uploads render `0 images`. The Garten 12 panel's image
+    // count is environment-derived state, not a wire-shape contract.
+    await expect(leafcutterArticle).toContainText('64');
   });
 });

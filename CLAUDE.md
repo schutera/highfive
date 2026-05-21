@@ -49,6 +49,8 @@ make test               # = make test-esp-native test-e2e
 make test-esp-native    # cd ESP32-CAM && python -m platformio test -e native
 make test-e2e-deps      # pip install -r tests/e2e/requirements.txt
 make test-e2e           # python -m pytest tests/e2e/ -v
+make test-ui-deps       # cd tests/ui && npm ci && npx playwright install --with-deps chromium
+make test-ui            # boots docker compose + production homepage, seeds, runs Playwright in real Chromium, tears down
 ```
 
 Per-service unit tests (what CI runs):
@@ -120,6 +122,8 @@ Three structural rules earned across PR-42's review cycle (see [`docs/11-risks-a
 1. **If a doc claims the admin UI renders a field, prove it before pushing.** Run the dev stack (`docker compose up`), hit the relevant view, and confirm the field actually renders. `npm test && npm run build` is necessary, not sufficient — both can pass while every wire-shape field renders as `undefined` (TypeScript optionals collapse silently on level mismatch).
 2. **Wire shapes at the backend ↔ homepage boundary live in [`contracts/src/index.ts`](contracts/src/index.ts).** A service-local `interface` declaration for a wire shape is a smell — it means the type isn't pinned across the boundary, and ADR-004's "drift becomes a TypeScript compile error" guarantee doesn't hold. Move the type to the shared workspace package and re-export it where needed.
 3. **Component tests for views that render wire-shape data must mount with a realistic fixture, not a mock object the test author guessed at.** The fixture shape is itself the contract under test. Bonus: a wire-shape round-trip test (mock `fetch` with the exact JSON the emitting service produces, feed through the consumer's API client, render the component) catches refactors that would silently break the production code path.
+4. **When introducing a new view that renders wire-shape data — or changing how an existing one does — add a Playwright spec under [`tests/ui/tests/`](tests/ui/) that mounts the production-built homepage and asserts the field renders against the real backend.** Vitest + jsdom is necessary, not sufficient: every TS-optional wire-shape field collapses to `undefined` silently under mocked APIs, and jsdom never exercises SPA routing or nginx serving. The Playwright layer is the only one that closes both gaps. See [ADR-014](docs/09-architecture-decisions/adr-014-playwright-ui-tests.md) for the rationale and `tests/ui/README.md` for how to add a spec.
+5. **For endpoints that aggregate (group-by, bucket, fold), assert that real data lands in the expected bucket — not just that the response envelope has the right shape.** A test that pins `len(response["buckets"]) == 7` is satisfied by `[{count: 0}] * 7`, which is exactly what a silently-broken aggregation looks like. Seed at least one upload (or row, or event) inside the test window and assert it appears in its bucket with the expected count. "Envelope right, behaviour wrong" was the failure mode behind PR-120's all-zeros daily aggregation (see [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md) "`date_trunc('day', ts)` returns DATE not TIMESTAMP" for the incident).
 
 ## Critical rules (do NOT violate)
 

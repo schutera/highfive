@@ -254,7 +254,7 @@ timeline without stitching across silent periods. Aggregates over
 proxies this route at `/api/modules/:id/activity` and maps the
 top-level `module_id` to `moduleId` (camelCase) for the homepage.
 See [api-reference.md §3.10](../api-reference.md) and
-[ADR-014](../09-architecture-decisions/adr-014-weather-correlation.md).
+[ADR-015](../09-architecture-decisions/adr-015-weather-correlation.md).
 
 ## Internal services (no HTTP surface)
 

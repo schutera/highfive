@@ -40,7 +40,13 @@
 //   topology (verified at the time of writing).
 // * `'test'` — vitest's default `NODE_ENV` (Vitest documents this:
 //   "If NODE_ENV is not set, Vitest sets it to 'test' by default").
-//   The backend's entire 60-test suite runs under this value.
+//   The backend's entire 60-test suite runs under this value. Also
+//   set explicitly by `tests/ui/docker-compose.ui.yml`'s backend
+//   service so the Playwright stack picks up the dev-CORS fallback
+//   (production CORS only allows `https://highfive.schutera.com`
+//   and would block the homepage container's `http://localhost:6173`
+//   origin). Narrowing this safelist requires updating the UI
+//   compose first.
 //
 // `process.env` is read each call rather than captured at module load
 // because the test suite manipulates env vars between cases via

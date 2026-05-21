@@ -282,7 +282,7 @@ def test_record_image_invalid_module_id_returns_400(client):
 
 
 def test_record_image_stamps_uploaded_at_in_utc(client, fresh_db):
-    """Regression pin for ADR-014 review P2: `record_image` stamps UTC,
+    """Regression pin for ADR-015 review P2: `record_image` stamps UTC,
     not container-local time. Without this, setting TZ=Europe/Berlin on
     the container would put rows 1-2 hours past `activity_timeseries`'s
     window upper bound and the chart would silently drop the most
@@ -456,22 +456,21 @@ def test_activity_timeseries_daily_groups_uploads_by_day(client, fresh_db):
     from datetime import datetime, timezone, timedelta
 
     _seed_module(fresh_db, TEST_MAC_1)
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    # Today bucket (3 uploads) + 2-days-ago bucket (1 upload).
-    today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    two_days_ago = today_midnight - timedelta(days=2)
-    _seed_image_upload(
-        fresh_db, TEST_MAC_1, "t1.jpg", today_midnight + timedelta(hours=3)
+    # Cluster all seeded stamps around midday so even a test run that
+    # straddles UTC midnight between this `now` and the route's own
+    # `datetime.now(timezone.utc)` (inside the request handler) lands
+    # all four stamps in the same calendar day from both clocks. A
+    # midnight-adjacent test could see "today" become "yesterday"
+    # between seed time and read time, flaking the bucket assertion.
+    now = datetime.now(timezone.utc).replace(
+        tzinfo=None, hour=12, minute=0, second=0, microsecond=0
     )
-    _seed_image_upload(
-        fresh_db, TEST_MAC_1, "t2.jpg", today_midnight + timedelta(hours=11)
-    )
-    _seed_image_upload(
-        fresh_db, TEST_MAC_1, "t3.jpg", today_midnight + timedelta(hours=19)
-    )
-    _seed_image_upload(
-        fresh_db, TEST_MAC_1, "p1.jpg", two_days_ago + timedelta(hours=8)
-    )
+    today_noon = now
+    two_days_ago_noon = today_noon - timedelta(days=2)
+    _seed_image_upload(fresh_db, TEST_MAC_1, "t1.jpg", today_noon - timedelta(hours=3))
+    _seed_image_upload(fresh_db, TEST_MAC_1, "t2.jpg", today_noon)
+    _seed_image_upload(fresh_db, TEST_MAC_1, "t3.jpg", today_noon + timedelta(hours=3))
+    _seed_image_upload(fresh_db, TEST_MAC_1, "p1.jpg", two_days_ago_noon)
 
     resp = client.get(
         f"/modules/{TEST_MAC_1}/activity_timeseries?interval=daily&days=7"
@@ -479,9 +478,14 @@ def test_activity_timeseries_daily_groups_uploads_by_day(client, fresh_db):
     assert resp.status_code == 200
     body = resp.get_json()
     non_zero = {b["timestamp"]: b["count"] for b in body["buckets"] if b["count"] > 0}
+    # Asserting against the exact bucket keys derived from `today_noon`
+    # rather than the route's "today" — both clocks now agree on the
+    # calendar day because all stamps are midday-aligned.
+    today_bucket_key = today_noon.replace(hour=0).isoformat()
+    two_days_ago_bucket_key = two_days_ago_noon.replace(hour=0).isoformat()
     assert non_zero == {
-        today_midnight.isoformat(): 3,
-        two_days_ago.isoformat(): 1,
+        today_bucket_key: 3,
+        two_days_ago_bucket_key: 1,
     }, f"daily buckets did not aggregate as expected: {non_zero!r}"
 
 

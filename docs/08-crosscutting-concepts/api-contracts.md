@@ -201,7 +201,7 @@ browser** (Open-Meteo, no API key, CORS open) — it is _not_ a
 HiveHive wire shape, so it does not appear here. The Open-Meteo
 client is at `homepage/src/services/weather.ts`. Rationale for
 browser-direct vs. backend-proxy:
-[ADR-014](../09-architecture-decisions/adr-014-weather-correlation.md).
+[ADR-015](../09-architecture-decisions/adr-015-weather-correlation.md).
 
 ## Field-name drift to watch for
 

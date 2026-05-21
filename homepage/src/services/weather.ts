@@ -93,6 +93,11 @@ export function aggregateHourlyToDaily(hourly: WeatherBucket[]): WeatherBucket[]
     { tempSum: number; tempCount: number; precipSum: number; precipSawValue: boolean }
   >();
   for (const h of hourly) {
+    // Open-Meteo's contract guarantees `YYYY-MM-DDTHH:mm` (16 chars)
+    // — we pad to 19 above. Any shorter value is malformed and would
+    // produce a truncated day key; drop it rather than poison the
+    // aggregate.
+    if (h.timestamp.length < 10) continue;
     const dayKey = h.timestamp.slice(0, 10); // "YYYY-MM-DD"
     let agg = byDay.get(dayKey);
     if (!agg) {

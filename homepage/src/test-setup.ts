@@ -43,7 +43,13 @@ afterEach(() => {
         contentBoxSize: [],
         devicePixelContentBoxSize: [],
       } as unknown as ResizeObserverEntry;
-      this.cb([entry], this as unknown as ResizeObserver);
+      // Real browsers dispatch ResizeObserver entries after the current
+      // microtask batch / commit phase, not synchronously inside
+      // observe(). Mirror that: a synchronous fire would land setState
+      // calls in the middle of React's commit, which works by luck for
+      // our chart but is a latent ordering hazard for any future
+      // consumer that sets state only from the observer.
+      queueMicrotask(() => this.cb([entry], this as unknown as ResizeObserver));
     }
     unobserve() {}
     disconnect() {}

@@ -175,7 +175,7 @@ the prod hostname in deployed builds via the build-time
 The dashboard's `ActivityWeatherChart` also calls Open-Meteo
 directly from the browser (no API key, CORS open) at
 `https://api.open-meteo.com/v1/forecast` — see
-[ADR-014](../09-architecture-decisions/adr-014-weather-correlation.md).
+[ADR-015](../09-architecture-decisions/adr-015-weather-correlation.md).
 The chart component lives at
 [`homepage/src/components/ActivityWeatherChart.tsx`](../../homepage/src/components/ActivityWeatherChart.tsx);
 the Open-Meteo client at

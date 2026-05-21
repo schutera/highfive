@@ -1,4 +1,4 @@
-# ADR-014: Weather correlation overlay uses Open-Meteo direct from the browser
+# ADR-015: Weather correlation overlay uses Open-Meteo direct from the browser
 
 ## Status
 
@@ -121,10 +121,16 @@ key is `${YYYY-MM-DD}T00:00:00`, byte-aligned with the duckdb-
 service daily aggregate timestamps so the chart's `Map.get` lookup
 hits without further normalisation.
 
-An earlier revision of this ADR took option (1) on the reasoning
+**Previously (drop weather entirely in daily mode → superseded):**
+the first revision of this ADR took option (1) on the reasoning
 that mapping a single midnight-UTC hourly sample as the daily value
-would mislead. The aggregator is the explicit fix for that: the
-daily value is the mean across the day, not a single point.
+would mislead. The aggregator above is the explicit fix for that:
+the daily value is the mean across the day, not a single point.
+The reversal was triggered by PR-120 manual testing — the empty
+30-day view felt broken on inspection even though the original
+decision was internally consistent. Recording the supersede here
+so a future archaeologist sees the scar tissue, not just the
+new state.
 Partial days at the window edges (first/last day not fully covered)
 under-sample but do not bias systematically — acceptable trade-off
 because the chart is for pattern-spotting, not weather-station

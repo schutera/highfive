@@ -62,10 +62,12 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
     observerRef.current?.disconnect();
     observerRef.current = null;
     if (!node) return;
-    const rect = node.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      setChartSize({ w: rect.width, h: rect.height });
-    }
+    // ResizeObserver fires once for the initial size as soon as
+    // `observe()` is called (per spec), so we don't need a separate
+    // `getBoundingClientRect` pass — the observer's first delivery
+    // is the synchronous-on-modern-browsers measurement we'd get
+    // from the rect anyway, just routed through the same code path
+    // that subsequent resize updates take.
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const cr = entry.contentRect;

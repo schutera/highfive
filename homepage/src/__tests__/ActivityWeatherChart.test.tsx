@@ -169,10 +169,11 @@ describe('<ActivityWeatherChart>', () => {
     });
     // Chart still renders — the upload bars are independent of weather.
     // findBy* (async) because the chart subtree is gated on a
-    // requestAnimationFrame in production — see ActivityWeatherChart's
-    // `chartReady` state. The RAF resolves one microtask later than
-    // the effect that sets the activity/weather text, so a sync
-    // getByTestId here would race.
+    // ResizeObserver-derived `chartSize` state (see
+    // `ActivityWeatherChart.tsx::setContainerRef`). The stub in
+    // `test-setup.ts` fires the observer microtask-asynchronously to
+    // mirror real-browser semantics, so a sync getByTestId here would
+    // race the gate.
     expect(await screen.findByTestId('recharts-ComposedChart')).toBeInTheDocument();
   });
 
@@ -191,7 +192,7 @@ describe('<ActivityWeatherChart>', () => {
   });
 
   it('aggregates hourly weather to daily buckets in 30d mode (mean temp, sum precip)', async () => {
-    // Earlier ADR-014 revisions suppressed the Open-Meteo fetch in
+    // Earlier ADR-015 revisions suppressed the Open-Meteo fetch in
     // daily mode and let the bars stand alone, on the reasoning that
     // a single midnight-UTC hourly sample is not the daily value.
     // The aggregator (`aggregateHourlyToDaily`) is the explicit fix
@@ -240,10 +241,11 @@ describe('<ActivityWeatherChart>', () => {
       screen.queryByText(/Weather data unavailable|Wetterdaten nicht verfügbar/i),
     ).not.toBeInTheDocument();
     // findBy* (async) because the chart subtree is gated on a
-    // requestAnimationFrame in production — see ActivityWeatherChart's
-    // `chartReady` state. The RAF resolves one microtask later than
-    // the effect that sets the activity/weather text, so a sync
-    // getByTestId here would race.
+    // ResizeObserver-derived `chartSize` state (see
+    // `ActivityWeatherChart.tsx::setContainerRef`). The stub in
+    // `test-setup.ts` fires the observer microtask-asynchronously to
+    // mirror real-browser semantics, so a sync getByTestId here would
+    // race the gate.
     expect(await screen.findByTestId('recharts-ComposedChart')).toBeInTheDocument();
   });
 
@@ -263,10 +265,11 @@ describe('<ActivityWeatherChart>', () => {
       ).toBeInTheDocument();
     });
     // findBy* (async) because the chart subtree is gated on a
-    // requestAnimationFrame in production — see ActivityWeatherChart's
-    // `chartReady` state. The RAF resolves one microtask later than
-    // the effect that sets the activity/weather text, so a sync
-    // getByTestId here would race.
+    // ResizeObserver-derived `chartSize` state (see
+    // `ActivityWeatherChart.tsx::setContainerRef`). The stub in
+    // `test-setup.ts` fires the observer microtask-asynchronously to
+    // mirror real-browser semantics, so a sync getByTestId here would
+    // race the gate.
     expect(await screen.findByTestId('recharts-ComposedChart')).toBeInTheDocument();
   });
 });

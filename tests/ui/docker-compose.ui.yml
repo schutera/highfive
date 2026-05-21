@@ -1,0 +1,133 @@
+# UI test stack.
+#
+# Same three back-of-stack services as tests/e2e/docker-compose.test.yml
+# (image-service, duckdb-service, backend) plus a production-built homepage
+# container served by nginx. Project name `highfive-ui` keeps the volumes
+# and network isolated from both the dev stack (`highfive`) and the e2e
+# pipeline stack (`highfive-e2e`), so all three can coexist on one host.
+#
+# Why a production build, not vite dev:
+#   - vite dev includes HMR overlays and the LAN-IP middleware that don't
+#     exist in prod. Tests against the dev server test the wrong artifact.
+#   - The production Dockerfile is what users hit; the tests should pin
+#     the same path.
+#
+# Host port mapping:
+#   image-service     8000  →  9000   (matches tests/e2e/)
+#   duckdb-service    8002  →  9002   (matches tests/e2e/)
+#   backend           3002  →  4002   (matches tests/e2e/)
+#   homepage          80    →  6173   (NEW — Playwright drives this)
+#
+# Run via:
+#   docker compose -f tests/ui/docker-compose.ui.yml -p highfive-ui up -d --build
+# Drive via:
+#   python tests/ui/scripts/seed_ui_fixtures.py
+#   cd tests/ui && npx playwright test
+# Tear down:
+#   docker compose -f tests/ui/docker-compose.ui.yml -p highfive-ui down -v
+
+services:
+  duckdb-service:
+    build:
+      context: ../../duckdb-service
+      dockerfile: Dockerfile.dev
+    ports:
+      - '0.0.0.0:9002:8000'
+    environment:
+      DEBUG: 'false'
+      # UI tests want the seeded modules (Garten 12 with leafcutter nests
+      # etc.) as a deterministic backdrop for module-panel rendering and
+      # side-list ordering. seed_ui_fixtures.py adds the Null-Island
+      # module + telemetry-bearing upload on top.
+      SEED_DATA: 'true'
+    volumes:
+      - duckdb_ui_data:/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    networks:
+      - uinet
+
+  image-service:
+    build:
+      context: ../../image-service
+      dockerfile: Dockerfile.dev
+    ports:
+      - '9000:4444'
+    environment:
+      DEBUG: 'false'
+      DUCKDB_PATH: /data/app.duckdb
+      DUCKDB_SERVICE_URL: http://duckdb-service:8000
+    volumes:
+      - duckdb_ui_data:/data
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
+    networks:
+      - uinet
+
+  backend:
+    build:
+      # Context is repo root - npm workspaces needs contracts/ + the root
+      # lockfile. Same pattern as tests/e2e/docker-compose.test.yml.
+      context: ../..
+      dockerfile: backend/Dockerfile.dev
+    ports:
+      - '4002:3002'
+    environment:
+      # NODE_ENV=test, not production. The e2e stack uses production
+      # because it drives the backend with raw HTTP requests where CORS
+      # doesn't apply. The UI stack drives the homepage in a real
+      # browser, and `backend/src/app.ts`'s cors origin is
+      # `'https://highfive.schutera.com'` under isProduction() - which
+      # blocks `http://localhost:6173`. `'test'` is in the
+      # isProduction() dev safelist (see `backend/src/env.ts`'s
+      # DEV_ENV_TOKENS) so CORS falls back to '*' and the cross-origin
+      # fetch from the homepage container to the backend works.
+      # HIGHFIVE_API_KEY is still set explicitly so the dev-fallback
+      # off-ramp the safelist allows is never exercised.
+      NODE_ENV: test
+      PORT: '3002'
+      DUCKDB_SERVICE_URL: http://duckdb-service:8000
+      IMAGE_SERVICE_URL: http://image-service:4444
+      HIGHFIVE_API_KEY: hf_test_key
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
+    networks:
+      - uinet
+
+  homepage:
+    build:
+      # Production Dockerfile - nginx serves the built SPA. Build context
+      # must be the repo root so the workspace setup (contracts/) is
+      # available; same shape as backend above.
+      context: ../..
+      dockerfile: homepage/Dockerfile
+      args:
+        # Baked into the bundle at build time. The browser running on the
+        # host resolves these URLs against the host port mappings above.
+        VITE_API_URL: http://localhost:4002/api
+        VITE_API_KEY: hf_test_key
+    ports:
+      - '6173:80'
+    depends_on:
+      - backend
+    networks:
+      - uinet
+
+volumes:
+  duckdb_ui_data:
+
+networks:
+  uinet:
+    driver: bridge

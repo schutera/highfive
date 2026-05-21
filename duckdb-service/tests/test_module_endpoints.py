@@ -438,6 +438,53 @@ def test_activity_timeseries_daily_interval(client, fresh_db):
     assert len(body["buckets"]) == 7
 
 
+def test_activity_timeseries_daily_groups_uploads_by_day(client, fresh_db):
+    """Seeded uploads MUST land in their day-bucket on the daily path.
+
+    Regression pin for the PR-120 manual-test bug: `date_trunc('day', ts)`
+    returns a DATE in DuckDB (handed back to Python as `datetime.date`),
+    whereas `date_trunc('hour', ts)` returns a TIMESTAMP (`datetime`).
+    The route's bucket-key normalisation used `isinstance(bucket,
+    datetime)` and fell through to `str(bucket)` for the date case,
+    producing keys like "2026-05-20" that never matched the dense-fill
+    cursor's "2026-05-20T00:00:00". Result: every daily bucket silently
+    rendered `count: 0` regardless of how many uploads existed.
+    The existing `test_activity_timeseries_daily_interval` only asserts
+    bucket *count* (which still hits 7 with all zeros), so the bug
+    survived. This test asserts that data lands in the daily bucket.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    _seed_module(fresh_db, TEST_MAC_1)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Today bucket (3 uploads) + 2-days-ago bucket (1 upload).
+    today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    two_days_ago = today_midnight - timedelta(days=2)
+    _seed_image_upload(
+        fresh_db, TEST_MAC_1, "t1.jpg", today_midnight + timedelta(hours=3)
+    )
+    _seed_image_upload(
+        fresh_db, TEST_MAC_1, "t2.jpg", today_midnight + timedelta(hours=11)
+    )
+    _seed_image_upload(
+        fresh_db, TEST_MAC_1, "t3.jpg", today_midnight + timedelta(hours=19)
+    )
+    _seed_image_upload(
+        fresh_db, TEST_MAC_1, "p1.jpg", two_days_ago + timedelta(hours=8)
+    )
+
+    resp = client.get(
+        f"/modules/{TEST_MAC_1}/activity_timeseries?interval=daily&days=7"
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    non_zero = {b["timestamp"]: b["count"] for b in body["buckets"] if b["count"] > 0}
+    assert non_zero == {
+        today_midnight.isoformat(): 3,
+        two_days_ago.isoformat(): 1,
+    }, f"daily buckets did not aggregate as expected: {non_zero!r}"
+
+
 def test_activity_timeseries_excludes_other_modules(client, fresh_db):
     """Activity for another module must not bleed into the result."""
     from datetime import datetime, timezone, timedelta

@@ -95,6 +95,42 @@ selection time, but it is real. Code-splitting the chart out via
 for now the chart loads eagerly with the rest of the module
 panel.
 
+### Daily-mode weather: client-side aggregation from hourly samples
+
+Open-Meteo emits hourly samples only. The dashboard chart supports a
+30-day range that aggregates upload activity to one bucket per day;
+weather therefore has to be projected to the same daily grid for the
+overlay to be meaningful. Two options:
+
+1. Drop weather entirely in daily mode and let the upload bars stand
+   alone. Honest about Open-Meteo's hourly granularity; visually
+   loses the most interesting correlation signal (multi-week
+   temperature trends vs. activity trends).
+2. Aggregate the hourly series client-side into per-day mean
+   temperature + per-day summed precipitation, keyed to UTC
+   midnight, and merge into the daily activity buckets by
+   timestamp.
+
+We picked (2). `services/weather.ts`'s
+`aggregateHourlyToDaily` does the projection: temperature is an
+arithmetic mean of non-null hourly values, precipitation is the sum
+of non-null hourly values (mm/h × hours = mm/day), and a day with
+no non-null samples in a series collapses to `null` so the line
+breaks visibly instead of dragging through fake-zero. The bucket
+key is `${YYYY-MM-DD}T00:00:00`, byte-aligned with the duckdb-
+service daily aggregate timestamps so the chart's `Map.get` lookup
+hits without further normalisation.
+
+An earlier revision of this ADR took option (1) on the reasoning
+that mapping a single midnight-UTC hourly sample as the daily value
+would mislead. The aggregator is the explicit fix for that: the
+daily value is the mean across the day, not a single point.
+Partial days at the window edges (first/last day not fully covered)
+under-sample but do not bias systematically — acceptable trade-off
+because the chart is for pattern-spotting, not weather-station
+accuracy. The "weather unavailable" notice fires in daily mode too
+now, since both intervals depend on Open-Meteo reachability.
+
 ### Dense bucket projection on the server
 
 The duckdb-service endpoint

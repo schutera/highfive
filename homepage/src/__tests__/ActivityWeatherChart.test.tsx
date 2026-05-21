@@ -19,9 +19,17 @@ vi.mock('../services/api', () => ({
 }));
 
 const fetchHourlyWeather = vi.fn();
-vi.mock('../services/weather', () => ({
-  fetchHourlyWeather: (...args: unknown[]) => fetchHourlyWeather(...args),
-}));
+// Spread `vi.importActual` so the real `aggregateHourlyToDaily` (used by
+// the chart in daily mode) stays available — without this the named
+// import becomes `undefined` and the effect throws, dropping the chart
+// into its error branch.
+vi.mock('../services/weather', async () => {
+  const actual = await vi.importActual<typeof import('../services/weather')>('../services/weather');
+  return {
+    ...actual,
+    fetchHourlyWeather: (...args: unknown[]) => fetchHourlyWeather(...args),
+  };
+});
 
 // Recharts pulls in ResponsiveContainer which doesn't size correctly
 // in jsdom; mock its primitives down to plain DOM so we can assert on
@@ -141,9 +149,11 @@ describe('<ActivityWeatherChart>', () => {
 
     await waitFor(() => {
       expect(getActivity).toHaveBeenLastCalledWith(MODULE_ID, 'daily', 30);
+      // Weather IS fetched in daily mode (the hourly samples are then
+      // aggregated to daily client-side). See the daily-aggregation
+      // test below for the merge behaviour.
+      expect(fetchHourlyWeather).toHaveBeenLastCalledWith(48.2, 11.77, 30);
     });
-    // Weather fetch is intentionally NOT triggered for daily mode — see
-    // the dedicated daily-mode test below for the rationale.
   });
 
   it('surfaces the "weather unavailable" hint when Open-Meteo returns nothing', async () => {
@@ -158,7 +168,12 @@ describe('<ActivityWeatherChart>', () => {
       ).toBeInTheDocument();
     });
     // Chart still renders — the upload bars are independent of weather.
-    expect(screen.getByTestId('recharts-ComposedChart')).toBeInTheDocument();
+    // findBy* (async) because the chart subtree is gated on a
+    // requestAnimationFrame in production — see ActivityWeatherChart's
+    // `chartReady` state. The RAF resolves one microtask later than
+    // the effect that sets the activity/weather text, so a sync
+    // getByTestId here would race.
+    expect(await screen.findByTestId('recharts-ComposedChart')).toBeInTheDocument();
   });
 
   it('renders the empty-state message when activity has no buckets', async () => {
@@ -175,21 +190,34 @@ describe('<ActivityWeatherChart>', () => {
     expect(screen.queryByTestId('recharts-ComposedChart')).not.toBeInTheDocument();
   });
 
-  it('does NOT fetch Open-Meteo in daily (30d) mode and does not render the weather-unavailable hint', async () => {
-    // Reviewer P1: a stale comment claimed "daily mode skips the
-    // weather merge" while the code merged anyway, painting "midnight
-    // UTC temperature" as if it were the daily value. The fix gates the
-    // fetch on `interval === 'hourly'`. Pinned here so a regression
-    // re-enabling the call shows up at test time.
-    //
-    // The mount-time render is in the default 7d/hourly window — that
-    // call DOES legitimately hit fetchHourlyWeather. We clear the spy
-    // after that initial load so the "did the daily click trigger a
-    // fetch?" assertion below isn't contaminated by the mount call.
+  it('aggregates hourly weather to daily buckets in 30d mode (mean temp, sum precip)', async () => {
+    // Earlier ADR-014 revisions suppressed the Open-Meteo fetch in
+    // daily mode and let the bars stand alone, on the reasoning that
+    // a single midnight-UTC hourly sample is not the daily value.
+    // The aggregator (`aggregateHourlyToDaily`) is the explicit fix
+    // for that, so daily mode now fetches and aggregates. This test
+    // pins both halves of the new contract:
+    //   1. fetchHourlyWeather IS called with the daily window (30).
+    //   2. The chart receives bucket rows whose weather values are
+    //      the per-day mean / sum of the hourly samples, keyed at
+    //      `YYYY-MM-DDT00:00:00` to align with the duckdb-service
+    //      daily aggregate timestamps.
     getActivity.mockResolvedValue(
-      makeActivity([{ timestamp: '2026-05-19T00:00:00', count: 4 }], 'daily'),
+      makeActivity(
+        [
+          { timestamp: '2026-05-18T00:00:00', count: 2 },
+          { timestamp: '2026-05-19T00:00:00', count: 4 },
+        ],
+        'daily',
+      ),
     );
-    fetchHourlyWeather.mockResolvedValue([]);
+    // Two hourly samples for the 19th: temp mean = (10 + 20)/2 = 15;
+    // precip sum = 0.2 + 0.4 = 0.6. The 18th has no samples → both
+    // values null (line will gap visibly).
+    fetchHourlyWeather.mockResolvedValue([
+      { timestamp: '2026-05-19T08:00:00', temperatureC: 10, precipitationMm: 0.2 },
+      { timestamp: '2026-05-19T15:00:00', temperatureC: 20, precipitationMm: 0.4 },
+    ]);
 
     renderChart({ lat: 48.2, lng: 11.77 });
 
@@ -203,12 +231,42 @@ describe('<ActivityWeatherChart>', () => {
 
     await waitFor(() => {
       expect(getActivity).toHaveBeenLastCalledWith(MODULE_ID, 'daily', 30);
+      expect(fetchHourlyWeather).toHaveBeenLastCalledWith(48.2, 11.77, 30);
     });
-    expect(fetchHourlyWeather).not.toHaveBeenCalled();
-    // The "weather unavailable" notice is reserved for "asked, got
-    // nothing" — silent daily mode is by design, not a failure.
+    // The "weather unavailable" notice is reserved for "asked and got
+    // nothing back" — Open-Meteo returned 2 rows, so the notice does
+    // NOT fire even though only one of the activity days got coverage.
     expect(
       screen.queryByText(/Weather data unavailable|Wetterdaten nicht verfügbar/i),
     ).not.toBeInTheDocument();
+    // findBy* (async) because the chart subtree is gated on a
+    // requestAnimationFrame in production — see ActivityWeatherChart's
+    // `chartReady` state. The RAF resolves one microtask later than
+    // the effect that sets the activity/weather text, so a sync
+    // getByTestId here would race.
+    expect(await screen.findByTestId('recharts-ComposedChart')).toBeInTheDocument();
+  });
+
+  it('fires "weather unavailable" when daily-mode Open-Meteo returns nothing', async () => {
+    getActivity.mockResolvedValue(
+      makeActivity([{ timestamp: '2026-05-19T00:00:00', count: 4 }], 'daily'),
+    );
+    fetchHourlyWeather.mockResolvedValue([]);
+
+    renderChart({ lat: 48.2, lng: 11.77 });
+    const range30 = screen.getByRole('radio', { name: /30/i });
+    fireEvent.click(range30);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Weather data unavailable|Wetterdaten nicht verfügbar/i),
+      ).toBeInTheDocument();
+    });
+    // findBy* (async) because the chart subtree is gated on a
+    // requestAnimationFrame in production — see ActivityWeatherChart's
+    // `chartReady` state. The RAF resolves one microtask later than
+    // the effect that sets the activity/weather text, so a sync
+    // getByTestId here would race.
+    expect(await screen.findByTestId('recharts-ComposedChart')).toBeInTheDocument();
   });
 });

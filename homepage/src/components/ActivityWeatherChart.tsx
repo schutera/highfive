@@ -1,18 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import {
-  Bar,
-  CartesianGrid,
-  ComposedChart,
-  Legend,
-  Line,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Bar, CartesianGrid, ComposedChart, Legend, Line, Tooltip, XAxis, YAxis } from 'recharts';
 import type { ActivityTimeSeries, Module, ModuleId } from '@highfive/contracts';
 import { api } from '../services/api';
-import { fetchHourlyWeather, type WeatherBucket } from '../services/weather';
+import {
+  aggregateHourlyToDaily,
+  fetchHourlyWeather,
+  type WeatherBucket,
+} from '../services/weather';
 import { hasPlausibleLocation } from '../lib/location';
 import { useTranslation } from '../i18n/LanguageContext';
 
@@ -44,8 +38,49 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
   const [weatherFailed, setWeatherFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  // Recharts' ResponsiveContainer measures its wrapper synchronously
+  // on mount, sees 0×0 before the first browser paint, and logs a
+  // noisy "width(-1) of chart should be greater than 0" — once per
+  // child component, per render pass, so ~7 console entries every
+  // time a module panel opens. `minWidth/minHeight=0` only soften
+  // the warning text; gating on `requestAnimationFrame` doesn't help
+  // either because Recharts' measure loop runs at mount. We bypass
+  // the container entirely: a ResizeObserver attached to our own
+  // wrapper feeds explicit numeric `width`/`height` to ComposedChart,
+  // which then skips the measurement path that emits the warning.
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const [chartSize, setChartSize] = useState<{ w: number; h: number } | null>(null);
 
   const locationOk = hasPlausibleLocation(location ?? null);
+
+  // Callback ref so the ResizeObserver attaches the moment the chart
+  // wrapper div mounts — which is only AFTER activity data loads,
+  // since the wrapper sits inside the `rows.length > 0` branch. A
+  // plain `useRef` + effect would have measured `null` on first
+  // commit and never re-run.
+  const setContainerRef = useCallback((node: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setChartSize({ w: rect.width, h: rect.height });
+    }
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const cr = entry.contentRect;
+        if (cr.width > 0 && cr.height > 0) {
+          setChartSize((prev) =>
+            prev && prev.w === cr.width && prev.h === cr.height
+              ? prev
+              : { w: cr.width, h: cr.height },
+          );
+        }
+      }
+    });
+    observer.observe(node);
+    observerRef.current = observer;
+  }, []);
 
   useEffect(() => {
     // Guard the effect, not just the JSX — fetching activity for a
@@ -59,27 +94,29 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
     setWeatherFailed(false);
     const interval: 'hourly' | 'daily' = range === 30 ? 'daily' : 'hourly';
     const activityPromise = api.getActivity(moduleId, interval, range);
-    // Daily-mode skips the Open-Meteo fetch entirely. Open-Meteo only
-    // emits hourly samples; merging a single midnight-UTC sample onto
-    // each daily bucket (which is what `weatherByTs.get(timestamp)`
-    // accidentally does — daily buckets are at T00:00:00 and so is
-    // Open-Meteo's first sample of each day) would render "midnight
-    // temperature only" as if it were the daily value. Worse than
-    // showing nothing. Aggregating to a daily mean/max client-side is
-    // a defensible future enhancement; for now we suppress the overlay
-    // and let the bars stand alone.
-    const weatherPromise: Promise<WeatherBucket[]> =
-      interval === 'hourly'
-        ? fetchHourlyWeather(location!.lat, location!.lng, range)
-        : Promise.resolve([]);
+    // Open-Meteo only emits hourly samples. In daily-interval mode we
+    // still fetch the hourly series for the full window and aggregate
+    // client-side (mean temperature, summed precipitation) into one
+    // bucket per UTC day — see `aggregateHourlyToDaily` in
+    // `services/weather.ts`. Earlier revisions skipped the call to
+    // avoid painting a single midnight-UTC sample as the daily value;
+    // the aggregator is the explicit fix for that, so the call is
+    // always made when location is plausible.
+    const weatherPromise: Promise<WeatherBucket[]> = fetchHourlyWeather(
+      location!.lat,
+      location!.lng,
+      range,
+    );
     Promise.all([activityPromise, weatherPromise.catch(() => [] as WeatherBucket[])])
       .then(([act, wx]) => {
         if (cancelled) return;
         setActivity(act);
-        setWeather(wx);
-        // "Weather unavailable" only fires when we ASKED for weather
-        // and got nothing — silent daily mode is not a failure.
-        setWeatherFailed(interval === 'hourly' && wx.length === 0);
+        const finalWeather = interval === 'daily' ? aggregateHourlyToDaily(wx) : wx;
+        setWeather(finalWeather);
+        // "Weather unavailable" fires whenever we asked for weather and
+        // got nothing back — true for hourly AND daily, since both
+        // depend on Open-Meteo reachability.
+        setWeatherFailed(wx.length === 0);
       })
       .catch(() => {
         if (cancelled) return;
@@ -95,9 +132,13 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
   }, [moduleId, range, location?.lat, location?.lng, locationOk]);
 
   // Merge series by bucket-start timestamp. In daily mode the weather
-  // array is empty (the effect above skips the fetch), so the merge
-  // collapses to `temperatureC: null` / `precipitationMm: null` on
-  // every row and the Line/Bar for weather render as gaps.
+  // array is the result of `aggregateHourlyToDaily` and its keys are
+  // `${YYYY-MM-DD}T00:00:00` — byte-aligned with the duckdb-service
+  // daily activity buckets. In hourly mode it is the raw Open-Meteo
+  // hourly series. Either way `weatherByTs.get(timestamp)` returns the
+  // matching weather sample for the activity bucket; missing samples
+  // collapse to `null` so the Line breaks visibly instead of
+  // interpolating through zero.
   const rows = useMemo<ChartRow[]>(() => {
     if (!activity) return [];
     const weatherByTs = new Map(weather.map((w) => [w.timestamp, w]));
@@ -179,9 +220,14 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
               {t('activityChart.weatherUnavailable')}
             </p>
           )}
-          <div className="h-48 md:h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <div ref={setContainerRef} className="h-48 md:h-64 w-full">
+            {chartSize && (
+              <ComposedChart
+                width={chartSize.w}
+                height={chartSize.h}
+                data={rows}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--hf-fg-mute)" opacity={0.2} />
                 <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                 <YAxis
@@ -207,6 +253,35 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
                   }}
                 />
                 <Tooltip
+                  // Recharts' default tooltip is a hardcoded white box that
+                  // ignores the theme tokens and, on the narrow ModulePanel
+                  // chart, covers half the plot area. Pin compact dims + HF
+                  // tokens so it sits as a small overlay readable in both
+                  // light and dark themes. `offset` nudges it off the cursor
+                  // so the underlying bar/line stays visible while hovered.
+                  cursor={{
+                    stroke: 'var(--hf-fg-mute)',
+                    strokeOpacity: 0.4,
+                    strokeDasharray: '3 3',
+                  }}
+                  offset={16}
+                  wrapperStyle={{ outline: 'none', zIndex: 10 }}
+                  contentStyle={{
+                    background: 'color-mix(in oklch, var(--hf-bg-elev) 94%, transparent)',
+                    border: '1px solid var(--hf-border)',
+                    borderRadius: 'var(--radius-md)',
+                    boxShadow: 'var(--shadow-2)',
+                    padding: '6px 8px',
+                    fontSize: 10,
+                    lineHeight: 1.35,
+                    color: 'var(--hf-fg)',
+                  }}
+                  labelStyle={{
+                    color: 'var(--hf-fg-mute)',
+                    fontSize: 9,
+                    marginBottom: 2,
+                  }}
+                  itemStyle={{ padding: 0, color: 'var(--hf-fg)' }}
                   labelFormatter={(_label, payload) => {
                     const ts = payload?.[0]?.payload?.timestamp as string | undefined;
                     if (!ts) return '';
@@ -239,7 +314,7 @@ export default function ActivityWeatherChart({ moduleId, location }: ActivityWea
                   connectNulls
                 />
               </ComposedChart>
-            </ResponsiveContainer>
+            )}
           </div>
         </>
       )}

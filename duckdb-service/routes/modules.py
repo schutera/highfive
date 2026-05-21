@@ -718,9 +718,17 @@ def activity_timeseries(module_id):
     # instead — `interval` is whitelisted above so this is not a SQL
     # injection vector.
     trunc_unit = "hour" if interval == "hourly" else "day"
+    # ::TIMESTAMP cast is load-bearing: `date_trunc('day', ts)` returns a
+    # DATE in DuckDB (no time component), which the Python driver hands
+    # back as a `datetime.date`. The dense-fill cursor below emits keys
+    # like "2026-05-20T00:00:00" — `date.isoformat()` produces
+    # "2026-05-20" without the `T00:00:00`, so every daily-mode lookup
+    # would miss and all buckets would silently render `count: 0`.
+    # date_trunc('hour', ts) already returns TIMESTAMP so the cast is a
+    # no-op there; pinning both for consistency.
     rows = query_all(
         f"""
-        SELECT date_trunc('{trunc_unit}', uploaded_at) AS bucket,
+        SELECT date_trunc('{trunc_unit}', uploaded_at)::TIMESTAMP AS bucket,
                COUNT(*) AS count
         FROM image_uploads
         WHERE module_id = ? AND uploaded_at >= ? AND uploaded_at < ?
@@ -730,13 +738,13 @@ def activity_timeseries(module_id):
         (canonical, start, end),
     )
 
-    # Normalise DuckDB's row keys (already lowercased by repository
-    # helper) and build a lookup by bucket-start ISO so the gap-fill
-    # below can O(1) the matches.
+    # With the ::TIMESTAMP cast above, `bucket` is always a `datetime`
+    # — but keep the defensive branch in case a future migration drops
+    # the cast. `str()` of a datetime.date is "YYYY-MM-DD" which would
+    # not match the dense-fill cursor's ISO keys.
     counts_by_bucket: dict[str, int] = {}
     for row in rows:
         bucket = row["bucket"]
-        # DuckDB returns a datetime object; force naive-UTC ISO.
         if isinstance(bucket, datetime):
             key = bucket.replace(tzinfo=None).isoformat()
         else:

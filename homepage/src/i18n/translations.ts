@@ -517,9 +517,12 @@ const translations = {
       empty: 'Keine Aktivit\u00E4t im ausgew\u00E4hlten Zeitraum.',
       weatherUnavailable: 'Wetterdaten nicht verf\u00FCgbar \u2013 nur Uploads werden angezeigt.',
       locationUnknown: 'Standort unbekannt \u2013 Wetter-Diagramm nicht verf\u00FCgbar.',
-      rangeDay: '24 h',
-      rangeWeek: '7 T',
-      rangeMonth: '30 T',
+      // U+00A0 NBSP keeps "24 h" / "7 T" / "30 T" on one line inside
+      // the narrow range-toggle buttons. Plain spaces wrap to two rows
+      // in the ModulePanel layout (caught in PR-120 manual walk).
+      rangeDay: '24\u00A0h',
+      rangeWeek: '7\u00A0T',
+      rangeMonth: '30\u00A0T',
     },
 
     // ---- Admin key (telemetry gate) ----

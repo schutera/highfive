@@ -72,3 +72,47 @@ export async function fetchHourlyWeather(
     return [];
   }
 }
+
+/**
+ * Collapse hourly Open-Meteo samples into one bucket per UTC day so a
+ * daily-interval activity chart can overlay them without painting a
+ * single hour's value as if it were the day. Aggregation rules:
+ *
+ *   - `temperatureC`  → arithmetic mean of non-null hourly values
+ *   - `precipitationMm` → sum of non-null hourly values (mm/h × hours = mm/day)
+ *
+ * Bucket key is `${YYYY-MM-DD}T00:00:00`, byte-for-byte aligned to the
+ * duckdb-service daily aggregate timestamps so the chart's `Map.get`
+ * lookup hits without further normalisation. Days where every hourly
+ * sample was null collapse to `null` (not 0) so the line breaks
+ * visibly instead of dragging through fake-zero.
+ */
+export function aggregateHourlyToDaily(hourly: WeatherBucket[]): WeatherBucket[] {
+  const byDay = new Map<
+    string,
+    { tempSum: number; tempCount: number; precipSum: number; precipSawValue: boolean }
+  >();
+  for (const h of hourly) {
+    const dayKey = h.timestamp.slice(0, 10); // "YYYY-MM-DD"
+    let agg = byDay.get(dayKey);
+    if (!agg) {
+      agg = { tempSum: 0, tempCount: 0, precipSum: 0, precipSawValue: false };
+      byDay.set(dayKey, agg);
+    }
+    if (h.temperatureC != null) {
+      agg.tempSum += h.temperatureC;
+      agg.tempCount += 1;
+    }
+    if (h.precipitationMm != null) {
+      agg.precipSum += h.precipitationMm;
+      agg.precipSawValue = true;
+    }
+  }
+  return Array.from(byDay.entries())
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([dayKey, agg]) => ({
+      timestamp: `${dayKey}T00:00:00`,
+      temperatureC: agg.tempCount > 0 ? agg.tempSum / agg.tempCount : null,
+      precipitationMm: agg.precipSawValue ? agg.precipSum : null,
+    }));
+}

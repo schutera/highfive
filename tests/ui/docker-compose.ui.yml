@@ -84,7 +84,18 @@ services:
     ports:
       - '4002:3002'
     environment:
-      NODE_ENV: production
+      # NODE_ENV=test, not production. The e2e stack uses production
+      # because it drives the backend with raw HTTP requests where CORS
+      # doesn't apply. The UI stack drives the homepage in a real
+      # browser, and `backend/src/app.ts`'s cors origin is
+      # `'https://highfive.schutera.com'` under isProduction() - which
+      # blocks `http://localhost:6173`. `'test'` is in the
+      # isProduction() dev safelist (see `backend/src/env.ts`'s
+      # DEV_ENV_TOKENS) so CORS falls back to '*' and the cross-origin
+      # fetch from the homepage container to the backend works.
+      # HIGHFIVE_API_KEY is still set explicitly so the dev-fallback
+      # off-ramp the safelist allows is never exercised.
+      NODE_ENV: test
       PORT: '3002'
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       IMAGE_SERVICE_URL: http://image-service:4444

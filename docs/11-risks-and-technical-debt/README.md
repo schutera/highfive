@@ -942,6 +942,13 @@ entry — the wire-shape-mismatch story there was the same shape:
 docs + types + code all individually correct, but the cross-layer
 contract was wishful.
 
+**Pinned by.** `tests/ui/tests/dashboard-side-list.spec.ts` (Playwright,
+ADR-014). Drives a real browser against the production-built homepage
+with a seeded Null-Island module at `(0,0)` and asserts both that the
+module is present in the side-list and that the "Location pending"
+pill renders. A regression that re-introduces the pre-bounds filter
+fails this spec.
+
 **Current design (PR 1 / issues #103, #102, #101 — supersedes the
 union-based fix.)** The original PR II patch closed the symptom by
 defining `sideListModules = visibleModules ∪ pendingModules` in
@@ -1720,6 +1727,15 @@ discipline, and realistic component-test fixtures. The rules earned
 their own slot in the project orientation rather than living only as
 post-mortem prose so the next contributor sees them before writing
 the bug, not after.
+
+**Pinned by.** `tests/ui/tests/dashboard-telemetry.spec.ts` (Playwright,
+ADR-014). Drives a real browser against the production-built homepage,
+seeds one telemetry-bearing sidecar via `tools/mock_esp.py`, and
+asserts the rendered `TelemetryRow` contains the literal values
+(`UI_TEST_RESET`, `fw ui-test-1.2.3`, `200 KB`, `-42 dBm`, `1h 0m`).
+The spec also imports `TelemetryEntry` from `@highfive/contracts` so
+a future rename at the wire-shape boundary is a TS compile error
+before the spec even runs.
 
 ### TASK_WDT in `postImage:read_body` — WiFiClient read loops must feed the watchdog (issues #42, #53)
 

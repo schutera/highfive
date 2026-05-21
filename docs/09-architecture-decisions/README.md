@@ -22,6 +22,7 @@ and link backwards.
 | [011](adr-011-module-display-name-override.md)              | Two-column module naming — firmware `name` + admin-settable `display_name`      | Accepted |
 | [012](adr-012-dashboard-ip-geo-hint.md)                     | Dashboard map IP-geo hint via backend proxy (not `GEO_API_KEY`)                 | Accepted |
 | [013](adr-013-compensating-restore-for-duckdb-fk-update.md) | Bespoke autocommit + compensating-restore for DuckDB FK over-enforced UPDATEs   | Accepted |
+| [014](adr-014-playwright-ui-tests.md)                       | UI tests run real Chromium against the production-built homepage via Playwright | Accepted |
 
 ## When to create an ADR
 

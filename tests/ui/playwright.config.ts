@@ -11,8 +11,10 @@ export default defineConfig({
   // Iteration-1 keeps retries at 0 even in CI: the seed-script sets up
   // a single deterministic state, literal-value assertions key on that
   // state, and retries against the same already-mutated stack would
-  // hide flake instead of surfacing it. Re-evaluate after a few green
-  // runs.
+  // hide flake instead of surfacing it. Re-evaluate (see #123) once
+  // `ui-playwright` has 5 consecutive green PR runs - if a real
+  // transient flake surfaces in that window, lift to `retries: 1`;
+  // otherwise leave it at 0.
   retries: 0,
   workers: 1,
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],

@@ -357,6 +357,11 @@ jobs:
       # If the dashboard renders empty, this section makes the cause
       # obvious without trace-viewer download (CORS reject vs. empty DB
       # vs. unreachable backend look very different from this output).
+      #
+      # TODO(#123): remove this step once `ui-playwright` has 5 consecutive
+      # green runs on PRs to main. The probes earned their keep during
+      # iteration-1's first four CI rounds (CORS, wire-shape, strict-mode)
+      # but become noise once the failure modes are familiar.
       - name: Diagnostic — probe stack from runner
         run: |
           set -x

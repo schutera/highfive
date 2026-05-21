@@ -68,7 +68,7 @@ Five specs in iteration 1:
 - `smoke.spec.ts` — homepage `/`, `/dashboard`, `/setup` mount without console errors.
 - `dashboard-telemetry.spec.ts` — pins the [Telemetry sidecar envelope drift](../11-risks-and-technical-debt/README.md#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field) regression. Asserts TelemetryRow renders literal values, not `—`.
 - `dashboard-side-list.spec.ts` — pins the [Three layers, one rule](../11-risks-and-technical-debt/README.md#three-layers-one-rule-was-actually-four-surfaces--the-dashboard-side-list-silently-filtered-pending-modules-pr-ii-final-pass-smoke) regression. Asserts the Null-Island module appears with the "Location pending" pill.
-- `module-panel-rendering.spec.ts` — header, MAC-prefix, image count, nest grid all render against real backend data.
+- `module-panel-rendering.spec.ts` — header, MAC-prefix, nest grid (4 leafcutter progressbars), and bee-type summary total hatches (64, summed from `daily_progress`) render against real backend data. Image count is deliberately not pinned — see the spec for why.
 - `setup-wizard-happy-path.spec.ts` — Step 1 → 5 via the documented skip branches.
 
 Specs that fixture-type a wire shape import the type from

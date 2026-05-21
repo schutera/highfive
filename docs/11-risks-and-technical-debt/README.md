@@ -1738,12 +1738,14 @@ the bug, not after.
 
 **Pinned by.** `tests/ui/tests/dashboard-telemetry.spec.ts` (Playwright,
 ADR-014). Drives a real browser against the production-built homepage,
-seeds one telemetry-bearing sidecar via `tools/mock_esp.py`, and
-asserts the rendered `TelemetryRow` contains the literal values
-(`UI_TEST_RESET`, `fw ui-test-1.2.3`, `200 KB`, `-42 dBm`, `1h 0m`).
-The spec also imports `TelemetryEntry` from `@highfive/contracts` so
-a future rename at the wire-shape boundary is a TS compile error
-before the spec even runs.
+seeds one telemetry-bearing sidecar via
+`tests/ui/scripts/seed_ui_fixtures.py`'s `seed_telemetry_upload`
+(which drives `tools/mock_esp.MockEsp`), and asserts the rendered
+`TelemetryRow` contains the literal values (`UI_TEST_RESET`,
+`fw ui-test-1.2.3`, `200 KB`, `-42 dBm`, `1h 0m`). The spec also
+imports `TelemetryEntry` from `@highfive/contracts` so a future
+rename at the wire-shape boundary is a TS compile error before the
+spec even runs.
 
 ### TASK_WDT in `postImage:read_body` — WiFiClient read loops must feed the watchdog (issues #42, #53)
 
@@ -2518,3 +2520,23 @@ gotchas the fix exposed:
   UX (e.g. a small badge / colour shift, or a snackbar) would be
   the next iteration if a future review finds the tooltip
   insufficient.
+
+### Seed values coalesced behind an aggregate `COUNT(...)` are dead — and `??` does not save them (PR #122 iteration-1)
+
+**What happened.** PR #122's first `tests/ui/tests/module-panel-rendering.spec.ts` asserted the seeded `Garten 12` module would render `87` images, lifted directly from `duckdb-service/db/schema.py`'s `INSERT INTO module_configs (..., image_count) VALUES ('000000000002', 'Garten 12', ..., 87)`. The spec failed in CI: the rendered panel showed `0 images`. The seed value never reached the wire.
+
+**Why it shipped.** Two layers stacked.
+
+1. **`duckdb-service/routes/modules.py`'s `get_modules`** computes a `COUNT(i.id) AS real_image_count` over a `LEFT JOIN image_uploads`. The seed only inserts `module_configs` rows; it never inserts matching `image_uploads`. So `COUNT(i.id)` returns `0` — a non-null integer, not null.
+2. **`backend/src/database.ts`'s** assembler coalesces `imageCount: m.real_image_count ?? m.image_count ?? 0`. The first `??` short-circuits because `real_image_count` is `0` and `0 ?? X` returns `0` — the nullish coalescing operator short-circuits on `null` / `undefined` only, never on numeric `0`. The seed's `image_count = 87` is unreachable.
+
+The seed value lives in the schema, has a plausible-looking name, and never wins. Reading the schema would lead a contributor to believe `Garten 12.imageCount === 87`; reading the wire response confirms otherwise.
+
+**Lesson.** Seed values for columns that the read path coalesces _behind_ a SQL aggregate (`COUNT(...)`, `SUM(...)`, `COALESCE(..., 0)` — anything that returns a non-null default for an empty join) are dead. The aggregate always returns a non-null number; `??` always short-circuits on it; the seed value never surfaces. This generalises beyond `image_count`: audit every `module_configs` column whose read path traverses a `LEFT JOIN ... GROUP BY` aggregate before treating its seed value as user-visible.
+
+**How to avoid next time.** Two structural rules.
+
+1. **Don't trust the column name; trust the wire.** When writing a fixture-based assertion against a seeded value, hit the actual endpoint that the consumer reads (here: `GET /api/modules/:id`) and check the response body before pinning the value in a spec. The schema's column is necessary but not sufficient.
+2. **If a seed value must be user-visible, make the seed populate the join table too.** For `image_count`: insert N matching `image_uploads` rows so `COUNT(i.id) = N`, and the `??` chain becomes irrelevant. The chain only matters at the boundary where data is genuinely missing; if you want the seed to be the boundary, fix the missing-data condition.
+
+**Pinned by.** `tests/ui/tests/module-panel-rendering.spec.ts` now asserts on the leafcutter bee-type summary's total hatches (`22 + 8 + 19 + 15 = 64`), which IS load-bearing: the values come from `daily_progress` rows that the seed _does_ insert, traverse `getModuleById` → `ModulePanel.beeTypeSummaries`, and surface in the rendered DOM.

@@ -65,10 +65,15 @@ test.describe('module panel rendering', () => {
     // This is the literal-value pin against `daily_progress` plumbing
     // through `getModuleById` -> ModulePanel.beeTypeSummaries.
     // Backend's `image_count=87` seed value is intentionally NOT pinned
-    // here - the backend coalesces `real_image_count ?? image_count`
-    // and the `??` short-circuits on 0, so seeded modules with no
-    // actual uploads render `0 images`. The Garten 12 panel's image
-    // count is environment-derived state, not a wire-shape contract.
+    // here. `backend/src/database.ts` coalesces
+    // `m.real_image_count ?? m.image_count ?? 0`, and `real_image_count`
+    // is `COUNT(i.id)` over a `LEFT JOIN image_uploads` in
+    // `duckdb-service/routes/modules.py`'s `get_modules`. `COUNT(...)`
+    // never returns null - it returns `0` when no rows match - so the
+    // first `??` always short-circuits and the seed's `image_count=87`
+    // never wins. Seeded modules with no uploads render `0 images`;
+    // image count is environment-derived state, not a wire-shape
+    // contract that this spec should pin.
     await expect(leafcutterArticle).toContainText('64');
   });
 });

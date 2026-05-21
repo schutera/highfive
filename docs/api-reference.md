@@ -268,6 +268,57 @@ call per replica per visitor per hour.
 Why a backend proxy rather than reusing `GEO_API_KEY` directly:
 [ADR-012](09-architecture-decisions/adr-012-dashboard-ip-geo-hint.md).
 
+## 1.6 Module activity timeseries (dashboard chart)
+
+```
+GET /api/modules/:id/activity?interval=hourly&days=7
+Headers: X-API-Key: <key>
+```
+
+Bucketed image-upload counts for a single module, used by the dashboard
+`ActivityWeatherChart` to overlay activity against Open-Meteo weather
+at the module's lat/lng. Maps to the duckdb-service
+`/modules/<id>/activity_timeseries` route (see §3.10) and rewrites the
+snake_case wire to the camelCase `ActivityTimeSeries` shape pinned in
+[`contracts/src/index.ts`](../contracts/src/index.ts).
+
+Query parameters (both optional, with sensible defaults):
+
+- `interval` — `hourly` (default) or `daily`. Buckets coarser than
+  hourly skip the weather overlay client-side (Open-Meteo only
+  publishes hourly observations).
+- `days` — look-back window. Default `7`, range `[1, 90]`.
+
+Empty buckets are filled server-side with `count: 0`. The chart
+renders a continuous timeline rather than stitching across silent
+hours, which would visually misrepresent a quiet hive as a spike on
+either side of the gap.
+
+```json
+{
+  "moduleId": "aabbccddeeff",
+  "interval": "hourly",
+  "start": "2026-05-13T00:00:00",
+  "end": "2026-05-20T00:00:00",
+  "buckets": [
+    { "timestamp": "2026-05-13T00:00:00", "count": 0 },
+    { "timestamp": "2026-05-13T01:00:00", "count": 3 }
+  ]
+}
+```
+
+Timestamps are UTC ISO 8601, bucket-start. The homepage formats them to
+the visitor's browser locale at render time (see
+[`08-crosscutting-concepts/api-contracts.md`](08-crosscutting-concepts/api-contracts.md)
+for the timezone reasoning).
+
+Error responses bubble verbatim from duckdb-service:
+
+- `400` — invalid module id, unknown `interval`, or `days` outside
+  `[1, 90]`.
+- `404` — module unknown.
+- `502` — duckdb-service unreachable.
+
 <br>
 
 # 2. Image Service API
@@ -594,6 +645,52 @@ Called by `image-service` after every successful `_persist_image` step
 locally; this endpoint is what makes the upload visible to the rest of
 the stack. Implementation: `duckdb-service/routes/modules.py`'s
 `record_image`.
+
+## 3.10 Module activity timeseries
+
+```
+GET /modules/<module_id>/activity_timeseries?interval=hourly&days=7
+```
+
+Bucketed image-upload counts for the dashboard `ActivityWeatherChart`.
+The backend's `/api/modules/:id/activity` (§1.6) proxies this route and
+renames the top-level `module_id` field to `moduleId` on the way out;
+nested fields are camelCase already.
+
+Query parameters:
+
+- `interval` — `hourly` (default) or `daily`. Any other value returns
+  `400`.
+- `days` — integer in `[1, 90]`, default `7`. Out-of-range or
+  non-integer returns `400`.
+
+Empty buckets are filled server-side with `count: 0` so consumers
+render a continuous timeline. Bucket-start timestamps are UTC ISO 8601.
+
+```json
+{
+  "module_id": "aabbccddeeff",
+  "interval": "hourly",
+  "start": "2026-05-13T00:00:00",
+  "end": "2026-05-20T00:00:00",
+  "buckets": [
+    { "timestamp": "2026-05-13T00:00:00", "count": 0 },
+    { "timestamp": "2026-05-13T01:00:00", "count": 3 }
+  ]
+}
+```
+
+Error responses:
+
+- `400` — invalid module id, invalid `interval`, or `days` out of range.
+- `404` — module unknown.
+
+Implementation: `duckdb-service/routes/modules.py`'s
+`activity_timeseries`. Source table is `image_uploads`, filtered by
+`module_id` and aggregated via `date_trunc('hour' | 'day',
+uploaded_at)`. Adding a third granularity means a matching entry in
+`_ACTIVITY_INTERVAL_STEP` and a new branch in the `date_trunc`
+positional argument — both wired by the same `interval` query param.
 
 <br>
 

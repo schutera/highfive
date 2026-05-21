@@ -96,6 +96,23 @@ const translations = {
       failedToLoad: 'Failed to load module details',
     },
 
+    // ---- Activity vs weather chart ----
+    activityChart: {
+      title: 'Activity & weather',
+      subtitle: 'Image uploads vs. temperature and rain at the module location',
+      uploadsAxis: 'Uploads',
+      temperatureAxis: 'Temperature (°C)',
+      precipitationLabel: 'Precipitation (mm)',
+      uploadsLabel: 'Uploads',
+      loading: 'Loading chart…',
+      empty: 'No activity in the selected window.',
+      weatherUnavailable: 'Weather data unavailable — showing uploads only.',
+      locationUnknown: 'Location unknown — weather chart unavailable.',
+      rangeDay: '24h',
+      rangeWeek: '7d',
+      rangeMonth: '30d',
+    },
+
     // ---- Admin key (telemetry gate) ----
     adminKey: {
       telemetry: 'Telemetry',
@@ -486,6 +503,26 @@ const translations = {
       nest: 'Nest {index}',
       moduleNotFound: 'Modul nicht gefunden',
       failedToLoad: 'Moduldetails konnten nicht geladen werden',
+    },
+
+    // ---- Activity vs weather chart ----
+    activityChart: {
+      title: 'Aktivit\u00E4t & Wetter',
+      subtitle: 'Bild-Uploads gegen\u00FCber Temperatur und Niederschlag am Modul-Standort',
+      uploadsAxis: 'Uploads',
+      temperatureAxis: 'Temperatur (\u00B0C)',
+      precipitationLabel: 'Niederschlag (mm)',
+      uploadsLabel: 'Uploads',
+      loading: 'Diagramm wird geladen\u2026',
+      empty: 'Keine Aktivit\u00E4t im ausgew\u00E4hlten Zeitraum.',
+      weatherUnavailable: 'Wetterdaten nicht verf\u00FCgbar \u2013 nur Uploads werden angezeigt.',
+      locationUnknown: 'Standort unbekannt \u2013 Wetter-Diagramm nicht verf\u00FCgbar.',
+      // U+00A0 NBSP keeps "24 h" / "7 T" / "30 T" on one line inside
+      // the narrow range-toggle buttons. Plain spaces wrap to two rows
+      // in the ModulePanel layout (caught in PR-120 manual walk).
+      rangeDay: '24\u00A0h',
+      rangeWeek: '7\u00A0T',
+      rangeMonth: '30\u00A0T',
     },
 
     // ---- Admin key (telemetry gate) ----

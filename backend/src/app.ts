@@ -251,6 +251,60 @@ app.patch('/api/modules/:id/name', async (req, res) => {
   }
 });
 
+// Bucketed image-upload activity for the homepage weather-correlation
+// chart. Proxies duckdb-service `/modules/:id/activity_timeseries`
+// (snake_case wire) and maps to the camelCase `ActivityTimeSeries`
+// shape pinned in `@highfive/contracts`. Forwards `interval` and `days`
+// verbatim; upstream owns validation so we surface 400/404 unchanged.
+//
+// No admin gate — the dashboard chart is part of the regular view, so
+// only the standard X-API-Key middleware (applied at /api above) runs.
+app.get('/api/modules/:id/activity', async (req, res) => {
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
+  const params = new URLSearchParams();
+  if (typeof req.query.interval === 'string') params.set('interval', req.query.interval);
+  if (typeof req.query.days === 'string') params.set('days', req.query.days);
+  const qs = params.toString();
+  const url = `${DUCKDB_URL}/modules/${encodeURIComponent(id)}/activity_timeseries${
+    qs ? `?${qs}` : ''
+  }`;
+  try {
+    const upstream = await fetch(url);
+    // Check `upstream.ok` BEFORE parsing JSON. duckdb-service wraps its
+    // errors as JSON today (and the activity_timeseries route does so
+    // explicitly), but other Flask routes can serve the default HTML
+    // 500 page on uncaught exceptions — see `routes/modules.py`'s
+    // `get_modules` wrapper comment. Trying to `.json()` an HTML body
+    // throws and we'd return 502 instead of bubbling the real upstream
+    // status. Defence-in-depth, not a hard requirement today.
+    if (!upstream.ok) {
+      const errBody = (await upstream.json().catch(() => ({
+        error: `upstream returned ${upstream.status}`,
+      }))) as Record<string, unknown>;
+      res.status(upstream.status).json(errBody);
+      return;
+    }
+    const body = (await upstream.json()) as Record<string, unknown>;
+    // snake_case → camelCase mapping. Only `module_id` differs from
+    // the wire JSON; `buckets` entries (`timestamp`, `count`) and the
+    // ISO `start` / `end` strings carry through unchanged.
+    res.json({
+      moduleId: body.module_id,
+      interval: body.interval,
+      start: body.start,
+      end: body.end,
+      buckets: body.buckets,
+    });
+  } catch (error) {
+    console.error('[GET /api/modules/:id/activity]', { id, error: String(error) });
+    res.status(502).json({ error: 'duckdb-service unreachable' });
+  }
+});
+
 // Admin-only: telemetry sidecar logs. Layered on top of the existing X-API-Key
 // middleware. Requires an additional X-Admin-Key header matching HIGHFIVE_API_KEY.
 app.get('/api/modules/:id/logs', async (req, res) => {

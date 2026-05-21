@@ -86,6 +86,79 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### `image_uploads.uploaded_at` stamped in container-local time, new reader assumed UTC (ADR-015 review)
+
+**What happened.** When the `activity_timeseries` endpoint landed
+(ADR-015, weather-correlation chart), the writer
+`duckdb-service/routes/modules.py`'s `record_image` was still
+stamping `uploaded_at` with naive-local `datetime.now()`, while the
+new reader computed its window upper bound from
+`datetime.now(timezone.utc).replace(tzinfo=None)`. The two only
+agree because the `python:3.x-slim` base image defaults to UTC; a
+prod-ops `TZ=Europe/Berlin` override on the container would have
+written rows 1-2 hours past the reader's window upper bound, making
+the most recent uploads silently invisible to the chart.
+
+**Why it happened.** The reader was written timezone-aware (correct);
+the existing writer pre-dated the reader and was timezone-naive
+(formerly correct, because the reader was day-granularity and the
+schema's `DEFAULT CURRENT_TIMESTAMP` was the dominant timestamp
+source). Adding a new consumer with a different timezone discipline
+exposed the latent inconsistency. The schema's
+`DEFAULT CURRENT_TIMESTAMP` on `image_uploads.uploaded_at`
+(`duckdb-service/db/schema.py`'s `_MODULE_CONFIGS_DDL` neighbour
+block) carries the same naive-local risk and is the next thing to
+audit if a TZ-flipped container is ever staged.
+
+**How to avoid it next time.** Pick UTC at the writer for any
+column that crosses service boundaries or feeds an aggregation.
+The fix in `record_image` is two lines (`datetime.now(timezone.utc)`
+instead of `datetime.now()`). When adding a new timezone-aware
+reader against existing data, grep the writers for `datetime.now()`
+(no `tz` arg) first; if any survive, fix them in the same PR.
+
+### `date_trunc('day', ts)` returns DATE not TIMESTAMP — daily aggregation silently rendered all-zeros (PR-120 manual-test discovery)
+
+**What happened.** The `activity_timeseries` endpoint (ADR-015) joins
+DuckDB-aggregated bucket counts with a Python-side dense-fill cursor.
+On the hourly path it worked; on the daily path **every bucket
+silently rendered `count: 0` regardless of how many uploads existed**.
+Hourly returned 6 non-zero buckets, daily returned 0 against the
+exact same `image_uploads` rows — caught by eyeballing a 30-day view
+during the PR-120 manual walk after the unit suite was 122/122 green.
+
+**Why it happened.** `date_trunc('hour', ts)` returns a TIMESTAMP
+(DuckDB hands it back to Python as `datetime.datetime`); but
+`date_trunc('day', ts)` returns a DATE (handed back as
+`datetime.date`). The route's normalisation branched on
+`isinstance(bucket, datetime)` and fell through to `str(bucket)` for
+the date case, producing keys like `"2026-05-20"` that never matched
+the dense-fill cursor's `"2026-05-20T00:00:00"` ISO keys. Every
+daily lookup missed and the gap-fill loop emitted zero.
+
+The unit tests passed because they only asserted the daily bucket
+_count_ (`len(body["buckets"]) == 7`), which still hits 7 with all
+zeros. Wire shape was tested; aggregation _behaviour_ on the daily
+path was not. The hourly path had a behaviour test — daily didn't,
+because writing the same test for daily felt redundant. It wasn't.
+
+**How to avoid it next time.** When two SQL aggregations share a
+single Python normalisation path, write one behaviour test per
+aggregation that asserts data lands in the expected bucket — not
+just that the bucket count matches. "Same shape" is not "same
+behaviour" when the DB type differs by argument. For DuckDB
+specifically, prefer an explicit `::TIMESTAMP` cast on `date_trunc`
+results when the consumer expects a uniform Python type — the cast
+is a no-op on the hourly path and a correctness fix on the daily
+path. The fix in `routes/modules.py`'s `activity_timeseries` is one
+SQL token; the regression pin is
+`tests/test_module_endpoints.py`'s
+`test_activity_timeseries_daily_groups_uploads_by_day`. CLAUDE.md
+rule #3 ("component tests must mount with a realistic fixture, not
+a mock object the test author guessed at") applies one layer
+deeper than originally framed: aggregation tests must seed real
+data and assert real output, not just the response envelope.
+
 ### Windows host parity: build.sh tripped on three path assumptions and a unit test depended on a jsdom polyfill that doesn't exist (PR 2 / issues #99, #100)
 
 **What happened.** A contributor on Windows 11 + Git Bash + Node 22 +

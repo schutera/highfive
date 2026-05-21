@@ -1,4 +1,10 @@
-import type { Module, ModuleDetail, TelemetryEntry, UserLocation } from '@highfive/contracts';
+import type {
+  ActivityTimeSeries,
+  Module,
+  ModuleDetail,
+  TelemetryEntry,
+  UserLocation,
+} from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 // The build-time validator + DEV_FALLBACK_KEY live in their own module
 // so main.tsx can side-effect-import them and the throw fires on first
@@ -165,6 +171,30 @@ class ApiService {
       throw new Error(`Failed to fetch logs for module ${id}`);
     }
     return response.json();
+  }
+
+  /**
+   * Bucketed image-upload activity for the dashboard weather chart.
+   * Maps to `GET /api/modules/:id/activity` on the backend, which in
+   * turn proxies the duckdb-service aggregate. `interval` is `'hourly'`
+   * or `'daily'`; `days` is the look-back window (1..90).
+   */
+  async getActivity(
+    id: string,
+    interval: 'hourly' | 'daily' = 'hourly',
+    days: number = 7,
+  ): Promise<ActivityTimeSeries> {
+    const url = `${this.baseUrl}/modules/${encodeURIComponent(id)}/activity?interval=${interval}&days=${days}`;
+    const response = await fetch(url, { headers: this.getHeaders() });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch activity for module ${id}`);
+    }
+    const raw: unknown = await response.json();
+    const obj = raw as Record<string, unknown>;
+    return {
+      ...obj,
+      moduleId: parseModuleId(obj.moduleId as string),
+    } as ActivityTimeSeries;
   }
 
   async getImages(moduleId?: string): Promise<ImageUpload[]> {

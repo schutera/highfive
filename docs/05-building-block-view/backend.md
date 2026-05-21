@@ -14,13 +14,14 @@ auth-gated JSON API. Stateless read-through projection on top of
 
 ## Endpoints
 
-| Endpoint                      | Auth                        | Purpose                                                                                                                                |
-| ----------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`             | public                      | Liveness check (`{"status":"ok"}`)                                                                                                     |
-| `GET /api/modules`            | `X-API-Key`                 | List all modules + their nests + latest progress                                                                                       |
-| `GET /api/modules/:id`        | `X-API-Key`                 | One module + its detail                                                                                                                |
-| `PATCH /api/modules/:id/name` | `X-API-Key` + `X-Admin-Key` | Sets or clears the operator-settable `display_name` override. Proxies to `duckdb-service /modules/<id>/display_name`. 409 on collision |
-| `GET /api/modules/:id/logs`   | `X-API-Key` + `X-Admin-Key` | Proxies to `image-service /modules/<mac>/logs` for admin telemetry inspection                                                          |
+| Endpoint                        | Auth                        | Purpose                                                                                                                                                                |
+| ------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`               | public                      | Liveness check (`{"status":"ok"}`)                                                                                                                                     |
+| `GET /api/modules`              | `X-API-Key`                 | List all modules + their nests + latest progress                                                                                                                       |
+| `GET /api/modules/:id`          | `X-API-Key`                 | One module + its detail                                                                                                                                                |
+| `PATCH /api/modules/:id/name`   | `X-API-Key` + `X-Admin-Key` | Sets or clears the operator-settable `display_name` override. Proxies to `duckdb-service /modules/<id>/display_name`. 409 on collision                                 |
+| `GET /api/modules/:id/logs`     | `X-API-Key` + `X-Admin-Key` | Proxies to `image-service /modules/<mac>/logs` for admin telemetry inspection                                                                                          |
+| `GET /api/modules/:id/activity` | `X-API-Key`                 | Bucketed image-upload counts for the dashboard weather-correlation chart. Proxies `duckdb-service /modules/<id>/activity_timeseries` and maps `module_id` → `moduleId` |
 
 Full request/response shapes in [docs/api-reference.md](../api-reference.md).
 

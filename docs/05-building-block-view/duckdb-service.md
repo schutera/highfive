@@ -243,6 +243,19 @@ Returns `{"count": <int>}` — the number of `daily_progress` rows
 associated with the given module. Used by `image-service` to detect
 first-upload events without opening a direct DuckDB connection.
 
+### GET /modules/<module_id>/activity_timeseries
+
+Bucketed image-upload counts for a single module. Query parameters:
+`interval` (`hourly` | `daily`, default `hourly`) and `days`
+(integer in `[1, 90]`, default `7`). Empty buckets are filled
+server-side with `count: 0` so the consumer can render a continuous
+timeline without stitching across silent periods. Aggregates over
+`image_uploads` via `date_trunc(<unit>, uploaded_at)`. The backend
+proxies this route at `/api/modules/:id/activity` and maps the
+top-level `module_id` to `moduleId` (camelCase) for the homepage.
+See [api-reference.md §3.10](../api-reference.md) and
+[ADR-015](../09-architecture-decisions/adr-015-weather-correlation.md).
+
 ## Internal services (no HTTP surface)
 
 | Module                        | Role                                                                                                                                                                             |

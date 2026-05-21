@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
@@ -518,9 +518,23 @@ def record_image():
         return err
     try:
         with write_transaction() as con:
+            # UTC, NOT naive-local. The `activity_timeseries` reader
+            # computes its window against `datetime.now(timezone.utc)`;
+            # if the writer stamps in container-local time (which is
+            # what `datetime.now()` does — UTC today only because the
+            # python:3.x-slim image happens to default to UTC), setting
+            # `TZ=Europe/Berlin` on the container in prod would put
+            # writes 1-2 hours past the reader's window upper bound.
+            # The schema's `DEFAULT CURRENT_TIMESTAMP` carries the same
+            # naive-local risk; chapter-11 entry to follow.
+            now_utc = (
+                datetime.now(timezone.utc)
+                .replace(tzinfo=None)
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
             con.execute(
                 "INSERT INTO image_uploads (module_id, filename, uploaded_at) VALUES (?, ?, ?)",
-                (canonical, filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                (canonical, filename, now_utc),
             )
         return jsonify({"message": "Image recorded"}), 200
     except Exception as e:
@@ -627,6 +641,136 @@ def progress_count(module_id):
         (canonical,),
     )
     return jsonify(count=int(count) if count is not None else 0), 200
+
+
+# Bucket sizes for the activity-timeseries endpoint. Kept as a
+# constant so the gap-fill loop below and the SQL `date_trunc` stay
+# in sync — adding a third granularity (e.g. `weekly`) means a new
+# entry here AND a matching `date_trunc` argument, both wired by
+# the same `interval` query-param.
+_ACTIVITY_INTERVAL_STEP = {
+    "hourly": timedelta(hours=1),
+    "daily": timedelta(days=1),
+}
+
+
+def _floor_to_interval(ts: datetime, interval: str) -> datetime:
+    """Truncate ``ts`` to the start of its hour/day in UTC.
+
+    Mirrors DuckDB's ``date_trunc('hour'|'day', ...)`` semantics so
+    the gap-fill loop emits the exact same bucket-start instants the
+    SQL aggregate produces. Without this, a window starting at
+    12:34:56 would produce a first gap-bucket at 12:34:56 and the
+    chart would see "two buckets at the same hour, one zero".
+    """
+    if interval == "hourly":
+        return ts.replace(minute=0, second=0, microsecond=0)
+    # daily
+    return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+@modules_bp.get("/modules/<module_id>/activity_timeseries")
+def activity_timeseries(module_id):
+    """Bucketed image-upload counts for the dashboard weather chart.
+
+    Query params:
+      * ``interval`` — ``hourly`` (default) or ``daily``.
+      * ``days``     — window size, default 7, max 90.
+
+    Empty buckets are filled with ``count: 0`` server-side so the
+    chart renders a continuous timeline instead of "stitching" across
+    silent periods (which would visually misrepresent a quiet hive as
+    a sudden activity spike on either side of the gap).
+    """
+    canonical, err = _canonicalize_or_400(module_id)
+    if err is not None:
+        return err
+
+    interval = request.args.get("interval", "hourly")
+    if interval not in _ACTIVITY_INTERVAL_STEP:
+        return (
+            jsonify(
+                {
+                    "error": "invalid interval",
+                    "detail": "must be 'hourly' or 'daily'",
+                }
+            ),
+            400,
+        )
+
+    days_raw = request.args.get("days", "7")
+    try:
+        days = int(days_raw)
+    except (TypeError, ValueError):
+        return jsonify({"error": "days must be an integer"}), 400
+    if days < 1 or days > 90:
+        return jsonify({"error": "days must be in [1, 90]"}), 400
+
+    if query_one("SELECT 1 FROM module_configs WHERE id = ?", (canonical,)) is None:
+        return jsonify({"error": "Module not found"}), 404
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    end = _floor_to_interval(now_utc, interval) + _ACTIVITY_INTERVAL_STEP[interval]
+    start = end - timedelta(days=days)
+
+    # `date_trunc`'s first arg cannot be a bind parameter in DuckDB
+    # (it's a SQL keyword-positional, not a value). Branch in Python
+    # instead — `interval` is whitelisted above so this is not a SQL
+    # injection vector.
+    trunc_unit = "hour" if interval == "hourly" else "day"
+    # ::TIMESTAMP cast is load-bearing: `date_trunc('day', ts)` returns a
+    # DATE in DuckDB (no time component), which the Python driver hands
+    # back as a `datetime.date`. The dense-fill cursor below emits keys
+    # like "2026-05-20T00:00:00" — `date.isoformat()` produces
+    # "2026-05-20" without the `T00:00:00`, so every daily-mode lookup
+    # would miss and all buckets would silently render `count: 0`.
+    # date_trunc('hour', ts) already returns TIMESTAMP so the cast is a
+    # no-op there; pinning both for consistency.
+    rows = query_all(
+        f"""
+        SELECT date_trunc('{trunc_unit}', uploaded_at)::TIMESTAMP AS bucket,
+               COUNT(*) AS count
+        FROM image_uploads
+        WHERE module_id = ? AND uploaded_at >= ? AND uploaded_at < ?
+        GROUP BY bucket
+        ORDER BY bucket
+        """,
+        (canonical, start, end),
+    )
+
+    # With the ::TIMESTAMP cast above, `bucket` is always a `datetime`
+    # — but keep the defensive branch in case a future migration drops
+    # the cast. `str()` of a datetime.date is "YYYY-MM-DD" which would
+    # not match the dense-fill cursor's ISO keys.
+    counts_by_bucket: dict[str, int] = {}
+    for row in rows:
+        bucket = row["bucket"]
+        if isinstance(bucket, datetime):
+            key = bucket.replace(tzinfo=None).isoformat()
+        else:
+            key = str(bucket)
+        counts_by_bucket[key] = int(row["count"])
+
+    step = _ACTIVITY_INTERVAL_STEP[interval]
+    buckets: list[dict] = []
+    cursor = start
+    while cursor < end:
+        key = cursor.isoformat()
+        buckets.append({"timestamp": key, "count": counts_by_bucket.get(key, 0)})
+        cursor = cursor + step
+
+    return (
+        jsonify(
+            {
+                "module_id": canonical,
+                "interval": interval,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "buckets": buckets,
+            }
+        ),
+        200,
+    )
 
 
 @modules_bp.post("/modules/<module_id>/heartbeat")

@@ -42,9 +42,11 @@ def _purge_service_modules() -> None:
         "routes.measurements",
         "routes.heartbeats",
         "routes.health",
+        "routes.admin_weather",
         "routes._bucketing",
         "routes",
         "services.discord",
+        "services.weather_worker",
         "services",
         "db.schema",
         "db.connection",
@@ -68,6 +70,10 @@ def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DUCKDB_PATH", str(db_file))
     monkeypatch.delenv("SEED_DATA", raising=False)
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    # Default off in tests — the weather worker has its own test module
+    # that enables it explicitly. Other tests that import `app` don't
+    # want a scheduler tick firing Open-Meteo requests an hour later.
+    monkeypatch.setenv("WEATHER_WORKER_ENABLED", "false")
 
     _purge_service_modules()
 

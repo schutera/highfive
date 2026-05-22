@@ -220,11 +220,14 @@ export interface ActivityTimeSeries {
 // from a gap. The duckdb-service aggregate is `AVG(value)` per bucket.
 //
 // `metric` and `source` are open strings on the wire so a new producer
-// (weather worker for #111, classifier for #114) can append without
-// requiring a contracts release first; the producer's ADR pins the
-// chosen identifier so it doesn't drift across services. Known metrics
-// today: `battery_pct`. Known sources today: `esp-heartbeat`,
-// `esp-heartbeat-backfill`.
+// (classifier for #114) can append without requiring a contracts
+// release first; the producer's ADR pins the chosen identifier so it
+// doesn't drift across services. The canonical, current list of
+// known metric / source values lives at
+// `docs/08-crosscutting-concepts/api-contracts.md` § "Known `source`
+// values in the wild" — keeping it there rather than in this
+// comment so a new producer doesn't have to touch this file (and
+// so this comment can't go stale without anyone noticing).
 //
 // A `Measurement` (single-row) shape lived here briefly in the initial
 // #110 PR but was unused — the homepage reads `MeasurementTimeSeries`,

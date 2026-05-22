@@ -3,6 +3,7 @@ from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from db.schema import init_db
+from routes.admin_weather import admin_weather_bp
 from routes.health import health_bp
 from routes.measurements import measurements_bp
 from routes.modules import modules_bp
@@ -11,6 +12,7 @@ from routes.progress import progress_bp
 from routes.heartbeats import heartbeats_bp
 from services.backup import run_backup
 from services.silence_watcher import check_silence
+from services.weather_worker import run_weather_fetch
 
 app = Flask(__name__)
 app.register_blueprint(health_bp)
@@ -19,6 +21,7 @@ app.register_blueprint(nests_bp)
 app.register_blueprint(progress_bp)
 app.register_blueprint(heartbeats_bp)
 app.register_blueprint(measurements_bp)
+app.register_blueprint(admin_weather_bp)
 
 # Dev-only: /firmware.json + /firmware.app.bin proxy to homepage:5173.
 # In prod, host-nginx serves these directly from homepage static; this
@@ -36,6 +39,13 @@ scheduler.add_job(
     run_backup, "cron", day_of_week="sun", hour=3, minute=0, id="weekly_backup"
 )
 scheduler.add_job(check_silence, "interval", minutes=15, id="silence_watcher")
+# Weather worker (issue #111, ADR-017). Gated separately from the
+# blueprint registration: the admin backfill endpoint must remain
+# reachable even when the scheduled tick is disabled, so an operator
+# can manually trigger a one-shot fetch on a stack where the live
+# worker is intentionally off (e.g. throttled CI environments).
+if os.getenv("WEATHER_WORKER_ENABLED", "true").lower() == "true":
+    scheduler.add_job(run_weather_fetch, "interval", minutes=60, id="weather_worker")
 scheduler.start()
 
 if __name__ == "__main__":

@@ -326,9 +326,7 @@ app.get('/api/modules/:id/measurements', async (req, res) => {
   if (typeof req.query.interval === 'string') params.set('interval', req.query.interval);
   if (typeof req.query.days === 'string') params.set('days', req.query.days);
   const qs = params.toString();
-  const url = `${DUCKDB_URL}/modules/${encodeURIComponent(id)}/measurements${
-    qs ? `?${qs}` : ''
-  }`;
+  const url = `${DUCKDB_URL}/modules/${encodeURIComponent(id)}/measurements${qs ? `?${qs}` : ''}`;
   try {
     const upstream = await fetch(url);
     if (!upstream.ok) {
@@ -345,7 +343,9 @@ app.get('/api/modules/:id/measurements', async (req, res) => {
     // `sample_count`) carry through unchanged in name… except for
     // `sample_count`, which we rename to `sampleCount` so the
     // `MeasurementBucket` contract in `@highfive/contracts` matches.
-    const rawBuckets = Array.isArray(body.buckets) ? (body.buckets as Array<Record<string, unknown>>) : [];
+    const rawBuckets = Array.isArray(body.buckets)
+      ? (body.buckets as Array<Record<string, unknown>>)
+      : [];
     res.json({
       moduleId: body.module_id,
       metric: body.metric,
@@ -397,7 +397,9 @@ app.post('/api/modules/:id/measurements', async (req, res) => {
   if (Array.isArray(body.measurements)) {
     forward = {
       measurements: body.measurements.map((m) =>
-        typeof m === 'object' && m !== null ? { ...(m as Record<string, unknown>), module_mac: id } : m,
+        typeof m === 'object' && m !== null
+          ? { ...(m as Record<string, unknown>), module_mac: id }
+          : m,
       ),
     };
   } else {
@@ -415,6 +417,38 @@ app.post('/api/modules/:id/measurements', async (req, res) => {
     res.status(upstream.status).json(data);
   } catch (error) {
     console.error('[POST /api/modules/:id/measurements]', { id, error: String(error) });
+    res.status(502).json({ error: 'duckdb-service unreachable' });
+  }
+});
+
+// Admin-only: trigger the one-shot historical weather backfill (issue
+// #111, ADR-017). Layered on top of the standard X-API-Key middleware
+// — needs an additional X-Admin-Key matching HIGHFIVE_API_KEY, like
+// the other /api admin endpoints in this file.
+//
+// Forwards `days` (optional integer) to the duckdb-service handler,
+// which itself owns the range validation (>= 1, <= 36500) and the
+// per-module fetch logic. Response shape is the partial-success
+// envelope `{modules_touched, rows_written, errors[]}` — see
+// `docs/api-reference.md` §1.8.
+app.post('/api/admin/weather/backfill', async (req, res) => {
+  const provided = req.header('X-Admin-Key');
+  if (!provided || !verifyApiKey(provided)) {
+    res.status(403).json({ error: 'Forbidden: admin key required' });
+    return;
+  }
+  const params = new URLSearchParams();
+  if (typeof req.query.days === 'string') params.set('days', req.query.days);
+  const qs = params.toString();
+  const url = `${DUCKDB_URL}/admin/weather/backfill${qs ? `?${qs}` : ''}`;
+  try {
+    const upstream = await fetch(url, { method: 'POST' });
+    const data = await upstream.json().catch(() => ({
+      error: `upstream returned ${upstream.status}`,
+    }));
+    res.status(upstream.status).json(data);
+  } catch (error) {
+    console.error('[POST /api/admin/weather/backfill]', { error: String(error) });
     res.status(502).json({ error: 'duckdb-service unreachable' });
   }
 });

@@ -5,14 +5,15 @@ the upload pipeline (edge → server) and the dashboard read flow.
 
 ## Scenarios
 
-| Scenario                                                         | Document                                     |
-| ---------------------------------------------------------------- | -------------------------------------------- |
-| **Image upload, classification, persistence** (the main flow)    | [image-upload-flow.md](image-upload-flow.md) |
-| **Dashboard read** (browser → backend → duckdb-service)          | covered inline below                         |
-| **Admin telemetry inspection** (admin gate, log sidecars)        | covered inline below                         |
-| **ESP firmware reliability** (watchdogs, recovery, daily reboot) | [esp-reliability.md](esp-reliability.md)     |
-| **OTA firmware updates** (LAN push + boot-time HTTP pull)        | [ota-update-flow.md](ota-update-flow.md)     |
+| Scenario                                                                            | Document                                               |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Image upload, classification, persistence** (the main flow)                       | [image-upload-flow.md](image-upload-flow.md)           |
+| **Dashboard read** (browser → backend → duckdb-service)                             | covered inline below                                   |
+| **Admin telemetry inspection** (admin gate, log sidecars)                           | covered inline below                                   |
+| **ESP firmware reliability** (watchdogs, recovery, daily reboot)                    | [esp-reliability.md](esp-reliability.md)               |
+| **OTA firmware updates** (LAN push + boot-time HTTP pull)                           | [ota-update-flow.md](ota-update-flow.md)               |
 | **Per-module measurement write & read** (heartbeat dual-write → bucketed aggregate) | [measurement-write-flow.md](measurement-write-flow.md) |
+| **External weather worker** (hourly Open-Meteo fetch → measurements)                | [weather-worker-flow.md](weather-worker-flow.md)       |
 
 ## Dashboard read flow
 

@@ -89,6 +89,16 @@ services:
       # prod, host-nginx serves these directly from homepage static.
       HIGHFIVE_DEV_OTA_PROXY: 'true'
       HOMEPAGE_DEV_URL: 'http://homepage:5173'
+      # Server-side weather worker (#111, ADR-017). On by default in
+      # dev so the measurements store gains real Open-Meteo rows for
+      # the seeded modules on the first tick after the stack is up;
+      # a homepage chart consuming `temperature_c` / `humidity_pct` /
+      # `precipitation_mm` is a follow-up (the existing
+      # ActivityWeatherChart still calls Open-Meteo browser-direct
+      # per ADR-015). Set to 'false' on a stack where outbound HTTP
+      # is intentionally throttled — the admin backfill endpoint
+      # stays reachable either way.
+      WEATHER_WORKER_ENABLED: 'true'
     restart: unless-stopped
     healthcheck:
       test:

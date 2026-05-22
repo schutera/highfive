@@ -1,5 +1,6 @@
 import type {
   ActivityTimeSeries,
+  MeasurementTimeSeries,
   Module,
   ModuleDetail,
   TelemetryEntry,
@@ -195,6 +196,36 @@ class ApiService {
       ...obj,
       moduleId: parseModuleId(obj.moduleId as string),
     } as ActivityTimeSeries;
+  }
+
+  /**
+   * Bucketed per-module measurements (issue #110). Maps to
+   * `GET /api/modules/:id/measurements` on the backend, which proxies
+   * the duckdb-service aggregate. `metric` picks one stream out of the
+   * module's many concurrent time series (`battery_pct`, eventually
+   * `temperature_c`, `activity_score`, …). `interval` is `'hourly'` or
+   * `'daily'`; `days` is the look-back window (1..90).
+   *
+   * Bucket `value` is `number | null` — `null` is a gap, not a zero
+   * (see `MeasurementBucket` docstring in `@highfive/contracts`).
+   */
+  async getMeasurements(
+    id: string,
+    metric: string,
+    interval: 'hourly' | 'daily' = 'hourly',
+    days: number = 7,
+  ): Promise<MeasurementTimeSeries> {
+    const url = `${this.baseUrl}/modules/${encodeURIComponent(id)}/measurements?metric=${encodeURIComponent(metric)}&interval=${interval}&days=${days}`;
+    const response = await fetch(url, { headers: this.getHeaders() });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch measurements for module ${id}`);
+    }
+    const raw: unknown = await response.json();
+    const obj = raw as Record<string, unknown>;
+    return {
+      ...obj,
+      moduleId: parseModuleId(obj.moduleId as string),
+    } as MeasurementTimeSeries;
   }
 
   async getImages(moduleId?: string): Promise<ImageUpload[]> {

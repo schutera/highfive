@@ -1,4 +1,6 @@
+import math
 import os
+from datetime import datetime, timedelta, timezone
 
 from db.connection import lock, get_conn
 
@@ -83,6 +85,33 @@ _DAILY_PROGRESS_DDL = """
 
 _DAILY_PROGRESS_COLUMNS = "progress_id, nest_id, date, empty, sealed, hatched"
 
+# Per-module time-series store (issue #110). Append-only event table; the
+# (module_mac, ts, metric, source) combination is a natural soft key but
+# we deliberately do NOT enforce uniqueness — a transient duplicate is
+# preferable to a silently-dropped sample (AVG over the bucket converges
+# on the right value either way). No FK to `module_configs` so out-of-
+# order arrival or orphan rows survive a stale parent row; the read
+# endpoint already filters by `module_mac` so orphans are invisible to
+# the dashboard without taking the table down.
+#
+# `value DOUBLE` rather than per-metric typed columns: this PR lands one
+# metric (`battery_pct`) but the same table is the substrate for
+# `temperature_c` (#111), `activity_score` (#114), `battery_mv` (#8b),
+# and arbitrary future producers. A wide table avoids a schema migration
+# per metric; `metric` + `source` carry the semantics. ADR-016 records
+# the trade-off (and rejects an EAV-with-typed-columns alternative).
+_MEASUREMENTS_DDL = """
+    CREATE TABLE measurements (
+        module_mac VARCHAR(20) NOT NULL,
+        ts         TIMESTAMP   NOT NULL,
+        metric     VARCHAR(40) NOT NULL,
+        value      DOUBLE      NOT NULL,
+        source     VARCHAR(40) NOT NULL
+    )
+"""
+
+_MEASUREMENTS_COLUMNS = "module_mac, ts, metric, value, source"
+
 
 def init_db():
     with lock:
@@ -123,6 +152,26 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_heartbeat_module ON module_heartbeats(module_id);
             CREATE INDEX IF NOT EXISTS idx_heartbeat_received ON module_heartbeats(received_at);
+            """
+        )
+
+        # Per-module measurements (issue #110). Derived from the same DDL
+        # constant the migration block below references so a future column
+        # edit can't drift between the fresh-DB and migrated-DB paths.
+        # Indices: the (module_mac, metric, ts) composite covers the
+        # read endpoint's WHERE/GROUP-BY; `idx_measurements_ts` covers
+        # the retention scan documented in
+        # `docs/08-crosscutting-concepts/measurement-retention.md` (no
+        # retention job is implemented yet — the index is cheap and
+        # avoids a follow-up DDL once one lands).
+        con.execute(
+            _MEASUREMENTS_DDL.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_measurements_module_metric_ts
+                ON measurements(module_mac, metric, ts);
+            CREATE INDEX IF NOT EXISTS idx_measurements_ts ON measurements(ts);
             """
         )
 
@@ -288,6 +337,29 @@ def init_db():
                 "a backup before re-running."
             ) from e
 
+        # One-time backfill: surface historical heartbeat batteries in the
+        # new measurements store so the dashboard chart isn't blank on
+        # existing volumes. Idempotent via the `esp-heartbeat-backfill`
+        # source sentinel — a second `init_db()` after a prod restart sees
+        # the marker and skips. We deliberately tag the backfill with a
+        # different `source` than the live dual-write (`esp-heartbeat`) so
+        # operators can tell which samples were imported retroactively vs.
+        # arrived in real time; aggregates over the metric collapse them
+        # together. Issue #110.
+        backfill_existing = con.execute(
+            "SELECT COUNT(*) FROM measurements WHERE source = 'esp-heartbeat-backfill'"
+        ).fetchone()[0]
+        if backfill_existing == 0:
+            con.execute(
+                """
+                INSERT INTO measurements (module_mac, ts, metric, value, source)
+                SELECT module_id, received_at, 'battery_pct',
+                       CAST(battery AS DOUBLE), 'esp-heartbeat-backfill'
+                FROM module_heartbeats
+                WHERE battery IS NOT NULL
+                """
+            )
+
         if os.getenv("SEED_DATA", "").lower() == "true":
             row_count = con.execute("SELECT COUNT(*) FROM module_configs").fetchone()[0]
             if row_count == 0:
@@ -350,6 +422,50 @@ def init_db():
                     ('prog-020', 'nest-020', '2024-06-01', 4, 53, 7);
                     """
                 )
+
+                # Seed `measurements` for the per-module time-series store
+                # (issue #110). One `battery_pct` sample per hour per seed
+                # module for the trailing 7 days. The value is a per-module
+                # phase-shifted cosine in [55, 95] so the dashboard chart
+                # shows visible motion instead of a flat 75% line —
+                # demonstrates the read shape; the *real* battery story is
+                # the open #8a / #8b work to replace `random(1, 100)` in
+                # the firmware. Glossary entry "Measurement" notes the
+                # caveat so a future reader doesn't mistake this for a
+                # realistic sensor trace.
+                #
+                # Seeding from Python (one executemany) rather than
+                # generated SQL keeps the formula readable and avoids
+                # DuckDB's interval-arithmetic quirks for non-literal
+                # offsets.
+                seed_module_ids = (
+                    "000000000001",
+                    "000000000002",
+                    "000000000003",
+                    "000000000004",
+                    "000000000005",
+                )
+                now_hour = (
+                    datetime.now(timezone.utc)
+                    .replace(tzinfo=None, minute=0, second=0, microsecond=0)
+                )
+                measurement_rows = []
+                for module_idx, mid in enumerate(seed_module_ids):
+                    for h in range(168):  # 7 days × 24 h
+                        ts = now_hour - timedelta(hours=167 - h)
+                        # Daily cosine with a 6 h phase shift per module
+                        # so the five seed modules don't overlap visually.
+                        angle = 2 * math.pi * ((h + module_idx * 6) % 24) / 24.0
+                        value = 75.0 + 20.0 * math.cos(angle)
+                        measurement_rows.append(
+                            (mid, ts, "battery_pct", value, "esp-heartbeat")
+                        )
+                con.executemany(
+                    f"INSERT INTO measurements ({_MEASUREMENTS_COLUMNS}) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    measurement_rows,
+                )
+
                 print("✅ Seed data inserted")
 
         con.close()

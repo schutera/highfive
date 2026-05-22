@@ -203,6 +203,68 @@ client is at `homepage/src/services/weather.ts`. Rationale for
 browser-direct vs. backend-proxy:
 [ADR-015](../09-architecture-decisions/adr-015-weather-correlation.md).
 
+## `MeasurementTimeSeries` — per-module canonical time series
+
+Added for the per-module measurements store (issue #110). Served by
+`GET /api/modules/:id/measurements` (backend) which proxies
+`GET /modules/<id>/measurements` (duckdb-service). The wire shape:
+
+```ts
+export interface Measurement {
+  moduleMac: ModuleId;
+  ts: string;        // ISO 8601 (UTC)
+  metric: string;    // 'battery_pct' | 'temperature_c' | …
+  value: number;
+  source: string;    // 'esp-heartbeat' | 'weather-api' | …
+}
+
+export interface MeasurementBucket {
+  timestamp: string; // ISO 8601 (UTC), bucket start
+  value: number | null;
+  sampleCount: number;
+}
+
+export interface MeasurementTimeSeries {
+  moduleId: ModuleId;
+  metric: string;
+  interval: ActivityInterval; // reuses 'hourly' | 'daily'
+  start: string;
+  end: string;
+  buckets: MeasurementBucket[];
+}
+```
+
+Three non-obvious contract details:
+
+- **`value: number | null` for buckets, NOT `0`.** This is the most
+  important difference from `ActivityBucket`. Activity counts treat
+  absence-as-zero (no uploads in an hour IS a zero). A sensor
+  measurement does not — a missing battery reading is unknown, not
+  0%. The chart renders `null` as a break in the line via recharts'
+  `connectNulls={false}` so a silent module reads as silence, not as
+  a flat-line discharge. Any future consumer aggregating across
+  buckets MUST handle `null` explicitly; `(b.value ?? 0)` is almost
+  always wrong.
+- **`sampleCount` is the row count behind `AVG(value)`.** Separates
+  "no samples here" (`value: null, sampleCount: 0`) from "the
+  aggregate happens to be 0.0" (`value: 0, sampleCount > 0`). Pinned
+  by the integration test in
+  `duckdb-service/tests/test_measurements_endpoints.py`.
+- **`metric` and `source` are open strings on the wire.** A producer
+  can ship a new metric without a coordinated contracts release.
+  The canonical list lives in the glossary
+  ([`docs/12-glossary/README.md`](../12-glossary/README.md) under
+  "Metric" / "Source"); a typo silently creates a new metric instead
+  of failing at write. See [ADR-016](../09-architecture-decisions/adr-016-per-module-measurements-store.md)
+  for the rationale.
+
+The snake → camel mapping at the backend renames `module_id →
+moduleId` and `sample_count → sampleCount`; the rest of the JSON
+carries through unchanged. The contracts type and the duckdb-service
+wire JSON are deliberately close enough that the proxy is one
+`.map((b) => ({ timestamp, value, sampleCount }))` and not a
+field-by-field transform.
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing

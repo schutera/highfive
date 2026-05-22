@@ -6,6 +6,7 @@ from db.connection import lock, get_conn
 from db.repository import query_all, query_scalar, query_one, write_transaction
 from models.module import ModuleData
 from models.module_id import ModuleId
+from routes._bucketing import INTERVAL_STEP, floor_to_interval
 from services.discord import send_discord_message
 
 
@@ -643,30 +644,13 @@ def progress_count(module_id):
     return jsonify(count=int(count) if count is not None else 0), 200
 
 
-# Bucket sizes for the activity-timeseries endpoint. Kept as a
-# constant so the gap-fill loop below and the SQL `date_trunc` stay
-# in sync — adding a third granularity (e.g. `weekly`) means a new
-# entry here AND a matching `date_trunc` argument, both wired by
-# the same `interval` query-param.
-_ACTIVITY_INTERVAL_STEP = {
-    "hourly": timedelta(hours=1),
-    "daily": timedelta(days=1),
-}
-
-
-def _floor_to_interval(ts: datetime, interval: str) -> datetime:
-    """Truncate ``ts`` to the start of its hour/day in UTC.
-
-    Mirrors DuckDB's ``date_trunc('hour'|'day', ...)`` semantics so
-    the gap-fill loop emits the exact same bucket-start instants the
-    SQL aggregate produces. Without this, a window starting at
-    12:34:56 would produce a first gap-bucket at 12:34:56 and the
-    chart would see "two buckets at the same hour, one zero".
-    """
-    if interval == "hourly":
-        return ts.replace(minute=0, second=0, microsecond=0)
-    # daily
-    return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+# Bucketing helpers moved to `routes/_bucketing.py` (issue #110) so the
+# measurements read endpoint and this activity-timeseries endpoint share
+# the exact same window / step semantics — adding a `weekly` granularity
+# touches one place. Module-local aliases preserve the old call sites and
+# make the import look like a normal helper rather than an indirection.
+_ACTIVITY_INTERVAL_STEP = INTERVAL_STEP
+_floor_to_interval = floor_to_interval
 
 
 @modules_bp.get("/modules/<module_id>/activity_timeseries")

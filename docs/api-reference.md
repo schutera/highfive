@@ -319,6 +319,102 @@ Error responses bubble verbatim from duckdb-service:
 - `404` — module unknown.
 - `502` — duckdb-service unreachable.
 
+## 1.7 Module measurements timeseries (per-module canonical store)
+
+```
+GET  /api/modules/:id/measurements?metric=battery_pct&interval=hourly&days=7
+POST /api/modules/:id/measurements
+Headers: X-API-Key: <key>            (both)
+         X-Admin-Key: <key>          (POST only)
+```
+
+Per-module bucketed time-series read against the canonical
+`measurements` store (issue #110). Maps to the duckdb-service
+`/modules/<id>/measurements` and `/measurements` routes (see §3.11
+and §3.12) and rewrites the snake_case wire to the camelCase
+`MeasurementTimeSeries` shape pinned in
+[`contracts/src/index.ts`](../contracts/src/index.ts).
+
+### GET — bucketed read
+
+Query parameters:
+
+- `metric` — **required**. One of the metric strings the producers
+  emit (`battery_pct` today; future: `temperature_c`, `activity_score`,
+  `rssi_dbm`, …). See the
+  [glossary](12-glossary/README.md) for the canonical list.
+- `interval` — `hourly` (default) or `daily`.
+- `days` — look-back window. Default `7`, range `[1, 90]`.
+
+Empty buckets carry `value: null` and `sampleCount: 0` — NOT `value:
+0`. A missing sensor reading is unknown, not zero; the homepage chart
+renders `null` as a break in the line so a silent device doesn't
+read as a flat-line discharge.
+
+```json
+{
+  "moduleId": "aabbccddeeff",
+  "metric": "battery_pct",
+  "interval": "hourly",
+  "start": "2026-05-13T00:00:00",
+  "end": "2026-05-20T00:00:00",
+  "buckets": [
+    { "timestamp": "2026-05-13T00:00:00", "value": null,  "sampleCount": 0 },
+    { "timestamp": "2026-05-13T01:00:00", "value": 87.5,  "sampleCount": 2 }
+  ]
+}
+```
+
+Bucket `value` is `AVG(measurements.value)` across all rows landing in
+the bucket; `sampleCount` is the row count behind the average.
+
+Errors:
+
+- `400` — invalid module id, missing `metric`, unknown `interval`,
+  `days` outside `[1, 90]`.
+- `404` — module unknown.
+- `502` — duckdb-service unreachable.
+
+### POST — admin-gated append
+
+Body shape — single:
+
+```json
+{
+  "ts": "2026-05-20T12:00:00Z",
+  "metric": "temperature_c",
+  "value": 18.4,
+  "source": "weather-api"
+}
+```
+
+Body shape — batched (≤ 1000 rows):
+
+```json
+{
+  "measurements": [
+    {"ts": "...", "metric": "...", "value": 1.0, "source": "..."},
+    ...
+  ]
+}
+```
+
+The backend forces `module_mac` to match the path; a body-supplied
+`module_mac` is ignored. Returns `{"inserted": N}` on success.
+
+Errors:
+
+- `400` — invalid body, batch > 1000 rows, missing/oversized field,
+  non-finite `value`, malformed `ts`.
+- `403` — `X-Admin-Key` missing or wrong.
+- `502` — duckdb-service unreachable.
+
+Intended producers: weather worker (#111), classifier (#112).
+Heartbeat-side battery does NOT go through this proxy — it
+dual-writes directly from `duckdb-service/routes/heartbeats.py`.
+See [ADR-016](09-architecture-decisions/adr-016-per-module-measurements-store.md)
+for the rationale.
+
 <br>
 
 # 2. Image Service API
@@ -689,8 +785,92 @@ Implementation: `duckdb-service/routes/modules.py`'s
 `activity_timeseries`. Source table is `image_uploads`, filtered by
 `module_id` and aggregated via `date_trunc('hour' | 'day',
 uploaded_at)`. Adding a third granularity means a matching entry in
-`_ACTIVITY_INTERVAL_STEP` and a new branch in the `date_trunc`
-positional argument — both wired by the same `interval` query param.
+`INTERVAL_STEP` (in `routes/_bucketing.py`) and a new branch in the
+`date_trunc` positional argument — both wired by the same `interval`
+query param.
+
+## 3.11 Module measurements timeseries
+
+```
+GET /modules/<module_id>/measurements?metric=battery_pct&interval=hourly&days=7
+```
+
+Bucketed read against the per-module `measurements` table (issue
+#110). The backend's `/api/modules/:id/measurements` (§1.7) proxies
+this route and rewrites `module_id` → `moduleId`, `sample_count` →
+`sampleCount`.
+
+Query parameters:
+
+- `metric` — required.
+- `interval` — `hourly` (default) or `daily`.
+- `days` — `[1, 90]`, default `7`.
+
+Empty buckets emit `value: null` and `sample_count: 0` (NOT `value:
+0`). Bucket value is `AVG(value)`.
+
+```json
+{
+  "module_id": "aabbccddeeff",
+  "metric": "battery_pct",
+  "interval": "hourly",
+  "start": "2026-05-13T00:00:00",
+  "end": "2026-05-20T00:00:00",
+  "buckets": [
+    { "timestamp": "2026-05-13T00:00:00", "value": null, "sample_count": 0 },
+    { "timestamp": "2026-05-13T01:00:00", "value": 87.5, "sample_count": 2 }
+  ]
+}
+```
+
+Implementation: `duckdb-service/routes/measurements.py`'s
+`get_measurements`. Shares bucketing helpers with §3.10 via
+`routes/_bucketing.py`. Uses the same `::TIMESTAMP` cast on the
+`date_trunc` result — see the chapter 11 entry "`date_trunc('day',
+ts)` returns DATE not TIMESTAMP" for the incident.
+
+## 3.12 Append measurements
+
+```
+POST /measurements
+```
+
+Append one or a batch of measurement rows. No service-level auth —
+network-internal only (the backend proxy is the public boundary, and
+gates with `X-Admin-Key`).
+
+Body — single:
+
+```json
+{
+  "module_mac": "aabbccddeeff",
+  "ts": "2026-05-20T12:00:00Z",
+  "metric": "temperature_c",
+  "value": 18.4,
+  "source": "weather-api"
+}
+```
+
+Body — batched (≤ 1000):
+
+```json
+{
+  "measurements": [
+    {"module_mac": "...", "ts": "...", "metric": "...", "value": 1.0, "source": "..."},
+    ...
+  ]
+}
+```
+
+Response (200 OK):
+
+```json
+{ "inserted": 2 }
+```
+
+Validation rejects the entire batch on any item failure (400 with
+the failing item's `index` in the response body). Implementation:
+`duckdb-service/routes/measurements.py`'s `post_measurements`.
 
 <br>
 

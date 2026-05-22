@@ -24,6 +24,7 @@ and link backwards.
 | [013](adr-013-compensating-restore-for-duckdb-fk-update.md) | Bespoke autocommit + compensating-restore for DuckDB FK over-enforced UPDATEs   | Accepted |
 | [014](adr-014-playwright-ui-tests.md)                       | UI tests run real Chromium against the production-built homepage via Playwright | Accepted |
 | [015](adr-015-weather-correlation.md)                       | Activity-vs-weather chart — Open-Meteo browser-direct + Recharts                | Accepted |
+| [016](adr-016-per-module-measurements-store.md)             | Per-module time-series store is one wide `measurements` table                   | Accepted |
 
 ## When to create an ADR
 

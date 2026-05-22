@@ -305,6 +305,120 @@ app.get('/api/modules/:id/activity', async (req, res) => {
   }
 });
 
+// Bucketed per-module measurements time series (issue #110). Mirrors
+// the activity-timeseries proxy above: pre-checks `upstream.ok`, maps
+// snake_case → camelCase, and gates on the standard X-API-Key
+// middleware (this is dashboard data, not admin data — production
+// /api/modules/:id is publicly readable with the API key).
+//
+// Pass-through query params: `metric` (required upstream),
+// `interval`, `days`. Upstream owns the actual validation; we
+// forward 400 / 404 verbatim so the user-facing error reflects the
+// real reason rather than a generic 502.
+app.get('/api/modules/:id/measurements', async (req, res) => {
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
+  const params = new URLSearchParams();
+  if (typeof req.query.metric === 'string') params.set('metric', req.query.metric);
+  if (typeof req.query.interval === 'string') params.set('interval', req.query.interval);
+  if (typeof req.query.days === 'string') params.set('days', req.query.days);
+  const qs = params.toString();
+  const url = `${DUCKDB_URL}/modules/${encodeURIComponent(id)}/measurements${
+    qs ? `?${qs}` : ''
+  }`;
+  try {
+    const upstream = await fetch(url);
+    if (!upstream.ok) {
+      const errBody = (await upstream.json().catch(() => ({
+        error: `upstream returned ${upstream.status}`,
+      }))) as Record<string, unknown>;
+      res.status(upstream.status).json(errBody);
+      return;
+    }
+    const body = (await upstream.json()) as Record<string, unknown>;
+    // snake_case → camelCase mapping. The only key that differs from
+    // the wire JSON is `module_id`; `metric`, `interval`, `start`,
+    // `end`, and the `buckets` entries (`timestamp`, `value`,
+    // `sample_count`) carry through unchanged in name… except for
+    // `sample_count`, which we rename to `sampleCount` so the
+    // `MeasurementBucket` contract in `@highfive/contracts` matches.
+    const rawBuckets = Array.isArray(body.buckets) ? (body.buckets as Array<Record<string, unknown>>) : [];
+    res.json({
+      moduleId: body.module_id,
+      metric: body.metric,
+      interval: body.interval,
+      start: body.start,
+      end: body.end,
+      buckets: rawBuckets.map((b) => ({
+        timestamp: b.timestamp,
+        value: b.value,
+        sampleCount: b.sample_count,
+      })),
+    });
+  } catch (error) {
+    console.error('[GET /api/modules/:id/measurements]', { id, error: String(error) });
+    res.status(502).json({ error: 'duckdb-service unreachable' });
+  }
+});
+
+// Admin-only: append one or more measurements. Used by external
+// producers (the future weather worker for #111, the classifier for
+// #114) to push samples into the canonical store. The heartbeat dual-
+// write at `duckdb-service/routes/heartbeats.py` writes directly to
+// the DB without going through this proxy because it's in-cluster.
+//
+// X-Admin-Key gate mirrors the `/logs` and `/name` admin routes
+// below — the standard /api X-API-Key middleware is necessary but
+// not sufficient.
+app.post('/api/modules/:id/measurements', async (req, res) => {
+  const provided = req.header('X-Admin-Key');
+  if (!provided || !verifyApiKey(provided)) {
+    res.status(403).json({ error: 'Forbidden: admin key required' });
+    return;
+  }
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
+  if (!req.body || typeof req.body !== 'object') {
+    res.status(400).json({ error: 'body must be a JSON object' });
+    return;
+  }
+  // Force the path id onto each item before forwarding — the path is
+  // the authority, not the body. This mirrors REST conventions and
+  // means a typo in the body can't smuggle a sample onto a different
+  // module.
+  const body = req.body as Record<string, unknown>;
+  let forward: unknown;
+  if (Array.isArray(body.measurements)) {
+    forward = {
+      measurements: body.measurements.map((m) =>
+        typeof m === 'object' && m !== null ? { ...(m as Record<string, unknown>), module_mac: id } : m,
+      ),
+    };
+  } else {
+    forward = { ...body, module_mac: id };
+  }
+  try {
+    const upstream = await fetch(`${DUCKDB_URL}/measurements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(forward),
+    });
+    const data = await upstream.json().catch(() => ({
+      error: `upstream returned ${upstream.status}`,
+    }));
+    res.status(upstream.status).json(data);
+  } catch (error) {
+    console.error('[POST /api/modules/:id/measurements]', { id, error: String(error) });
+    res.status(502).json({ error: 'duckdb-service unreachable' });
+  }
+});
+
 // Admin-only: telemetry sidecar logs. Layered on top of the existing X-API-Key
 // middleware. Requires an additional X-Admin-Key header matching HIGHFIVE_API_KEY.
 app.get('/api/modules/:id/logs', async (req, res) => {

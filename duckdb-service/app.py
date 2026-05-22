@@ -4,6 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from db.schema import init_db
 from routes.health import health_bp
+from routes.measurements import measurements_bp
 from routes.modules import modules_bp
 from routes.nests import nests_bp
 from routes.progress import progress_bp
@@ -17,6 +18,7 @@ app.register_blueprint(modules_bp)
 app.register_blueprint(nests_bp)
 app.register_blueprint(progress_bp)
 app.register_blueprint(heartbeats_bp)
+app.register_blueprint(measurements_bp)
 
 # Dev-only: /firmware.json + /firmware.app.bin proxy to homepage:5173.
 # In prod, host-nginx serves these directly from homepage static; this

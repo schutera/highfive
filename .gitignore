@@ -234,9 +234,15 @@ duckdb-service/data/
 
 .DS_Store
 
-# User-local Claude config — per-machine permission allowlist accumulates
-# here, do not share. settings.json (without the .local) stays committed.
-.claude/settings.local.json
+# Claude Code — ignore everything except committed workspace agents and skills
+.claude/*
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/senior-reviewer.md
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/analyze-pr/
+!.claude/skills/esp32-onboarding/
 
 # FreeCAD autosave backups — the .FCStd is the source of truth, the
 # timestamped .FCBak files are noise that drift in every working tree.

@@ -164,6 +164,23 @@ def test_post_measurements_missing_field_returns_400(client):
     assert resp.status_code == 400
 
 
+def test_post_measurements_rejects_whitespace_only_metric(client, fresh_db):
+    """A whitespace-only string is not a real metric name."""
+    _seed_module(fresh_db)
+    resp = client.post(
+        "/measurements",
+        json={
+            "module_mac": TEST_MAC_1,
+            "ts": "2026-05-20T12:00:00",
+            "metric": "   ",  # would `bool()` to True without strip()
+            "value": 50.0,
+            "source": "esp-heartbeat",
+        },
+    )
+    assert resp.status_code == 400
+    assert _count_measurements(fresh_db, module_mac=TEST_MAC_1) == 0
+
+
 def test_post_measurements_rejects_nan_value(client):
     resp = client.post(
         "/measurements",
@@ -510,3 +527,70 @@ def test_heartbeat_received_at_matches_measurements_ts(client, fresh_db):
         con.close()
     assert hb_row is not None and ms_row is not None
     assert hb_row[0] == ms_row[0]
+
+
+def test_heartbeat_dual_write_atomic_on_measurements_failure(
+    client, fresh_db, monkeypatch
+):
+    """If the measurements INSERT raises, the heartbeats INSERT rolls back.
+
+    The dual-write's whole rationale is the canonical store stays
+    cross-table consistent — a partial failure that leaves a heartbeat
+    row without its matching measurement would silently drift the
+    two tables. Wrapping the handler in `write_transaction()` is what
+    makes "either neither row or both" true; this test pins the
+    invariant so a future refactor that drops the BEGIN/COMMIT can't
+    quietly take the guarantee away. (PR B's senior-reviewer caught
+    the same shape in `set_display_name` — this is the equivalent
+    pin for `post_heartbeat`.)
+    """
+    _seed_module(fresh_db)
+
+    # Patch the live connection so any INSERT touching `measurements`
+    # raises. We replace `db.connection.get_conn` with a factory that
+    # returns a thin wrapper — the original connection still does the
+    # heavy lifting, but `execute(...)` short-circuits when it sees
+    # the target SQL fragment. `write_transaction` resolves
+    # `get_conn` lazily at call time (see `db/repository.py`'s
+    # `_conn_module`), so monkeypatching the module attribute
+    # propagates.
+    real_get_conn = fresh_db.connection.get_conn
+
+    class FailingOnMeasurements:
+        def __init__(self, real):
+            self._real = real
+
+        def execute(self, sql, params=()):
+            if "INTO measurements" in sql:
+                raise RuntimeError("simulated measurements write failure")
+            return self._real.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    def fake_get_conn():
+        return FailingOnMeasurements(real_get_conn())
+
+    monkeypatch.setattr(fresh_db.connection, "get_conn", fake_get_conn)
+
+    # In TESTING mode Flask re-raises rather than serving a 500. Use
+    # `pytest.raises` so the propagating RuntimeError becomes the
+    # successful path — the contract under test is "the rollback
+    # happened", not "what status code Flask emitted".
+    import pytest
+
+    with pytest.raises(RuntimeError, match="simulated measurements write failure"):
+        client.post("/heartbeat", data={"mac": TEST_MAC_1, "battery": "42"})
+
+    # Either-neither-or-both: with the simulated failure on the
+    # second INSERT, neither row should survive.
+    assert _count_measurements(fresh_db, module_mac=TEST_MAC_1) == 0
+    con = real_get_conn()
+    try:
+        hb_count = con.execute(
+            "SELECT COUNT(*) FROM module_heartbeats WHERE module_id = ?",
+            (TEST_MAC_1,),
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert hb_count == 0

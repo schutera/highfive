@@ -59,9 +59,15 @@ CREATE INDEX idx_measurements_module_metric_ts
 CREATE INDEX idx_measurements_ts ON measurements(ts);
 ```
 
-DDL lives at `duckdb-service/db/schema.py`'s `_MEASUREMENTS_DDL` and
-is materialised inside the same `con.execute("""...""")` block that
-creates `image_uploads` / `module_heartbeats`.
+DDL lives at `duckdb-service/db/schema.py`'s `_MEASUREMENTS_DDL`.
+`init_db()` materialises it via a separate `con.execute(...)` call
+(distinct from the multi-statement block that creates `image_uploads`
+/ `module_heartbeats`) so the rewrite from `CREATE TABLE` to
+`CREATE TABLE IF NOT EXISTS` happens through the same DDL constant
+the (future) migration block can reference — mirrors the
+FK-chained-table pattern at the top of `init_db`. Indices live in a
+sibling `con.execute(...)` so adding a third index doesn't churn the
+DDL diff.
 
 Notes on the shape:
 
@@ -190,6 +196,19 @@ Gated by `SELECT COUNT(*) FROM measurements WHERE source =
 'esp-heartbeat-backfill' = 0` — runs once, never again. The distinct
 `source` lets us tell backfilled samples from live ones without an
 extra "imported_at" column. Aggregates collapse them together.
+
+Timezone caveat: the backfill copies `module_heartbeats.received_at`
+verbatim into `measurements.ts`. Until the dual-write landed in this
+PR, `received_at` came from the column's `DEFAULT CURRENT_TIMESTAMP`,
+which DuckDB stamps in the container's local TZ. On the
+`python:3.x-slim` default that's UTC and matches the new live
+writes (`datetime.now(timezone.utc).replace(tzinfo=None)`); on a
+container with `TZ=Europe/Berlin`, the backfilled rows would land 1–2
+hours offset from live writes — the latent risk
+[ADR-015](adr-015-weather-correlation.md)'s lessons-learned entry
+flagged for `record_image`. The fix is operator-side: deploy
+`duckdb-service` without `TZ=` overrides, as the existing
+docker-compose configuration already does.
 
 ### Public read path is the same as activity
 

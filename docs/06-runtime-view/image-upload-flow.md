@@ -29,8 +29,10 @@ sequenceDiagram
 
     Note over ESP,DDB: independently, hourly
     ESP->>DDB: POST /heartbeat<br/>(telemetry, body: mac, battery, rssi, uptime_ms, free_heap, fw_version,<br/>optional latitude/longitude/accuracy when deferred-retry recovered)
-    DDB->>DDB: insert row in module_heartbeats
+    DDB->>DDB: BEGIN; insert row in module_heartbeats
+    DDB->>DDB: if battery is not None: insert measurements(metric=battery_pct, source=esp-heartbeat) (#110)
     DDB->>DDB: if lat/lng/accuracy plausible AND existing config row at (0,0): UPDATE module_configs (#89)
+    DDB->>DDB: COMMIT (either all three writes land, or none do)
 
     Note over BR,DDB: later, on dashboard poll
     BR->>DDB: GET /modules /nests /progress<br/>(via backend, normalised)
@@ -50,13 +52,19 @@ sequenceDiagram
 > `latitude/longitude/accuracy` triplet attached by `sendHeartbeat`
 > only when `hasPendingGeolocationFixToReport()` is true (PR II /
 > issue #89: the firmware's deferred-retry path obtained a fix
-> mid-uptime after a failed boot getGeolocation). The handler
-> inserts a row into `module_heartbeats` AND — if the optional
-> lat/lng arrived plausible AND the existing `module_configs` row
-> sits at the `(0,0)` sentinel — UPDATEs `module_configs.lat`/`lng`.
-> The "only patch from (0,0)" rule means a deliberately-placed
-> module is never clobbered. `heartbeat` route in
-> `duckdb-service/routes/heartbeats.py`; `sendHeartbeat` in
+> mid-uptime after a failed boot getGeolocation). The handler runs
+> all its writes inside one explicit BEGIN/COMMIT
+> (`db/repository.py`'s `write_transaction`): a row into
+> `module_heartbeats`; a sibling row into `measurements` with
+> `metric='battery_pct'` and `source='esp-heartbeat'` when the
+> heartbeat carries a battery (issue #110 dual-write — see
+> [measurement-write-flow.md](measurement-write-flow.md) and
+> [ADR-016](../09-architecture-decisions/adr-016-per-module-measurements-store.md));
+> and — if the optional lat/lng arrived plausible AND the existing
+> `module_configs` row sits at the `(0,0)` sentinel — an UPDATE on
+> `module_configs.lat`/`lng`. The "only patch from (0,0)" rule means
+> a deliberately-placed module is never clobbered. `heartbeat` route
+> in `duckdb-service/routes/heartbeats.py`; `sendHeartbeat` in
 > `ESP32-CAM/client.cpp`. It is the source of `latestHeartbeat`
 > /`HeartbeatSnapshot` ([ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md)).
 >

@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
 from db.connection import lock, get_conn
+from db.repository import write_transaction
 from models.module_id import ModuleId
 
 heartbeats_bp = Blueprint("heartbeats", __name__)
@@ -119,12 +120,21 @@ def post_heartbeat():
     # same timestamp. Falling back to the column's
     # `DEFAULT CURRENT_TIMESTAMP` would leave the two rows millisecond-
     # apart AND latently depend on the container's local TZ (see
-    # chapter 11 "uploaded_at writer drifted to container-local time"
-    # for the analogous incident in `record_image`).
+    # chapter 11 "`image_uploads.uploaded_at` stamped in container-local
+    # time" for the analogous incident in `record_image`).
     received_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    with lock:
-        con = get_conn()
+    # All writes in this handler share one explicit BEGIN/COMMIT via
+    # `write_transaction()` (db/repository.py). That's load-bearing for
+    # the dual-write to `measurements`: DuckDB autocommits each
+    # `con.execute` outside a transaction, so without this the
+    # `module_heartbeats` row would land even if the `measurements`
+    # INSERT raised, and the cross-table joins the canonical store
+    # is supposed to support would silently develop drift between the
+    # two tables. PR B's senior-reviewer caught the same shape in
+    # `set_display_name`'s dance — see the `write_transaction`
+    # docstring for the receipts.
+    with write_transaction() as con:
         con.execute(
             """
             INSERT INTO module_heartbeats

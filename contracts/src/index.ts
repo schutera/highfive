@@ -225,14 +225,13 @@ export interface ActivityTimeSeries {
 // chosen identifier so it doesn't drift across services. Known metrics
 // today: `battery_pct`. Known sources today: `esp-heartbeat`,
 // `esp-heartbeat-backfill`.
-
-export interface Measurement {
-  moduleMac: ModuleId;
-  ts: string; // ISO 8601 (UTC)
-  metric: string;
-  value: number;
-  source: string;
-}
+//
+// A `Measurement` (single-row) shape lived here briefly in the initial
+// #110 PR but was unused — the homepage reads `MeasurementTimeSeries`,
+// the backend forwards `Record<string, unknown>` on the admin write
+// route. The case discipline for a single-row shape (e.g. `moduleMac`
+// vs `module_mac` on the wire) should be pinned by the first real
+// producer (#111 weather worker) when it lands, not speculated now.
 
 export interface MeasurementBucket {
   timestamp: string; // ISO 8601 (UTC), bucket start

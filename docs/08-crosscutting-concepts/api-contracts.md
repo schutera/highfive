@@ -210,14 +210,6 @@ Added for the per-module measurements store (issue #110). Served by
 `GET /modules/<id>/measurements` (duckdb-service). The wire shape:
 
 ```ts
-export interface Measurement {
-  moduleMac: ModuleId;
-  ts: string;        // ISO 8601 (UTC)
-  metric: string;    // 'battery_pct' | 'temperature_c' | …
-  value: number;
-  source: string;    // 'esp-heartbeat' | 'weather-api' | …
-}
-
 export interface MeasurementBucket {
   timestamp: string; // ISO 8601 (UTC), bucket start
   value: number | null;
@@ -233,6 +225,12 @@ export interface MeasurementTimeSeries {
   buckets: MeasurementBucket[];
 }
 ```
+
+A single-row `Measurement` interface is deliberately NOT exported —
+the homepage only reads the bucketed shape, the backend forwards the
+admin write body untyped. When the first real producer (#111 weather
+worker) lands and needs to spell the field-by-field shape, the case
+discipline can be pinned by that PR rather than guessed at now.
 
 Three non-obvious contract details:
 

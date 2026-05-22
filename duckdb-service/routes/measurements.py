@@ -53,7 +53,12 @@ _MAX_NAME_LEN = 40
 
 
 def _validate_name(value: Any, field: str) -> tuple[str | None, tuple | None]:
-    if not isinstance(value, str) or not value:
+    # Whitespace-only strings (` `, `\t`, etc.) `bool()` to True, so the
+    # bare `not value` guard would let them through and DuckDB would
+    # happily store ` ` as a metric. Strip first; reject the empty-
+    # after-strip case so a buggy producer can't sneak a single space
+    # into a column the next reader would have to grep for.
+    if not isinstance(value, str) or not value.strip():
         return None, (
             jsonify({"error": f"'{field}' must be a non-empty string"}),
             400,

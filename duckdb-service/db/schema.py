@@ -423,49 +423,66 @@ def init_db():
                     """
                 )
 
-                # Seed `measurements` for the per-module time-series store
-                # (issue #110). One `battery_pct` sample per hour per seed
-                # module for the trailing 7 days. The value is a per-module
-                # phase-shifted cosine in [55, 95] so the dashboard chart
-                # shows visible motion instead of a flat 75% line —
-                # demonstrates the read shape; the *real* battery story is
-                # the open #8a / #8b work to replace `random(1, 100)` in
-                # the firmware. Glossary entry "Measurement" notes the
-                # caveat so a future reader doesn't mistake this for a
-                # realistic sensor trace.
-                #
-                # Seeding from Python (one executemany) rather than
-                # generated SQL keeps the formula readable and avoids
-                # DuckDB's interval-arithmetic quirks for non-literal
-                # offsets.
-                seed_module_ids = (
-                    "000000000001",
-                    "000000000002",
-                    "000000000003",
-                    "000000000004",
-                    "000000000005",
-                )
-                now_hour = (
-                    datetime.now(timezone.utc)
-                    .replace(tzinfo=None, minute=0, second=0, microsecond=0)
-                )
-                measurement_rows = []
-                for module_idx, mid in enumerate(seed_module_ids):
-                    for h in range(168):  # 7 days × 24 h
-                        ts = now_hour - timedelta(hours=167 - h)
-                        # Daily cosine with a 6 h phase shift per module
-                        # so the five seed modules don't overlap visually.
-                        angle = 2 * math.pi * ((h + module_idx * 6) % 24) / 24.0
-                        value = 75.0 + 20.0 * math.cos(angle)
-                        measurement_rows.append(
-                            (mid, ts, "battery_pct", value, "esp-heartbeat")
-                        )
-                con.executemany(
-                    f"INSERT INTO measurements ({_MEASUREMENTS_COLUMNS}) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    measurement_rows,
-                )
-
                 print("✅ Seed data inserted")
+
+            # Seed `measurements` for the per-module time-series store
+            # (issue #110). Gated independently of the `module_configs`
+            # branch above so operator volumes that ran the seed on an
+            # earlier commit (when only `module_configs` was seeded, not
+            # `measurements`) still get a populated chart on the first
+            # boot after PR #125 — without this split, the
+            # `BatteryHistoryChart` rendered its empty state on every
+            # persistent dev volume because `row_count == 0` was already
+            # false. Idempotent on its own row count.
+            #
+            # Filters to the canonical 12-hex `00000000000N` seed-ID
+            # pattern so real ESP MACs on hybrid dev+device stacks (e.g.
+            # `e89fa9f23a08`) are not decorated with synthetic battery
+            # data. SEED_DATA is a dev/demo flag anyway, so prod never
+            # reaches this block.
+            #
+            # The value is a per-module phase-shifted cosine in [55, 95]
+            # so the dashboard chart shows visible motion instead of a
+            # flat 75% line — demonstrates the read shape; the *real*
+            # battery story is the open #8a / #8b work to replace
+            # `random(1, 100)` in the firmware. Glossary entry
+            # "Measurement" notes the caveat so a future reader doesn't
+            # mistake this for a realistic sensor trace.
+            measurements_seeded = con.execute(
+                "SELECT COUNT(*) FROM measurements WHERE source = 'esp-heartbeat'"
+            ).fetchone()[0]
+            if measurements_seeded == 0:
+                canonical_seed_ids = [
+                    row[0]
+                    for row in con.execute(
+                        "SELECT id FROM module_configs "
+                        "WHERE id LIKE '00000000000_' "
+                        "ORDER BY id LIMIT 5"
+                    ).fetchall()
+                ]
+                if canonical_seed_ids:
+                    now_hour = datetime.now(timezone.utc).replace(
+                        tzinfo=None, minute=0, second=0, microsecond=0
+                    )
+                    measurement_rows = []
+                    for module_idx, mid in enumerate(canonical_seed_ids):
+                        for h in range(168):  # 7 days × 24 h
+                            ts = now_hour - timedelta(hours=167 - h)
+                            # Daily cosine with a 6 h phase shift per module
+                            # so the seed modules don't overlap visually.
+                            angle = 2 * math.pi * ((h + module_idx * 6) % 24) / 24.0
+                            value = 75.0 + 20.0 * math.cos(angle)
+                            measurement_rows.append(
+                                (mid, ts, "battery_pct", value, "esp-heartbeat")
+                            )
+                    con.executemany(
+                        f"INSERT INTO measurements ({_MEASUREMENTS_COLUMNS}) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        measurement_rows,
+                    )
+                    print(
+                        f"✅ Seeded measurements for {len(canonical_seed_ids)} "
+                        "canonical module(s)"
+                    )
 
         con.close()

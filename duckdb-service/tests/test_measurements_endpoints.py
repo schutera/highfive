@@ -330,10 +330,20 @@ def test_get_measurements_groups_samples_by_hour_with_avg(client, fresh_db):
         tzinfo=None, minute=0, second=0, microsecond=0
     ) - timedelta(hours=2)
     _seed_measurement(
-        fresh_db, TEST_MAC_1, base + timedelta(minutes=5), "battery_pct", 75, "esp-heartbeat"
+        fresh_db,
+        TEST_MAC_1,
+        base + timedelta(minutes=5),
+        "battery_pct",
+        75,
+        "esp-heartbeat",
     )
     _seed_measurement(
-        fresh_db, TEST_MAC_1, base + timedelta(minutes=45), "battery_pct", 85, "esp-heartbeat"
+        fresh_db,
+        TEST_MAC_1,
+        base + timedelta(minutes=45),
+        "battery_pct",
+        85,
+        "esp-heartbeat",
     )
     _seed_measurement(
         fresh_db,
@@ -384,7 +394,9 @@ def test_get_measurements_daily_groups_samples_by_day(client, fresh_db):
         70,
         "esp-heartbeat",
     )
-    _seed_measurement(fresh_db, TEST_MAC_1, today_noon, "battery_pct", 80, "esp-heartbeat")
+    _seed_measurement(
+        fresh_db, TEST_MAC_1, today_noon, "battery_pct", 80, "esp-heartbeat"
+    )
     _seed_measurement(
         fresh_db,
         TEST_MAC_1,
@@ -594,3 +606,82 @@ def test_heartbeat_dual_write_atomic_on_measurements_failure(
     finally:
         con.close()
     assert hb_count == 0
+
+
+# ---------- measurements seed on operator volumes ----------
+
+
+def test_measurements_seed_fires_when_modules_exist_but_measurements_empty(
+    fresh_db, monkeypatch
+):
+    """PR #125 follow-up: operator volumes with pre-existing modules
+    from earlier commits must still get a populated measurements
+    table on first boot after this PR.
+
+    Pre-PR-125 path: `module_configs` was seeded, `measurements` did
+    not exist. After upgrade, `init_db` creates `measurements` empty,
+    and the original seed gate (`row_count(module_configs) == 0`) is
+    already false — so without the independent measurements gate,
+    `BatteryHistoryChart` renders the empty state forever.
+    """
+    seed_ids = (
+        "000000000001",
+        "000000000002",
+        "000000000003",
+        "000000000004",
+        "000000000005",
+    )
+    real_mac = "e89fa9f23a08"
+    for mid in seed_ids:
+        _seed_module(fresh_db, module_id=mid)
+    _seed_module(fresh_db, module_id=real_mac)
+
+    assert _count_measurements(fresh_db, source="esp-heartbeat") == 0
+
+    monkeypatch.setenv("SEED_DATA", "true")
+    fresh_db.schema.init_db()
+
+    for mid in seed_ids:
+        n = _count_measurements(
+            fresh_db,
+            module_mac=mid,
+            source="esp-heartbeat",
+            metric="battery_pct",
+        )
+        assert n == 168, f"module {mid} got {n} samples, expected 168"
+
+    # Real MAC must not be decorated with synthetic samples — the
+    # canonical-pattern filter is the load-bearing safeguard for
+    # hybrid dev+device stacks.
+    assert (
+        _count_measurements(fresh_db, module_mac=real_mac, source="esp-heartbeat") == 0
+    )
+
+    # CLAUDE.md rule 5: assert real values land in real buckets, not
+    # just envelope shape. Cosine in [55, 95] so every sample is
+    # bounded and non-null.
+    con = fresh_db.connection.get_conn()
+    try:
+        min_v, max_v, null_count = con.execute(
+            "SELECT MIN(value), MAX(value), "
+            "SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) "
+            "FROM measurements WHERE source = 'esp-heartbeat'"
+        ).fetchone()
+    finally:
+        con.close()
+    assert null_count == 0
+    assert 55.0 <= min_v <= max_v <= 95.0
+
+
+def test_measurements_seed_is_idempotent_across_reboots(fresh_db, monkeypatch):
+    """Second `init_db()` call must not duplicate the seeded rows."""
+    _seed_module(fresh_db, module_id="000000000001")
+
+    monkeypatch.setenv("SEED_DATA", "true")
+    fresh_db.schema.init_db()
+    first = _count_measurements(fresh_db, source="esp-heartbeat")
+    assert first == 168
+
+    fresh_db.schema.init_db()
+    second = _count_measurements(fresh_db, source="esp-heartbeat")
+    assert second == first

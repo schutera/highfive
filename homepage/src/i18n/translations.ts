@@ -15,6 +15,7 @@ const translations = {
       impressum: 'Impressum',
       hiveModules: 'Hive Modules',
       backToHome: 'Back to Home',
+      weatherAttribution: 'Weather data by Open-Meteo',
     },
 
     // ---- Home Page ----
@@ -448,6 +449,7 @@ const translations = {
       impressum: 'Impressum',
       hiveModules: 'Hive Module',
       backToHome: 'Zur Startseite',
+      weatherAttribution: 'Wetterdaten von Open-Meteo',
     },
 
     // ---- Home Page ----

@@ -359,8 +359,8 @@ read as a flat-line discharge.
   "start": "2026-05-13T00:00:00",
   "end": "2026-05-20T00:00:00",
   "buckets": [
-    { "timestamp": "2026-05-13T00:00:00", "value": null,  "sampleCount": 0 },
-    { "timestamp": "2026-05-13T01:00:00", "value": 87.5,  "sampleCount": 2 }
+    { "timestamp": "2026-05-13T00:00:00", "value": null, "sampleCount": 0 },
+    { "timestamp": "2026-05-13T01:00:00", "value": 87.5, "sampleCount": 2 }
   ]
 }
 ```
@@ -414,6 +414,81 @@ Heartbeat-side battery does NOT go through this proxy — it
 dual-writes directly from `duckdb-service/routes/heartbeats.py`.
 See [ADR-016](09-architecture-decisions/adr-016-per-module-measurements-store.md)
 for the rationale.
+
+## 1.8 Trigger weather backfill (admin)
+
+```
+POST /api/admin/weather/backfill?days=N
+Headers:
+  X-API-Key:   <key>
+  X-Admin-Key: <key>   # must match HIGHFIVE_API_KEY
+```
+
+Trigger a one-shot historical weather backfill for every module with
+a plausible `lat`/`lng`. Operator command, expected to be run once
+per deployment after a new module's geolocation lands or after a
+fresh dev volume is seeded. Implementation:
+`duckdb-service/services/weather_worker.py`'s `run_weather_backfill`.
+
+Query parameters:
+
+- `days` — optional integer, range `[1, 36500]`. When omitted, each
+  module's window starts at its `module_configs.first_online` so the
+  full history is covered. With `days=N`, all modules start at
+  `now - N days`. The upper bound is always `now - 5 days` (the
+  Open-Meteo Archive API is ERA5-backed and trails real time by ~5
+  days; hours more recent than that are filled by the live hourly
+  worker).
+
+Response (200 OK):
+
+```json
+{
+  "modules_touched": 5,
+  "rows_written": 87600,
+  "errors": []
+}
+```
+
+`errors` is a list of `{module_mac, error}` objects when one module
+fails — partial success is the explicit contract for an admin
+endpoint, so a single module's API failure does not invalidate the
+rows already written for the others. A request that completes with
+non-empty `errors` still returns 200; the caller inspects the array.
+
+Concurrent invocations: a second `POST` arriving while the first is
+still running returns 200 immediately with a single sentinel error
+`{"module_mac": null, "error": "backfill already in progress"}` and
+no rows written. Two parallel runs would each read the same
+`existing` ts dedup set and silently double-write chunks (the
+`measurements` table has no UNIQUE constraint per
+[ADR-016](09-architecture-decisions/adr-016-per-module-measurements-store.md)),
+so the worker fails-fast rather than racing.
+
+The endpoint remains reachable even when `WEATHER_WORKER_ENABLED`
+is `false` — the env var controls the scheduled hourly tick only;
+the operator-initiated admin path is always available so a stack
+with the live worker intentionally off can still trigger a one-shot
+historical import.
+
+Status codes:
+
+- **200** — request completed (possibly partially; check `errors`).
+  Also **200** for the "backfill already in progress" sentinel — the
+  request was accepted but no work was done.
+- **400** — `days` query param is non-integer or out of range.
+- **403** — `X-Admin-Key` missing or wrong.
+- **502** — duckdb-service unreachable.
+
+The endpoint runs synchronously and may take seconds to minutes
+depending on `days` and the number of modules — Open-Meteo's
+Archive endpoint serves the data fast, but each module is a separate
+HTTP call. Triggering it from a script is fine; do not put it behind
+a single page-load click without a spinner. See
+[ADR-017](09-architecture-decisions/adr-017-external-weather-source.md)
+and
+[weather-worker-flow.md](06-runtime-view/weather-worker-flow.md)
+for the rationale and the live-worker counterpart.
 
 <br>
 
@@ -871,6 +946,46 @@ Response (200 OK):
 Validation rejects the entire batch on any item failure (400 with
 the failing item's `index` in the response body). Implementation:
 `duckdb-service/routes/measurements.py`'s `post_measurements`.
+
+## 3.13 Trigger weather backfill
+
+```
+POST /admin/weather/backfill?days=N
+```
+
+No service-level auth — internal only, the backend's
+`POST /api/admin/weather/backfill` (§1.8) is the public boundary and
+gates with `X-Admin-Key`. Calls
+`duckdb-service/services/weather_worker.py`'s `run_weather_backfill`
+synchronously and returns counts.
+
+**Do not expose duckdb-service's port 8002 publicly.** The dev
+`docker-compose.yml` binds `0.0.0.0:8002` for development
+convenience; in production the host firewall must restrict the port
+to the backend's reverse-proxy origin. Without that boundary, any
+host-network caller could trigger arbitrary outbound Open-Meteo
+fetches and large writes by hitting this route directly.
+
+Query parameter:
+
+- `days` — optional integer in `[1, 36500]`. Omitted → since
+  `module_configs.first_online` per module. Present → uniform
+  `now - days` start for all modules.
+
+Response shape (200 OK), matching §1.8:
+
+```json
+{ "modules_touched": 5, "rows_written": 87600, "errors": [] }
+```
+
+Errors:
+
+- `400` — `days` non-integer or out of range.
+
+A partial failure (some modules' Open-Meteo calls fail mid-run) is
+reported in the `errors` array, NOT a non-2xx status. The endpoint
+distinguishes "the request itself was bad" (400) from "the work was
+attempted but some modules failed" (200 with errors).
 
 <br>
 

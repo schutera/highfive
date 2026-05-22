@@ -25,6 +25,7 @@ and link backwards.
 | [014](adr-014-playwright-ui-tests.md)                       | UI tests run real Chromium against the production-built homepage via Playwright | Accepted |
 | [015](adr-015-weather-correlation.md)                       | Activity-vs-weather chart — Open-Meteo browser-direct + Recharts                | Accepted |
 | [016](adr-016-per-module-measurements-store.md)             | Per-module time-series store is one wide `measurements` table                   | Accepted |
+| [017](adr-017-external-weather-source.md)                   | Server-side weather worker fetches Open-Meteo into the measurements store       | Accepted |
 
 ## When to create an ADR
 

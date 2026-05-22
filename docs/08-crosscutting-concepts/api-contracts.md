@@ -256,6 +256,16 @@ Three non-obvious contract details:
   of failing at write. See [ADR-016](../09-architecture-decisions/adr-016-per-module-measurements-store.md)
   for the rationale.
 
+Known `source` values in the wild (consumers can filter on these to
+isolate a producer; aggregates over `metric` collapse them together):
+
+| `source`                 | Producer                                                                                                                                                                   | Metrics emitted                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `esp-heartbeat`          | `duckdb-service/routes/heartbeats.py`'s `post_heartbeat` dual-write — one row per heartbeat carrying `battery`                                                             | `battery_pct`                                       |
+| `esp-heartbeat-backfill` | One-time idempotent block in `duckdb-service/db/schema.py`'s `init_db` — replays `module_heartbeats.battery` history on existing volumes                                   | `battery_pct`                                       |
+| `open-meteo`             | `duckdb-service/services/weather_worker.py`'s `run_weather_fetch` — hourly APScheduler tick per [ADR-017](../09-architecture-decisions/adr-017-external-weather-source.md) | `temperature_c`, `humidity_pct`, `precipitation_mm` |
+| `open-meteo-backfill`    | `duckdb-service/services/weather_worker.py`'s `run_weather_backfill` — operator-triggered one-shot per ADR-017                                                             | `temperature_c`, `humidity_pct`, `precipitation_mm` |
+
 The snake → camel mapping at the backend renames `module_id →
 moduleId` and `sample_count → sampleCount`; the rest of the JSON
 carries through unchanged. The contracts type and the duckdb-service

@@ -113,6 +113,16 @@ const translations = {
       rangeMonth: '30d',
     },
 
+    // ---- Battery history chart (issue #110) ----
+    batteryChart: {
+      title: 'Battery history',
+      subtitle: 'Hourly battery level over the last 7 days',
+      axisLabel: 'Battery (%)',
+      seriesLabel: 'Battery',
+      loading: 'Loading battery history…',
+      empty: 'No battery readings in the last 7 days.',
+    },
+
     // ---- Admin key (telemetry gate) ----
     adminKey: {
       telemetry: 'Telemetry',
@@ -523,6 +533,16 @@ const translations = {
       rangeDay: '24\u00A0h',
       rangeWeek: '7\u00A0T',
       rangeMonth: '30\u00A0T',
+    },
+
+    // ---- Akku-Historie-Diagramm (Issue #110) ----
+    batteryChart: {
+      title: 'Akku-Verlauf',
+      subtitle: 'St\u00FCndlicher Akkustand der letzten 7 Tage',
+      axisLabel: 'Akku (%)',
+      seriesLabel: 'Akku',
+      loading: 'Akku-Verlauf wird geladen\u2026',
+      empty: 'Keine Akkudaten in den letzten 7 Tagen.',
     },
 
     // ---- Admin key (telemetry gate) ----

@@ -7,6 +7,7 @@ import AdminKeyForm from './AdminKeyForm';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
 import ActivityWeatherChart from './ActivityWeatherChart';
+import BatteryHistoryChart from './BatteryHistoryChart';
 
 const ADMIN_KEY_STORAGE = 'hf_admin_key';
 
@@ -525,6 +526,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
         </div>
 
         <ActivityWeatherChart moduleId={moduleDetail.id} location={moduleDetail.location} />
+        <BatteryHistoryChart moduleId={moduleDetail.id} />
       </div>
     </div>
   );

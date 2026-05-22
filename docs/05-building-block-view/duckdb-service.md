@@ -62,13 +62,16 @@ We have already worked with DuckDB as part of the Data Engineering course. We ca
 
 ## Data Model
 
-The data model consists of three main tables:
+The data model consists of three FK-chained tables plus three auxiliary stores:
 
-- `module`
-- `nest_data`
-- `daily_progress`
+- `module_configs` (root, registered modules)
+- `nest_data` (per-module nests, FK → `module_configs`)
+- `daily_progress` (per-nest snapshots, FK → `nest_data`)
+- `image_uploads` (per-upload event log, used for activity bucketing)
+- `module_heartbeats` (per-heartbeat telemetry rows; see [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md))
+- `measurements` (per-module canonical time-series; see [ADR-016](../09-architecture-decisions/adr-016-per-module-measurements-store.md))
 
-The tables form a hierarchical structure:
+The FK-chained tables form a hierarchical structure:
 
 A module can have multiple nests, and each nest can have multiple daily progress entries.
 Cardinality:
@@ -128,6 +131,41 @@ Speichert den **täglichen Fortschritt eines Nestes**.
 The value `sealed` is stored as a percentage between 0 and 100 for one nest.
 
 One possible extension for data storage would be to implement a layered model with bronze, silver, and gold layers. In the bronze layer, the images and JSON objects from the various modules could be stored in raw format. The Silver layer remains unchanged due to the existing relational schema. The Gold layer then comprises a star schema, where nests and modules could represent dimensions. The fact table could consist of the daily progress data. A star schema allows analytical processes and evaluations to be designed for higher performance and makes the data model efficient even for large data volumes.
+
+---
+
+# Table: measurements
+
+Per-module time-series store (issue #110). Append-only event table; see
+[ADR-016](../09-architecture-decisions/adr-016-per-module-measurements-store.md)
+for the schema rationale (no PK, no FK, `value DOUBLE`).
+
+| Attribute  | Data Type   | Required | Description                                         |
+| ---------- | ----------- | -------- | --------------------------------------------------- |
+| module_mac | VARCHAR(20) | Yes      | Canonical module id (no FK; out-of-order safe)      |
+| ts         | TIMESTAMP   | Yes      | UTC; producers stamp explicitly                     |
+| metric     | VARCHAR(40) | Yes      | `battery_pct`, future: `temperature_c`, …           |
+| value      | DOUBLE      | Yes      | Numeric reading; `AVG(value)` aggregates on read    |
+| source     | VARCHAR(40) | Yes      | `esp-heartbeat`, `esp-heartbeat-backfill`, …        |
+
+Indices:
+
+- `idx_measurements_module_metric_ts` on `(module_mac, metric, ts)` —
+  covers the WHERE/GROUP-BY of the bucketed read endpoint.
+- `idx_measurements_ts` on `(ts)` — covers the (future) retention scan
+  documented in
+  [`docs/08-crosscutting-concepts/measurement-retention.md`](../08-crosscutting-concepts/measurement-retention.md).
+
+Writers: `routes/heartbeats.py`'s `post_heartbeat` (dual-write from the
+ESP heartbeat path, `metric='battery_pct'`, `source='esp-heartbeat'`),
+`routes/measurements.py`'s `post_measurements` (admin batch insert
+proxied through the backend), and a one-shot backfill in
+`db/schema.py`'s `init_db()` (idempotent; tags
+`source='esp-heartbeat-backfill'`).
+
+Readers: `routes/measurements.py`'s `get_measurements` (bucketed
+aggregate, shares window helpers with `activity_timeseries` via
+`routes/_bucketing.py`). Future readers tracked in #115, #116, #117.
 
 ## API Documentation
 
@@ -255,6 +293,30 @@ proxies this route at `/api/modules/:id/activity` and maps the
 top-level `module_id` to `moduleId` (camelCase) for the homepage.
 See [api-reference.md §3.10](../api-reference.md) and
 [ADR-015](../09-architecture-decisions/adr-015-weather-correlation.md).
+
+### GET /modules/<module_id>/measurements
+
+Bucketed read against the per-module `measurements` table (issue
+#110). Query parameters: `metric` (required), `interval` (`hourly` |
+`daily`, default `hourly`), and `days` (integer in `[1, 90]`,
+default `7`). Empty buckets emit `value: null` and `sample_count: 0`
+(NOT `value: 0` — a missing sensor reading is unknown, not zero).
+Aggregate is `AVG(value)`. Backend proxy at
+`/api/modules/:id/measurements` (§1.7); see also
+[api-reference.md §3.11](../api-reference.md) and
+[ADR-016](../09-architecture-decisions/adr-016-per-module-measurements-store.md).
+Shares bucketing helpers with `activity_timeseries` via
+`routes/_bucketing.py`.
+
+### POST /measurements
+
+Appends one or a batch of measurement rows. Network-internal; the
+backend proxy at `POST /api/modules/:id/measurements` is the public
+boundary and gates with `X-Admin-Key`. Batches cap at 1000 rows;
+validation rejects the whole batch on any item failure. Used by
+in-cluster producers (heartbeat dual-write writes directly; future
+producers — weather worker #111, classifier #112 — will route
+through this endpoint).
 
 ## Internal services (no HTTP surface)
 

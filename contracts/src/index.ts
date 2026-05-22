@@ -202,3 +202,50 @@ export interface ActivityTimeSeries {
   end: string; // ISO 8601 (UTC), exclusive
   buckets: ActivityBucket[];
 }
+
+// ---- Per-module measurements time series (issue #110) ----
+//
+// Canonical store for per-module sensor / derived metrics. Returned by
+// `backend GET /api/modules/:id/measurements` (camelCase), which proxies
+// `duckdb-service /modules/<id>/measurements` (snake_case → camelCase
+// mapping in the backend, mirroring the activity-timeseries proxy).
+//
+// `MeasurementBucket.value` is deliberately `number | null`:
+// `ActivityBucket.count` treats absence-as-zero because zero uploads in
+// an hour is a meaningful zero, but a missing battery reading is NOT a
+// reading of zero — collapsing the gap to 0 would mis-render a silent
+// device as a flat-line discharge. `sampleCount` separates "we
+// aggregated zero samples here" from "we aggregated samples and the
+// average was 0", so a future zero-value reading still distinguishes
+// from a gap. The duckdb-service aggregate is `AVG(value)` per bucket.
+//
+// `metric` and `source` are open strings on the wire so a new producer
+// (weather worker for #111, classifier for #114) can append without
+// requiring a contracts release first; the producer's ADR pins the
+// chosen identifier so it doesn't drift across services. Known metrics
+// today: `battery_pct`. Known sources today: `esp-heartbeat`,
+// `esp-heartbeat-backfill`.
+//
+// A `Measurement` (single-row) shape lived here briefly in the initial
+// #110 PR but was unused — the homepage reads `MeasurementTimeSeries`,
+// the backend forwards `Record<string, unknown>` on the admin write
+// route. The case discipline for a single-row shape (e.g. `moduleMac`
+// vs `module_mac` on the wire) should be pinned by the first real
+// producer (#111 weather worker) when it lands, not speculated now.
+
+export interface MeasurementBucket {
+  timestamp: string; // ISO 8601 (UTC), bucket start
+  // `null` when no samples landed in this bucket. NOT zero — see the
+  // module docstring above for why this distinction is load-bearing.
+  value: number | null;
+  sampleCount: number;
+}
+
+export interface MeasurementTimeSeries {
+  moduleId: ModuleId;
+  metric: string;
+  interval: ActivityInterval; // reuses the existing 'hourly' | 'daily'
+  start: string; // ISO 8601 (UTC), inclusive
+  end: string; // ISO 8601 (UTC), exclusive
+  buckets: MeasurementBucket[];
+}

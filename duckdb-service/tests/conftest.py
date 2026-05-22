@@ -39,8 +39,10 @@ def _purge_service_modules() -> None:
         "routes.progress",
         "routes.nests",
         "routes.modules",
+        "routes.measurements",
         "routes.heartbeats",
         "routes.health",
+        "routes._bucketing",
         "routes",
         "services.discord",
         "services",
@@ -90,6 +92,7 @@ def fresh_db(tmp_path, monkeypatch):
     importlib.import_module("routes.health")
     importlib.import_module("routes.nests")
     importlib.import_module("routes.progress")
+    importlib.import_module("routes.measurements")
 
     # init_db on the fresh file.
     schema.init_db()

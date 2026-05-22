@@ -1,7 +1,10 @@
+from datetime import datetime, timezone
+
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
 from db.connection import lock, get_conn
+from db.repository import write_transaction
 from models.module_id import ModuleId
 
 heartbeats_bp = Blueprint("heartbeats", __name__)
@@ -112,16 +115,60 @@ def post_heartbeat():
         )
     )
 
-    with lock:
-        con = get_conn()
+    # Stamp `received_at` explicitly in UTC so the row this writer
+    # emits and the `measurements` dual-write below share the exact
+    # same timestamp. Falling back to the column's
+    # `DEFAULT CURRENT_TIMESTAMP` would leave the two rows millisecond-
+    # apart AND latently depend on the container's local TZ (see
+    # chapter 11 "`image_uploads.uploaded_at` stamped in container-local
+    # time" for the analogous incident in `record_image`).
+    received_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # All writes in this handler share one explicit BEGIN/COMMIT via
+    # `write_transaction()` (db/repository.py). That's load-bearing for
+    # the dual-write to `measurements`: DuckDB autocommits each
+    # `con.execute` outside a transaction, so without this the
+    # `module_heartbeats` row would land even if the `measurements`
+    # INSERT raised, and the cross-table joins the canonical store
+    # is supposed to support would silently develop drift between the
+    # two tables. PR B's senior-reviewer caught the same shape in
+    # `set_display_name`'s dance — see the `write_transaction`
+    # docstring for the receipts.
+    with write_transaction() as con:
         con.execute(
             """
             INSERT INTO module_heartbeats
-              (module_id, battery, rssi, uptime_ms, free_heap, fw_version)
-            VALUES (?, ?, ?, ?, ?, ?)
+              (module_id, received_at, battery, rssi, uptime_ms, free_heap, fw_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            [mac, battery, rssi, uptime_ms, free_heap, fw_version],
+            [mac, received_at, battery, rssi, uptime_ms, free_heap, fw_version],
         )
+
+        # Dual-write into the per-module measurements store (issue
+        # #110). The `measurements` table is the canonical home for
+        # per-module time-series data; downstream consumers
+        # (anomaly detection #116, hatching prediction #117, baseline
+        # #115) read from it rather than from each producer's home
+        # table. We tag `source='esp-heartbeat'` so analytics can
+        # tell live samples from the one-time backfill
+        # (`esp-heartbeat-backfill` in `db/schema.py`'s init block).
+        #
+        # Caveat carried forward, not introduced here: the
+        # `battery` value the firmware sends is currently
+        # `random(1, 100)` (see issue #8 investigation comment).
+        # The dual-write records it honestly under the
+        # `battery_pct` metric name; once #8a / #8b land the same
+        # path starts emitting real percentages and (later)
+        # millivolts under a new metric name.
+        if battery is not None:
+            con.execute(
+                """
+                INSERT INTO measurements
+                  (module_mac, ts, metric, value, source)
+                VALUES (?, ?, 'battery_pct', ?, 'esp-heartbeat')
+                """,
+                [mac, received_at, float(battery)],
+            )
 
         # Heartbeat-side geolocation patch (PR II / issue #89). Guarded
         # by:

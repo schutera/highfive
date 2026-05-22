@@ -43,6 +43,18 @@ vi.mock('../services/api', () => ({
       end: '2026-05-20T00:00:00',
       buckets: [],
     }),
+    // ModulePanel also renders <BatteryHistoryChart> (issue #110),
+    // which calls api.getMeasurements on mount. Stub it with an
+    // empty bucket list so the chart resolves to its "no readings"
+    // branch without an unhandled rejection.
+    getMeasurements: vi.fn().mockResolvedValue({
+      moduleId: 'e89fa9f23a08',
+      metric: 'battery_pct',
+      interval: 'hourly',
+      start: '2026-05-13T00:00:00',
+      end: '2026-05-20T00:00:00',
+      buckets: [],
+    }),
   },
 }));
 // fetchHourlyWeather inside <ActivityWeatherChart> calls

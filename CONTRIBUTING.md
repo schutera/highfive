@@ -184,6 +184,20 @@ The body (optional, separated by a blank line) explains _why_, not _what_.
 Do not commit `.env`, secrets, or large binaries. The `assets/` folder
 holds CAD files (`.FCStd`, `.dxf`) — those are intentional.
 
+## Licensing & contributor agreement
+
+HighFive is **source-available, not open source**: it is free for any
+**noncommercial** use under the [PolyForm Noncommercial License 1.0.0](LICENSE),
+and **commercial use requires a separate license** from the maintainers
+(contact <mark.schutera@mailbox.org>).
+
+Because we keep the option to offer commercial licenses, every contribution is
+accepted under our [Contributor License Agreement](CLA.md). It is short: you keep
+ownership of your work and grant the project the right to relicense it (including
+commercially). By opening a pull request you agree to it; first-time contributors
+will be asked to confirm once. Please don't submit third-party code without
+flagging its origin and license.
+
 ## Reporting issues
 
 Open a GitHub issue with reproduction steps, expected vs actual

@@ -15,7 +15,8 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
     "@highfive/contracts": "*",
     "cors": "^2.8.5",

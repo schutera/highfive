@@ -1,7 +1,11 @@
 <h1 align="center">🙌 HighFive</h1>
 
 <p align="center">
-  <img src="docs/_images/HiveHive_Logo.png" alt="HighFive Logo" width="180"/>
+  <img src="docs/_images/highfive-logo.svg" alt="HighFive logo" width="120"/>
+</p>
+
+<p align="center">
+  <em>An open monitoring pipeline for wild-bee nesting activity.</em>
 </p>
 
 <p align="center">
@@ -10,9 +14,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB?logo=react&logoColor=white" alt="React + Vite" />
-  <img src="https://img.shields.io/badge/language-TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/backend-Node.js%20%2B%20Express-339933?logo=node.js&logoColor=white" alt="Node.js + Express" />
-  <img src="https://img.shields.io/badge/image--service-Python%20%2B%20Flask-3776AB?logo=python&logoColor=white" alt="Python + Flask" />
+  <img src="https://img.shields.io/badge/services-Python%20%2B%20Flask-3776AB?logo=python&logoColor=white" alt="Python + Flask" />
   <img src="https://img.shields.io/badge/database-DuckDB-FFC107?logoColor=white" alt="DuckDB" />
   <img src="https://img.shields.io/badge/hardware-ESP32--CAM-E7352C?logoColor=white" alt="ESP32-CAM" />
   <img src="https://img.shields.io/badge/deploy-Docker%20Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose" />
@@ -20,73 +23,50 @@
 
 <br>
 
-Automated monitoring pipeline that captures images of wild bee hotels, analyzes nest activity, and displays the results on an interactive dashboard. The system is built on ESP32-CAM hardware, a Python image service, and a React web application — fully containerized with Docker Compose.
+HighFive captures images of wild-bee hotels with solar-powered ESP32-CAM modules,
+analyzes nest activity, and renders the results on an interactive dashboard, map,
+and setup wizard. Everything runs locally under Docker Compose.
+
+<p align="center">
+  <img src="docs/_images/dashboard.png" alt="HighFive dashboard" width="640"/>
+</p>
 
 <br>
 
-## System Components
-
-- **homepage** — React + Vite frontend, served on port `5173`
-- **backend** — Node.js + Express API, served on port `3002`
-- **image-service** — Python + Flask image ingestion and analysis service, port `8000`
-- **duckdb-service** — Python + Flask database service, port `8002`
-- **ESP32-CAM** — edge hardware module for image capture and upload
-
-<br>
-
-## Documentation
-
-| Guide                                                                | Description                                                                                                                                                                                                 |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Deployment Guide](docs/07-deployment-view/docker-compose.md)        | How to run all services with Docker Compose                                                                                                                                                                 |
-| [Homepage](docs/05-building-block-view/homepage.md)                  | Frontend pages, routes, and backend connection                                                                                                                                                              |
-| [ESP Deployment](docs/07-deployment-view/esp-flashing.md)            | ESP32 firmware flashing, WiFi setup, configuration. **Read this before building firmware** — the Google Geolocation API key is build-time injected via `ESP32-CAM/GEO_API_KEY` (gitignored), not hardcoded. |
-| [Troubleshooting](docs/troubleshooting.md)                           | ESP32-CAM setup issues, server connectivity, Windows Firewall                                                                                                                                               |
-| [API Reference](docs/api-reference.md)                               | All API endpoints with example requests and responses                                                                                                                                                       |
-| [Architecture (arc42)](docs/05-building-block-view/README.md)        | System architecture, building blocks, and design decisions                                                                                                                                                  |
-| [Image Service](docs/05-building-block-view/image-service.md)        | Image ingestion and analysis service                                                                                                                                                                        |
-| [DuckDB & Data Model](docs/05-building-block-view/duckdb-service.md) | Database schema and query reference                                                                                                                                                                         |
-
-<br>
-
-## Quick Start
+## Quick start
 
 ```bash
 git clone https://github.com/schutera/highfive.git
 cd highfive
+cp .env.example .env       # then edit if needed
+docker compose up --build  # homepage on http://localhost:5173
 ```
 
-Create a `.env` file in the root directory:
-
-```env
-DEBUG=true
-DUCKDB_SERVICE_URL=http://duckdb-service:8000
-```
-
-Start all services:
-
-```bash
-docker compose up --build
-```
-
-See [Deployment Guide](docs/07-deployment-view/docker-compose.md) for full setup instructions.
+Full setup, ports, and service map: **[Deployment Guide](docs/07-deployment-view/docker-compose.md)**.
 
 <br>
 
-## Development
+## Where to go next
 
-### Backend
+| If you want to…              | Start here                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------- |
+| **Contribute**               | [CONTRIBUTING.md](CONTRIBUTING.md) — setup, conventions, branch & test workflow |
+| Understand the architecture  | [Architecture (arc42)](docs/05-building-block-view/README.md)                   |
+| Flash an ESP32-CAM module    | [ESP Deployment](docs/07-deployment-view/esp-flashing.md)                       |
+| Call the API                 | [API Reference](docs/api-reference.md)                                          |
+| Fix a setup problem          | [Troubleshooting](docs/troubleshooting.md)                                      |
+| See what's planned / changed | [Roadmap](docs/roadmap.md) · [Changelog](CHANGELOG.md)                          |
 
-```bash
-cd backend
-npm install
-npm run dev
-```
+<br>
 
-### Frontend
+## License
 
-```bash
-cd homepage
-npm install
-npm run dev        # runs on port 5173
-```
+HighFive is **source-available, not open source**: free for any **noncommercial**
+use under the [PolyForm Noncommercial License 1.0.0](LICENSE). **Commercial use
+requires a separate license** — contact <mark.schutera@mailbox.org>.
+
+Contributions are welcome under our [Contributor License Agreement](CLA.md).
+
+<br>
+
+<sub>Built for citizen science. 🐝</sub>

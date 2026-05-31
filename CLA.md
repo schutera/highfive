@@ -71,5 +71,5 @@ Except for the licenses and representations above, the Contribution is provided
 
 By submitting a pull request to this repository, You agree to the terms of this
 Contributor License Agreement for that Contribution and all future Contributions.
-First-time contributors will be asked to confirm this once (a maintainer or the
-CLA-check bot will link back to this file).
+A maintainer may ask You to confirm your agreement on the pull request before it
+is merged.

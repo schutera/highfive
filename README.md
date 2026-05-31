@@ -27,10 +27,6 @@ HighFive captures images of wild-bee hotels with solar-powered ESP32-CAM modules
 analyzes nest activity, and renders the results on an interactive dashboard, map,
 and setup wizard. Everything runs locally under Docker Compose.
 
-<p align="center">
-  <img src="docs/_images/dashboard.png" alt="HighFive dashboard" width="640"/>
-</p>
-
 <br>
 
 ## Quick start

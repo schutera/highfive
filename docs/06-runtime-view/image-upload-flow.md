@@ -79,6 +79,20 @@ sequenceDiagram
    reason, last HTTP codes, the last ~2 KB of the on-device circular
    log buffer.
 
+   > **Onboarding precondition.** Before any of this runs, the module
+   > must be onboarded once. The captive portal at `http://192.168.4.1`
+   > (setup/AP mode) now asks the operator for **Wi-Fi SSID and password
+   > only** — everything else is assigned under the hood: the module
+   > name is derived from the MAC (`ESP32-CAM/esp_init.cpp`'s
+   > `generateModuleName`), the `INIT_URL` / `UPLOAD_URL` come from the
+   > build-time defaults applied in `ESP32-CAM/esp_init.cpp`'s
+   > `loadConfig`, and camera settings come from
+   > `ESP32-CAM/lib/firmware_defaults/firmware_defaults.h`. Reconfigure
+   > is by re-flash (which erases the saved config). See
+   > [ADR-018](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md)
+   > and the
+   > [onboarding guide](../07-deployment-view/esp-flashing.md).
+
 1. **Upload.** Device sends multipart `POST /upload` to
    `image-service` with form fields `image` (the JPEG), `mac` (the
    module identifier), `battery` (0–100), and optional `logs`

@@ -1,5 +1,25 @@
-import { describe, it, expect } from 'vitest';
-import { assertFirmwareResponse, ESP_IMAGE_MAGIC } from '../components/setup/flashEsp';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Hoisted spies for the esptool-js mock. flashEsp() constructs an ESPLoader
+// and a Transport; we record the writeFlash options so the erase-policy test
+// can assert eraseAll without touching real Web Serial (absent in jsdom).
+const writeFlash = vi.fn().mockResolvedValue(undefined);
+const loaderMain = vi.fn().mockResolvedValue(undefined);
+const flashId = vi.fn().mockResolvedValue(undefined);
+const after = vi.fn().mockResolvedValue(undefined);
+const transportDisconnect = vi.fn().mockResolvedValue(undefined);
+vi.mock('esptool-js', () => ({
+  ESPLoader: vi.fn().mockImplementation(() => ({
+    main: loaderMain,
+    flashId,
+    writeFlash,
+    after,
+  })),
+  Transport: vi.fn().mockImplementation(() => ({ disconnect: transportDisconnect })),
+}));
+
+import { assertFirmwareResponse, ESP_IMAGE_MAGIC, flashEsp } from '../components/setup/flashEsp';
+import type { Manifest } from '../components/setup/flashEsp';
 
 // Issue #43: when /firmware.bin is missing, Vite's SPA fallback returns
 // index.html with HTTP 200 + content-type: text/html. flashEsp used to read
@@ -119,5 +139,67 @@ describe('assertFirmwareResponse', () => {
     await expect(assertFirmwareResponse(resp, '/firmware.bin')).rejects.toThrow(
       /byte 0x1000 is 0xAA.*expected 0xE9/,
     );
+  });
+});
+
+// The wizard's only reconfigure mechanism is now re-flashing: a full-chip
+// erase before writing wipes NVS (the `configured` flag) + SPIFFS
+// (`/config.json`) so a re-flashed module always reboots into its Wi-Fi
+// setup portal. eraseAll: false would leave the saved Wi-Fi config in place,
+// silently defeating "reconfigure by re-flash". This test pins the policy.
+describe('flashEsp writeFlash erase policy', () => {
+  beforeEach(() => {
+    writeFlash.mockClear();
+    loaderMain.mockClear();
+    flashId.mockClear();
+    after.mockClear();
+    transportDisconnect.mockClear();
+
+    // Web Serial port picker: return a stub port with a close() method.
+    const port = { close: vi.fn().mockResolvedValue(undefined) };
+    (navigator as unknown as { serial: { requestPort: () => Promise<unknown> } }).serial = {
+      requestPort: vi.fn().mockResolvedValue(port),
+    };
+
+    // Firmware fetch: a valid merge_bin-shaped blob (0xFF pad, 0xE9 at 0x1000).
+    const bytes = new Uint8Array(0x1001).fill(0xff);
+    bytes[0x1000] = ESP_IMAGE_MAGIC;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(bytes, {
+        status: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+      }),
+    ) as typeof fetch;
+
+    // jsdom 25's FileReader.readAsBinaryString rejects the Blob produced
+    // from a fetched Uint8Array body ("parameter 1 is not of type 'Blob'"),
+    // which flashEsp's blobToBinaryString relies on. Stub it so the flash
+    // path reaches writeFlash; the byte content is irrelevant to this test
+    // (we only assert the erase option), so resolve with an empty string.
+    vi.spyOn(FileReader.prototype, 'readAsBinaryString').mockImplementation(function (
+      this: FileReader,
+    ) {
+      Object.defineProperty(this, 'result', { value: '', configurable: true });
+      this.onload?.(new ProgressEvent('load') as ProgressEvent<FileReader>);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('flashes with eraseAll: true so a re-flash wipes saved Wi-Fi config', async () => {
+    const manifest: Manifest = {
+      name: 'HiveHive',
+      version: 'test',
+      builds: [{ chipFamily: 'ESP32', parts: [{ path: '/firmware.bin', offset: 0 }] }],
+    };
+
+    const states: string[] = [];
+    await flashEsp(manifest, (p) => states.push(p.state));
+
+    expect(writeFlash).toHaveBeenCalledTimes(1);
+    expect(writeFlash.mock.calls[0][0]).toMatchObject({ eraseAll: true });
+    expect(states).toContain('finished');
   });
 });

@@ -71,12 +71,36 @@ if [ -z "${GEO_API_KEY}" ] && [ -f "${SKETCH_DIR}/GEO_API_KEY" ]; then
   GEO_API_KEY="$(tr -d '[:space:]' < "${SKETCH_DIR}/GEO_API_KEY")"
 fi
 
+# DEV_SERVER_HOST (optional): point a dev module at a LAN stack instead of the
+# production backend baked into firmware_defaults.h. Sourced from env var
+# first, then a .gitignored file — same pattern as GEO_API_KEY above. When set,
+# compose the init/upload URLs from the LAN-dev host ports (8002 = duckdb-
+# service, 8000 = image-service) and inject them as -DHF_INIT_URL_DEFAULT /
+# -DHF_UPLOAD_URL_DEFAULT, overriding the production #ifndef defaults in
+# firmware_defaults.h. Absent => no flags, production URLs apply. The `\"`
+# escapes produce a single layer of C-string quote bytes, matching the
+# GEO_API_KEY/FIRMWARE_VERSION quoting; extra_scripts.py mirrors this via
+# env.StringifyMacro. See docs/07-deployment-view/esp-flashing.md.
+DEV_SERVER_HOST="$(printf '%s' "${DEV_SERVER_HOST:-}" | tr -d '[:space:]')"
+if [ -z "${DEV_SERVER_HOST}" ] && [ -f "${SKETCH_DIR}/DEV_SERVER_HOST" ]; then
+  DEV_SERVER_HOST="$(tr -d '[:space:]' < "${SKETCH_DIR}/DEV_SERVER_HOST")"
+fi
+DEV_URL_FLAGS=""
+if [ -n "${DEV_SERVER_HOST}" ]; then
+  DEV_URL_FLAGS=" -DHF_INIT_URL_DEFAULT=\"http://${DEV_SERVER_HOST}:8002/new_module\" -DHF_UPLOAD_URL_DEFAULT=\"http://${DEV_SERVER_HOST}:8000/upload\""
+fi
+
 echo "Compiling ESP32-CAM firmware..."
 echo "  FQBN:     ${FQBN}"
 echo "  Sketch:   ${SKETCH_DIR}"
 echo "  Output:   ${BUILD_DIR}"
 echo "  Version:  ${VERSION}"
 echo "  Sequence: ${SEQUENCE}"
+if [ -n "${DEV_SERVER_HOST}" ]; then
+  echo "  DevHost: ${DEV_SERVER_HOST} (init :8002, upload :8000 — LAN dev override)"
+else
+  echo "  DevHost: <unset> (production URLs baked in)"
+fi
 if [ -n "${GEO_API_KEY}" ]; then
   echo "  GeoKey:  set (len=${#GEO_API_KEY})"
 else
@@ -107,7 +131,7 @@ arduino-cli compile \
   --fqbn "${FQBN}" \
   --output-dir "${BUILD_DIR}" \
   --libraries "${SKETCH_DIR}/lib" \
-  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\" -DFIRMWARE_SEQUENCE=${SEQUENCE}" \
+  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\" -DFIRMWARE_SEQUENCE=${SEQUENCE}${DEV_URL_FLAGS}" \
   --build-property "build.partitions=min_spiffs" \
   "${SKETCH_DIR}"
 

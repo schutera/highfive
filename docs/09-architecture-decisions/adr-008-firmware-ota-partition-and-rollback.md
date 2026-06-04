@@ -197,9 +197,11 @@ watchdog feed.
      the counter entirely and the slot reboots forever with no
      recovery. Use `abort()` or `esp_system_abort()` instead — the
      panic handler produces `reset_reason=ESP_RST_PANIC`, which the
-     gate counts. The six existing `ESP.restart()` sites in the
+     gate counts. The five existing `ESP.restart()` sites in the
      firmware (per `git grep "ESP\.restart()" ESP32-CAM/`) are all
-     intentional clean reboots, none of which violate this invariant:
+     intentional clean reboots, none of which violate this invariant
+     (a sixth — the captive-portal `/factory_reset` handler — was
+     later removed when reconfigure moved to re-flash; see ADR-018):
      - `ESP32-CAM/esp_init.cpp`'s `setupWifiConnection` — WiFi-join
        timeout, intentional retry.
      - `ESP32-CAM/ESP32-CAM.ino`'s `setup()` AP-fallback branch —
@@ -209,8 +211,6 @@ watchdog feed.
      - `ESP32-CAM/ESP32-CAM.ino`'s `loop()` upload circuit-breaker —
        fires only after setup() already completed (mark-valid done,
        counter at 0); rollback wouldn't help network failures anyway.
-     - `ESP32-CAM/host.cpp`'s captive-portal `/factory_reset` handler
-       — operator action.
      - `ESP32-CAM/ota.cpp`'s `httpOtaCheckAndApply` — boot into the
        just-flashed slot. THIS one IS in setup() but it's a clean
        reboot ON SUCCESS (Update.end() returned ok); the new slot

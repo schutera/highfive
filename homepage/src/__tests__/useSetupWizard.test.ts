@@ -29,9 +29,8 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
     healthCheck.mockReset();
     healthCheck.mockResolvedValue({ status: 'ok', timestamp: '' });
     vi.useFakeTimers();
-    // The hook's mount effects also fetch /firmware.json and
-    // /__dev-api/lan-ip — stub those so the test isn't coupled to
-    // their implementations. Stash the original so afterEach can
+    // The hook's mount effect also fetches /firmware.json — stub it so
+    // the test isn't coupled to its implementation. Stash the original so afterEach can
     // restore it and the next test in this file (or next file run
     // in the same worker) doesn't inherit the override.
     originalFetch = globalThis.fetch;
@@ -66,8 +65,8 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
     getAllModules.mockRejectedValue(new Error('fetch failed'));
 
     const { result } = renderHook(() => useSetupWizard());
-    // Drain the mount-effect promises (loadFirmware, detectLanIp,
-    // snapshotModules) so subsequent assertions see the post-mount state.
+    // Drain the mount-effect promises (loadFirmware, snapshotModules)
+    // so subsequent assertions see the post-mount state.
     await act(async () => {
       await Promise.resolve();
     });

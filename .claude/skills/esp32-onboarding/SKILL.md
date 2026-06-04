@@ -63,6 +63,20 @@ Find the COM port:
 - Windows: Device Manager → Ports → "USB-SERIAL CH340 (COMx)"
 - Linux/Mac: `/dev/ttyUSB0` or `/dev/cu.usbserial-*`
 
+**Targeting a local dev stack?** The server URLs are baked in at build time (the captive portal no longer asks for them). For a production build, skip this — the firmware defaults to `https://highfive.schutera.com/...`. To point the module at your LAN `docker compose` stack, write the host's LAN IP (host only — no scheme, no port, no path) to the gitignored `ESP32-CAM/DEV_SERVER_HOST` **before** flashing, or export `DEV_SERVER_HOST`:
+
+```bash
+# Linux/Mac — from repo root
+printf '%s' "192.168.1.50" > ESP32-CAM/DEV_SERVER_HOST
+```
+
+```powershell
+# Windows / PowerShell — from repo root
+"192.168.1.50" | Out-File -NoNewline -Encoding ascii ESP32-CAM\DEV_SERVER_HOST
+```
+
+The build (`build.sh` / `extra_scripts.py`) injects `http://<host>:8002/new_module` (duckdb-service) and `http://<host>:8000/upload` (image-service). Same pattern as `GEO_API_KEY`. See [esp-flashing.md → "Point a dev module at a local stack"](../../../docs/07-deployment-view/esp-flashing.md).
+
 Enter flash mode (ESP32-CAM-MB):
 
 1. Hold **IO0** (BOOT) button
@@ -121,17 +135,14 @@ Check `esp_log.txt`. A healthy unconfigured board shows:
 
 1. Connect to Wi-Fi: **`ESP32-Access-Point`** / password **`esp-12345`**
 2. Open **http://192.168.4.1**
-3. Fill in the form:
+3. Fill in the form — **Wi-Fi credentials only**:
 
-| Field                   | Value                                                                     |
-| ----------------------- | ------------------------------------------------------------------------- |
-| Module Name             | Any label, e.g. `hive-01`                                                 |
-| Wi-Fi SSID              | Your **2.4 GHz** network name — copy-paste, don't retype (case-sensitive) |
-| Wi-Fi Password          | Your network password                                                     |
-| Initialization Base URL | `http://<LAN-IP>:8002`                                                    |
-| Initialization Endpoint | `/new_module`                                                             |
-| Upload Base URL         | `http://<LAN-IP>:8000`                                                    |
-| Upload Endpoint         | `/upload`                                                                 |
+| Field          | Value                                                                     |
+| -------------- | ------------------------------------------------------------------------- |
+| Wi-Fi SSID     | Your **2.4 GHz** network name — copy-paste, don't retype (case-sensitive) |
+| Wi-Fi Password | Your network password                                                     |
+
+There are no other fields. Module name, server URLs, and camera settings are assigned under the hood (see Phase 3 — server URLs are baked in at build time, not entered here). See [ADR-018](../../../docs/09-architecture-decisions/adr-018-captive-portal-wifi-only.md).
 
 4. Click **Save Configuration** — you should see "Configuration saved successfully."
 
@@ -141,9 +152,9 @@ The board reboots and connects to your Wi-Fi. The access point disappears.
 
 - ESP32 is **2.4 GHz only** — router must have a 2.4 GHz band available
 - The ESP32 and the server must be on the **same LAN** — not one on a phone hotspot and the other on the home router
-- Use the server's **LAN IP**, not `localhost`
+- For a dev module, the server's **LAN IP** (not `localhost`) goes into `DEV_SERVER_HOST` **before flashing** (Phase 3), not into the form — there is no URL field
 
-**Factory reset** (to redo config): in AP mode, visit `http://192.168.4.1` → expand **Factory reset (advanced)** → tick the confirm box → submit. The module reboots and reopens the access point. From STA mode without a serial cable, cause three consecutive failed WiFi joins to trigger the auto-AP-fallback first.
+**Reconfigure = re-flash.** There is no factory-reset button. Re-flashing erases the saved config (full chip erase, `eraseAll: true` in `homepage/src/components/setup/flashEsp.ts`'s `flashEsp`), so the module boots straight back into this Wi-Fi-only setup page. To change the server a module talks to, set `DEV_SERVER_HOST`, re-build, and re-flash (Phase 3). The "moved to a new network" case needs no re-flash: cause three consecutive failed Wi-Fi joins (e.g. save wrong credentials) and the module auto-reopens the access point after ~90 s (`WIFI_FAIL_AP_FALLBACK_THRESH` in `ESP32-CAM/ESP32-CAM.ino`).
 
 ---
 

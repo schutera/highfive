@@ -469,8 +469,22 @@ bool loadConfig(esp_config_t *esp_config) {
   const bool urlMigrated =
       (uploadMigrated != uploadFromDisk) || (initMigrated != initFromDisk);
 
-  strlcpy(esp_config->UPLOAD_URL, uploadMigrated.c_str(), sizeof(esp_config->UPLOAD_URL));
-  strlcpy(esp_config->INIT_URL,   initMigrated.c_str(),   sizeof(esp_config->INIT_URL));
+  // Server URLs are no longer operator-entered — the captive portal is
+  // Wi-Fi-credentials-only, so a config saved by the simplified form carries
+  // no INIT_URL/UPLOAD_URL. Fall back to the compile-time defaults
+  // (production by default; a LAN-dev override baked in via the gitignored
+  // DEV_SERVER_HOST build file). See lib/firmware_defaults/firmware_defaults.h.
+  // Modules still holding URLs from an older config keep them (migrated to
+  // https above), so existing fleets are unaffected. The substitution is
+  // RAM-only — we do NOT persist the default to SPIFFS, so a rebuild for a
+  // different target retargets cleanly without an erase.
+  const std::string uploadResolved =
+      uploadMigrated.empty() ? std::string(hf::defaults::kUploadUrlDefault) : uploadMigrated;
+  const std::string initResolved =
+      initMigrated.empty() ? std::string(hf::defaults::kInitUrlDefault) : initMigrated;
+
+  strlcpy(esp_config->UPLOAD_URL, uploadResolved.c_str(), sizeof(esp_config->UPLOAD_URL));
+  strlcpy(esp_config->INIT_URL,   initResolved.c_str(),   sizeof(esp_config->INIT_URL));
   strlcpy(
     esp_config->email,
     esp_config_doc["NETWORK"]["EMAIL"] | "",

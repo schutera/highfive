@@ -63,7 +63,8 @@ if [[ -n "$hits" ]]; then
   echo ""
   echo "  The 'hold IO0 / left button for N seconds' procedure is unreachable on"
   echo "  AI Thinker ESP32-CAM-MB (GPIO0 is a strap pin). Replace with the"
-  echo "  captive-portal procedure: POST /factory_reset on http://192.168.4.1."
+  echo "  current reconfigure procedure: re-flash the module (the web installer"
+  echo "  erases the saved config and reopens the Wi-Fi setup page)."
   echo "  See docs/11-risks-and-technical-debt/README.md \"GPIO0 is a strap pin\"."
   echo "  The post-mortem file itself is allowlisted."
   exit 1

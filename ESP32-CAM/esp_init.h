@@ -74,16 +74,16 @@ void setESPConfigured(bool value);
 /* Settle delay between mutating NVS (e.g. setESPConfigured(false)) and
    ESP.restart(), so the flash write commits and the WiFi/HTTP stack can
    finish flushing FINs. Used by the auto-AP-fallback path in
-   ESP32-CAM.ino's setup() and by the /factory_reset endpoint in
-   host.cpp. */
+   ESP32-CAM.ino's setup(). (The captive-portal /factory_reset endpoint that
+   also used this was removed; reconfiguring is now done by re-flashing.) */
 #define FACTORY_RESET_SETTLE_MS 500UL
 
 /* Persisted counter of consecutive WiFi-join timeouts. Cleared on a
    successful join; bumped from setupWifiConnection() each time the 30 s
    begin() loop times out. Used at boot to decide whether to drop back
-   into AP-config mode automatically — the user can also trigger the
-   same NVS mutation by hand via the captive portal's POST /factory_reset
-   endpoint once the AP has reopened.
+   into AP-config mode automatically — the user can also force the AP to
+   reopen by re-flashing the firmware (the web installer erases the saved
+   config).
 
    Storage: NVS namespace "config", key "wifi_fails" (uint8). */
 uint8_t getWifiFailCount();

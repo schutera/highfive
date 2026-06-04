@@ -231,7 +231,8 @@ keeps onboarding to one secret while preserving the gating semantics.
 - `GET /api/health` — public liveness check.
 - `image-service /upload` — accepts uploads from any client that
   knows the URL. Authentication for ESP modules is "you must be on
-  the LAN" (the Init/Upload base URL is the host's LAN IP). Not
+  the LAN" (the module's upload URL is the host's LAN IP in a dev
+  build, or the production origin otherwise). Not
   defence-in-depth; a compromised LAN device can spoof uploads.
   Acceptable for the current threat model (single-tenant, hobbyist
   deployment); revisit if multi-tenancy is added.

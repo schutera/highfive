@@ -250,8 +250,8 @@ const translations = {
       photoStep: 'Photo: Step {n}',
       tips: 'Tips',
       factoryReset:
-        "To reconfigure your module: open http://192.168.4.1 (the module reopens this portal automatically after three failed WiFi joins), expand 'Factory reset (advanced)' at the bottom of the form, tick the confirmation checkbox, and submit. With a serial cable: cd ESP32-CAM && pio run -t erase && pio run -t upload.",
-      factoryResetLabel: 'Factory Reset:',
+        'To reconfigure your module (new WiFi network or a changed password), simply re-flash it from the setup wizard (Step 2). Flashing now wipes the saved configuration, so the module reboots straight into its WiFi setup page. The module also reopens its setup access point automatically after three failed WiFi joins.',
+      factoryResetLabel: 'Reconfigure:',
       ctaTitle: 'Module assembled?',
       ctaText: 'Now flash the firmware and connect your module to the server.',
       ctaCta: 'Start Setup Wizard',
@@ -400,7 +400,7 @@ const translations = {
     // ---- Step 4: Configure ----
     step4: {
       title: 'Configure Your Module',
-      text: 'Open the module\u2019s configuration page to enter your WiFi details and server settings.',
+      text: 'Open the module\u2019s configuration page. It asks for only your WiFi name and password \u2014 everything else is set up automatically.',
       openConfigPage: 'Open Configuration Page',
       configDoneBtn: 'I\u2019ve saved the configuration',
       reconnectTitle: 'Configuration Saved!',
@@ -444,9 +444,9 @@ const translations = {
         apTitle: 'Is the access point still visible?',
         apText:
           "If you can still see 'ESP32-Access-Point' in your WiFi list, the module hasn't connected to your home network yet. Reconnect and verify the WiFi settings.",
-        resetTitle: 'Factory Reset',
+        resetTitle: 'Re-flash to reconfigure',
         resetText:
-          "Open http://192.168.4.1 (the module reopens this access point after three failed WiFi joins), expand 'Factory reset (advanced)' at the bottom of the form, tick the confirmation checkbox, and submit. The module reboots into the configuration portal.",
+          'To re-enter your WiFi details, re-flash the module from the setup wizard (Step 2). Flashing now wipes the saved configuration, so the module reboots straight into its WiFi setup page. It also reopens its setup access point automatically after three failed WiFi joins.',
       },
     },
 
@@ -700,8 +700,8 @@ const translations = {
       photoStep: 'Foto: Schritt {n}',
       tips: 'Tipps',
       factoryReset:
-        "Zum Neukonfigurieren deines Moduls: \u00F6ffne http://192.168.4.1 (das Modul \u00F6ffnet diesen Zugangspunkt nach drei fehlgeschlagenen WLAN-Verbindungsversuchen automatisch erneut), klappe 'Factory reset (advanced)' unten im Formular auf, aktiviere die Best\u00E4tigungs-Checkbox und sende ab. Mit einem seriellen Kabel: cd ESP32-CAM && pio run -t erase && pio run -t upload.",
-      factoryResetLabel: 'Werkseinstellungen:',
+        'Zum Neukonfigurieren deines Moduls (neues WLAN oder ge\u00E4ndertes Passwort) flashe es einfach im Setup-Assistenten neu (Schritt 2). Das Flashen l\u00F6scht jetzt die gespeicherte Konfiguration, sodass das Modul direkt in seine WLAN-Einrichtungsseite startet. Das Modul \u00F6ffnet seinen Einrichtungs-Zugangspunkt au\u00DFerdem nach drei fehlgeschlagenen WLAN-Verbindungsversuchen automatisch erneut.',
+      factoryResetLabel: 'Neukonfigurieren:',
       ctaTitle: 'Modul zusammengebaut?',
       ctaText: 'Jetzt die Firmware flashen und dein Modul mit dem Server verbinden.',
       ctaCta: 'Setup-Assistent starten',
@@ -850,7 +850,7 @@ const translations = {
     // ---- Step 4: Configure ----
     step4: {
       title: 'Modul konfigurieren',
-      text: '\u00D6ffne die Konfigurationsseite des Moduls, um deine WLAN-Daten und Servereinstellungen einzugeben.',
+      text: '\u00D6ffne die Konfigurationsseite des Moduls. Sie fragt nur nach deinem WLAN-Namen und Passwort \u2014 alles andere wird automatisch eingerichtet.',
       openConfigPage: 'Konfigurationsseite \u00F6ffnen',
       configDoneBtn: 'Ich habe die Konfiguration gespeichert',
       reconnectTitle: 'Konfiguration gespeichert!',
@@ -895,9 +895,9 @@ const translations = {
         apTitle: 'Ist der Access Point noch sichtbar?',
         apText:
           "Wenn du 'ESP32-Access-Point' noch in deiner WLAN-Liste siehst, hat sich das Modul noch nicht mit deinem Heimnetzwerk verbunden. Verbinde dich erneut und \u00FCberpr\u00FCfe die WLAN-Einstellungen.",
-        resetTitle: 'Werkseinstellungen',
+        resetTitle: 'Zum Neukonfigurieren neu flashen',
         resetText:
-          "\u00D6ffne http://192.168.4.1 (das Modul \u00F6ffnet diesen Zugangspunkt nach drei fehlgeschlagenen WLAN-Verbindungsversuchen erneut), klappe 'Factory reset (advanced)' unten im Formular auf, aktiviere die Best\u00E4tigungs-Checkbox und sende ab. Das Modul startet neu in das Konfigurationsportal.",
+          'Um deine WLAN-Daten erneut einzugeben, flashe das Modul im Setup-Assistenten neu (Schritt 2). Das Flashen l\u00F6scht jetzt die gespeicherte Konfiguration, sodass das Modul direkt in seine WLAN-Einrichtungsseite startet. Es \u00F6ffnet seinen Einrichtungs-Zugangspunkt au\u00DFerdem nach drei fehlgeschlagenen WLAN-Verbindungsversuchen automatisch erneut.',
       },
     },
 

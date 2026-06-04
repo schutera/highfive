@@ -591,3 +591,95 @@ def test_delete_module_unknown_returns_404(client, fresh_db):
 
 def test_delete_module_invalid_id_returns_400(client):
     assert client.delete("/modules/not-a-mac").status_code == 400
+# ---------- GET /image_uploads pagination ----------
+
+
+def test_image_uploads_pagination_pages_newest_first(client, fresh_db):
+    """limit/offset return the right *rows* (newest first), with a stable
+    `total` across pages — not just a correctly-shaped envelope."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    # Five uploads, ascending timestamps → "e" is newest.
+    for letter, day in zip("abcde", range(1, 6)):
+        _seed_image_upload(
+            fresh_db, TEST_MAC_1, f"{letter}.jpg", f"2024-06-0{day} 12:00:00"
+        )
+
+    page1 = client.get("/image_uploads?limit=2").get_json()
+    assert page1["total"] == 5
+    assert [i["filename"] for i in page1["images"]] == ["e.jpg", "d.jpg"]
+
+    page2 = client.get("/image_uploads?limit=2&offset=2").get_json()
+    assert page2["total"] == 5  # total ignores the page window
+    assert [i["filename"] for i in page2["images"]] == ["c.jpg", "b.jpg"]
+
+    page3 = client.get("/image_uploads?limit=2&offset=4").get_json()
+    assert [i["filename"] for i in page3["images"]] == ["a.jpg"]  # last partial page
+
+
+def test_image_uploads_total_respects_module_filter(client, fresh_db):
+    """`total` counts only rows matching ?module_id=, so the UI's "load
+    more" math is correct under a filter."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    _seed_module(fresh_db, TEST_MAC_2)
+    _seed_image_upload(fresh_db, TEST_MAC_1, "a.jpg", "2024-06-01 12:00:00")
+    _seed_image_upload(fresh_db, TEST_MAC_1, "b.jpg", "2024-06-02 12:00:00")
+    _seed_image_upload(fresh_db, TEST_MAC_2, "other.jpg", "2024-06-03 12:00:00")
+
+    body = client.get(f"/image_uploads?module_id={TEST_MAC_1}&limit=1").get_json()
+    assert body["total"] == 2  # not 3 — the other module is excluded
+    assert [i["filename"] for i in body["images"]] == ["b.jpg"]  # newest of the two
+
+
+def test_image_uploads_pagination_deterministic_on_tied_timestamps(client, fresh_db):
+    """Rows sharing an `uploaded_at` must page without overlap or gaps:
+    the `id DESC` tiebreaker makes the order a strict total order, so
+    page1 ∪ page2 covers every row exactly once (the bug a bare
+    `ORDER BY uploaded_at DESC` would cause under LIMIT/OFFSET)."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    tied = "2024-06-01 12:00:00"
+    for letter in "abcd":
+        _seed_image_upload(fresh_db, TEST_MAC_1, f"{letter}.jpg", tied)
+
+    page1 = client.get("/image_uploads?limit=2&offset=0").get_json()
+    page2 = client.get("/image_uploads?limit=2&offset=2").get_json()
+    # a,b,c,d inserted in that order → ids ascending → id DESC = d,c,b,a.
+    # Pin the actual order, not just set coverage: an `id ASC` tiebreaker
+    # would also give no-dup/no-skip, so coverage alone can't catch a
+    # reversed tiebreaker.
+    assert [i["filename"] for i in page1["images"]] == ["d.jpg", "c.jpg"]
+    assert [i["filename"] for i in page2["images"]] == ["b.jpg", "a.jpg"]
+    seen = [i["filename"] for i in page1["images"]] + [
+        i["filename"] for i in page2["images"]
+    ]
+    assert sorted(seen) == ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]  # no dup, no skip
+    assert len(set(seen)) == 4
+
+
+def test_image_uploads_malformed_limit_does_not_become_unbounded(client, fresh_db):
+    """A garbage `limit` must degrade to a finite cap, never to the
+    unbounded query the pagination exists to avoid. Proven via `offset`:
+    if the bad limit fell through to None, `offset` would be ignored
+    (the route only applies LIMIT/OFFSET when limit is set) and all 3
+    rows would return; a finite cap honours the offset and returns 2."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    for letter, day in zip("abc", range(1, 4)):
+        _seed_image_upload(
+            fresh_db, TEST_MAC_1, f"{letter}.jpg", f"2024-06-0{day} 12:00:00"
+        )
+
+    body = client.get("/image_uploads?limit=abc&offset=1").get_json()
+    assert body["total"] == 3
+    # offset honoured (skip newest "c.jpg") → "b.jpg", "a.jpg"
+    assert [i["filename"] for i in body["images"]] == ["b.jpg", "a.jpg"]
+
+
+def test_image_uploads_without_limit_returns_all_with_total(client, fresh_db):
+    """Omitting limit returns every row (back-compat) and still reports
+    `total`."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    _seed_image_upload(fresh_db, TEST_MAC_1, "a.jpg", "2024-06-01 12:00:00")
+    _seed_image_upload(fresh_db, TEST_MAC_1, "b.jpg", "2024-06-02 12:00:00")
+
+    body = client.get("/image_uploads").get_json()
+    assert body["total"] == 2
+    assert len(body["images"]) == 2

@@ -86,6 +86,50 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Admin "failed to load images": stale `IMAGE_SERVICE_URL` after a no-`--update-env` PM2 restart, masking an unbounded image-list query that tripped a 5s timeout
+
+**What happened.** The admin page (`/admin`) showed "Failed to load
+images. Is the image service running?" while the image-service PM2
+process was healthy and serving. Two independent faults stacked:
+
+1. The backend (`highfive-api`) had been restarted at some point
+   _without_ `--update-env`, so PM2 reused the environment captured at
+   first launch — from before `IMAGE_SERVICE_URL` was added to
+   `ecosystem.config.js`. `pm2 env <id>` showed `DUCKDB_SERVICE_URL`
+   but no `IMAGE_SERVICE_URL`, so the backend fell back to its dev
+   default `http://image-service:4444` (a **Docker** service name that
+   does not resolve on the PM2 host). Every `/api/images` 502'd.
+2. After fixing the env, images _still_ failed: `duckdb-service`'s
+   `GET /image_uploads` ran `SELECT … ORDER BY uploaded_at DESC` with
+   **no `LIMIT`**, returning all ~15k rows in ~12s against an 8 GB DB
+   file. `image-service`'s proxy used a **5-second** read timeout, so
+   the call timed out → 500 → 502 at the backend → the same UI error.
+
+**Why it happened.** (1) `pm2 restart`/`reload` does _not_ re-read the
+ecosystem `env` block unless you pass `--update-env`; a config edit is
+invisible to a running process until then, so the file looked correct
+while the live env was stale. (2) The list query was written when the
+table was small; an unbounded `ORDER BY` over a bloated table crossed
+the fixed proxy timeout as data grew. The 8 GB file (mostly churn from
+high-frequency tables, not the 15k image rows) made even a 15k-row
+sort slow.
+
+**How to avoid it next time.** After editing `ecosystem.config.js`
+env, deploy with `pm2 reload ecosystem.config.js --update-env` and
+verify with `pm2 env <id>` — never trust the file alone. Never proxy
+an unbounded list across a fixed network timeout: paginate at the
+source (`limit`/`offset`, newest-first) so latency is bounded by page
+size, not table size, and pick a timeout with real headroom over the
+worst-case _bounded_ page (here 15s vs a ~50ms page). When a symptom
+points at a service ("is X running?"), confirm the _path_ end-to-end
+(`pm2 env`, `getent hosts <name>`, time the slow hop with `curl -w
+%{time_total}`) before concluding the service is down — here it never
+was. The fix is `duckdb-service/routes/modules.py`'s
+`list_image_uploads` (now `LIMIT`/`OFFSET` + `total`), the bumped
+timeout in `image-service/app.py`'s `list_images`, and the
+`feat/admin-image-pagination` "Load more" UI in
+`homepage/src/pages/AdminPage.tsx`.
+
 ### `image_uploads.uploaded_at` stamped in container-local time, new reader assumed UTC (ADR-015 review)
 
 **What happened.** When the `activity_timeseries` endpoint landed

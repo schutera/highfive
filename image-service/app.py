@@ -157,13 +157,31 @@ def get_module_logs(mac: str):
 
 @app.get("/images")
 def list_images():
-    """List all uploaded images, optionally filtered by ?module_id=, proxied from duckdb-service."""
-    module_id = request.args.get("module_id")
+    """List uploaded images (newest first), proxied from duckdb-service.
+
+    Query params, all optional and forwarded verbatim to duckdb-service:
+      * module_id — filter to one module's uploads
+      * limit     — page size (most-recent-first); omit for all rows
+      * offset    — rows to skip, for "load more" pagination
+
+    Returns duckdb's ``{"images": [...], "total": N}`` envelope as-is.
+
+    The timeout is deliberately generous (15s, not the old 5s): paginated
+    pages return in ~50ms, but an un-paginated caller against a large
+    ``image_uploads`` table can take >5s and used to trip the old limit,
+    surfacing as a spurious 502 "image service unreachable" in the admin
+    UI (the actual incident behind this change).
+    """
+    params = {}
+    for key in ("module_id", "limit", "offset"):
+        value = request.args.get(key)
+        if value is not None:
+            params[key] = value
     try:
         resp = http_requests.get(
             f"{DUCKDB_SERVICE_URL}/image_uploads",
-            params={"module_id": module_id} if module_id else {},
-            timeout=5,
+            params=params,
+            timeout=15,
         )
         return jsonify(resp.json()), resp.status_code
     except Exception as e:

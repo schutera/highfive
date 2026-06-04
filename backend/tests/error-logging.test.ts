@@ -87,7 +87,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
     expect(consoleError).toHaveBeenCalledWith(
       '[GET /api/images]',
       expect.objectContaining({
-        moduleId: 'aabbccddeeff',
+        query: expect.objectContaining({ module_id: 'aabbccddeeff' }),
         error: expect.stringContaining('img-list down'),
       }),
     );

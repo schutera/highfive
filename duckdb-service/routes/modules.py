@@ -479,27 +479,47 @@ def set_display_name(module_id):
 
 @modules_bp.delete("/modules/<module_id>")
 def delete_module(module_id):
-    """Delete a module and all its related data (nests, progress, images)."""
+    """Delete a module and all its related data.
+
+    Matches BOTH the canonical 12-hex id and the legacy decimal uint64
+    MAC form. Some rows were stored as e.g. ``273227831496128`` instead
+    of canonical ``f87fcfd6cdc0`` (the decimal-MAC issue); the admin
+    delete button sends canonical hex, so a raw ``WHERE id = <hex>``
+    would 404 against those modules. We canonicalise the input and also
+    derive its decimal equivalent, matching either.
+
+    Also clears `module_heartbeats` and `measurements` — the previous
+    version deleted only nests/progress/images/config and left orphan
+    telemetry behind.
+    """
+    canonical, err = _canonicalize_or_400(module_id)
+    if err is not None:
+        return err
+    legacy_decimal = str(int(canonical, 16))  # same MAC as a uint64 string
+    ids = (canonical, legacy_decimal)
     with lock:
         con = get_conn()
         try:
-            # Check module exists
             existing = con.execute(
-                "SELECT id FROM module_configs WHERE id = ?", (module_id,)
+                "SELECT id FROM module_configs WHERE id IN (?, ?)", ids
             ).fetchone()
             if not existing:
                 return jsonify({"error": "Module not found"}), 404
 
-            # Delete in order: progress -> nests -> images -> module
+            # Reverse-FK order; both id forms; every table that references
+            # the module so nothing is orphaned.
             con.execute(
-                "DELETE FROM daily_progress WHERE nest_id IN (SELECT nest_id FROM nest_data WHERE module_id = ?)",
-                (module_id,),
+                "DELETE FROM daily_progress WHERE nest_id IN "
+                "(SELECT nest_id FROM nest_data WHERE module_id IN (?, ?))",
+                ids,
             )
-            con.execute("DELETE FROM nest_data WHERE module_id = ?", (module_id,))
-            con.execute("DELETE FROM image_uploads WHERE module_id = ?", (module_id,))
-            con.execute("DELETE FROM module_configs WHERE id = ?", (module_id,))
+            con.execute("DELETE FROM nest_data WHERE module_id IN (?, ?)", ids)
+            con.execute("DELETE FROM image_uploads WHERE module_id IN (?, ?)", ids)
+            con.execute("DELETE FROM module_heartbeats WHERE module_id IN (?, ?)", ids)
+            con.execute("DELETE FROM measurements WHERE module_mac IN (?, ?)", ids)
+            con.execute("DELETE FROM module_configs WHERE id IN (?, ?)", ids)
             con.commit()
-            return jsonify({"message": f"Module {module_id} deleted"}), 200
+            return jsonify({"message": f"Module {canonical} deleted"}), 200
         except Exception as e:
             con.rollback()
             return jsonify({"error": str(e)}), 500

@@ -506,6 +506,91 @@ def test_activity_timeseries_excludes_other_modules(client, fresh_db):
     assert all(b["count"] == 0 for b in body["buckets"])
 
 
+# ---------- DELETE /modules/<id> ----------
+
+
+def _seed_heartbeat(fresh_db, module_id):
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute("INSERT INTO module_heartbeats (module_id) VALUES (?)", (module_id,))
+        con.commit()
+    finally:
+        con.close()
+
+
+def _seed_measurement(fresh_db, module_mac):
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO measurements (module_mac, ts, metric, value, source) "
+            "VALUES (?, '2024-06-01 00:00:00', 'battery_pct', 50.0, 'test')",
+            (module_mac,),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _count(fresh_db, sql, params):
+    con = fresh_db.connection.get_conn()
+    try:
+        return con.execute(sql, params).fetchone()[0]
+    finally:
+        con.close()
+
+
+def test_delete_module_clears_every_referencing_table(client, fresh_db):
+    """Delete must leave no orphan rows — including module_heartbeats and
+    measurements, which the pre-fix version did not touch."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    _seed_nest(fresh_db, "nest-1", TEST_MAC_1)
+    _seed_progress(fresh_db, "prog-1", "nest-1")
+    _seed_image_upload(fresh_db, TEST_MAC_1, "x.jpg", "2024-06-01 12:00:00")
+    _seed_heartbeat(fresh_db, TEST_MAC_1)
+    _seed_measurement(fresh_db, TEST_MAC_1)
+
+    assert client.delete(f"/modules/{TEST_MAC_1}").status_code == 200
+
+    assert _count(fresh_db, "SELECT COUNT(*) FROM module_configs WHERE id=?", (TEST_MAC_1,)) == 0
+    assert _count(fresh_db, "SELECT COUNT(*) FROM nest_data WHERE module_id=?", (TEST_MAC_1,)) == 0
+    assert _count(fresh_db, "SELECT COUNT(*) FROM image_uploads WHERE module_id=?", (TEST_MAC_1,)) == 0
+    assert _count(fresh_db, "SELECT COUNT(*) FROM module_heartbeats WHERE module_id=?", (TEST_MAC_1,)) == 0
+    assert _count(fresh_db, "SELECT COUNT(*) FROM measurements WHERE module_mac=?", (TEST_MAC_1,)) == 0
+
+
+def test_delete_module_matches_legacy_decimal_mac(client, fresh_db):
+    """A module stored with its decimal uint64 MAC must be deletable via
+    the canonical-hex id the admin button sends — the f87f… 404 incident.
+    add_module rejects a decimal MAC, so seed the legacy row directly."""
+    decimal_id = "273227831496128"  # == 0xf87fcfd6cdc0
+    canonical = "f87fcfd6cdc0"
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO module_configs (id, name, lat, lng, first_online, "
+            "battery_level, image_count) VALUES (?, 'Legacy', 47.8, 9.6, "
+            "'2024-01-01', NULL, 0)",
+            (decimal_id,),
+        )
+        con.commit()
+    finally:
+        con.close()
+    _seed_heartbeat(fresh_db, decimal_id)
+    _seed_measurement(fresh_db, decimal_id)
+
+    # The admin UI sends the canonical hex form; it must match the decimal row.
+    assert client.delete(f"/modules/{canonical}").status_code == 200
+    assert _count(fresh_db, "SELECT COUNT(*) FROM module_configs WHERE id=?", (decimal_id,)) == 0
+    assert _count(fresh_db, "SELECT COUNT(*) FROM module_heartbeats WHERE module_id=?", (decimal_id,)) == 0
+    assert _count(fresh_db, "SELECT COUNT(*) FROM measurements WHERE module_mac=?", (decimal_id,)) == 0
+
+
+def test_delete_module_unknown_returns_404(client, fresh_db):
+    assert client.delete("/modules/aabbccddeeff").status_code == 404
+
+
+def test_delete_module_invalid_id_returns_400(client):
+    assert client.delete("/modules/not-a-mac").status_code == 400
 # ---------- GET /image_uploads pagination ----------
 
 

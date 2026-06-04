@@ -568,6 +568,52 @@ Reads `*.log.json` sidecars on disk, filters by `mac` (envelope field),
 sorts by mtime descending, and returns the newest N (default 10, max 100).
 Used by the backend admin proxy in section 1.4.
 
+## 2.4 List images (admin gallery)
+
+```
+GET /images?module_id=<mac>&limit=N&offset=M
+```
+
+Proxies `duckdb-service GET /image_uploads` (§3.14) verbatim. The
+backend exposes this unchanged at `GET /api/images`, which the admin
+image gallery (`homepage/src/pages/AdminPage.tsx`) calls — it loads the
+newest `PAGE_SIZE` (5) and reveals the rest via "Load more".
+
+Query parameters, all optional:
+
+- `module_id` — canonical or colon-/dash-separated MAC; filters to one
+  module (canonicalised server-side in duckdb).
+- `limit` — page size, clamped to `[1, 500]`. **Omit** to return all
+  rows (back-compat); a _malformed_ value degrades to the 500 cap, never
+  to unbounded.
+- `offset` — rows to skip (≥0), for "Load more" pagination.
+
+Response is the `{ images, total }` envelope (newest-first):
+
+```json
+{
+  "images": [
+    {
+      "module_id": "aabbccddeeff",
+      "filename": "esp_capture_…jpg",
+      "uploaded_at": "2026-06-03 10:00:06"
+    }
+  ],
+  "total": 15352
+}
+```
+
+`total` is the full count matching `module_id`, **ignoring** `limit`/`offset`
+— the UI compares `images.length < total` to decide whether to keep the
+"Load more" button. Ordering is `uploaded_at DESC, id DESC` (deterministic;
+see §3.14). Proxied at a **15s** read timeout — never proxy an un-paginated
+list across a short timeout (chapter 11 "failed to load images").
+
+The TypeScript wire type is `ImageUploadsPage` in
+[`contracts/src/index.ts`](../contracts/src/index.ts); see
+[api-contracts.md](08-crosscutting-concepts/api-contracts.md) for the
+backend↔homepage contract.
+
 <br>
 
 # 3. DuckDB Service API
@@ -999,6 +1045,47 @@ A partial failure (some modules' Open-Meteo calls fail mid-run) is
 reported in the `errors` array, NOT a non-2xx status. The endpoint
 distinguishes "the request itself was bad" (400) from "the work was
 attempted but some modules failed" (200 with errors).
+
+## 3.14 List image uploads
+
+```
+GET /image_uploads?module_id=<mac>&limit=N&offset=M
+```
+
+Newest-first list of `image_uploads` rows, paginated. Proxied by
+`image-service GET /images` (§2.4) and `backend GET /api/images`; backs
+the admin gallery.
+
+Query parameters, all optional:
+
+- `module_id` — filter to one module; canonicalised via
+  `_canonicalize_or_400` (a non-canonicalisable value → `400`).
+- `limit` — page size, clamped to `[1, 500]`. **Omit** → all rows
+  (back-compat). A malformed value degrades to the `500` cap, never to
+  the unbounded query.
+- `offset` — rows to skip (≥0).
+
+```json
+{
+  "images": [
+    {
+      "module_id": "aabbccddeeff",
+      "filename": "esp_capture_…jpg",
+      "uploaded_at": "2026-06-03 10:00:06"
+    }
+  ],
+  "total": 15352
+}
+```
+
+`total` is the count matching `module_id`, **ignoring** `limit`/`offset`.
+Ordering is `ORDER BY uploaded_at DESC, id DESC` — newest capture first,
+with the monotonic `id` (insertion sequence) as a stable tiebreaker so
+two rows sharing a second-resolution `uploaded_at` cannot duplicate or
+skip across pages. Implementation: `duckdb-service/routes/modules.py`'s
+`list_image_uploads`. The unbounded variant (omitted `limit`) is slow on
+a large table — see chapter 11 "failed to load images"; callers should
+always paginate.
 
 <br>
 

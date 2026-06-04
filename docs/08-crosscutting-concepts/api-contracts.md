@@ -273,6 +273,52 @@ wire JSON are deliberately close enough that the proxy is one
 `.map((b) => ({ timestamp, value, sampleCount }))` and not a
 field-by-field transform.
 
+## `ImageUploadsPage` — admin gallery pagination
+
+Served by `GET /api/images` (backend), which proxies
+`image-service GET /images` → `duckdb-service GET /image_uploads`.
+The admin gallery (`homepage/src/pages/AdminPage.tsx`) loads the
+newest `PAGE_SIZE` rows and reveals the rest via a "Load more"
+button. The type lives in `contracts/src/index.ts`:
+
+```ts
+export interface ImageUpload {
+  module_id: string;
+  filename: string;
+  uploaded_at: string; // UTC, no 'T'/'Z'. "YYYY-MM-DD HH:MM:SS" as record_image writes it (second res); the reader emits str() of a DuckDB TIMESTAMP and does not re-format, so sub-second rows would carry fractional seconds. Treat as opaque + sortable.
+}
+
+export interface ImageUploadsPage {
+  images: ImageUpload[];
+  total: number; // full count matching the filter, IGNORING limit/offset
+}
+```
+
+Query params forwarded verbatim through every hop: `module_id?` (filter),
+`limit?` (1-500, omit for all), `offset?` (≥0). Two non-obvious contract
+details:
+
+- **`total` is the un-paged count.** It is the count of all rows
+  matching `module_id`, not `images.length`. The UI compares
+  `images.length < total` to decide whether to show "Load more", and
+  the client falls back to `images.length` if a (pre-pagination) response
+  omits `total`. Pinned by `homepage/src/__tests__/api-getImages.test.ts`
+  and `duckdb-service/tests/test_module_endpoints.py`.
+- **Deterministic capture order.** Rows are ordered
+  `uploaded_at DESC, id DESC` — newest capture first, with `id`
+  (monotonic insertion sequence) as a stable tiebreaker. Without the
+  tiebreaker, two uploads sharing a timestamp (`uploaded_at` is
+  second-resolution) sort arbitrarily, so `limit`/`offset` paging could
+  duplicate one row and skip another. The total order makes "Load more"
+  safe.
+- **Bounded by construction.** An un-paged list over a large
+  `image_uploads` table is slow; never proxy it across a short timeout.
+  See the chapter 11 "failed to load images" incident.
+
+Per ADR-004 the type lives in `@highfive/contracts`; the previous
+service-local `interface ImageUpload` in `homepage/src/services/api.ts`
+was the exact smell that rule warns against and is now a re-export.
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing
@@ -323,12 +369,13 @@ Python ↔ Python boundary between `image-service` and `duckdb-service`
 has no shared-types mechanism. Wire shapes on this boundary are
 documented here and pinned by tests on both sides.
 
-| Endpoint                                   | Caller                                                  | Payload fields                                                       |
-| ------------------------------------------ | ------------------------------------------------------- | -------------------------------------------------------------------- |
-| `POST /add_progress_for_module`            | `image-service`'s `UploadPipeline._record_progress`     | `module_id` (canonical, `modul_id` alias accepted), `classification` |
-| `POST /record_image`                       | `image-service`'s `UploadPipeline._record_image_upload` | `module_id` (canonical), `filename`                                  |
-| `POST /modules/<module_id>/heartbeat`      | `image-service`'s `UploadPipeline._record_heartbeat`    | `battery` (int 0-100)                                                |
-| `GET  /modules/<module_id>/progress_count` | `image-service`'s `UploadPipeline._check_first_upload`  | (no body)                                                            |
+| Endpoint                                   | Caller                                                  | Payload fields                                                                                                                                                                                                                                                      |
+| ------------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /add_progress_for_module`            | `image-service`'s `UploadPipeline._record_progress`     | `module_id` (canonical, `modul_id` alias accepted), `classification`                                                                                                                                                                                                |
+| `POST /record_image`                       | `image-service`'s `UploadPipeline._record_image_upload` | `module_id` (canonical), `filename`                                                                                                                                                                                                                                 |
+| `POST /modules/<module_id>/heartbeat`      | `image-service`'s `UploadPipeline._record_heartbeat`    | `battery` (int 0-100)                                                                                                                                                                                                                                               |
+| `GET  /modules/<module_id>/progress_count` | `image-service`'s `UploadPipeline._check_first_upload`  | (no body)                                                                                                                                                                                                                                                           |
+| `GET  /image_uploads`                      | `image-service`'s `list_images` (admin gallery proxy)   | query: `module_id?`, `limit?` (1-500), `offset?` (≥0); response: `{ images: [{module_id, filename, uploaded_at}], total }`, newest-first. `total` ignores the page window. Proxied at a 15s read timeout — never unbounded across a short timeout (see chapter 11). |
 
 Server-side canonicalisation through `ModuleId.model_validate(...)` is
 the rule, not the exception — colon-/dash-separated and uppercase

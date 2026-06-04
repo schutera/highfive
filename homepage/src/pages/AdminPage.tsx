@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { api, ImageUpload } from '../services/api';
+import { api } from '../services/api';
+import type { ImageUpload } from '../services/api';
 import type { Module } from '@highfive/contracts';
 import RenameModuleModal from '../components/RenameModuleModal';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
 
 const SESSION_KEY = 'highfive_admin_auth';
+// Admin image gallery loads newest-first in pages of this size; the rest
+// come in via the "Load more" button. Keeps the initial render fast on a
+// large image_uploads table (see the slow-list incident in chapter 11).
+const PAGE_SIZE = 5;
 
 function LoginGate({ onAuth }: { onAuth: () => void }) {
   const [password, setPassword] = useState('');
@@ -68,6 +73,8 @@ export default function AdminPage() {
   const [authed, setAuthed] = useState(() => !!sessionStorage.getItem(SESSION_KEY));
   const [modules, setModules] = useState<Module[]>([]);
   const [images, setImages] = useState<ImageUpload[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedModule, setSelectedModule] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,17 +112,45 @@ export default function AdminPage() {
     }
   };
 
+  // Load the first page (newest first), replacing whatever is shown.
+  // Runs on auth and whenever the module filter changes.
   const loadImages = async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await api.getImages(selectedModule || undefined);
-      setImages(data);
+      const page = await api.getImages(selectedModule || undefined, {
+        limit: PAGE_SIZE,
+        offset: 0,
+      });
+      setImages(page.images);
+      setTotal(page.total);
     } catch (err) {
       setError('Failed to load images. Is the image service running?');
       console.error('Failed to load images:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Append the next page, offset by what's already loaded. `total` is
+  // refreshed from each response so the "Load more" button hides once
+  // everything is loaded. Note: this is offset paging, so row identity
+  // across pages is not transaction-consistent under a concurrent
+  // delete — acceptable for a low-concurrency admin tool.
+  const loadMore = async () => {
+    try {
+      setLoadingMore(true);
+      const page = await api.getImages(selectedModule || undefined, {
+        limit: PAGE_SIZE,
+        offset: images.length,
+      });
+      setImages((prev) => [...prev, ...page.images]);
+      setTotal(page.total);
+    } catch (err) {
+      setError('Failed to load more images. Is the image service running?');
+      console.error('Failed to load more images:', err);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -147,6 +182,7 @@ export default function AdminPage() {
     try {
       await api.deleteImage(img.filename);
       setImages((prev) => prev.filter((i) => i.filename !== img.filename));
+      setTotal((t) => Math.max(0, t - 1));
       if (lightboxImage?.filename === img.filename) setLightboxImage(null);
     } catch (err) {
       console.error('Failed to delete image:', err);
@@ -416,7 +452,8 @@ export default function AdminPage() {
 
             <div className="flex gap-6 text-sm text-gray-600">
               <div>
-                <span className="font-semibold text-gray-900">{images.length}</span> images
+                <span className="font-semibold text-gray-900">{images.length}</span>
+                {total > images.length ? ` of ${total}` : ''} images
               </div>
               <div>
                 <span className="font-semibold text-gray-900">{modules.length}</span> modules
@@ -467,6 +504,8 @@ export default function AdminPage() {
             {images.map((img, idx) => (
               <button
                 key={`${img.filename}-${idx}`}
+                data-testid="admin-image-cell"
+                data-filename={img.filename}
                 onClick={() => setLightboxImage(img)}
                 className="group bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md hover:border-amber-300 transition-all text-left"
               >
@@ -515,6 +554,20 @@ export default function AdminPage() {
                 </div>
               </button>
             ))}
+          </div>
+        )}
+
+        {/* Load more — shown while fewer than `total` rows are loaded.
+            Fetches the next PAGE_SIZE newest-first and appends them. */}
+        {!loading && !error && images.length < total && (
+          <div className="flex justify-center mt-8">
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {loadingMore ? 'Loading…' : `Load more (${total - images.length} left)`}
+            </button>
           </div>
         )}
       </main>

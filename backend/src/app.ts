@@ -192,20 +192,32 @@ app.get('/api/modules/:id', async (req, res) => {
   }
 });
 
-// Image listing (proxied to image-service)
+// Image listing (proxied to image-service). Forwards module_id/limit/
+// offset for newest-first pagination; response is the ImageUploadsPage
+// envelope ({ images, total }) from the contracts package.
 app.get('/api/images', async (req, res) => {
   try {
-    const moduleId = req.query.module_id;
-    const url = moduleId
-      ? `${IMAGE_SERVICE_URL}/images?module_id=${encodeURIComponent(String(moduleId))}`
-      : `${IMAGE_SERVICE_URL}/images`;
-    const response = await fetch(url);
+    const params = new URLSearchParams();
+    for (const key of ['module_id', 'limit', 'offset']) {
+      const value = req.query[key];
+      if (value !== undefined) params.set(key, String(value));
+    }
+    const qs = params.toString();
+    const url = `${IMAGE_SERVICE_URL}/images${qs ? `?${qs}` : ''}`;
+    // 15s ceiling so a hung image-service can't hang this hop
+    // indefinitely — matches image-service's own read timeout, keeping
+    // the proxy chain free of any unbounded fetch.
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    // Masks any upstream non-2xx (incl. a duckdb 400 on a bad module_id)
+    // as 502 by design — these routes are only ever called with the
+    // admin dropdown's canonical ids and integer paging, so an upstream
+    // 4xx is unreachable in practice.
     if (!response.ok) throw new Error(`Image service error: ${response.status}`);
     const data = await response.json();
     res.json(data);
   } catch (error) {
     console.error('[GET /api/images]', {
-      moduleId: req.query.module_id,
+      query: req.query,
       error: String(error),
     });
     res.status(502).json({ error: 'Failed to fetch images from image service' });

@@ -1,5 +1,6 @@
 import type {
   ActivityTimeSeries,
+  ImageUploadsPage,
   MeasurementTimeSeries,
   Module,
   ModuleDetail,
@@ -19,11 +20,10 @@ export type { TelemetryEntry } from '@highfive/contracts';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 
-export interface ImageUpload {
-  module_id: string;
-  filename: string;
-  uploaded_at: string;
-}
+// Wire shape lives in the shared contracts package (ADR-004); re-exported
+// here so existing `import { ImageUpload } from '../services/api'` sites
+// keep working.
+export type { ImageUpload, ImageUploadsPage } from '@highfive/contracts';
 
 /**
  * Thrown by `api.renameModule()` when the server returns 409 because
@@ -228,16 +228,30 @@ class ApiService {
     } as MeasurementTimeSeries;
   }
 
-  async getImages(moduleId?: string): Promise<ImageUpload[]> {
-    const url = moduleId
-      ? `${this.baseUrl}/images?module_id=${encodeURIComponent(moduleId)}`
-      : `${this.baseUrl}/images`;
+  /**
+   * Fetch a page of image uploads, newest first. Pass `limit`/`offset`
+   * for "load more" pagination; omit both to fetch every row (slow on a
+   * large table — prefer paging). Returns the `{ images, total }`
+   * envelope; `total` is the full count ignoring the page window, so the
+   * caller can tell whether more rows remain. The `total` fallback keeps
+   * old wire responses (pre-pagination, no `total` field) working.
+   */
+  async getImages(
+    moduleId?: string,
+    opts?: { limit?: number; offset?: number },
+  ): Promise<ImageUploadsPage> {
+    const params = new URLSearchParams();
+    if (moduleId) params.set('module_id', moduleId);
+    if (opts?.limit != null) params.set('limit', String(opts.limit));
+    if (opts?.offset != null) params.set('offset', String(opts.offset));
+    const qs = params.toString();
+    const url = `${this.baseUrl}/images${qs ? `?${qs}` : ''}`;
     const response = await fetch(url, {
       headers: this.getHeaders(),
     });
     if (!response.ok) throw new Error('Failed to fetch images');
     const data = await response.json();
-    return data.images;
+    return { images: data.images, total: data.total ?? data.images.length };
   }
 
   async deleteImage(filename: string): Promise<void> {

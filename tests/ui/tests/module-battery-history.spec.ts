@@ -19,7 +19,15 @@ import { test, expect } from '@playwright/test';
 // `module-panel-rendering.spec.ts` applies here too — scope every
 // assertion to the desktop `<aside>` complementary landmark.
 
-test.describe('battery history chart (issue #110)', () => {
+// TODO(perf/data): Re-enable together with <BatteryHistoryChart> in
+// ModulePanel.tsx. The chart was commented out (perf/dashboard-load)
+// because the seeded `battery_pct` series is fabricated firmware data
+// (`random(1,100)`). While the chart is shelved this spec is skipped —
+// keep it intact so re-enabling the chart re-enables its Playwright gate
+// in the same change (CLAUDE.md rule 4 / ADR-014). The
+// `data-testid="battery-history-chart"` node never mounts today, so
+// every assertion below would time out.
+test.describe.skip('battery history chart (issue #110)', () => {
   test('seeded Garten 12 module renders the BatteryHistoryChart with sampled buckets', async ({
     page,
   }) => {
@@ -41,7 +49,9 @@ test.describe('battery history chart (issue #110)', () => {
     // Heading reads either English ("Battery history") or German
     // ("Akku-Verlauf") depending on the test environment locale. Match
     // both — the spec asserts presence, not language.
-    await expect(chart.getByRole('heading', { name: /Battery history|Akku-Verlauf/ })).toBeVisible();
+    await expect(
+      chart.getByRole('heading', { name: /Battery history|Akku-Verlauf/ }),
+    ).toBeVisible();
 
     // Seed data populates 168 hourly samples — the empty state must
     // NOT appear. This is the load-bearing assertion: if the

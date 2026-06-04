@@ -4,14 +4,15 @@ import { render, screen } from '@testing-library/react';
 import SiteFooter from '../components/SiteFooter';
 import { LanguageProvider } from '../i18n/LanguageContext';
 
-// Pins the Open-Meteo attribution link added for ADR-017 (server-side
-// weather worker for #111). The component is plain JSX with no
-// conditional rendering, so this test would fail loudly if a future
-// refactor accidentally drops the attribution — and the CC-BY 4.0
-// licence requirement that ADR-017 carries forward from ADR-015 would
-// quietly stop being met.
+// Pins the Impressum link (German legal compliance). The Open-Meteo
+// CC-BY 4.0 attribution link was removed alongside disabling the
+// dashboard weather chart — with no weather data rendered anywhere in
+// the UI, the attribution is no longer tied to a visible use. The
+// absence assertion below guards against it silently creeping back in
+// while the weather feature stays disabled; restore both together when
+// ActivityWeatherChart is re-enabled against real data (ADR-017/ADR-015).
 describe('SiteFooter', () => {
-  it('renders the Impressum link and the Open-Meteo attribution', () => {
+  it('renders the Impressum link', () => {
     render(
       <LanguageProvider>
         <SiteFooter />
@@ -20,10 +21,15 @@ describe('SiteFooter', () => {
 
     const impressum = screen.getByRole('link', { name: /Impressum/i });
     expect(impressum).toHaveAttribute('href', 'https://partner.schutera.com/impressum');
+  });
 
-    const weather = screen.getByRole('link', { name: /Open-Meteo/i });
-    expect(weather).toHaveAttribute('href', 'https://open-meteo.com/');
-    expect(weather).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(weather).toHaveAttribute('target', '_blank');
+  it('does not render the Open-Meteo attribution while the weather chart is disabled', () => {
+    render(
+      <LanguageProvider>
+        <SiteFooter />
+      </LanguageProvider>,
+    );
+
+    expect(screen.queryByRole('link', { name: /Open-Meteo/i })).not.toBeInTheDocument();
   });
 });

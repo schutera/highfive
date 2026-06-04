@@ -119,6 +119,19 @@ the listing and has already seen the degradation signal. Old clients
 that don't read the header still see a structurally valid response;
 only the per-module `status` value may differ.
 
+**Caching / freshness.** Both `GET /api/modules` and
+`GET /api/modules/:id` are served from a shared in-process snapshot in
+`backend/src/database.ts's ModuleReadModel` that is at most **5 s** old
+(`ASSEMBLE_CACHE_TTL_MS`). The detail route reuses the listing's
+snapshot rather than re-running the four-endpoint duckdb fan-out, so the
+common "open the dashboard, click a module" path costs one upstream
+round-trip, not two. Consequence: a freshly registered or renamed module
+— or a brand-new heartbeat — can lag by up to one TTL. The dashboard
+does not poll, so this is only ever observed across deliberate
+re-navigations, where 5 s is imperceptible. A **degraded** fan-out (any
+upstream fetch failed) is returned to the caller but **not** cached, so a
+transient duckdb outage cannot pin partial state past recovery.
+
 ## 1.3 Module detail
 
 ```

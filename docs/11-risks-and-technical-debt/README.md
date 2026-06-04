@@ -1555,6 +1555,41 @@ about a WiFi or HTTP surface, grep for the actual API call
 before describing what the surface looks like to the network. Doc
 review needs to inspect the API, not just the surrounding prose.
 
+### Setup wizard Step 3 told users "open network — no password" while the AP is WPA2-protected
+
+**What happened.** The same wrong "open AP" claim as the `auth.md`
+incident above, but this time it shipped in the **user-facing setup
+wizard** (`homepage/.../Step3WiFi.tsx` via `step3.openNetwork` in both
+locales of `translations.ts`). The card showed the SSID
+`ESP32-Access-Point` and the caption "This is an open network — no
+password required.", but the firmware's `WiFi.softAP(HOST_SSID,
+HOST_PASSWORD, …)` in `host.cpp` advertises a WPA2 AP with PSK
+`esp-12345`. A field user followed the wizard, was prompted for a
+password the wizard insisted didn't exist, guessed `esp-1234` (one
+digit short), and got "unable to connect to this network." Fix: render
+the PSK as a second copy-able field next to the SSID and replace the
+caption with "this network is password-protected — enter the password
+above". Every doc (`hardware-notes.md`, `esp-flashing.md`,
+`troubleshooting.md`, `esp32cam.md`) already stated the password
+correctly; the wizard was the lone surface that didn't.
+
+**Why it happened.** The `auth.md` "open AP" fix corrected the _doc_
+but never swept the _product_. The two surfaces describe the same
+`WiFi.softAP` arguments, yet the lessons-learned remediation was scoped
+to prose review and stopped at `docs/`. The wizard string had no test
+asserting the rendered field matched `HOST_PASSWORD`, so jsdom unit
+tests and the build stayed green while the only string that mattered to
+a user in the field was wrong.
+
+**How to avoid it next time.** When a code/doc-drift fix corrects a
+claim that is _also_ surfaced in the UI, grep the frontend for the same
+claim in the same change — `host.cpp`'s `HOST_SSID`/`HOST_PASSWORD` are
+mirrored in `Step3WiFi.tsx`, and a constant in one must not silently
+diverge from a translation string in the other. The
+`tests/ui/tests/setup-wizard-happy-path.spec.ts` Playwright spec now pins
+`#ap-ssid`/`#ap-password` to the literal firmware values so a future
+divergence fails CI in the only layer that renders the production page.
+
 ### `lib/<name>/` includes diverge between PIO and arduino-cli (issue #36, PR #55)
 
 **What happened.** `bash ESP32-CAM/build.sh` (the arduino-cli release

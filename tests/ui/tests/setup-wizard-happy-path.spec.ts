@@ -33,6 +33,14 @@ test.describe('setup wizard happy path', () => {
     // Step 3 - "Connect to Your Module". Skip-to-verification triggers
     // onSkip = () => goToStep(5).
     await expect(page.locator('#step3-title')).toBeVisible();
+
+    // The AP is WPA2-protected (HOST_PASSWORD in ESP32-CAM/host.cpp), so the
+    // card MUST surface both the SSID and the PSK. A field report showed the
+    // wizard once claimed "open network", so users couldn't connect. Pin the
+    // exact strings the firmware advertises against the production-built page.
+    await expect(page.locator('#ap-ssid')).toHaveText('ESP32-Access-Point');
+    await expect(page.locator('#ap-password')).toHaveText('esp-12345');
+
     await page
       .getByRole('button', {
         name: /Already configured.*skip to verification|Bereits konfiguriert/i,

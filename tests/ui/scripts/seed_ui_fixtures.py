@@ -53,6 +53,11 @@ HOMEPAGE_URL = "http://localhost:6173"
 # pattern ("00...") or the e2e mock-esp default ("ee...").
 NULL_ISLAND_MAC = "ff0000000001"
 TELEMETRY_MAC = "ff1111111111"
+# Dedicated module for the admin image-gallery pagination spec. Seeded
+# with > PAGE_SIZE (5) uploads so admin-image-pagination.spec.ts can
+# assert the first page caps at 5 and "Load more" reveals the rest.
+GALLERY_MAC = "ff2222222222"
+GALLERY_IMAGE_COUNT = 6
 
 
 def wait_for_stack(timeout_s: int = 180) -> None:
@@ -146,10 +151,45 @@ def seed_telemetry_upload() -> None:
     print(f"[ui-seed] uploaded one image + sidecar for {TELEMETRY_MAC}", flush=True)
 
 
+def seed_admin_gallery_images() -> None:
+    """Upload GALLERY_IMAGE_COUNT images for one module so the admin
+    gallery has more than one page.
+
+    ``duckdb-service`` stamps ``image_uploads.uploaded_at`` server-side
+    at SECOND resolution (``datetime.now(timezone.utc).strftime(
+    '%Y-%m-%d %H:%M:%S')`` in ``record_image``). The 2s gap aims to land
+    each upload in a distinct second so the capture order shows up in the
+    timestamp itself — but note this is best-effort: the truncation
+    happens on the server clock at INSERT time, not on this client sleep,
+    so under heavy CI load two inserts could still collide in one second.
+    The *guarantee* of newest-first order comes from the
+    ``uploaded_at DESC, id DESC`` total order in ``list_image_uploads``
+    (the ``id`` tiebreaker), which the spec relies on; the spec also
+    derives its expected order from the live API rather than from these
+    timestamps, so a same-second collision cannot make it flaky.
+    """
+    esp = MockEsp(
+        upload_url=f"{IMAGE_SERVICE_URL}/upload",
+        init_url=f"{DUCKDB_URL}/new_module",
+        mac=GALLERY_MAC,
+        module_name="UI Test Gallery",
+    )
+    esp.register().raise_for_status()
+    for i in range(GALLERY_IMAGE_COUNT):
+        esp.upload().raise_for_status()
+        time.sleep(2)  # headroom over the 1s uploaded_at truncation boundary
+    print(
+        f"[ui-seed] uploaded {GALLERY_IMAGE_COUNT} images for gallery "
+        f"module {GALLERY_MAC}",
+        flush=True,
+    )
+
+
 def main() -> int:
     wait_for_stack()
     seed_null_island_module()
     seed_telemetry_upload()
+    seed_admin_gallery_images()
     print("[ui-seed] done", flush=True)
     return 0
 

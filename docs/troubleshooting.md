@@ -30,6 +30,41 @@ DEBUG=true
 DUCKDB_SERVICE_URL=http://duckdb-service:8000
 ```
 
+### Admin page (`/admin`) shows "Failed to load images. Is the image service running?"
+
+**Symptom.** The admin image gallery renders the error banner even though
+`pm2 list` shows `image-service` online. `GET /api/images` returns `502`.
+
+**Likely causes, in order.**
+
+1. **Stale backend env after a PM2 restart without `--update-env`.**
+   `pm2 restart`/`reload` does not re-read the `env` block in
+   `ecosystem.config.js` unless you pass `--update-env`, so the backend
+   can keep an old environment from before `IMAGE_SERVICE_URL` was set —
+   falling back to the Docker name `http://image-service:4444`, which
+   does not resolve on a PM2 host. Check and fix:
+
+   ```bash
+   pm2 env 0 | grep -E "IMAGE_SERVICE_URL|DUCKDB_SERVICE_URL"   # is it set?
+   getent hosts image-service || echo "Docker name does not resolve here"
+   pm2 reload ecosystem.config.js --update-env                  # re-read env
+   ```
+
+2. **A slow, un-paginated image list tripping the proxy timeout.** A
+   bare `GET /image_uploads` over a large table can take >5s; the admin
+   gallery now paginates (newest-first `limit`/`offset`) and the
+   image-service proxy timeout is 15s, but a caller that omits `limit`
+   still pays the full cost. Time the hops to locate the slow one:
+
+   ```bash
+   curl -s -o /dev/null -w "image:  %{http_code} %{time_total}s\n" http://127.0.0.1:4444/images
+   curl -s -o /dev/null -w "duckdb: %{http_code} %{time_total}s\n" http://127.0.0.1:8000/image_uploads
+   ```
+
+   "Is the service running?" is usually the wrong question — confirm the
+   _path_ end-to-end before concluding a service is down. See chapter 11
+   "failed to load images" for the full incident.
+
 ### `duckdb-service` exits with `RuntimeError: module_configs status-drop migration failed`
 
 **Symptom.** Container restart loop with a `RuntimeError: module_configs status-drop migration failed: ...` traceback in `docker compose logs duckdb-service`. The transactional rebuild migration (issue #69) refused to mid-state the DB and rolled back; the container is refusing to serve a half-migrated schema.

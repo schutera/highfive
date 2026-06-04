@@ -132,6 +132,34 @@ export interface ModuleDetail extends Module {
   nests: NestData[];
 }
 
+// ---- Image uploads ----
+//
+// Wire-shape returned by `GET /api/images` (backend proxies
+// `image-service GET /images`, which proxies `duckdb-service GET
+// /image_uploads`). Newest-first. Lives here, not in
+// `homepage/src/services/api.ts`, per ADR-004 — any DTO crossing the
+// backend↔homepage boundary belongs in the shared workspace package.
+
+export interface ImageUpload {
+  module_id: string;
+  filename: string;
+  // UTC, NOT full ISO-8601 (no 'T'/'Z'). In practice "YYYY-MM-DD
+  // HH:MM:SS" because `record_image` writes it at second resolution,
+  // but the reader (`list_image_uploads`) emits `str()` of a DuckDB
+  // TIMESTAMP and does not re-format — a row written with sub-second
+  // precision would surface fractional seconds. Treat as an opaque
+  // sortable string; parse defensively if you ever need a Date.
+  uploaded_at: string;
+}
+
+// Paginated envelope. `total` is the full count matching the filter,
+// ignoring limit/offset — the admin UI uses it to decide whether to
+// render a "Load more" button.
+export interface ImageUploadsPage {
+  images: ImageUpload[];
+  total: number;
+}
+
 // ---- Telemetry sidecar envelope ----
 //
 // Wire-shape returned by `image-service /modules/<mac>/logs` (proxied

@@ -563,24 +563,81 @@ def delete_image_upload(filename):
 
 @modules_bp.get("/image_uploads")
 def list_image_uploads():
+    """List image uploads, newest first, with optional pagination.
+
+    Query params:
+      * module_id — filter to one module's uploads.
+      * limit     — page size (1..500). Omit to return every row.
+      * offset    — rows to skip (>=0), for "load more" pagination.
+
+    Wire shape: ``{"images": [...], "total": N}`` where ``total`` is the
+    full count matching the filter, *ignoring* limit/offset — the admin
+    UI needs it to decide whether to show a "Load more" button.
+
+    The ``LIMIT`` fixes the slow-list incident: an un-paginated
+    ``ORDER BY uploaded_at DESC`` over a bloated ``image_uploads`` table
+    took ~12s, tripping image-service's read timeout and surfacing as
+    "failed to load images" in the admin UI. A bounded page returns in
+    ~50ms.
+    """
     module_id = request.args.get("module_id")
+    # Canonicalise the filter for parity with every sibling route
+    # (record_image, delete_image_upload, activity_timeseries, …) so a
+    # colon-/dash-separated MAC matches instead of silently returning
+    # zero rows. Optional: absent filter = list across all modules.
+    if module_id is not None:
+        module_id, err = _canonicalize_or_400(module_id)
+        if err:
+            return err
+    raw_limit = request.args.get("limit")
+    raw_offset = request.args.get("offset")
+    MAX_LIMIT = 500
+    if raw_limit is None:
+        limit = None  # caller explicitly opted into "all rows" (back-compat)
+    else:
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            # A malformed limit must NOT fall through to None/unbounded —
+            # that is precisely the slow-list incident this endpoint was
+            # paginated to prevent. Degrade to the cap, never to "all".
+            limit = MAX_LIMIT
+        limit = max(1, min(limit, MAX_LIMIT))
+    try:
+        offset = max(0, int(raw_offset)) if raw_offset is not None else 0
+    except ValueError:
+        offset = 0
+
+    where = "WHERE module_id = ?" if module_id else ""
+    where_params = [module_id] if module_id else []
     with lock:
         con = get_conn()
         try:
-            if module_id:
-                rows = con.execute(
-                    "SELECT module_id, filename, uploaded_at FROM image_uploads WHERE module_id = ? ORDER BY uploaded_at DESC",
-                    (module_id,),
-                ).fetchall()
-            else:
-                rows = con.execute(
-                    "SELECT module_id, filename, uploaded_at FROM image_uploads ORDER BY uploaded_at DESC"
-                ).fetchall()
+            total = con.execute(
+                f"SELECT COUNT(*) FROM image_uploads {where}", where_params
+            ).fetchone()[0]
+            # `id DESC` is a stable tiebreaker, NOT decoration: with only
+            # `uploaded_at DESC`, two uploads sharing a timestamp (same
+            # second/microsecond) sort in an undefined order that can
+            # differ between the page-1 query and the page-2 query — so
+            # LIMIT/OFFSET paging would duplicate one row and skip
+            # another. `id` is the monotonic insertion sequence (capture
+            # order), so `uploaded_at DESC, id DESC` is a strict total
+            # order: newest capture first, deterministic across pages.
+            sql = (
+                "SELECT module_id, filename, uploaded_at "
+                f"FROM image_uploads {where} ORDER BY uploaded_at DESC, id DESC"
+            )
+            query_params = list(where_params)
+            if limit is not None:
+                sql += " LIMIT ? OFFSET ?"
+                query_params += [limit, offset]
+            rows = con.execute(sql, query_params).fetchall()
             images = [
                 {"module_id": r[0], "filename": r[1], "uploaded_at": str(r[2])}
                 for r in rows
             ]
-            return jsonify(images=images), 200
+            return jsonify(images=images, total=total), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500
         finally:

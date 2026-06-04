@@ -1,5 +1,6 @@
 #include "esp_camera.h"
 #include "esp_wifi.h"
+#include "esp_wpa2.h"          // WPA2-Enterprise (PEAP/TTLS) join — issue #63
 #include "esp_init.h"
 #include "firmware_defaults.h" // hf::defaults::k*ProductionFallback (issue #66)
 #include "form_query.h"        // hf::rewriteLegacyHighfiveUrl — issue #79
@@ -8,6 +9,7 @@
 #include "module_id.h"
 #include "module_name.h"       // hf::moduleNameFromMac — issue #92
 #include "url.h"               // hf::parseUrl — scheme-aware TLS dispatch (#79)
+#include "wifi_auth.h"         // hf::wifiAuthMode — PSK vs WPA2-Enterprise (#63)
 #include "wifi_diag.h"
 #include "breadcrumb.h"
 #include <Arduino.h>
@@ -317,8 +319,62 @@ void setupWifiConnection(wifi_configuration_t *wifi_config) {
   WiFi.persistent(true);
   WiFi.setAutoReconnect(true);
   WiFi.onEvent(onWifiEvent);
-  WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
-  //WiFi.begin("Vodafone-CAKE", "tYsjat-gakke8-kephaw");
+
+  // Issue #63: an optional WPA2-Enterprise username switches the join from
+  // WPA2-Personal (PSK) to PEAP/TTLS + MSCHAPv2. When no username is
+  // configured the legacy `WiFi.begin(ssid, password)` path runs exactly
+  // as before — backward compatibility for every PSK module already in the
+  // field. The mode decision lives in lib/wifi_auth/ so it stays host-
+  // testable; the esp_wpa2 calls below touch the radio and are covered by
+  // the on-device build + manual onboarding test, not the native suite.
+  if (hf::wifiIsEnterprise(wifi_config->USERNAME)) {
+    // The EAP identity is `user@realm` for eduroam — half the credential
+    // pair and arguably PII — so it gets the same -DDEBUG_WIFI redaction
+    // the password log above uses, rather than being printed to anyone
+    // with a serial monitor.
+#ifdef DEBUG_WIFI
+    Serial.printf("---- WPA2-Enterprise join (identity=%s)\n", wifi_config->USERNAME);
+#else
+    Serial.println("---- WPA2-Enterprise join (identity redacted; build with -DDEBUG_WIFI to log)");
+#endif
+    // Identity == inner username (single-field UI); no anonymous outer
+    // identity and no RADIUS server-cert validation — tradeoffs recorded
+    // canonically in ADR-018. The esp_err_t results are short-circuited on
+    // first failure and logged, so a failed EAP setup is distinguishable
+    // from the generic 30 s join timeout a wrong password would otherwise
+    // produce (see the eduroam entry in docs/troubleshooting.md).
+    esp_err_t entErr = esp_wifi_sta_wpa2_ent_set_identity(
+        reinterpret_cast<const unsigned char *>(wifi_config->USERNAME),
+        strlen(wifi_config->USERNAME));
+    if (entErr == ESP_OK) {
+      entErr = esp_wifi_sta_wpa2_ent_set_username(
+          reinterpret_cast<const unsigned char *>(wifi_config->USERNAME),
+          strlen(wifi_config->USERNAME));
+    }
+    if (entErr == ESP_OK) {
+      entErr = esp_wifi_sta_wpa2_ent_set_password(
+          reinterpret_cast<const unsigned char *>(wifi_config->PASSWORD),
+          strlen(wifi_config->PASSWORD));
+    }
+    if (entErr == ESP_OK) {
+      entErr = esp_wifi_sta_wpa2_ent_enable();
+    }
+    if (entErr != ESP_OK) {
+      Serial.printf("------ WPA2-Enterprise setup failed (esp_err 0x%x); the join below "
+                    "will likely time out — check the username/password\n",
+                    entErr);
+    }
+    WiFi.begin(wifi_config->SSID);
+  } else {
+    // Defensive teardown so the PSK branch is self-contained. A no-op
+    // today (setupWifiConnection runs once per boot and every failure path
+    // reboots, so the radio is always fresh), but it pre-empts a future
+    // in-process reconnect carrying stale WPA2-Enterprise state into this
+    // plain `WiFi.begin(ssid, password)`. Idempotent — safe to call when
+    // enterprise was never enabled.
+    esp_wifi_sta_wpa2_ent_disable();
+    WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
+  }
   Serial.printf("---- connecting to %s\n", wifi_config->SSID);
   ledSetMode(hf::LedMode::Connecting);
   unsigned long wifiStart = millis();
@@ -453,6 +509,16 @@ bool loadConfig(esp_config_t *esp_config) {
     esp_config->wifi_config.PASSWORD,
     esp_config_doc["NETWORK"]["PASSWORD"] | "",
     sizeof(esp_config->wifi_config.PASSWORD)
+  );
+  // Optional WPA2-Enterprise username (issue #63). Absent/empty key →
+  // empty string → the WPA2-Personal (PSK) path in setupWifiConnection
+  // runs unchanged. Deliberately NOT added to the strlen() required-field
+  // gate below: a username is optional, only SSID + PASSWORD are required
+  // (enterprise still needs a password).
+  strlcpy(
+    esp_config->wifi_config.USERNAME,
+    esp_config_doc["NETWORK"]["USERNAME"] | "",
+    sizeof(esp_config->wifi_config.USERNAME)
   );
   // Pre-#79 modules baked `http://highfive.schutera.com/*` into
   // SPIFFS. The first boot after the #79 OTA migrates the SPIFFS

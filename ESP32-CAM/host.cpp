@@ -20,6 +20,7 @@ String header;
 
 String cfg_module_name = "";
 String cfg_ssid           = "";
+String cfg_username       = "";  // optional WPA2-Enterprise username (#63)
 String cfg_password       = "";
 String cfg_upload_url     = "";
 String cfg_init_url       = "";
@@ -92,6 +93,7 @@ void loadConfig() {
 
   cfg_module_name = doc["NETWORK"]["MODULE_NAME"] | "";
   cfg_ssid        = doc["NETWORK"]["SSID"]           | "";
+  cfg_username    = doc["NETWORK"]["USERNAME"]       | "";  // optional, #63
   cfg_password    = doc["NETWORK"]["PASSWORD"]       | "";
   cfg_upload_url  = doc["NETWORK"]["UPLOAD_URL"]     | "";
   cfg_init_url    = doc["NETWORK"]["INIT_URL"]       | "";
@@ -135,6 +137,7 @@ void saveConfig() {
 
   net["MODULE_NAME"] = cfg_module_name;
   net["SSID"]        = cfg_ssid;
+  net["USERNAME"]    = cfg_username;  // optional WPA2-Enterprise username (#63)
   net["PASSWORD"]    = cfg_password;
   net["UPLOAD_URL"]  = cfg_upload_url;
   net["INIT_URL"]    = cfg_init_url;
@@ -371,6 +374,18 @@ void sendConfigForm(WiFiClient &client, bool saved = false, const char* errorMes
   client.println("<input type=\"text\" name=\"ssid\" value=\"" + cfg_ssid + "\">");
   client.println("</div>");
 
+  // Optional WPA2-Enterprise username (issue #63). Tagged data-keep-empty
+  // so the JS validator accepts a blank submission — personal/PSK networks
+  // leave this empty and stay on the legacy join path. Echoed back like the
+  // SSID (not secret, unlike the password which is deliberately never
+  // echoed). Stored verbatim by /save; an empty value keeps the module on
+  // WPA2-Personal.
+  client.println("<div class=\"field\">");
+  client.println("<label>WiFi Username <span style=\"font-weight:400;color:var(--muted)\">(optional, for enterprise networks)</span></label>");
+  client.println("<input type=\"text\" name=\"username\" data-keep-empty=\"1\" value=\"" + cfg_username + "\">");
+  client.println("<div class=\"description\">Leave blank for normal home WiFi. Fill in only for networks that need a username and password, such as eduroam or company WiFi.</div>");
+  client.println("</div>");
+
   client.println("<div class=\"field\">");
   client.println("<label>WiFi Password</label>");
   // Never echo the saved password back into the form: the captive portal is
@@ -569,6 +584,15 @@ void runAccessPoint() {
                     cfg_module_name = getParam(query, "module_name");
 
                     cfg_ssid        = getParam(query, "ssid");
+                    // Optional WPA2-Enterprise username (issue #63). Stored
+                    // verbatim like the SSID (no keep-current / no trim):
+                    // empty means "personal WiFi, PSK join". The HTML half
+                    // tags this input data-keep-empty so a blank submission
+                    // passes the JS validator. The firmware's
+                    // `hf::wifiAuthMode` (lib/wifi_auth/) treats whitespace-
+                    // only as empty, so a stray space can't flip a PSK
+                    // module onto the enterprise path.
+                    cfg_username    = getParam(query, "username");
                     // Empty submission means "keep current password" (#46): the
                     // form no longer pre-fills the field, so a user editing only
                     // the SSID would otherwise wipe their saved credential. The

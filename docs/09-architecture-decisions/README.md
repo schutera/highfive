@@ -26,6 +26,7 @@ and link backwards.
 | [015](adr-015-weather-correlation.md)                       | Activity-vs-weather chart — Open-Meteo browser-direct + Recharts                | Accepted |
 | [016](adr-016-per-module-measurements-store.md)             | Per-module time-series store is one wide `measurements` table                   | Accepted |
 | [017](adr-017-external-weather-source.md)                   | Server-side weather worker fetches Open-Meteo into the measurements store       | Accepted |
+| [018](adr-018-wpa2-enterprise-wifi.md)                      | Optional WPA2-Enterprise WiFi (username + password) for onboarding              | Accepted |
 
 ## When to create an ADR
 

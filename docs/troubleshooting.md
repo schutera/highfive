@@ -246,6 +246,23 @@ MAC: 08:3a:f2:6e:69:b0
 
 Also look at the serial log: a join failure now prints the SSID and the resolved `WL_*` status code (e.g. `WL_NO_SSID_AVAIL` for a typo, `WL_CONNECT_FAILED` for a bad password) alongside the running fail counter.
 
+### Enterprise / eduroam WiFi won't connect (module keeps rebooting on a university network)
+
+**Symptom.** On an eduroam, university, or corporate WiFi the module never joins — the serial log shows repeated join timeouts and the board reboots, eventually falling back to `ESP32-Access-Point` after three consecutive failures (~90 s). The same credentials work fine on a normal home WiFi.
+
+**Cause.** These networks use **WPA2-Enterprise** (802.1X) — they need a **username in addition to a password**. If the captive-portal **Wi-Fi Username** field is left blank, the firmware joins in WPA2-Personal (PSK) mode, which an enterprise network rejects.
+
+**Fix.**
+
+1. Reconnect to `ESP32-Access-Point`, open `http://192.168.4.1`, and **fill in the Wi-Fi Username** field (blank = PSK mode, which won't work here).
+2. If the network requires a full identity, enter it in `user@realm` form (e.g. `ab1234@uni-example.de`) rather than the bare username.
+3. Confirm **Wi-Fi SSID** and **Wi-Fi Password** are also set — both are still required in enterprise mode.
+4. Save and let the module reboot. The firmware negotiates PEAP/TTLS + MSCHAPv2.
+
+> **Not the cause: server certificates.** The firmware does **not** validate the RADIUS server certificate, so a cert/CA mismatch can't be why the join fails — don't chase it. (The flip side is a known limitation: the module can't detect a rogue AP impersonating the network. See [ADR-018](09-architecture-decisions/adr-018-wpa2-enterprise-wifi.md).)
+
+For USB/`uploadfs` provisioning, set the same value as `NETWORK.USERNAME` in `config.json`.
+
 ### LED flashed three times after WiFi config — what now?
 
 Three quick pulses (~450 ms total) means the most recent WiFi join timed out. The board reboots after a 1-second hold and tries again. After **three consecutive failures (~90 s)** the firmware automatically drops back to AP-config mode and the `ESP32-Access-Point` SSID returns on your phone's WiFi list. No manual factory-reset hold needed for a mistyped password.

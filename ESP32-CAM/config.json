@@ -2,6 +2,7 @@
   "NETWORK": {
     "MODULE_NAME": "",
     "SSID": "",
+    "USERNAME": "",
     "PASSWORD": "",
     "UPLOAD_URL": "https://highfive.schutera.com/upload",
     "INIT_URL": "https://highfive.schutera.com/new_module"

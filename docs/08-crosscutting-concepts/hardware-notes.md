@@ -33,6 +33,34 @@ message — the form just looks like nothing happened.
 - **SSID is case-sensitive** and special characters matter. Copy-paste
   from your device's Wi-Fi settings rather than retyping.
 
+## WPA2-Enterprise Wi-Fi (eduroam, university/corporate)
+
+Networks that need a **username and a password** (eduroam, most
+university/corporate WiFi) are WPA2-Enterprise (802.1X), not the usual
+home-router WPA2-Personal (PSK). The config form and `config.json` carry
+an optional **WiFi Username** field for these:
+
+- **Home / office WiFi (PSK): leave the username blank.** Empty username
+  → the unchanged `WiFi.begin(ssid, password)` join. Every existing
+  module is unaffected.
+- **Enterprise WiFi: fill in both the username and the password.** A
+  non-empty username switches the join to WPA2-Enterprise PEAP/TTLS +
+  MSCHAPv2. On the captive portal it's the "WiFi Username (optional, for
+  enterprise networks)" input; over USB / `uploadfs` it's
+  `NETWORK.USERNAME` in `config.json`. A whitespace-only value is treated
+  as empty, so a stray space can't flip a PSK module onto the enterprise
+  path. The PSK-vs-enterprise branch lives in
+  `ESP32-CAM/lib/wifi_auth/`'s `hf::wifiAuthMode`.
+
+> **Security limitation — no server-cert validation.** The firmware does
+> **not** verify the RADIUS server's certificate, so a rogue AP
+> broadcasting the same SSID can complete the handshake and capture the
+> (offline-crackable) MSCHAPv2 exchange. This is weaker than the
+> firmware's CA-pinned googleapis call. The same username is used for both
+> the EAP identity and the inner username (no anonymous outer identity),
+> and EAP-TLS client certificates are not supported. See
+> [ADR-018](../09-architecture-decisions/adr-018-wpa2-enterprise-wifi.md).
+
 ## Server URLs
 
 The Init/Upload base URLs in the config form must use the host

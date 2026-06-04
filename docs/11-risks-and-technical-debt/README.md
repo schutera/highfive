@@ -78,6 +78,28 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   / data-protection notice does not mention this; if HiveHive ever
   reaches an audience that warrants a real GDPR posture, this flow
   needs to surface there. Tracked here, not as a bug.
+- **WPA2-Enterprise WiFi accepts the RADIUS server unverified.** The
+  optional enterprise-WiFi path (issue #63,
+  [ADR-018](../09-architecture-decisions/adr-018-wpa2-enterprise-wifi.md))
+  joins via `esp_wpa2.h` without validating the auth server's
+  certificate. A rogue AP broadcasting the same SSID can complete the
+  EAP handshake and capture the (offline-crackable) MSCHAPv2 exchange.
+  This is weaker than the firmware's googleapis CA-pinning
+  ([ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)).
+  Chosen for "just let me log in" reach across deployments; deferred
+  follow-up is optional CA-cert pinning. PSK modules are unaffected —
+  an empty username keeps the unchanged WPA2-Personal path.
+- **WPA2-Enterprise sends the real username in the cleartext outer
+  identity.** The operator-entered username (issue #63,
+  [ADR-018](../09-architecture-decisions/adr-018-wpa2-enterprise-wifi.md))
+  is used as both the EAP outer identity and the inner username, so on
+  privacy-conscious eduroam configs the real username travels in the
+  clear. Deferred: a separate anonymous-identity field.
+- **WPA2-Enterprise is username + password only.** PEAP/TTLS +
+  MSCHAPv2; no EAP-TLS / client-certificate support (issue #63,
+  [ADR-018](../09-architecture-decisions/adr-018-wpa2-enterprise-wifi.md)).
+  Client-cert methods need cert upload/storage on the ESP and a bigger
+  form — out of scope against the issue's "user and password" framing.
 
 ## Lessons learned
 

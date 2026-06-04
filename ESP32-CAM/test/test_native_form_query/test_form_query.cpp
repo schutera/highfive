@@ -150,6 +150,35 @@ static void test_getparam_realistic_wifi_form(void) {
                              getParam(body, "upload_endpoint").c_str());
 }
 
+static void test_getparam_enterprise_wifi_username(void) {
+    // WPA2-Enterprise onboarding (issue #63): the form posts an extra
+    // `username` field between `ssid` and `password`. Pins that it decodes
+    // out of the body (eduroam realm form, '@' percent-encoded as %40)
+    // alongside the password — host.cpp's /save reads exactly this key.
+    std::string body =
+        "session=abc123&module_name=Hive+1&ssid=eduroam&"
+        "username=alice%40uni-example.de&password=s3cr3t&"
+        "upload_base=https%3A%2F%2Fhighfive.schutera.com&upload_endpoint=upload";
+    TEST_ASSERT_EQUAL_STRING("eduroam", getParam(body, "ssid").c_str());
+    TEST_ASSERT_EQUAL_STRING("alice@uni-example.de",
+                             getParam(body, "username").c_str());
+    TEST_ASSERT_EQUAL_STRING("s3cr3t", getParam(body, "password").c_str());
+}
+
+static void test_getparam_personal_wifi_username_absent(void) {
+    // Personal/PSK onboarding (the backward-compatible path): the form
+    // still carries the `username` key, submitted empty. getParam must
+    // return "" so the firmware stays on the PSK join. Pins that an empty
+    // username in the middle of the body doesn't bleed the next field's
+    // value (regression guard for the prefix-substring key match).
+    std::string body =
+        "session=abc123&ssid=HomeNet&username=&password=hunter2&"
+        "upload_base=https%3A%2F%2Fhighfive.schutera.com";
+    TEST_ASSERT_EQUAL_STRING("HomeNet", getParam(body, "ssid").c_str());
+    TEST_ASSERT_EQUAL_STRING("", getParam(body, "username").c_str());
+    TEST_ASSERT_EQUAL_STRING("hunter2", getParam(body, "password").c_str());
+}
+
 // --- getParam: edge cases / pre-existing quirks ---------------------------
 
 static void test_getparam_missing_key_returns_empty(void) {
@@ -493,6 +522,8 @@ int main(int, char**) {
     RUN_TEST(test_getparam_last_of_many);
     RUN_TEST(test_getparam_value_is_urldecoded);
     RUN_TEST(test_getparam_realistic_wifi_form);
+    RUN_TEST(test_getparam_enterprise_wifi_username);
+    RUN_TEST(test_getparam_personal_wifi_username_absent);
     RUN_TEST(test_getparam_missing_key_returns_empty);
     RUN_TEST(test_getparam_empty_value);
     RUN_TEST(test_getparam_empty_query);

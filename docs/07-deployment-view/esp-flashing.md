@@ -141,6 +141,7 @@ Navigate to **http://192.168.4.1**
 | ----------------------- | --------------------------------------------------------------------- | -------------------------------------- |
 | Module Name             | Any label, e.g. `hive-01`                                             | Any label, e.g. `hive-01`              |
 | Wi-Fi SSID              | Your 2.4 GHz network name (case-sensitive — copy-paste, don't retype) | Same                                   |
+| Wi-Fi Username          | Leave **blank** for home WiFi; fill in for enterprise/eduroam         | Same                                   |
 | Wi-Fi Password          | Your network password                                                 | Same                                   |
 | Initialization Base URL | `http://<LAN-IP>`                                                     | `https://highfive.schutera.com`        |
 | Initialization Port     | `8002`                                                                | (leave empty — implicit 443 for HTTPS) |
@@ -158,6 +159,17 @@ shape exists so a production module on `https://highfive.schutera.com`
 and a LAN-dev module on `http://10.0.0.5:8002` use the same form
 without the operator having to retype the protocol-and-colon-and-port
 substring.
+
+> **Wi-Fi Username (optional, for enterprise networks).** Leave it
+> **blank** for ordinary home WiFi — the module joins via WPA2-Personal
+> (PSK) exactly as before. Fill it in (with the password and SSID still
+> set) to join a WPA2-Enterprise network — eduroam, university, or
+> corporate WiFi that asks for a username _and_ a password. The firmware
+> then negotiates PEAP/TTLS + MSCHAPv2. The field also persists to
+> `NETWORK.USERNAME` in `config.json` for USB/`uploadfs` provisioning.
+> Server-certificate validation is **not** performed, so the module
+> cannot detect a rogue AP impersonating the network — see
+> [ADR-018](../09-architecture-decisions/adr-018-wpa2-enterprise-wifi.md).
 
 > **Modules onboarded before firmware version `mason`** will auto-migrate
 > their saved URL from `http://highfive.schutera.com/...` to

@@ -36,6 +36,13 @@
 typedef struct {
   char SSID[64];
   char PASSWORD[64];
+  // Optional WPA2-Enterprise username (issue #63). Empty for WPA2-Personal
+  // (PSK) / open networks — the default and the path every existing module
+  // uses. When non-empty, `setupWifiConnection` joins via the esp_wpa2
+  // enterprise APIs (PEAP/TTLS + MSCHAPv2) instead of `WiFi.begin(ssid,
+  // password)`. Appended after PASSWORD so the struct layout for existing
+  // fields is unchanged. See lib/wifi_auth/ for the mode decision.
+  char USERNAME[64];
 } wifi_configuration_t;
 
 typedef struct {

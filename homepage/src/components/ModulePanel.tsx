@@ -360,7 +360,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 hf-cq">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 hf-cq">
         {/* Telemetry / Logs — admin */}
         {adminMode && (
           <div className="mb-4 hf-card overflow-hidden">

@@ -97,12 +97,12 @@ export default function HomePage() {
                 />
               </svg>
             </Link>
-            <a
-              href="#how-it-works"
+            <Link
+              to="/waitlist"
               className="hf-btn hf-glass w-full sm:w-auto px-8 py-4 text-hf-md text-white border border-white/40 hover:bg-white/15"
             >
-              {t('home.howItWorks')}
-            </a>
+              {t('home.joinWaitlist')}
+            </Link>
           </div>
         </div>
 

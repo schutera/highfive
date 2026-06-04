@@ -359,11 +359,13 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 hf-cq">
+      {/* Content. Mobile (default): natural-height + scroll inside the sheet.
+          Desktop (md+): a non-scrolling flex column so the species grid below
+          fills the available window height instead of overflowing the aside. */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 hf-cq md:flex md:flex-col md:overflow-hidden">
         {/* Telemetry / Logs — admin */}
         {adminMode && (
-          <div className="mb-4 hf-card overflow-hidden">
+          <div className="mb-4 hf-card overflow-hidden md:shrink-0">
             <button
               onClick={toggleLogs}
               className="w-full flex items-center justify-between px-4 py-3 hover:bg-hf-fg/5 transition-colors"
@@ -411,7 +413,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
             {logsOpen && (
               <div
                 id="telemetry-content"
-                className="border-t border-hf-border p-3 space-y-3"
+                className="border-t border-hf-border p-3 space-y-3 md:max-h-[40vh] md:overflow-y-auto"
                 style={{ background: 'var(--hf-line-soft)' }}
               >
                 {!hasKey && (
@@ -462,9 +464,13 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           </div>
         )}
 
-        {/* Species cards — single column on small panel widths, 2-col when there's room (container query) */}
+        {/* Species cards. The auto-fit grid flows to 2 columns once the panel is
+            wide enough (xl aside ≈ 560px). On desktop the grid grows to fill the
+            remaining panel height and its rows share that height equally
+            (grid-auto-rows 1fr), so the cards adapt to the window instead of the
+            panel scrolling; a card with more nests than fit scrolls internally. */}
         <div
-          className="grid gap-3 md:gap-4"
+          className="grid gap-3 md:gap-4 md:min-h-0 md:flex-1 md:[grid-auto-rows:minmax(0,1fr)]"
           style={{
             gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
           }}
@@ -472,13 +478,13 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           {beeTypeSummaries.map((summary) => (
             <article
               key={summary.key}
-              className="rounded-hf-lg p-3 md:p-4 shadow-hf-1 border-2 transition-transform active:scale-[0.98] md:active:scale-100"
+              className="rounded-hf-lg p-3 md:p-4 shadow-hf-1 border-2 transition-transform active:scale-[0.98] md:active:scale-100 md:flex md:flex-col md:h-full md:min-h-0 md:overflow-hidden"
               style={{
                 backgroundColor: summary.lightColor,
                 borderColor: summary.color,
               }}
             >
-              <div className="flex items-start justify-between mb-2">
+              <div className="flex items-start justify-between mb-2 md:shrink-0">
                 <div className="text-hf-md font-bold" style={{ color: summary.color }}>
                   {summary.size}
                 </div>
@@ -493,7 +499,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
                 </div>
               </div>
 
-              <ul className="space-y-2 mt-3">
+              <ul className="space-y-2 mt-3 md:flex-1 md:min-h-0 md:overflow-y-auto">
                 {summary.nests.map((nest, index) => (
                   <li key={nest.nest_id}>
                     <div className="flex items-center justify-between mb-1">

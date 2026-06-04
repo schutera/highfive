@@ -241,7 +241,7 @@ export default function DashboardPage() {
         {/* Desktop: right side panel */}
         {!error && selectedModule && (
           <aside
-            className="hidden md:flex w-[360px] lg:w-[400px] min-h-0 shadow-hf-2 overflow-hidden flex-col border-l border-hf-border bg-hf-surface"
+            className="hidden md:flex w-[360px] lg:w-[400px] xl:w-[560px] 2xl:w-[600px] min-h-0 shadow-hf-2 overflow-hidden flex-col border-l border-hf-border bg-hf-surface"
             aria-label={t('dashboard.moduleDetails')}
           >
             {/* Brittle invariant: ModulePanel is always opened from

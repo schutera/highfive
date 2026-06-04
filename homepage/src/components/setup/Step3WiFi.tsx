@@ -8,10 +8,13 @@ interface Step3WiFiProps {
   onSkip: () => void;
 }
 
-// Must match `HOST_SSID` in `ESP32-CAM/host.cpp` (the captive-portal SSID
-// the firmware actually advertises). Drift between this and the firmware
-// would tell users to look for a network that doesn't exist.
+// Must match `HOST_SSID` / `HOST_PASSWORD` in `ESP32-CAM/host.cpp` (the
+// captive-portal SSID + WPA2 PSK the firmware actually advertises). Drift
+// here would tell users to look for a network that doesn't exist, or — as
+// happened in the field — that the AP is open when it is in fact
+// password-protected, so connection silently fails.
 const AP_SSID = 'ESP32-Access-Point';
+const AP_PASSWORD = 'esp-12345';
 
 export default function Step3WiFi({ onNext, onBack, onSkip }: Step3WiFiProps) {
   const { t } = useTranslation();
@@ -67,7 +70,24 @@ export default function Step3WiFi({ onNext, onBack, onSkip }: Step3WiFiProps) {
           </code>
           <CopyButton text={AP_SSID} label={t('step3.networkName')} />
         </div>
-        <p className="text-hf-xs text-hf-fg-mute mt-2">{t('step3.openNetwork')}</p>
+
+        <label
+          className="text-hf-xs text-hf-fg-mute uppercase tracking-wider font-medium mt-4 block"
+          htmlFor="ap-password"
+        >
+          {t('step3.networkPassword')}
+        </label>
+        <div
+          className="flex items-center justify-between mt-1 rounded-hf px-4 py-3"
+          style={{ background: 'var(--hf-line-soft)' }}
+        >
+          <code id="ap-password" className="text-hf-md font-mono font-bold text-hf-fg">
+            {AP_PASSWORD}
+          </code>
+          <CopyButton text={AP_PASSWORD} label={t('step3.networkPassword')} />
+        </div>
+
+        <p className="text-hf-xs text-hf-fg-mute mt-2">{t('step3.passwordNotice')}</p>
       </div>
 
       <aside

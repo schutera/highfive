@@ -234,7 +234,8 @@ const translations = {
       submit: 'Join the Waitlist',
       submitting: 'Sending…',
       successTitle: 'You’re on the list!',
-      successText: 'Thanks for signing up. We’ll be in touch as soon as Hive Modules are available.',
+      successText:
+        'Thanks for signing up. We’ll be in touch as soon as Hive Modules are available.',
       errorGeneric: 'Something went wrong. Please try again.',
       privacy: 'We’ll only use your email to notify you about Hive Module availability.',
     },
@@ -375,7 +376,9 @@ const translations = {
       title: 'Connect to Your Module',
       text: "Your module is now broadcasting its own WiFi network. Open your device's WiFi settings and connect to it.",
       networkName: 'Network Name',
-      openNetwork: 'This is an open network \u2014 no password required.',
+      networkPassword: 'Password',
+      passwordNotice:
+        'This network is password-protected \u2014 enter the password above exactly (including the dash) when your device prompts for it.',
       disconnectNotice:
         "Your internet connection will temporarily disconnect when you connect to the module's network. That's completely normal.",
       connected: "I'm Connected",
@@ -680,9 +683,11 @@ const translations = {
       submit: 'Auf die Warteliste',
       submitting: 'Wird gesendet\u2026',
       successTitle: 'Du bist auf der Liste!',
-      successText: 'Danke f\u00FCr deine Anmeldung. Wir melden uns, sobald die Hive-Module verf\u00FCgbar sind.',
+      successText:
+        'Danke f\u00FCr deine Anmeldung. Wir melden uns, sobald die Hive-Module verf\u00FCgbar sind.',
       errorGeneric: 'Etwas ist schiefgelaufen. Bitte versuche es erneut.',
-      privacy: 'Wir verwenden deine E-Mail nur, um dich \u00FCber die Verf\u00FCgbarkeit zu informieren.',
+      privacy:
+        'Wir verwenden deine E-Mail nur, um dich \u00FCber die Verf\u00FCgbarkeit zu informieren.',
     },
 
     // ---- Assembly Guide ----
@@ -821,7 +826,9 @@ const translations = {
       title: 'Mit deinem Modul verbinden',
       text: 'Dein Modul sendet jetzt sein eigenes WLAN-Netzwerk. \u00D6ffne deine Ger\u00E4te-WLAN-Einstellungen und verbinde dich damit.',
       networkName: 'Netzwerkname',
-      openNetwork: 'Dies ist ein offenes Netzwerk \u2014 kein Passwort n\u00F6tig.',
+      networkPassword: 'Passwort',
+      passwordNotice:
+        'Dieses Netzwerk ist passwortgesch\u00FCtzt \u2014 gib das Passwort oben genau so ein (mit dem Bindestrich), wenn dein Ger\u00E4t danach fragt.',
       disconnectNotice:
         'Deine Internetverbindung wird vor\u00FCbergehend unterbrochen, wenn du dich mit dem Modul-Netzwerk verbindest. Das ist v\u00F6llig normal.',
       connected: 'Ich bin verbunden',

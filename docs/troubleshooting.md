@@ -287,20 +287,16 @@ Three quick pulses (~450 ms total) means the most recent WiFi join timed out. Th
 
 Note: the LED stays silent in AP mode — the on-board LED is the camera flash, so steady-state signalling would be obnoxious. Use the phone's WiFi list to confirm the captive portal is back, not the LED.
 
-### Factory reset to re-enter configuration
+### Reconfigure or reset a module
 
-Two paths, depending on whether the module is currently in AP mode or already joined to WiFi:
+To put a configured module back into its WiFi-only setup page — new SSID, changed password, or a full wipe — **re-flash it**. Flashing now does a full chip erase, which clears the saved config (the `configured` flag in NVS and `/config.json` in SPIFFS), so the module boots straight back into AP-config mode.
 
-**From AP mode** (the `ESP32-Access-Point` SSID is visible — either a fresh-flashed board, or one that hit the 3-consecutive-WiFi-join-failure auto-fallback):
+1. Re-flash via the homepage setup wizard **Step 2** (or the standalone web installer). The flash erases the saved config as a side effect.
+2. After the flash completes, the module reopens the `ESP32-Access-Point` SSID and serves its WiFi setup page at <http://192.168.4.1>. Reconnect to it and enter the new credentials.
 
-1. Connect to `ESP32-Access-Point` and visit <http://192.168.4.1>.
-2. Scroll to the **Factory reset (advanced)** section at the bottom of the form.
-3. Tick the confirmation checkbox and click **Factory reset**. The module reboots and reopens the AP for fresh configuration.
+There is no separate in-band reset button anymore — flashing _is_ the reset. The captive portal exposes Wi-Fi configuration only.
 
-**From STA mode** (the module joined WiFi but you want to move it to a different network) — there is no in-band reset. Either:
-
-- Cause three consecutive WiFi-join failures so the module's auto-fallback re-opens `ESP32-Access-Point`, then use the AP-mode steps above. The least disruptive way: reconnect to `ESP32-Access-Point`, open `http://192.168.4.1`, and save intentionally wrong WiFi credentials — the board will fail three times (~90 s total) and reopen the AP automatically.
-- Or, with a serial cable: `cd ESP32-CAM && pio run -t erase && pio run -t upload`.
+**If you only want to move the module to a different network**, you don't even need to re-flash: cause three consecutive WiFi-join failures and the module's auto-fallback re-opens `ESP32-Access-Point` on its own. The least disruptive way: reconnect to `ESP32-Access-Point`, open <http://192.168.4.1>, and save intentionally wrong WiFi credentials — the board fails three times (~90 s total) and reopens the AP automatically.
 
 > The "hold IO0 for 5 seconds" procedure documented in older guides did not work — GPIO0 is a strap pin and holding it LOW at boot puts the ESP32 into UART download mode instead of running the firmware. Removed in #40; see chapter 11 "Lessons learned" for the post-mortem.
 
@@ -312,7 +308,7 @@ Two paths, depending on whether the module is currently in AP mode or already jo
 
 The ESP32 must be able to reach the server's IP. A common mistake is configuring the module to join a phone hotspot while the server runs on the home router — those are separate networks.
 
-**Rule:** the Initialization Base URL and Upload Base URL you enter in the config form must use the server's **LAN IP** on the **same network** the ESP32 will join.
+**Rule:** the ESP32 must join the **same network** the server is on. Production modules reach `https://highfive.schutera.com` (baked in at build time, no operator action). For a **local dev** stack, the server URL is set from the host's **LAN IP** via the gitignored `ESP32-CAM/DEV_SERVER_HOST` build file — not `localhost`, which would resolve to the ESP32 itself.
 
 Find your LAN IP: `ipconfig` (Windows, look at WLAN/Ethernet adapter), `ip addr` (Linux/Mac).
 

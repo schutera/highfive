@@ -205,6 +205,9 @@ cython_debug/
 # Secrets
 secrets.h
 ESP32-CAM/GEO_API_KEY
+# Dev-only override: LAN host/IP that retargets the firmware's server URLs
+# away from production (see firmware_defaults.h / build.sh). Never committed.
+ESP32-CAM/DEV_SERVER_HOST
 
 # Configuration files - server-specific
 .env

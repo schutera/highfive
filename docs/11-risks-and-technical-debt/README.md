@@ -86,6 +86,48 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### ESP config-form complexity creep — re-simplified to the `59523d3` Wi-Fi-only shape
+
+**What happened.** The captive portal that a field operator uses to
+onboard an ESP32-CAM started as a Wi-Fi-credentials-only form (commit
+`59523d3`, 2026-03-30, "streamline setup flow"). Over the following
+months it re-accreted every configurable knob the firmware has: a
+free-text module name, both server URLs (each split into base / port /
+endpoint since #79, [ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)),
+the four camera settings, and — when #40 moved factory reset off the
+GPIO0 strap pin — a "Factory reset (advanced)" disclosure with its own
+`/factory_reset` route. The complexity crept back via `ad9ee17`; the
+factory-reset disclosure landed in `8c1be9c`. We re-simplified back to
+the `59523d3` Wi-Fi-only shape ([ADR-018](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md)):
+module name is derived from the MAC
+(`ESP32-CAM/esp_init.cpp`'s `generateModuleName`), server URLs are
+baked in at build time behind `DEV_SERVER_HOST` (mirroring `GEO_API_KEY`),
+camera settings come from `firmware_defaults.h`, and reconfigure is by
+re-flash (the web-installer flash now does a full chip erase via
+`eraseAll: true` in `homepage/src/components/setup/flashEsp.ts`'s
+`flashEsp`, so a re-flash wipes config and reopens the Wi-Fi-only setup
+page — the `/factory_reset` route is gone).
+
+**Why it happened.** Each individual addition looked locally reasonable
+("operators sometimes want to retarget a module", "let's expose the
+camera flip", "we need an in-field reset now that IO0 is unusable"). No
+single PR was wrong on its own terms, but the cumulative effect was a
+form that asked the operator to make six decisions they should never
+make in the field — three of which (the form-vs-production fallback
+asymmetry on camera settings, name typos, URL retyping) actively caused
+bugs. The form had no recorded "this is deliberately minimal" guard, so
+the default reviewer instinct was "one more field is fine".
+
+**How to avoid it next time.** Keep advanced knobs — server URLs,
+camera settings, module name, factory reset — **off** the operator-
+facing captive portal. Default them in firmware (`firmware_defaults.h`
+production fallbacks, MAC-derived name) or behind a build-time file
+(`DEV_SERVER_HOST`, the same pattern `GEO_API_KEY` uses), and make
+reconfigure a re-flash rather than a form field. ADR-018 is the
+recorded "deliberately minimal" guard: when a PR proposes adding a
+field to the captive portal, it has to argue past ADR-018 first. The
+operator types exactly two values, SSID and password, and nothing else.
+
 ### Admin "failed to load images": stale `IMAGE_SERVICE_URL` after a no-`--update-env` PM2 restart, masking an unbounded image-list query that tripped a 5s timeout
 
 **What happened.** The admin page (`/admin`) showed "Failed to load

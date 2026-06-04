@@ -237,11 +237,13 @@ void setup() {
   // to live here. It was unreachable on AI Thinker ESP32-CAM-MB because
   // GPIO0 is a strap pin — the ROM samples it at the moment EN releases,
   // so holding it LOW enters UART download mode and this firmware never
-  // runs. Removed in #40. The supported reset paths are:
-  //   1. The 3-WiFi-fail auto-fallback below (re-opens AP).
-  //   2. POST /factory_reset on the captive portal (host.cpp).
+  // runs. Removed in #40. The captive-portal factory-reset button was later
+  // removed too; the supported reset/reconfigure paths are now:
+  //   1. The 3-WiFi-fail auto-fallback below (re-opens the setup AP).
+  //   2. Re-flash via the homepage wizard — the web installer erases NVS +
+  //      SPIFFS, so the module boots back into the Wi-Fi setup page.
   //   3. `pio run -t erase` over a serial cable.
-  // See docs/troubleshooting.md "Factory reset" for details.
+  // See docs/07-deployment-view/esp-flashing.md "Reconfiguration (re-flash)".
 
   /*
     ESP opens WiFi access point to receive the configuration from user input
@@ -252,7 +254,8 @@ void setup() {
           ===== http://192.168.4.1 ===== -> ESP softAP() endpoint
           ==============================
 
-    to type in WiFi credentials, endpoint URL and camera settings
+    to type in your WiFi credentials (the only thing the page asks for —
+    module name, server URLs and camera settings are set under the hood)
   */
   Serial.println("[ESP] OPENING ACCESS POINT");
   Serial.println("------ Connect on http://192.168.4.1 to configure ------");
@@ -263,9 +266,10 @@ void setup() {
     setupAccessPoint();
   } else {
     // Auto-fallback: if previous boots have repeatedly failed to join the
-    // saved network, clear the configured flag so the next boot re-opens
-    // the captive portal. Same NVS mutation as POST /factory_reset on the
-    // captive portal; this path triggers automatically without user input.
+    // saved network, clear the NVS `configured` flag so the next boot
+    // re-opens the captive portal. This triggers automatically without user
+    // input — the supported recovery path when a module is moved to a new
+    // network and the old SSID is gone.
     uint8_t wifiFails = getWifiFailCount();
     if (wifiFails >= WIFI_FAIL_AP_FALLBACK_THRESH) {
       Serial.printf("-- %u consecutive WiFi join failures — re-entering AP mode\n",
@@ -276,9 +280,9 @@ void setup() {
       ESP.restart();
     }
     Serial.println("-- ESP already configured. To reconfigure:");
-    Serial.println("   (1) Cause 3 consecutive WiFi-join failures (e.g. save wrong credentials) — board auto-reopens AP at http://192.168.4.1.");
-    Serial.println("   (2) Once at the captive portal, expand 'Factory reset (advanced)' and submit.");
-    Serial.println("   (3) Or via serial cable: cd ESP32-CAM && pio run -t erase && pio run -t upload");
+    Serial.println("   (1) Re-flash via the homepage wizard Step 2 — flashing erases the saved config and reopens the WiFi setup page at http://192.168.4.1.");
+    Serial.println("   (2) Over a serial cable: cd ESP32-CAM && pio run -t erase && pio run -t upload");
+    Serial.println("   (3) Or cause 3 consecutive WiFi-join failures (e.g. move to a new network) — the board auto-reopens its setup AP at http://192.168.4.1.");
   }
 
   Serial.println("[ESP] INITIALIZING ESP");

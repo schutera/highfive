@@ -4,7 +4,7 @@ C++17 firmware on the AI-Thinker ESP32-CAM, built with PlatformIO
 against the Arduino framework. One module = one deployed unit. After
 configuration, the device runs fully unattended.
 
-For procedural setup (flashing, Wi-Fi config, factory reset) see
+For procedural setup (flashing, Wi-Fi config, reconfigure) see
 [07-deployment-view/esp-flashing.md](../07-deployment-view/esp-flashing.md).
 For the reliability layers (watchdogs, recovery) see
 [06-runtime-view/esp-reliability.md](../06-runtime-view/esp-reliability.md).
@@ -62,17 +62,20 @@ The host-testable split is documented in
 ## Configuration model
 
 The first boot opens an access point named `ESP32-Access-Point`
-(password `esp-12345`), serves a config form at
-`http://192.168.4.1`, and persists the user's input to NVS. On
-subsequent boots the device reads NVS and goes straight to the upload
-loop. The captive portal reopens automatically after three
-consecutive WiFi-join failures (auto-AP-fallback) so a typo'd
-password is recoverable in-band. From a reachable AP, factory reset
-is exposed via the captive portal at `http://192.168.4.1` (collapsed
-"Factory reset (advanced)" section), which calls `POST /factory_reset`
-and reboots into AP mode. For STA-locked boards (joined a working
-SSID, want to move to a different one), the cable path is
-`pio run -t erase` over serial.
+(password `esp-12345`), serves a Wi-Fi-only config form at
+`http://192.168.4.1`, and persists the user's input to SPIFFS
+`/config.json`; the `configured` flag that gates AP mode lives in NVS
+(`ESP32-CAM/host.cpp`'s `saveConfig`). On subsequent boots the device
+reads `configured` from NVS, loads `/config.json`, and goes straight
+to the upload loop. The captive portal reopens automatically after
+three consecutive WiFi-join failures (auto-AP-fallback,
+`ESP32-CAM/ESP32-CAM.ino`'s `WIFI_FAIL_AP_FALLBACK_THRESH`) so a
+typo'd password is recoverable in-band. There is no in-firmware
+factory-reset route — reconfiguring (new SSID, changed password, or a
+full wipe) is done by **re-flashing**: the homepage flasher erases the
+whole chip (`homepage/src/components/setup/flashEsp.ts`'s `flashEsp`
+sets `eraseAll: true`), which clears both the NVS `configured` flag and
+`/config.json`, so the next boot re-enters AP-config mode.
 
 See [esp-flashing.md](../07-deployment-view/esp-flashing.md) for the
 full setup walkthrough.

@@ -91,12 +91,20 @@ export async function flashEsp(
     onProgress({ state: 'erasing' });
 
     // --- 4. Flash firmware with progress callback ---
+    // eraseAll erases the entire flash chip before writing. The manifest
+    // (Step2Flash.tsx FIRMWARE_MANIFEST) is a single merged image at offset 0
+    // covering bootloader + partition table + app, so a full-chip erase is
+    // safe — nothing we need to preserve lives outside that image. The erase
+    // also wipes the NVS namespace (the `configured` flag) and the SPIFFS
+    // partition (`/config.json`), so a re-flashed module always boots back
+    // into its Wi-Fi setup portal. This is the "reconfigure by re-flash"
+    // mechanism that replaced the captive-portal factory reset.
     await loader.writeFlash({
       fileArray,
       flashSize: 'keep',
       flashMode: 'keep',
       flashFreq: 'keep',
-      eraseAll: false,
+      eraseAll: true,
       compress: true,
       reportProgress: (_fileIndex: number, written: number, total: number) => {
         const percent = Math.round((written / total) * 100);

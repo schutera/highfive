@@ -118,26 +118,25 @@ Handles ESP32 firmware flashing directly in the browser using
 
 ### SetupGuide (`/setup-guide`)
 
-Three-step configuration guide shown after flashing:
+Configuration guide shown after flashing:
 
 - **Step 1: WiFi Configuration** — connect to `ESP32-Access-Point`,
-  open `192.168.4.1`, enter home WiFi credentials
+  open `192.168.4.1`, enter home WiFi credentials. That is all the page
+  asks for — module name, server URLs and camera settings are derived
+  under the hood (see [ADR-018](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md))
 - **Step 2: Module Deployment** — placement guidelines (south-facing,
   weather protection, 1–2 m height, camera alignment)
-- **Step 3: Backend Configuration** — set Initialization Base URL
-  (port `8002`, endpoint `/new_module`) and Upload Base URL
-  (port `8000`, endpoint `/upload`)
 
 **Interactive Troubleshooting** — accordion section with six common issues:
 
-| Issue                           | Solution                                                                                                                                         |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Access point does not appear    | Power cycle the module and retry                                                                                                                 |
-| `192.168.4.1` does not open     | Ensure connected to `ESP32-Access-Point`, navigate manually                                                                                      |
-| ESP32 not detected in installer | Use a data USB cable, use Chrome or Edge                                                                                                         |
-| Module not on dashboard         | Check port `8002` and `/new_module` endpoint                                                                                                     |
-| No image uploads                | Check port `8000` and `/upload` endpoint                                                                                                         |
-| Need to reconfigure             | Open `http://192.168.4.1` → expand "Factory reset (advanced)" → confirm → submit. The module auto-reopens this portal after 3 failed WiFi joins. |
+| Issue                           | Solution                                                                                                                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Access point does not appear    | Power cycle the module and retry                                                                                                                                                                             |
+| `192.168.4.1` does not open     | Ensure connected to `ESP32-Access-Point`, navigate manually                                                                                                                                                  |
+| ESP32 not detected in installer | Use a data USB cable, use Chrome or Edge                                                                                                                                                                     |
+| Module not on dashboard         | Check port `8002` and `/new_module` endpoint                                                                                                                                                                 |
+| No image uploads                | Check port `8000` and `/upload` endpoint                                                                                                                                                                     |
+| Need to reconfigure             | Re-flash via the wizard (Step 2) — flashing erases the saved config, so the module reopens its Wi-Fi setup page at `http://192.168.4.1`. The module also auto-reopens this portal after 3 failed WiFi joins. |
 
 <br>
 

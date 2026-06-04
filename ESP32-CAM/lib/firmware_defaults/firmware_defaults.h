@@ -59,5 +59,32 @@ constexpr int kBrightnessProductionFallback = 1;
 constexpr int kSaturationFormFallback       = 0;
 constexpr int kSaturationProductionFallback = -1;
 
+// ----- SERVER URLs --------------------------------------------------------
+// The captive portal is Wi-Fi-credentials-only: the operator never types a
+// server URL. esp_init.cpp's `loadConfig` applies these compile-time defaults
+// whenever the saved /config.json has no (or empty) INIT_URL / UPLOAD_URL, so
+// a module configured with just SSID+password still reaches the backend.
+//
+// Production (the #ifndef fallback) points at the TLS origin nginx serves on
+// :443 with path routing. Developers targeting a LAN stack override both at
+// build time by writing a gitignored ESP32-CAM/DEV_SERVER_HOST file (a bare
+// host/IP, e.g. 192.168.1.50) or exporting DEV_SERVER_HOST; build.sh and
+// extra_scripts.py compose http://<host>:8002/new_module and
+// http://<host>:8000/upload (the LAN-dev host ports for duckdb-service and
+// image-service) and inject them as -DHF_INIT_URL_DEFAULT /
+// -DHF_UPLOAD_URL_DEFAULT. This mirrors the GEO_API_KEY build-injection
+// pattern. The wire endpoints (`new_module`, `upload`) are pinned by
+// duckdb-service/routes/modules.py::add_module and
+// image-service/app.py::upload_image.
+#ifndef HF_INIT_URL_DEFAULT
+#define HF_INIT_URL_DEFAULT "https://highfive.schutera.com/new_module"
+#endif
+#ifndef HF_UPLOAD_URL_DEFAULT
+#define HF_UPLOAD_URL_DEFAULT "https://highfive.schutera.com/upload"
+#endif
+
+constexpr const char* kInitUrlDefault   = HF_INIT_URL_DEFAULT;
+constexpr const char* kUploadUrlDefault = HF_UPLOAD_URL_DEFAULT;
+
 }  // namespace defaults
 }  // namespace hf

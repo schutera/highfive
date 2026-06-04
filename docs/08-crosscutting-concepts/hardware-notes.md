@@ -35,10 +35,15 @@ message — the form just looks like nothing happened.
 
 ## Server URLs
 
-The Init/Upload base URLs in the config form must use the host
-machine's **LAN IP** (e.g. `192.168.178.25`), **not** `localhost`.
-The ESP32 is a separate device on the network — `localhost` resolves
-to the ESP32 itself.
+Operators no longer enter server URLs — the config form is Wi-Fi-only and
+production modules reach `https://highfive.schutera.com` baked in at build
+time. **Developers** targeting a local stack set the host machine's **LAN
+IP** (e.g. `192.168.178.25`), **not** `localhost`, in the gitignored
+`ESP32-CAM/DEV_SERVER_HOST` build file (see
+[esp-flashing.md](../07-deployment-view/esp-flashing.md) and
+[ADR-018](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md)).
+`localhost` would resolve to the ESP32 itself — it is a separate device on
+the network.
 
 The ESP32 and the server must be on the **same LAN**. A common
 mistake is configuring the module to join a phone hotspot while the
@@ -55,13 +60,19 @@ New-NetFirewallRule -DisplayName "HiveHive image-service (8000)" -Direction Inbo
 New-NetFirewallRule -DisplayName "HiveHive duckdb-service (8002)" -Direction Inbound -Protocol TCP -LocalPort 8002 -Action Allow -Profile Any
 ```
 
-## Factory reset
+## Reconfigure or reset a module
 
-Use the captive portal at <http://192.168.4.1> ("Factory reset
-(advanced)" → confirm → submit) when the module is in AP mode. From
-STA mode, either cause three consecutive failed WiFi joins (the
-firmware auto-falls back to AP after that) or use `pio run -t erase`
-over a serial cable.
+There is no in-firmware factory-reset control — the captive portal is
+Wi-Fi-only. To reconfigure (new SSID, changed password, or a full
+wipe), **re-flash** the module: flashing does a full chip erase, which
+clears the saved config (the NVS `configured` flag and SPIFFS
+`/config.json`), so the module reopens its Wi-Fi setup page at
+<http://192.168.4.1> on the next boot. Re-flash via the homepage setup
+wizard (Step 2) or the standalone web installer.
+
+If you only need to move the module to a different network you can skip
+the re-flash: cause three consecutive failed WiFi joins and the
+firmware auto-falls back to AP mode on its own.
 
 > The IO0-hold procedure listed in older revisions was unreachable on
 > AI Thinker ESP32-CAM-MB — GPIO0 is a strap pin, holding it LOW at

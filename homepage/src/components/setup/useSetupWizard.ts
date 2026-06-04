@@ -28,16 +28,6 @@ export interface WizardState {
   verificationBackendUnreachable: boolean;
 }
 
-const INIT_BASE_URL = import.meta.env.VITE_INIT_BASE_URL || 'http://localhost:8000';
-const UPLOAD_BASE_URL = import.meta.env.VITE_UPLOAD_BASE_URL || 'http://localhost:8000';
-
-export const SERVER_CONFIG = {
-  initBaseUrl: INIT_BASE_URL,
-  initEndpoint: '/new_module',
-  uploadBaseUrl: UPLOAD_BASE_URL,
-  uploadEndpoint: '/upload',
-} as const;
-
 const MAX_POLLS = 24; // 2 minutes at 5s intervals
 const POLL_INTERVAL = 5000;
 // If the trailing run of consecutive poll errors is at least this long when
@@ -45,15 +35,6 @@ const POLL_INTERVAL = 5000;
 // the window), classify the timeout as "backend unreachable" rather than
 // "module didn't show up". See issue #44.
 const POLL_BACKEND_DOWN_TAIL = 5;
-
-/**
- * Replace "localhost" or "127.0.0.1" in a URL with the given LAN IP.
- * This is needed because the ESP module can't reach "localhost" —
- * from its perspective, localhost is the ESP itself.
- */
-function replaceLocalhost(url: string, lanIp: string): string {
-  return url.replace('://localhost', `://${lanIp}`).replace('://127.0.0.1', `://${lanIp}`);
-}
 
 export function useSetupWizard() {
   const [state, setState] = useState<WizardState>({
@@ -75,7 +56,6 @@ export function useSetupWizard() {
     verificationBackendUnreachable: false,
   });
 
-  const lanIpRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
   // Trailing-run counter for poll catches. Reset to 0 on any successful
@@ -104,7 +84,6 @@ export function useSetupWizard() {
   // field for "did this module just come alive?".)
   useEffect(() => {
     loadFirmware();
-    detectLanIp();
     snapshotModules();
   }, []);
 
@@ -146,21 +125,6 @@ export function useSetupWizard() {
       // Backend might not be reachable yet (user on ESP AP) — that's fine,
       // startVerification will take a fallback snapshot.
       console.log('[SetupWizard] Could not snapshot modules on mount (backend unreachable)');
-    }
-  };
-
-  const detectLanIp = async () => {
-    try {
-      const resp = await fetch('/__dev-api/lan-ip');
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.ip && data.ip !== 'localhost') {
-          lanIpRef.current = data.ip;
-          console.log('[SetupWizard] Detected LAN IP:', data.ip);
-        }
-      }
-    } catch {
-      // Not in dev or Vite plugin not available — that's fine
     }
   };
 
@@ -233,23 +197,13 @@ export function useSetupWizard() {
   const sendConfig = useCallback(async () => {
     setState((s) => ({ ...s, configSending: true, configError: null }));
 
-    // Replace localhost with LAN IP if detected
-    let initBase = SERVER_CONFIG.initBaseUrl;
-    let uploadBase = SERVER_CONFIG.uploadBaseUrl;
-    if (lanIpRef.current) {
-      initBase = replaceLocalhost(initBase, lanIpRef.current);
-      uploadBase = replaceLocalhost(uploadBase, lanIpRef.current);
-      console.log('[SetupWizard] Sending ESP URLs with LAN IP:', { initBase, uploadBase });
-    }
-
+    // The firmware /save handler now reads only ssid/password (+ session):
+    // server URLs are baked in at build time and module name + camera
+    // settings are derived on-device. We no longer compute or send them.
     try {
       await sendConfigToEsp({
         ssid: state.wifiSsid,
         password: state.wifiPassword,
-        initBase,
-        initEndpoint: SERVER_CONFIG.initEndpoint,
-        uploadBase,
-        uploadEndpoint: SERVER_CONFIG.uploadEndpoint,
       });
       setState((s) => ({ ...s, configSending: false, configSent: true }));
     } catch (err) {

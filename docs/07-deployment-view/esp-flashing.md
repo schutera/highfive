@@ -21,7 +21,7 @@ Check all four services are healthy (substitute your machine's LAN IP):
 | `http://<LAN-IP>:8000/health`     | `ok`              |
 | `http://<LAN-IP>:8002/health`     | `ok`              |
 
-> **Find your LAN IP:** `ipconfig` on Windows (look for the WLAN or Ethernet adapter), `ip addr` on Linux/Mac. Use this IP — not `localhost` — when configuring the module, because the ESP32 is a separate device on the network.
+> **Find your LAN IP:** `ipconfig` on Windows (look for the WLAN or Ethernet adapter), `ip addr` on Linux/Mac. For a dev module you write this IP — not `localhost` — into `DEV_SERVER_HOST` before building (see "Point a dev module at a local stack"), because the ESP32 is a separate device on the network and `localhost` would resolve to the module itself.
 
 > **Windows Firewall:** ports 8000 and 8002 must accept inbound TCP connections from LAN devices. If modules register on the network but never appear on the dashboard, run this once in an **admin** PowerShell:
 >
@@ -105,6 +105,54 @@ The maintainer issues the key from the project's Google Cloud
 Console (restricted to the Geolocation API). Ask in the issue
 tracker if you need access for a personal fork.
 
+### Point a dev module at a local stack (`DEV_SERVER_HOST`)
+
+> **Skip this for production builds.** Without it, the firmware bakes
+> in the production server URLs (`https://highfive.schutera.com/new_module`
+> for registration and `https://highfive.schutera.com/upload` for image
+> upload) — the `#ifndef` defaults in
+> [`ESP32-CAM/lib/firmware_defaults/firmware_defaults.h`](../../ESP32-CAM/lib/firmware_defaults/firmware_defaults.h).
+> The captive portal no longer has URL fields (see "Configuring a
+> module" below), so a dev module that should talk to your LAN stack
+> must be told at **build time**.
+
+The server URLs are build-time injected, exactly like the Geolocation
+key above. Write the LAN host or IP of the machine running
+`docker compose` to the gitignored `ESP32-CAM/DEV_SERVER_HOST` file —
+host only, no scheme, no port, no path:
+
+```powershell
+# Windows / PowerShell — from repo root
+"192.168.1.50" | Out-File -NoNewline -Encoding ascii ESP32-CAM\DEV_SERVER_HOST
+```
+
+```bash
+# Linux / macOS — from repo root
+printf '%s' "192.168.1.50" > ESP32-CAM/DEV_SERVER_HOST
+```
+
+Or set the env var in the shell where you run `pio` / `build.sh`:
+
+```bash
+export DEV_SERVER_HOST="192.168.1.50"
+```
+
+The build (`ESP32-CAM/build.sh` and `ESP32-CAM/extra_scripts.py`) then
+composes and injects
+`-DHF_INIT_URL_DEFAULT="http://<host>:8002/new_module"` and
+`-DHF_UPLOAD_URL_DEFAULT="http://<host>:8000/upload"` — port `8002` is
+the duckdb-service host port, `8000` is the image-service host port (see
+the service map in the root `CLAUDE.md`). When the file/env is absent
+the firmware falls back to the production `#ifndef` defaults in
+`firmware_defaults.h`. The under-the-hood URL fallback (used when the
+saved `/config.json` has no `INIT_URL` / `UPLOAD_URL` — i.e. on every
+fresh setup) is applied by `ESP32-CAM/esp_init.cpp`'s `loadConfig`.
+
+This is plain HTTP on purpose: dev-box services do not terminate TLS,
+so the LAN URLs stay `http://` while production stays `https://`. The
+rationale for moving URLs off the form and into the build is
+[ADR-018](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md).
+
 ### Flash
 
 ```bash
@@ -137,34 +185,31 @@ Navigate to **http://192.168.4.1**
 
 ### 3. Fill in the configuration form
 
-| Field                   | LAN dev value                                                         | Production value                       |
-| ----------------------- | --------------------------------------------------------------------- | -------------------------------------- |
-| Module Name             | Any label, e.g. `hive-01`                                             | Any label, e.g. `hive-01`              |
-| Wi-Fi SSID              | Your 2.4 GHz network name (case-sensitive — copy-paste, don't retype) | Same                                   |
-| Wi-Fi Password          | Your network password                                                 | Same                                   |
-| Initialization Base URL | `http://<LAN-IP>`                                                     | `https://highfive.schutera.com`        |
-| Initialization Port     | `8002`                                                                | (leave empty — implicit 443 for HTTPS) |
-| Initialization Endpoint | `new_module`                                                          | `new_module`                           |
-| Upload Base URL         | `http://<LAN-IP>`                                                     | `https://highfive.schutera.com`        |
-| Upload Port             | `8000`                                                                | (leave empty)                          |
-| Upload Endpoint         | `upload`                                                              | `upload`                               |
+The captive portal asks for **Wi-Fi credentials only** — SSID and
+password. Everything else (module name, server URLs, camera settings)
+is assigned under the hood, so there is nothing else to type
+([ADR-018](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md)).
 
-The captive-portal form splits each URL into three inputs since #79
-([ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)):
-**Base URL** (scheme + host, no port, no trailing slash), **Port**
-(numeric, empty means the scheme default — 80 for http, 443 for https),
-and **Endpoint** (path with no leading slash). The port-as-separate-field
-shape exists so a production module on `https://highfive.schutera.com`
-and a LAN-dev module on `http://10.0.0.5:8002` use the same form
-without the operator having to retype the protocol-and-colon-and-port
-substring.
+| Field          | Value                                                                 |
+| -------------- | --------------------------------------------------------------------- |
+| Wi-Fi SSID     | Your 2.4 GHz network name (case-sensitive — copy-paste, don't retype) |
+| Wi-Fi Password | Your network password                                                 |
 
-> **Modules onboarded before firmware version `mason`** will auto-migrate
-> their saved URL from `http://highfive.schutera.com/...` to
-> `https://highfive.schutera.com/...` on the first boot after the OTA.
-> The migration is idempotent and re-saves SPIFFS once. LAN-dev URLs
-> (`http://10.0.0.5:8002/...`) are not touched — they keep using plain
-> HTTP because there is no TLS endpoint on the dev box.
+Under the hood, after you save:
+
+- **Module name** is auto-derived from the MAC
+  (`ESP32-CAM/esp_init.cpp`'s `generateModuleName` →
+  `hf::moduleNameFromMac`) — no field, no typos, no same-batch
+  collisions.
+- **Server URLs** are the compiled-in defaults: production
+  (`https://highfive.schutera.com/...`) unless this firmware was built
+  with `DEV_SERVER_HOST` set, in which case the LAN
+  `http://<host>:8002/new_module` and `http://<host>:8000/upload` are
+  used (see "Point a dev module at a local stack" above). To change the
+  server a module talks to, re-build with the right `DEV_SERVER_HOST`
+  and re-flash — there is no URL field on the form.
+- **Camera settings** come from the production fallbacks in
+  `ESP32-CAM/lib/firmware_defaults/firmware_defaults.h`.
 
 > **2.4 GHz only.** The ESP32 does not support 5 GHz. If your router shows a single SSID for both bands (band steering), the ESP32 should be assigned to 2.4 GHz automatically — but if it fails to connect, check your router's band-steering settings.
 
@@ -228,14 +273,39 @@ Then open `esp_log.txt` to read the boot log.
 
 ---
 
-## Reconfiguration (factory reset)
+## Reconfiguration (re-flash)
 
-To clear the saved configuration and re-enter setup mode:
+**Reconfigure by re-flashing.** There is no factory-reset button. The
+web-installer flash performs a full chip erase (`eraseAll: true` in
+[`homepage/src/components/setup/flashEsp.ts`](../../homepage/src/components/setup/flashEsp.ts)'s
+`flashEsp`), which wipes the NVS `configured` flag and the SPIFFS
+`/config.json`. So after **any** (re)flash — web installer or
+`pio run -t upload` — the module boots straight into its Wi-Fi setup
+page (`ESP32-Access-Point`); re-enter Wi-Fi credentials there. To point
+a module at a different server, set `DEV_SERVER_HOST` (or build the
+production default), re-build, and re-flash — the URLs are baked in, not
+on the form.
 
-- **From AP mode** (`ESP32-Access-Point` visible): connect to it, open <http://192.168.4.1>, expand **Factory reset (advanced)**, tick the confirmation checkbox, and click **Factory reset**. The module reboots and reopens the AP.
-- **From STA mode** (joined WiFi): cause three consecutive failed joins to trigger the auto-AP-fallback, then follow the AP-mode steps. The least disruptive way: reconnect to `ESP32-Access-Point`, open `http://192.168.4.1`, and save intentionally wrong WiFi credentials — the board will fail three times (~90 s total) and reopen the AP automatically. Or, with a serial cable: `pio run -t erase && pio run -t upload`.
+> **Already in AP mode and just want to re-enter Wi-Fi?** You don't have
+> to re-flash for that — connect to `ESP32-Access-Point`, open
+> <http://192.168.4.1>, and save the correct credentials. Re-flash is
+> the path when you need to **clear** a saved config (wrong Wi-Fi that
+> the board keeps retrying, or a server-URL change).
 
-> The legacy "hold IO0 for 5 seconds" procedure was removed in #40 — GPIO0 is a strap pin, the procedure was unreachable on AI Thinker ESP32-CAM-MB boards. See chapter 11 "Lessons learned" for the post-mortem.
+The "moved to a new network" case needs no re-flash: the module
+auto-reopens its setup access point after `WIFI_FAIL_AP_FALLBACK_THRESH`
+consecutive failed Wi-Fi joins
+(`ESP32-CAM/ESP32-CAM.ino`). The least disruptive way to force that from
+STA mode without a serial cable: reconnect to `ESP32-Access-Point`, open
+`http://192.168.4.1`, and save intentionally wrong Wi-Fi credentials —
+the board fails the threshold number of joins (~90 s total) and reopens
+the AP automatically.
+
+> The captive-portal **Factory reset** route was removed in
+> [ADR-018](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md):
+> re-flash now erases config as a side effect, so the form button was
+> dead weight. The earlier "hold IO0 for 5 seconds" procedure was already removed in #40 (unreachable on the AI Thinker ESP32-CAM-MB — GPIO0 is a strap pin).
+> See chapter 11 "Lessons learned" for both post-mortems.
 
 ---
 
@@ -368,9 +438,10 @@ the `min_spiffs` partition tables put SPIFFS at different offsets, so
 the firmware's `SPIFFS.begin(true)` auto-formats on the mismatch.
 Result: `/config.json` is wiped, the module boots into AP mode after
 the migration flash, and the operator has to re-onboard via the
-captive portal (Wi-Fi SSID/password, server URLs). Plan for this on
-deployed modules — schedule the migration during an onboarding visit
-rather than from a remote office.
+captive portal (Wi-Fi SSID/password only — server URLs are baked in at
+build time, see ADR-018). Plan for this on deployed modules — schedule
+the migration during an onboarding visit rather than from a remote
+office.
 
 After that one-time USB flash, every subsequent update can be OTA.
 Symptom of trying to OTA-push to an un-migrated module: the upload

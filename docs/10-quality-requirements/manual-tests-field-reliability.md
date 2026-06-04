@@ -140,8 +140,8 @@ from a fluke.)
 
 **Steps**:
 
-1. Factory-reset the module to clear any cached config (jumper +
-   reboot per [`esp-flashing.md` "Reconfiguration"](../07-deployment-view/esp-flashing.md#reconfiguration-factory-reset)).
+1. Reset the module to clear any cached config by re-flashing
+   (per [`esp-flashing.md` "Reconfiguration"](../07-deployment-view/esp-flashing.md#reconfiguration-re-flash)).
 2. Re-onboard via the captive portal.
 3. Capture the boot serial:
    ```powershell

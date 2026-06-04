@@ -100,14 +100,35 @@ geo_key = (
     or (_strip_all_whitespace(geo_key_file.read_text(encoding="utf-8")) if geo_key_file.exists() else "")
 )
 
+# DEV_SERVER_HOST (optional): mirror build.sh. When set (env var first, then a
+# .gitignored ESP32-CAM/DEV_SERVER_HOST file), override the production server
+# URLs baked into firmware_defaults.h with a LAN-dev stack so a `pio run`
+# binary talks to the developer's machine. Absent => no defines, so the
+# production #ifndef defaults apply. The LAN-dev host ports are 8002 (duckdb-
+# service) and 8000 (image-service); the wire endpoints (`new_module`,
+# `upload`) match the production paths.
+dev_host_file = project_dir / "DEV_SERVER_HOST"
+dev_host = (
+    _strip_all_whitespace(os.environ.get("DEV_SERVER_HOST") or "")
+    or (_strip_all_whitespace(dev_host_file.read_text(encoding="utf-8")) if dev_host_file.exists() else "")
+)
+url_defines = []
+if dev_host:
+    url_defines = [
+        ("HF_INIT_URL_DEFAULT",   env.StringifyMacro(f"http://{dev_host}:8002/new_module")),   # noqa: F821
+        ("HF_UPLOAD_URL_DEFAULT", env.StringifyMacro(f"http://{dev_host}:8000/upload")),        # noqa: F821
+    ]
+
 env.Append(  # noqa: F821
     CPPDEFINES=[
         ("FIRMWARE_VERSION",  env.StringifyMacro(version)),       # noqa: F821
         ("FIRMWARE_SEQUENCE", str(sequence)),
         ("GEO_API_KEY",       env.StringifyMacro(geo_key)),       # noqa: F821
+        *url_defines,
     ]
 )
 
 print(f"[extra_scripts] FIRMWARE_VERSION={version}")
 print(f"[extra_scripts] FIRMWARE_SEQUENCE={sequence}")
 print(f"[extra_scripts] GEO_API_KEY len={len(geo_key)}")
+print(f"[extra_scripts] DEV_SERVER_HOST={dev_host or '<unset> (production URLs)'}")

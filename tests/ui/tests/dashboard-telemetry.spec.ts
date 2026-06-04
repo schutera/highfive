@@ -77,14 +77,18 @@ test.describe('dashboard telemetry render', () => {
     // back to name when null/empty, which it is for fresh registrations).
     await page.getByRole('button', { name: /UI Test Telemetry/ }).click();
 
-    // Expand the Telemetry section. There is no stable test-id; pin the
-    // aria-controls attribute on the toggle button.
-    await page.locator('button[aria-controls="telemetry-content"]').click();
-    await expect(page.locator('#telemetry-content')).toBeVisible();
+    // Scope to the desktop side panel: the dashboard renders ModulePanel
+    // twice (desktop <aside> + mobile sheet, a div[role=dialog]), so the
+    // telemetry toggle/content match two elements globally. <aside> is
+    // unique and the one visible at this viewport — scoping avoids the
+    // strict-mode violation (and the duplicate-id is a separate #129 issue).
+    const panel = page.locator('aside');
+    await panel.locator('button[aria-controls="telemetry-content"]').click();
+    await expect(panel.locator('#telemetry-content')).toBeVisible();
 
     // Wait for at least one rendered TelemetryRow. The seed produces one
     // entry; the panel may show extra if re-runs added more.
-    const telemetryBody = page.locator('#telemetry-content');
+    const telemetryBody = panel.locator('#telemetry-content');
 
     // Now the load-bearing assertions: literal values, not the silent
     // "—" placeholder. If the envelope drifts again every one of these

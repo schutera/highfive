@@ -5,6 +5,14 @@ import { parseModuleId } from '@highfive/contracts';
 
 import { LanguageProvider } from '../i18n/LanguageContext';
 
+// NOTE(perf/data): <BatteryHistoryChart> is currently shelved — its only
+// consumer (ModulePanel.tsx) has the import commented out because the
+// battery series is fabricated firmware data (`random(1,100)`). These
+// tests still pass but exercise a component not mounted in production
+// today; keep them as re-enable scaffolding. Green here does NOT mean
+// the feature is live (its Playwright gate is skipped for the same
+// reason — see tests/ui/tests/module-battery-history.spec.ts).
+
 // Mock api.getMeasurements at the service boundary — the contract under
 // test is "the chart calls api.getMeasurements with (id, 'battery_pct',
 // 'hourly', 7) and renders the buckets honestly". CLAUDE.md rule 3:
@@ -132,9 +140,7 @@ describe('<BatteryHistoryChart>', () => {
     });
     renderChart();
     await waitFor(() =>
-      expect(
-        screen.getByText(/No battery readings|Keine Akkudaten/i),
-      ).toBeInTheDocument(),
+      expect(screen.getByText(/No battery readings|Keine Akkudaten/i)).toBeInTheDocument(),
     );
     expect(screen.queryByTestId('recharts-LineChart')).not.toBeInTheDocument();
   });
@@ -142,8 +148,6 @@ describe('<BatteryHistoryChart>', () => {
   it('renders the error state when the fetch rejects', async () => {
     getMeasurements.mockRejectedValue(new Error('boom'));
     renderChart();
-    await waitFor(() =>
-      expect(screen.getByText(/error|fehler/i)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/error|fehler/i)).toBeInTheDocument());
   });
 });

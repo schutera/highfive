@@ -148,11 +148,26 @@ same idempotency guarantee.
 
 The
 [Open-Meteo licence](https://open-meteo.com/en/license)
-requires attribution. `SiteFooter` gains a "Weather data by
+requires attribution. `SiteFooter` gained a "Weather data by
 Open-Meteo" link — the first non-Impressum link in the footer.
 ADR-015 already required this attribution browser-side; this ADR
-extends it to the dashboard footer so the duty is met regardless of
-whether the user is on the marketing page or the dashboard.
+extended it to the dashboard footer so the duty was met regardless of
+whether the user was on the marketing page or the dashboard.
+
+> **Status note (perf/data, 2026-06):** the dashboard weather chart
+> (`ActivityWeatherChart` in `ModulePanel`) and this footer attribution
+> link were both disabled because the displayed series was not yet
+> trustworthy data. The server-side `weather_worker` **keeps ingesting**
+> Open-Meteo hourly observations into `measurements` (it is gated by
+> `WEATHER_WORKER_ENABLED`, default `true`; this change did not gate it
+> off, so historical correlation data continues to accumulate in the
+> default/compose config for when the chart returns); what changed is
+> only that no Open-Meteo data is now _rendered_ to the operator. CC-BY 4.0 attaches the attribution duty to
+> public display/distribution, so with nothing displayed the UI
+> attribution duty is dormant — but the data is still being collected.
+> **Re-enable the footer link in the same change that re-enables the
+> weather chart** — the two are coupled: showing the data again revives
+> the duty.
 
 ## Consequences
 

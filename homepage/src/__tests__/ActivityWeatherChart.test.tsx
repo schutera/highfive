@@ -5,6 +5,13 @@ import { parseModuleId } from '@highfive/contracts';
 
 import { LanguageProvider } from '../i18n/LanguageContext';
 
+// NOTE(perf/data): <ActivityWeatherChart> is currently shelved — its
+// only consumer (ModulePanel.tsx) has the import commented out because
+// the weather series came from a slow browser-direct Open-Meteo fetch.
+// These tests still pass but exercise a component not mounted in
+// production today; keep them as re-enable scaffolding. Green here does
+// NOT mean the feature is live.
+
 // Mock api.getActivity at the service boundary — the contract under
 // test is "the chart calls api.getActivity with (id, interval, days)
 // and renders the result". Pinning the wire-shape round trip with a

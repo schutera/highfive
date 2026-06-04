@@ -28,14 +28,18 @@ let nextModuleDetail: ModuleDetail | null = null;
 // in jsdom (empty sessionStorage, no `?admin` URL param), so the
 // admin/non-admin branch the pill is in is the only branch exercised
 // here. That's the right branch — operators don't see admin mode.
+// NOTE(perf/data): <ActivityWeatherChart> and <BatteryHistoryChart> are
+// currently commented out in ModulePanel.tsx (their data is fabricated),
+// so the panel no longer calls getActivity / getMeasurements /
+// fetchHourlyWeather. The stubs below are kept as scaffolding so this
+// suite is ready the moment the charts are re-enabled — without them a
+// re-enable would reintroduce the unhandled-rejection noise these mocks
+// were added to suppress. They are intentionally dead today.
 vi.mock('../services/api', () => ({
   api: {
     getModuleById: vi.fn(() => Promise.resolve(nextModuleDetail)),
     getModuleLogs: vi.fn().mockResolvedValue([]),
-    // ModulePanel now renders <ActivityWeatherChart>, which calls
-    // api.getActivity on mount. Stub it with an empty bucket list so
-    // the chart resolves to its "no activity" branch without an
-    // unhandled rejection from this mock object.
+    // Dead while the activity chart is shelved — see NOTE above.
     getActivity: vi.fn().mockResolvedValue({
       moduleId: 'e89fa9f23a08',
       interval: 'hourly',
@@ -43,10 +47,7 @@ vi.mock('../services/api', () => ({
       end: '2026-05-20T00:00:00',
       buckets: [],
     }),
-    // ModulePanel also renders <BatteryHistoryChart> (issue #110),
-    // which calls api.getMeasurements on mount. Stub it with an
-    // empty bucket list so the chart resolves to its "no readings"
-    // branch without an unhandled rejection.
+    // Dead while the battery chart is shelved — see NOTE above.
     getMeasurements: vi.fn().mockResolvedValue({
       moduleId: 'e89fa9f23a08',
       metric: 'battery_pct',
@@ -57,10 +58,8 @@ vi.mock('../services/api', () => ({
     }),
   },
 }));
-// fetchHourlyWeather inside <ActivityWeatherChart> calls
-// `fetch('https://api.open-meteo.com/...')` directly. Stub it once at
-// the module scope so each ModulePanel render gets an empty weather
-// series without polluting individual tests with vi.stubGlobal calls.
+// Dead while the activity chart is shelved — see NOTE above. Kept so the
+// open-meteo browser fetch stays stubbed when the chart is re-enabled.
 vi.mock('../services/weather', () => ({
   fetchHourlyWeather: vi.fn().mockResolvedValue([]),
 }));

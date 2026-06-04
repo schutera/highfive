@@ -7,10 +7,21 @@ import type { Module, UserLocation } from '@highfive/contracts';
 import { hasPlausibleLocation } from '../lib/location';
 import { useTranslation } from '../i18n/LanguageContext';
 
-// Create a badge icon for clusters
+// Memoized cluster/marker badge icons. The icon's appearance depends
+// only on (count, hasOnline), and a `divIcon` is an immutable descriptor
+// Leaflet reads when it builds each marker's DOM — so the same instance
+// is safe to share across markers and across renders. Without this
+// cache, every zoom tick rebuilt an HTML string + a fresh divIcon for
+// every marker on the map, which was part of the pan/zoom jank.
+const badgeIconCache = new Map<string, L.DivIcon>();
+
+// Create (or reuse) a badge icon for clusters and single markers.
 function createBadgeIcon(count: number, hasOnline: boolean) {
+  const key = `${count}|${hasOnline ? 1 : 0}`;
+  const cached = badgeIconCache.get(key);
+  if (cached) return cached;
   const color = hasOnline ? '#f59e0b' : '#94a3b8';
-  return L.divIcon({
+  const icon = L.divIcon({
     className: 'cluster-badge',
     html: `
       <div style="
@@ -34,6 +45,8 @@ function createBadgeIcon(count: number, hasOnline: boolean) {
     iconSize: [50, 50],
     iconAnchor: [25, 25],
   });
+  badgeIconCache.set(key, icon);
+  return icon;
 }
 
 // Custom amber marker for online modules
@@ -542,6 +555,11 @@ export default function MapView({
       className="h-full w-full"
       style={{ height: '100%', width: '100%' }}
       zoomControl={false}
+      // Render vector layers (the activity Circles) to a single <canvas>
+      // instead of one SVG <path> per circle. Canvas redraws the whole
+      // overlay in one pass during pan/zoom, eliminating the per-circle
+      // SVG reflow that made the map stutter while flying between modules.
+      preferCanvas
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

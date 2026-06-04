@@ -83,9 +83,47 @@ export interface ModuleDetailWithMeta {
   heartbeatsFailed: boolean;
 }
 
+/**
+ * Result of one full fan-out + assembly pass, shared by `listModules`
+ * and `getModuleDetail` via the short-TTL cache below.
+ */
+interface AssembleResult {
+  items: Array<{ detail: ModuleDetail; totalHatches: number }>;
+  heartbeatsFailed: boolean;
+  // True when ANY of the four upstream fetches rejected (modules, nests,
+  // progress, or heartbeats). The fan-out uses `Promise.allSettled` and
+  // degrades gracefully rather than throwing, so this flag is the only
+  // signal that the snapshot is partial. `assemble()` refuses to cache a
+  // degraded snapshot — otherwise a transient duckdb outage would pin an
+  // empty/partial fleet (or a stuck `heartbeatsFailed`) for a full TTL
+  // after upstream recovered. Not part of the public method return shape.
+  degraded: boolean;
+}
+
+// How long an assembled fleet snapshot is reused before the next
+// caller triggers a fresh upstream fan-out. Tuned for the dominant
+// access pattern: the dashboard fetches `/api/modules`, then the
+// operator clicks a module and `/api/modules/:id` fires moments later.
+// Pre-cache, the detail route re-fetched all four duckdb endpoints just
+// to find one module by id (the dashboard had already loaded the exact
+// same data). At 5 s, that second call — and any rapid re-selection —
+// is served from memory. The cost is staleness: a brand-new heartbeat
+// or freshly onboarded module can lag by up to one TTL. The dashboard
+// does not poll, so this is only ever observed across deliberate
+// re-navigations, where 5 s is imperceptible.
+const ASSEMBLE_CACHE_TTL_MS = 5000;
+
 export class ModuleReadModel {
+  // Last successful assembly + the time it completed. `null` until the
+  // first fetch resolves.
+  private cache: { at: number; value: AssembleResult } | null = null;
+  // In-flight fan-out, if one is running. Concurrent callers (e.g. the
+  // dashboard list and an immediate detail open) await the same promise
+  // instead of each launching a duplicate four-endpoint fan-out.
+  private inflight: Promise<AssembleResult> | null = null;
+
   async listModules(): Promise<ModulesWithMeta> {
-    const { items, heartbeatsFailed } = await this.fetchAndAssemble();
+    const { items, heartbeatsFailed } = await this.assemble();
     const modules = items.map(({ detail, totalHatches }) => ({
       id: detail.id,
       name: detail.name,
@@ -106,15 +144,51 @@ export class ModuleReadModel {
   }
 
   async getModuleDetail(id: ModuleId): Promise<ModuleDetailWithMeta> {
-    const { items, heartbeatsFailed } = await this.fetchAndAssemble();
+    const { items, heartbeatsFailed } = await this.assemble();
     const detail = items.find((x) => x.detail.id === id)?.detail ?? null;
     return { detail, heartbeatsFailed };
   }
 
-  private async fetchAndAssemble(): Promise<{
-    items: Array<{ detail: ModuleDetail; totalHatches: number }>;
-    heartbeatsFailed: boolean;
-  }> {
+  /**
+   * Cached wrapper around `fetchAndAssemble`. Serves a snapshot younger
+   * than `ASSEMBLE_CACHE_TTL_MS` from memory; otherwise dedupes
+   * concurrent callers onto a single in-flight fan-out.
+   *
+   * Two things are deliberately NOT cached, so a transient upstream
+   * outage can't pin stale-bad state for a full TTL:
+   *   - a rejected promise. The `Promise.allSettled` fan-out itself
+   *     never rejects; the only throw path is *during assembly, after
+   *     the fan-out* — e.g. `parseModuleId` on a malformed upstream id.
+   *     Caching is wired through `.then` (success only); `.finally`
+   *     clears the in-flight slot so the next caller retries.
+   *   - a *degraded* fan-out (`value.degraded` — any of the four
+   *     upstream fetches failed). The result is still returned to the
+   *     current caller (graceful degradation), but it is not stored, so
+   *     the next call re-fetches against a possibly-recovered upstream.
+   * Only a fully-successful snapshot is cached.
+   */
+  private async assemble(): Promise<AssembleResult> {
+    const now = Date.now();
+    if (this.cache && now - this.cache.at < ASSEMBLE_CACHE_TTL_MS) {
+      return this.cache.value;
+    }
+    if (this.inflight) {
+      return this.inflight;
+    }
+    this.inflight = this.fetchAndAssemble()
+      .then((value) => {
+        if (!value.degraded) {
+          this.cache = { at: Date.now(), value };
+        }
+        return value;
+      })
+      .finally(() => {
+        this.inflight = null;
+      });
+    return this.inflight;
+  }
+
+  private async fetchAndAssemble(): Promise<AssembleResult> {
     // Reject on non-2xx so the existing `.status === 'rejected'` branches
     // fire on a duckdb HTTP 500 (or any other non-2xx). Without this,
     // `r.json()` happily parses the JSON error body, the promise resolves
@@ -153,6 +227,14 @@ export class ModuleReadModel {
     if (heartbeatsFailed) {
       console.warn('⚠️ Failed to fetch heartbeats:', heartbeatsResult.reason);
     }
+
+    // Any rejected fetch makes the assembled snapshot partial — see the
+    // `degraded` field on AssembleResult for why `assemble()` won't cache it.
+    const degraded =
+      modulesResult.status === 'rejected' ||
+      nestsResult.status === 'rejected' ||
+      progressResult.status === 'rejected' ||
+      heartbeatsFailed;
 
     const modulesData = (
       modulesResult.status === 'fulfilled' ? modulesResult.value : { modules: [] }
@@ -305,7 +387,7 @@ export class ModuleReadModel {
 
       return { detail, totalHatches };
     });
-    return { items, heartbeatsFailed };
+    return { items, heartbeatsFailed, degraded };
   }
 }
 

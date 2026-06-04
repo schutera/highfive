@@ -6,8 +6,14 @@ import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
-import ActivityWeatherChart from './ActivityWeatherChart';
-import BatteryHistoryChart from './BatteryHistoryChart';
+// TODO(perf/data): Re-enable once these panels are backed by real data.
+// Both were disabled because the series are currently fabricated — the
+// battery trace is firmware `random(1,100)` (see BatteryHistoryChart
+// docstring) and the activity/weather chart fired a slow browser-direct
+// Open-Meteo fetch on every panel open. Removing them is the bulk of the
+// side-panel load-time fix.
+// import ActivityWeatherChart from './ActivityWeatherChart';
+// import BatteryHistoryChart from './BatteryHistoryChart';
 
 const ADMIN_KEY_STORAGE = 'hf_admin_key';
 
@@ -525,8 +531,11 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           ))}
         </div>
 
+        {/* TODO(perf/data): Re-enable when backed by real data — both series
+            are currently fabricated, and the weather chart's browser-direct
+            Open-Meteo fetch was a major side-panel load-time cost.
         <ActivityWeatherChart moduleId={moduleDetail.id} location={moduleDetail.location} />
-        <BatteryHistoryChart moduleId={moduleDetail.id} />
+        <BatteryHistoryChart moduleId={moduleDetail.id} /> */}
       </div>
     </div>
   );

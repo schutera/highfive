@@ -2,12 +2,14 @@ import { useTranslation } from '../i18n/LanguageContext';
 
 /**
  * Compact footer used on all marketing pages. Keeps the Impressum link
- * required for German legal compliance front-and-centre. The Open-Meteo
- * attribution next to it satisfies the CC-BY 4.0 licence requirement
- * that ADR-017 carries forward from ADR-015 (also satisfied
- * browser-side by the activity chart, but the server-side worker
- * means the data lands on the dashboard regardless of whether the
- * chart was opened).
+ * required for German legal compliance front-and-centre.
+ *
+ * The Open-Meteo CC-BY 4.0 attribution that ADR-017/ADR-015 added here
+ * was removed alongside disabling the dashboard weather chart
+ * (ActivityWeatherChart in ModulePanel) — with no weather data rendered
+ * to the operator anywhere in the UI, the attribution is no longer tied
+ * to a visible use. Restore both together when the weather chart is
+ * re-enabled against real data.
  */
 export default function SiteFooter() {
   const { t } = useTranslation();
@@ -21,14 +23,6 @@ export default function SiteFooter() {
             className="text-hf-honey-300 hover:text-hf-honey-200 underline underline-offset-4 rounded-md"
           >
             {t('common.impressum')}
-          </a>
-          <a
-            href="https://open-meteo.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-hf-honey-300 hover:text-hf-honey-200 underline underline-offset-4 rounded-md"
-          >
-            {t('common.weatherAttribution')}
           </a>
         </div>
       </div>

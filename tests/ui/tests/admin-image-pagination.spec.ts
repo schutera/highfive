@@ -62,10 +62,13 @@ test.describe('admin image gallery pagination', () => {
     await page.goto('/admin');
     await page.getByRole('combobox').selectOption(GALLERY_MAC);
 
-    // The thumbnail grid renders one <img> per loaded row. Initially the
-    // first page only: exactly PAGE_SIZE thumbnails, not all `total`.
-    const thumbs = page.locator('main img');
-    await expect(thumbs).toHaveCount(PAGE_SIZE);
+    // Count the image CELLS (one button per loaded row), not the <img>
+    // itself: AdminPage's onError handler replaces a failed thumbnail's
+    // parent innerHTML, removing the <img> from the DOM — so an <img>
+    // count is load-dependent and flaky in CI. The cell + its
+    // data-filename are what the pagination behaviour actually controls.
+    const cells = page.locator('[data-testid="admin-image-cell"]');
+    await expect(cells).toHaveCount(PAGE_SIZE); // first page only, not all `total`
 
     // The stats line shows "<loaded> of <total> images" while a page is
     // outstanding, and a "Load more (<n> left)" button is present.
@@ -79,15 +82,11 @@ test.describe('admin image gallery pagination', () => {
     //    disappears (all `total` now loaded), and the full rendered
     //    sequence equals the deterministic capture order from step 1.
     await loadMore.click();
-    await expect(thumbs).toHaveCount(allPage.total);
+    await expect(cells).toHaveCount(allPage.total);
     await expect(loadMore).toHaveCount(0);
 
-    const renderedOrder = await thumbs.evaluateAll((imgs) =>
-      imgs.map((img) => {
-        // src is /api/images/<filename>; compare on the filename tail.
-        const src = (img as HTMLImageElement).getAttribute('src') ?? '';
-        return decodeURIComponent(src.split('/').pop() ?? '');
-      }),
+    const renderedOrder = await cells.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-filename') ?? ''),
     );
     expect(renderedOrder).toEqual(expectedOrder);
   });

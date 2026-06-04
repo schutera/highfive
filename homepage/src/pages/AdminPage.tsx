@@ -504,6 +504,8 @@ export default function AdminPage() {
             {images.map((img, idx) => (
               <button
                 key={`${img.filename}-${idx}`}
+                data-testid="admin-image-cell"
+                data-filename={img.filename}
                 onClick={() => setLightboxImage(img)}
                 className="group bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md hover:border-amber-300 transition-all text-left"
               >

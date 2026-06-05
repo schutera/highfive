@@ -353,39 +353,6 @@ jobs:
       - name: Seed UI-specific fixtures
         run: python tests/ui/scripts/seed_ui_fixtures.py
 
-      # Probe each surface the specs depend on BEFORE Playwright runs.
-      # If the dashboard renders empty, this section makes the cause
-      # obvious without trace-viewer download (CORS reject vs. empty DB
-      # vs. unreachable backend look very different from this output).
-      #
-      # TODO(#123): remove this step once `ui-playwright` has 5 consecutive
-      # green runs on PRs to main. The probes earned their keep during
-      # iteration-1's first four CI rounds (CORS, wire-shape, strict-mode)
-      # but become noise once the failure modes are familiar.
-      - name: Diagnostic — probe stack from runner
-        run: |
-          set -x
-          echo "--- /api/health (backend, no auth) ---"
-          curl -sS -o /dev/null -w "HTTP %{http_code}\n" http://localhost:4002/api/health || true
-          echo "--- /api/modules (backend, X-API-Key) ---"
-          curl -sS -H 'X-API-Key: hf_test_key' http://localhost:4002/api/modules | head -c 600 || true
-          echo ""
-          echo "--- /api/modules (backend, browser-shaped Origin) ---"
-          curl -sS -H 'X-API-Key: hf_test_key' \
-            -H 'Origin: http://localhost:6173' \
-            -D /tmp/api_headers.txt \
-            http://localhost:4002/api/modules -o /dev/null
-          echo "Response headers:"
-          cat /tmp/api_headers.txt || true
-          echo "--- / (homepage nginx) ---"
-          curl -sS -o /dev/null -w "HTTP %{http_code}\n" http://localhost:6173/ || true
-          echo "--- /dashboard (homepage SPA fallback) ---"
-          curl -sS -o /dev/null -w "HTTP %{http_code}\n" http://localhost:6173/dashboard || true
-          echo "--- homepage bundle env (grep for VITE_API_URL bake) ---"
-          curl -sS http://localhost:6173/ | grep -oE 'assets/[A-Za-z0-9_-]+\.js' | head -1 \
-            | xargs -I {} curl -sS "http://localhost:6173/{}" \
-            | grep -oE '"http://localhost:[0-9]+/api"|hf_test_key|VITE_API' | head -10 || true
-
       - name: Run Playwright specs
         working-directory: tests/ui
         run: npx playwright test

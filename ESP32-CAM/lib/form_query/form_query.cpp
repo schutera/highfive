@@ -5,6 +5,22 @@
 
 namespace hf {
 
+std::string htmlEscape(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (char c : in) {
+        switch (c) {
+            case '&': out += "&amp;";  break;
+            case '<': out += "&lt;";   break;
+            case '>': out += "&gt;";   break;
+            case '"': out += "&quot;"; break;
+            case '\'': out += "&#39;"; break;
+            default:  out += c;        break;
+        }
+    }
+    return out;
+}
+
 std::string urlDecode(const std::string& src) {
     std::string decoded;
     decoded.reserve(src.size());

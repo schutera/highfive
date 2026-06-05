@@ -153,13 +153,24 @@ geolocation lookup.` and returns before the HTTPS call. No
 `{latitude: 0.0f, longitude: 0.0f, accuracy: 0.0f}`. If
 `getGeolocation` skips its lookup, those zeros remain and ship
 to the backend on the first heartbeat. The `homepage` map view
-has no `(0, 0)` special-case today, so the module plots at the
-Null Island coordinate in the Gulf of Guinea until an operator
-manually corrects the location. A release build without
-`GEO_API_KEY` therefore produces map-broken modules. `build.sh`
-prints `WARNING:` on `stderr` when the key is unset for this
-reason — do not suppress it unless you have a `dev` / `test`
-build that will never reach the dashboard.
+filters the `(0, 0)` Null Island sentinel client-side, so the
+module plots nowhere — it never appears on the dashboard map
+until an operator manually corrects the location. A release build
+without `GEO_API_KEY` therefore produces invisible modules.
+
+**`build.sh` hard-requires the key for release builds.** Because
+`build.sh` is the path that produces the web-installer `firmware.bin`
+an operator actually flashes, a missing `GEO_API_KEY` is now **fatal**
+there: the script prints a self-describing `ERROR:` on `stderr` and
+exits non-zero rather than emitting a binary that would ship
+`(0, 0, 0)` modules. The escape hatch is `HF_ALLOW_NO_GEO_KEY=1`,
+which downgrades the failure to a `WARNING:` and builds a keyless
+binary on purpose — intended only for a CI compile check that is never
+flashed. The `pio run -e esp32cam` smoke env stays keyless without the
+flag, because it is a compile-only gate (not a release path): its
+firmware's runtime guard skips the Google call and the binary is never
+flashed to a real device. Do not suppress the `build.sh` error for any
+build that will reach an operator.
 
 Only the **length** of the key is logged at build time
 (`[extra_scripts] GEO_API_KEY len=<N>`); the value never appears

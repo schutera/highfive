@@ -263,6 +263,17 @@ button:focus-visible,
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* Exception: loading spinners must keep turning even under reduced
+     motion. The blanket rule above sets animation-iteration-count: 1, which
+     freezes Tailwind's `animate-spin` after a single instant rotation — a
+     frozen spinner reads as "stuck", the opposite of the "working…" it's
+     meant to convey. A small, continuous, non-parallax rotation is exactly
+     the kind of motion the reduced-motion guideline tolerates, so we
+     restore it for the spinner utility specifically. */
+  .animate-spin {
+    animation-duration: 0.8s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
 
 /* ================================================================

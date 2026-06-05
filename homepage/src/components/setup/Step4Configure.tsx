@@ -134,9 +134,46 @@ export default function Step4Configure({
           </button>
 
           {opened && (
-            <button onClick={markConfigDone} className="hf-btn hf-btn-secondary mt-4 px-8 py-3">
-              {t('step4.configDoneBtn')}
-            </button>
+            <>
+              {/* Primary path: the captive-portal page closes itself and
+                  postMessages back to advance the wizard automatically
+                  (handled in useSetupWizard). This is just a reassurance
+                  that the wizard is waiting for that signal. */}
+              <p className="mt-5 mb-1 flex items-center gap-2 text-hf-sm text-hf-fg-soft text-center">
+                <svg
+                  className="w-4 h-4 shrink-0 animate-spin"
+                  style={{ color: 'var(--hf-honey-700)' }}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                {t('step4.waitingForSave')}
+              </p>
+
+              {/* Secondary / de-emphasized fallback for browsers that block
+                  window.close() or postMessage from the popup. */}
+              <p className="mt-4 text-hf-xs text-hf-fg-soft">{t('step4.manualFallbackHint')}</p>
+              <button
+                onClick={markConfigDone}
+                className="mt-1 text-hf-xs underline text-hf-fg-soft hover:text-hf-fg transition-colors"
+              >
+                {t('step4.configDoneBtn')}
+              </button>
+            </>
           )}
         </>
       )}

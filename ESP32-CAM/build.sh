@@ -54,10 +54,16 @@ fi
 
 # GEO_API_KEY is the Google Geolocation API key used by getGeolocation in
 # esp_init.cpp. Sourced from env var first, then a .gitignored file (so
-# local dev doesn't have to export it every shell). Missing key is NOT
-# fatal: the firmware's runtime guard logs a clear message and skips the
-# HTTPS call. We never print the value — only its length — so this script
-# can run in CI without leaking the secret into build logs.
+# local dev doesn't have to export it every shell). A missing key is
+# FATAL for this release path (see the GeoKey check below): build.sh
+# produces the web-installer firmware.bin an operator flashes, and a
+# keyless binary reports (0,0,0) and never appears on the dashboard map.
+# Set HF_ALLOW_NO_GEO_KEY=1 to build keyless on purpose (a compile check
+# that is never flashed). The local `pio run -e esp32cam` smoke env does
+# not require the key (CI may still pass GEO_API_KEY to it as a secret on
+# main; that's the pipeline's choice, not build.sh's). We never
+# print the value — only its length — so this script can run in CI without
+# leaking the secret into build logs.
 # Strip ALL whitespace from both sources (not just outer) so the env-var
 # and file paths cannot diverge on a stray trailing newline (the common
 # shape of a CI secret written via `echo "$KEY" > file`) OR an embedded
@@ -105,19 +111,40 @@ if [ -n "${GEO_API_KEY}" ]; then
   echo "  GeoKey:  set (len=${#GEO_API_KEY})"
 else
   echo "  GeoKey:  <unset>"
-  # First-boot side effect: with the geolocation fields left at their
-  # 0.0f defaults, the module reports (lat=0, lng=0, acc=0) on its
-  # first heartbeat and the homepage map plots it at Null Island in
-  # the Gulf of Guinea until an operator corrects it. Loud on stderr
-  # so the message survives a `> build.log` redirect. See
+  # build.sh is the path that produces the web-installer firmware.bin an
+  # operator actually flashes (homepage Step 2 serves it). A keyless build
+  # leaves the geolocation fields at their 0.0f defaults, so the module
+  # reports (lat=0, lng=0, acc=0) on its first heartbeat and the homepage
+  # map plots it at Null Island — i.e. the module never appears anywhere
+  # the operator can see it. Shipping that is the "new modules don't show
+  # up on the dashboard" failure, so a missing key here is FATAL by default.
+  #
+  # Escape hatch: HF_ALLOW_NO_GEO_KEY=1 builds keyless on purpose — for a CI
+  # compile check that is never flashed to a real device. The pio smoke
+  # env (`pio run -e esp32cam`) stays keyless without this flag because it
+  # is a compile-only gate, not a release path. Loud on stderr so the
+  # message survives a `> build.log` redirect. See
+  # docs/07-deployment-view/esp-flashing.md and
   # docs/08-crosscutting-concepts/auth.md "Third-party API keys".
-  echo "" >&2
-  echo "WARNING: GEO_API_KEY is unset. Firmware will skip the Google" >&2
-  echo "         Geolocation call at first boot and report (0, 0, 0)," >&2
-  echo "         which plots the module at Null Island on the dashboard." >&2
-  echo "         Set GEO_API_KEY or write ESP32-CAM/GEO_API_KEY for a" >&2
-  echo "         release build intended to reach an operator's map view." >&2
-  echo "" >&2
+  if [ "${HF_ALLOW_NO_GEO_KEY:-}" = "1" ]; then
+    echo "" >&2
+    echo "WARNING: GEO_API_KEY is unset but HF_ALLOW_NO_GEO_KEY=1 is set —" >&2
+    echo "         building a keyless binary on purpose. It reports (0, 0, 0)" >&2
+    echo "         and must NOT be flashed to a device meant to appear on the" >&2
+    echo "         dashboard map." >&2
+    echo "" >&2
+  else
+    echo "" >&2
+    echo "ERROR: GEO_API_KEY is unset. A release build flashed to an operator" >&2
+    echo "       would skip the Google Geolocation call and report (0, 0, 0)," >&2
+    echo "       so the module never appears on the dashboard map." >&2
+    echo "       Fix: export GEO_API_KEY=... or write ESP32-CAM/GEO_API_KEY" >&2
+    echo "       (gitignored). To build keyless on purpose (CI compile check," >&2
+    echo "       never flashed), re-run with HF_ALLOW_NO_GEO_KEY=1." >&2
+    echo "       See docs/07-deployment-view/esp-flashing.md." >&2
+    echo "" >&2
+    exit 1
+  fi
 fi
 echo ""
 

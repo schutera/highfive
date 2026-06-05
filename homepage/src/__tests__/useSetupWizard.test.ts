@@ -152,3 +152,101 @@ describe('useSetupWizard.startVerification — mid-poll classification (#44)', (
     expect(result.current.state.verificationTimedOut).toBe(false);
   });
 });
+
+// The captive-portal config page (served by the ESP firmware) calls
+// `window.opener.postMessage('hivehive-config-saved', '*')` and then
+// `window.close()` after the user saves their WiFi credentials. The wizard
+// hook listens for that message and auto-advances to Step 5 so the user
+// doesn't have to manually click "I've finished configuring" and navigate.
+// This is the load-bearing handoff: if the listener stops firing, the whole
+// automatic-handoff feature silently degrades to the manual fallback.
+describe('useSetupWizard — postMessage handoff from the ESP config popup', () => {
+  beforeEach(() => {
+    getAllModules.mockReset();
+    healthCheck.mockReset();
+    // Mount effect snapshots modules and fetches /firmware.json — keep both
+    // benign so the test is coupled only to the message-handoff behaviour.
+    getAllModules.mockResolvedValue([]);
+    healthCheck.mockResolvedValue({ status: 'ok', timestamp: '' });
+  });
+
+  /** Mimic the ESP popup's `window.opener.postMessage(...)`. */
+  function dispatchConfigSaved(data: unknown = 'hivehive-config-saved') {
+    window.dispatchEvent(new MessageEvent('message', { data }));
+  }
+
+  it('advances to step 5 and sets configSent when the popup posts the saved signal', async () => {
+    const { result } = renderHook(() => useSetupWizard());
+    // Drain the mount-effect promises so we assert on post-mount state.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Simulate the user having navigated to the configure step.
+    act(() => result.current.goToStep(4));
+    expect(result.current.state.currentStep).toBe(4);
+    expect(result.current.state.configSent).toBe(false);
+
+    act(() => dispatchConfigSaved());
+
+    expect(result.current.state.configSent).toBe(true);
+    expect(result.current.state.currentStep).toBe(5);
+    expect(result.current.state.direction).toBe('forward');
+  });
+
+  it('still advances when the message arrives before the user reaches step 4', async () => {
+    // Math.max(currentStep, 5) means an out-of-order signal (e.g. the popup
+    // fires while the opener is still on an earlier step) still lands on 5
+    // rather than yanking the wizard backwards or forwards by a fixed delta.
+    const { result } = renderHook(() => useSetupWizard());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.state.currentStep).toBe(1);
+
+    act(() => dispatchConfigSaved());
+
+    expect(result.current.state.configSent).toBe(true);
+    expect(result.current.state.currentStep).toBe(5);
+  });
+
+  it('ignores unrelated window messages', async () => {
+    const { result } = renderHook(() => useSetupWizard());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => result.current.goToStep(4));
+    act(() => dispatchConfigSaved('some-other-message'));
+
+    // Unrelated chatter (extensions, devtools, other frames) must not trip
+    // the handoff.
+    expect(result.current.state.configSent).toBe(false);
+    expect(result.current.state.currentStep).toBe(4);
+  });
+
+  it('removes the message listener on unmount (no leak across wizard remounts)', async () => {
+    const addSpy = vi.spyOn(window, 'addEventListener');
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+
+    const { unmount } = renderHook(() => useSetupWizard());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The handler the hook registered for 'message'.
+    const registered = addSpy.mock.calls.find(([type]) => type === 'message')?.[1];
+    expect(registered).toBeTypeOf('function');
+
+    unmount();
+
+    // The exact same handler reference must be torn down so repeated mounts
+    // (e.g. React Strict Mode, or re-entering the wizard) don't stack
+    // listeners that each fire on a single popup message.
+    expect(removeSpy).toHaveBeenCalledWith('message', registered);
+
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
+  });
+});

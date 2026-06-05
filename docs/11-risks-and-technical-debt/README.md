@@ -1026,6 +1026,77 @@ sides at once.
   invariant is "only patch from (0,0)". Same bucket as the "module
   physically moved" deferred-follow-up above.
 
+### A keyless release build shipped `(0, 0, 0)` modules that never appeared on the map
+
+**What happened.** A firmware binary built **without `GEO_API_KEY`**
+compiled cleanly and flashed fine, but every module flashed with it
+reported `(latitude=0, longitude=0, accuracy=0)` on first boot. The
+homepage map filters that `(0, 0)` Null Island sentinel client-side, so
+those modules registered, uploaded, and heartbeated normally yet never
+appeared anywhere the operator looks — the "new modules don't show up on
+the dashboard" symptom, with no error to point at.
+
+**Why it happened.** The Geolocation key is build-time-injected (issue
+#18) and a missing key was only ever a **warning**: `build.sh` printed
+`WARNING:` on `stderr` and produced the keyless binary anyway. The
+firmware's runtime guard correctly skips the Google lookup on an empty
+key, so nothing failed loudly — the binary was indistinguishable from a
+good one until a flashed module silently no-showed on the map. This is a
+sibling of the "First-boot geolocation race" entry above, but a distinct
+root cause: that one is a _transient_ boot failure with a key present
+(recoverable via deferred retry); this one is a _missing key at build
+time_ (no key to retry with — every boot reports zeros).
+
+**How to avoid it next time.** A latent constraint that only surfaces as
+a silent field no-show should be a build error, not a warning (same
+lesson as the "Critical-rules prose-to-code audit" entries). `build.sh`
+now **errors and exits non-zero** when no key is found, so a keyless
+binary can no longer reach an operator by accident. The deliberate
+keyless path (a CI compile check that is never flashed) is gated behind
+an explicit `HF_ALLOW_NO_GEO_KEY=1` opt-in that downgrades the failure
+to a warning; the `pio run -e esp32cam` smoke env stays keyless as a
+compile-only gate whose binary is never flashed. The guard lives in
+`ESP32-CAM/build.sh`'s GeoKey block; operator-facing docs are
+[`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md)
+and [`docs/08-crosscutting-concepts/auth.md`](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
+
+### A dormant unescaped SSID echo became a live reflected-XSS path the moment the captive-portal page started running script
+
+**What happened.** The captive portal's `sendConfigForm`
+(`ESP32-CAM/host.cpp`) had long echoed the operator-entered Wi-Fi SSID
+back into the form's `value="..."` **without HTML-escaping it**. For
+years this was harmless: the page rendered no script and held no handle
+to any other window, so a `"`/`<` in an SSID could at worst mangle the
+form's own markup (self-XSS over a public-PSK AP). The onboarding-flow
+change that made the saved page (a) run a `<script>` to
+`postMessage('hivehive-config-saved')` + `window.close()` and (b) be
+opened by the setup wizard via `window.open('http://192.168.4.1',
+'_blank')` **without `noopener`** (the handle is needed for the
+postMessage handoff) turned that dormant echo into a live **reflected
+XSS / reverse-tabnabbing** vector: an SSID like
+`"></script><script>window.opener.location=...</script>` survives the
+round-trip (POST `/save` → stored → re-rendered on the saved page) and
+can navigate the operator's wizard tab.
+
+**Why it happened.** The escaping gap predated the feature; the feature
+silently changed its blast radius. Nobody re-audited the existing echo
+when adding the script + opener handle, because the diff "only added a
+redirect," not an injection sink. The vector was caught by the
+end-of-implementation senior-review, not by a test.
+
+**How to avoid it next time.** Escape **every** operator-reflected value
+at the output sink, not "where it looks risky today" — a sink's risk is
+a function of the whole page, which a later change can alter without
+touching the echo. The fix added a host-testable `hf::htmlEscape`
+(`ESP32-CAM/lib/form_query/`) and routed the SSID echo through it, with
+Unity tests in `test_native_form_query` that pin the attribute-breakout
+payload produces no raw `<` or `"`. Related: the wizard's `message`
+listener (`homepage/src/components/setup/useSetupWizard.ts`) accepts the
+fixed signal from any origin and is safe **only** because it reads no
+payload data — a `SECURITY:` comment now pins that invariant so a future
+change that starts trusting the payload adds an origin/source check
+first.
+
 ### "Three layers, one rule" was actually four surfaces — the dashboard side-list silently filtered pending modules (PR II final-pass smoke)
 
 **What happened.** PR II's design intent was: a module stuck at the

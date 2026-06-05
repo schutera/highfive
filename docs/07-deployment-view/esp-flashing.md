@@ -65,12 +65,22 @@ The chip is now waiting for firmware.
 
 ### Provide the Geolocation API key (one-time, before first build)
 
-> **Skip this and your modules will plot at Null Island in the
-> Gulf of Guinea on the dashboard.** The Google Geolocation API key
+> **Required for any release build.** The Google Geolocation API key
 > used by the firmware's first-boot WiFi-AP lookup is **build-time
-> injected** — it is no longer hardcoded. Without a key, the
-> firmware compiles cleanly and the runtime guard skips the lookup,
-> but every module reports `(0, 0, 0)` to the backend.
+> injected** — it is no longer hardcoded. `ESP32-CAM/build.sh` (the
+> path that produces the web-installer `firmware.bin` an operator
+> flashes) now **errors and exits** when no key is found — a keyless
+> binary compiles cleanly, but the runtime guard skips the lookup and
+> every module reports `(0, 0, 0)`, so it plots at Null Island in the
+> Gulf of Guinea and is filtered out of the dashboard map (i.e. the
+> module never appears anywhere the operator can see it). Failing the
+> build is cheaper than shipping that.
+>
+> **Escape hatch:** set `HF_ALLOW_NO_GEO_KEY=1` to build a keyless
+> binary on purpose — a CI compile check that is never flashed. The
+> `pio run -e esp32cam` smoke env stays keyless without this flag,
+> because it is a compile-only gate (not a release path) and produces
+> a binary that is never flashed.
 
 Write the key to the gitignored `ESP32-CAM/GEO_API_KEY` file once
 (it's listed in the repo root `.gitignore` next to `secrets.h`):
@@ -95,7 +105,22 @@ export GEO_API_KEY="AIza<your-google-geolocation-api-key>"
 Either source survives in `extra_scripts.py`'s pre-build hook,
 which prints `[extra_scripts] GEO_API_KEY len=<N>` so you can
 confirm the value reached the build (the value itself is **never**
-logged). Full mechanism, source order, and rotation procedure:
+logged). `build.sh` likewise echoes `GeoKey: set (len=<N>)` when the
+key is found and aborts with a self-describing `ERROR:` when it is
+not. To run a CI compile check without a key on purpose, set the
+escape hatch first:
+
+```powershell
+# Windows / PowerShell — keyless compile check, never flashed
+$env:HF_ALLOW_NO_GEO_KEY = "1"; bash ESP32-CAM/build.sh
+```
+
+```bash
+# Linux / macOS — keyless compile check, never flashed
+HF_ALLOW_NO_GEO_KEY=1 bash ESP32-CAM/build.sh
+```
+
+Full mechanism, source order, and rotation procedure:
 [`docs/08-crosscutting-concepts/auth.md` → "Third-party API keys:
 Geolocation"](../08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
 The leak that prompted this design: [chapter 11 lessons-learned →
@@ -218,6 +243,21 @@ Under the hood, after you save:
 > **Capture cadence is hardcoded.** The shipping firmware captures once on first boot plus once daily at noon local time (`TZ_EU_CENTRAL` — `CET`/`CEST` — configured in `ESP32-CAM/esp_init.cpp`'s `configTzTime` call). There is no operator-configurable interval field on the form; an earlier `Capture Interval (ms)` knob was dead-weight (stored but never read) and was removed when issue #65 was resolved. If operator-configurable cadence is later wanted, the wiring would touch `ESP32-CAM/ESP32-CAM.ino`'s `loop` and interact with ADR-007's daily-reboot logic — a separate feature PR.
 
 Click **Save Configuration**. The module reboots, joins your Wi-Fi, registers itself with the server, and starts uploading images. It will appear on the dashboard at `http://localhost:5173/dashboard` within a minute.
+
+> **The config page now closes itself.** After you save, the page
+> (served by `ESP32-CAM/host.cpp`'s `sendConfigForm`) posts a
+> `hivehive-config-saved` message back to the setup wizard
+> (`window.opener.postMessage`) and calls `window.close()` after a
+> short delay. The wizard
+> (`homepage/src/components/setup/useSetupWizard.ts`) listens for that
+> message and auto-advances to the verification step, so you land back
+> in the wizard without clicking through — no manual navigation. If
+> your browser blocks `window.close()` or `postMessage` (some in-app
+> and privacy-hardened browsers do), the page stays open with a "this
+> page will close and take you back to setup — if it doesn't, switch
+> back to the HiveHive tab" banner; switch tabs manually and use the
+> de-emphasized **"I've finished configuring"** fallback link on
+> wizard Step 4 (`Step4Configure.tsx`) to advance.
 
 ---
 

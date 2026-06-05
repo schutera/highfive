@@ -97,6 +97,16 @@ export function useSetupWizard() {
   // Listen for the post-save signal from the ESP popup
   // (ESP firmware's /save handler calls window.opener.postMessage(...))
   // and auto-advance to Step 5 so the user doesn't have to navigate manually.
+  //
+  // SECURITY: there is intentionally no e.origin / e.source check here. The
+  // ESP serves the popup from http://192.168.4.1 and posts with
+  // targetOrigin '*', so a strict origin filter would break the real flow.
+  // This is safe ONLY because the handler reads NO data off the message — it
+  // matches a fixed literal and advances a wizard step, nothing more. The
+  // worst a hostile frame can do is nudge the wizard to step 5. Do NOT start
+  // reading attacker-controllable payload (an SSID, a token, a URL) off this
+  // message without first adding an origin/source check (e.g. retain the
+  // window.open() handle from Step4Configure and assert e.source === it).
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.data === 'hivehive-config-saved') {

@@ -65,7 +65,7 @@ Producers fan in to one table; consumers read bucketed aggregates.
 
 ## 1. Producer side — heartbeat dual-write
 
-The first real producer is the ESP heartbeat. ``routes/heartbeats.py``'s
+The first real producer is the ESP heartbeat. `routes/heartbeats.py`'s
 `post_heartbeat`:
 
 1. Validates the inbound payload (mac canonicalisation, battery /
@@ -120,9 +120,9 @@ or batched:
 
 `backend/src/app.ts`'s `POST /api/modules/:id/measurements`:
 
-1. Requires both `X-API-Key` (the standard middleware) AND
-   `X-Admin-Key` matching `HIGHFIVE_API_KEY` (mirrors `/logs` and
-   `/name`).
+1. Gated by `requireAdmin` (#142 / ADR-019): a valid `hf_admin_session`
+   cookie OR `X-Admin-Key` matching `HIGHFIVE_API_KEY` (mirrors `/logs`
+   and `/name`). 401 otherwise.
 2. Forces the path's `module_mac` onto each item before forwarding —
    the URL is the authority. A typo in the body cannot smuggle a
    sample onto a different module.
@@ -184,7 +184,7 @@ proxies `GET /modules/:id/measurements` on duckdb-service:
    incident.
 4. Dense-fills the response: every interval step in the window emits
    one bucket. Empty buckets carry `value: null` and `sample_count:
-   0`, NOT `value: 0` — a missing sensor reading is unknown, not
+0`, NOT `value: 0` — a missing sensor reading is unknown, not
    zero. `MeasurementBucket` in `@highfive/contracts` pins the
    `number | null` shape.
 

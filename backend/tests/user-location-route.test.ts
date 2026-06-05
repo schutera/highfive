@@ -27,10 +27,14 @@ beforeEach(() => {
 });
 
 describe('GET /api/user-location', () => {
-  it('requires an API key', async () => {
-    const res = await request(app).get('/api/user-location');
-    expect(res.status).toBe(401);
-    expect(vi.mocked(lookupUserLocation)).not.toHaveBeenCalled();
+  it('is public — no credential required (#142)', async () => {
+    vi.mocked(lookupUserLocation).mockResolvedValue({
+      source: 'miss',
+      data: { lat: 52.52, lng: 13.405 },
+    });
+    const res = await request(app).get('/api/user-location').set('X-Forwarded-For', '8.8.8.8');
+    expect(res.status).toBe(200);
+    expect(vi.mocked(lookupUserLocation)).toHaveBeenCalled();
   });
 
   it('returns 200 with the lookup payload on success', async () => {

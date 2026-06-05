@@ -1,8 +1,19 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { tryParseModuleId } from '@highfive/contracts';
 import { db } from './database';
-import { apiKeyAuth, verifyApiKey } from './auth';
+import { verifyApiKey } from './auth';
+import {
+  SESSION_COOKIE,
+  issueSessionToken,
+  verifySessionToken,
+  sessionCookieOptions,
+  requireAdmin,
+  isRateLimited,
+  recordFailedAttempt,
+  resetAttempts,
+} from './session';
 import { DUCKDB_URL } from './duckdbClient';
 import { isProduction } from './env';
 import { lookupUserLocation } from './userLocation';
@@ -27,8 +38,14 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 // read response headers that are explicitly listed here. Without
 // `X-Highfive-Data-Incomplete` exposed, the dashboard's
 // "heartbeat data unavailable" banner (#31) never fires.
+// `origin` cannot be the wildcard `*` once `credentials: true` is set — the
+// browser rejects a credentialed response whose Access-Control-Allow-Origin
+// is `*`. In dev we therefore reflect the request origin (`true`) instead of
+// `*` so the session cookie can flow on `credentials: 'include'` fetches from
+// the homepage dev server (localhost:5173 / CI :6173). Prod stays pinned to
+// the one allowed origin. See ADR-019 and docs/08-.../auth.md.
 const corsOptions = {
-  origin: isProduction() ? 'https://highfive.schutera.com' : '*',
+  origin: isProduction() ? 'https://highfive.schutera.com' : true,
   credentials: true,
   optionsSuccessStatus: 200,
   exposedHeaders: ['X-Highfive-Data-Incomplete'],
@@ -36,6 +53,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(cookieParser());
 
 // Health check (public, no auth required)
 app.get('/api/health', (req, res) => {
@@ -107,10 +125,53 @@ app.post('/api/waitlist', async (req, res) => {
   }
 });
 
-// Apply API key authentication to all other /api routes
-app.use('/api', apiKeyAuth);
+// --- Admin session auth (public routes; issue #142 / ADR-019) ----------
+//
+// The homepage bundle holds no secret. An operator logs in here with the
+// `HIGHFIVE_API_KEY` value; on success the server mints a signed, HttpOnly
+// session cookie. Admin/write routes below are gated by `requireAdmin`,
+// which accepts that cookie OR an `X-Admin-Key` header (machine credential).
 
-// API Routes (protected)
+app.post('/api/admin/login', (req, res) => {
+  const ip = req.ip ?? 'unknown';
+  if (isRateLimited(ip)) {
+    res.status(429).json({ authenticated: false, error: 'Too many attempts. Try again later.' });
+    return;
+  }
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!password || !verifyApiKey(password)) {
+    recordFailedAttempt(ip);
+    res.status(401).json({ authenticated: false });
+    return;
+  }
+  resetAttempts(ip);
+  res.cookie(SESSION_COOKIE, issueSessionToken(), sessionCookieOptions());
+  res.json({ authenticated: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  // Match the mint-time attributes so the browser deletes the right cookie;
+  // clearCookie overrides the expiry to the past.
+  const { maxAge: _maxAge, ...clearOpts } = sessionCookieOptions();
+  res.clearCookie(SESSION_COOKIE, clearOpts);
+  res.json({ authenticated: false });
+});
+
+app.get('/api/admin/session', (req, res) => {
+  const cookie = (req as typeof req & { cookies?: Record<string, string> }).cookies?.[
+    SESSION_COOKIE
+  ];
+  res.json({ authenticated: verifySessionToken(cookie) });
+});
+
+// API Routes
+//
+// Read routes below are PUBLIC by design: the dashboard and map are linked
+// from the marketing site and must render for anonymous visitors. The blanket
+// X-API-Key gate that used to sit here was removed in #142 — a single-page app
+// cannot hold the secret that gate required, so it protected nothing the public
+// dashboard didn't already expose. Write/admin routes are individually gated by
+// `requireAdmin` (see ADR-019).
 
 app.get('/api/modules', async (req, res) => {
   try {
@@ -224,7 +285,7 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-app.delete('/api/images/:filename', async (req, res) => {
+app.delete('/api/images/:filename', requireAdmin, async (req, res) => {
   try {
     const response = await fetch(
       `${IMAGE_SERVICE_URL}/images/${encodeURIComponent(req.params.filename)}`,
@@ -243,7 +304,7 @@ app.delete('/api/images/:filename', async (req, res) => {
   }
 });
 
-app.delete('/api/modules/:id', async (req, res) => {
+app.delete('/api/modules/:id', requireAdmin, async (req, res) => {
   const id = tryParseModuleId(req.params.id);
   if (id === null) {
     res.status(400).json({ error: 'invalid module id format' });
@@ -262,18 +323,13 @@ app.delete('/api/modules/:id', async (req, res) => {
 });
 
 // Admin-only: set or clear the operator-settable display-name override
-// for a module. Layered on top of the existing X-API-Key middleware;
-// requires an additional X-Admin-Key matching HIGHFIVE_API_KEY (mirrors
-// the /logs gate below). Proxies to duckdb-service's PATCH endpoint
+// for a module. Gated by `requireAdmin` (session cookie OR X-Admin-Key
+// machine credential — see session.ts / ADR-019). Proxies to duckdb-service's
+// PATCH endpoint
 // which enforces the UNIQUE constraint and surfaces 409 on collision —
 // we forward both status and body so the homepage can render the
 // inline error with the conflicting MAC. See ADR-011 and issue #93.
-app.patch('/api/modules/:id/name', async (req, res) => {
-  const provided = req.header('X-Admin-Key');
-  if (!provided || !verifyApiKey(provided)) {
-    res.status(403).json({ error: 'Forbidden: admin key required' });
-    return;
-  }
+app.patch('/api/modules/:id/name', requireAdmin, async (req, res) => {
   const id = tryParseModuleId(req.params.id);
   if (id === null) {
     res.status(400).json({ error: 'invalid module id format' });
@@ -312,8 +368,8 @@ app.patch('/api/modules/:id/name', async (req, res) => {
 // shape pinned in `@highfive/contracts`. Forwards `interval` and `days`
 // verbatim; upstream owns validation so we surface 400/404 unchanged.
 //
-// No admin gate — the dashboard chart is part of the regular view, so
-// only the standard X-API-Key middleware (applied at /api above) runs.
+// No admin gate — the dashboard chart is part of the regular view, and
+// reads are public (#142). No credential required.
 app.get('/api/modules/:id/activity', async (req, res) => {
   const id = tryParseModuleId(req.params.id);
   if (id === null) {
@@ -362,9 +418,8 @@ app.get('/api/modules/:id/activity', async (req, res) => {
 
 // Bucketed per-module measurements time series (issue #110). Mirrors
 // the activity-timeseries proxy above: pre-checks `upstream.ok`, maps
-// snake_case → camelCase, and gates on the standard X-API-Key
-// middleware (this is dashboard data, not admin data — production
-// /api/modules/:id is publicly readable with the API key).
+// snake_case → camelCase. No credential required — this is dashboard
+// data and reads are public (#142).
 //
 // Pass-through query params: `metric` (required upstream),
 // `interval`, `days`. Upstream owns the actual validation; we
@@ -425,15 +480,9 @@ app.get('/api/modules/:id/measurements', async (req, res) => {
 // write at `duckdb-service/routes/heartbeats.py` writes directly to
 // the DB without going through this proxy because it's in-cluster.
 //
-// X-Admin-Key gate mirrors the `/logs` and `/name` admin routes
-// below — the standard /api X-API-Key middleware is necessary but
-// not sufficient.
-app.post('/api/modules/:id/measurements', async (req, res) => {
-  const provided = req.header('X-Admin-Key');
-  if (!provided || !verifyApiKey(provided)) {
-    res.status(403).json({ error: 'Forbidden: admin key required' });
-    return;
-  }
+// Gated by `requireAdmin` (session cookie OR X-Admin-Key machine
+// credential), like the `/logs`, `/name`, and `/weather/backfill` routes.
+app.post('/api/modules/:id/measurements', requireAdmin, async (req, res) => {
   const id = tryParseModuleId(req.params.id);
   if (id === null) {
     res.status(400).json({ error: 'invalid module id format' });
@@ -477,21 +526,15 @@ app.post('/api/modules/:id/measurements', async (req, res) => {
 });
 
 // Admin-only: trigger the one-shot historical weather backfill (issue
-// #111, ADR-017). Layered on top of the standard X-API-Key middleware
-// — needs an additional X-Admin-Key matching HIGHFIVE_API_KEY, like
-// the other /api admin endpoints in this file.
+// #111, ADR-017). Gated by `requireAdmin` (session cookie OR X-Admin-Key
+// machine credential), like the other admin endpoints in this file.
 //
 // Forwards `days` (optional integer) to the duckdb-service handler,
 // which itself owns the range validation (>= 1, <= 36500) and the
 // per-module fetch logic. Response shape is the partial-success
 // envelope `{modules_touched, rows_written, errors[]}` — see
 // `docs/api-reference.md` §1.8.
-app.post('/api/admin/weather/backfill', async (req, res) => {
-  const provided = req.header('X-Admin-Key');
-  if (!provided || !verifyApiKey(provided)) {
-    res.status(403).json({ error: 'Forbidden: admin key required' });
-    return;
-  }
+app.post('/api/admin/weather/backfill', requireAdmin, async (req, res) => {
   const params = new URLSearchParams();
   if (typeof req.query.days === 'string') params.set('days', req.query.days);
   const qs = params.toString();
@@ -508,14 +551,9 @@ app.post('/api/admin/weather/backfill', async (req, res) => {
   }
 });
 
-// Admin-only: telemetry sidecar logs. Layered on top of the existing X-API-Key
-// middleware. Requires an additional X-Admin-Key header matching HIGHFIVE_API_KEY.
-app.get('/api/modules/:id/logs', async (req, res) => {
-  const provided = req.header('X-Admin-Key');
-  if (!provided || !verifyApiKey(provided)) {
-    res.status(403).json({ error: 'Forbidden: admin key required' });
-    return;
-  }
+// Admin-only: telemetry sidecar logs. Gated by `requireAdmin` (session
+// cookie OR X-Admin-Key machine credential — see session.ts / ADR-019).
+app.get('/api/modules/:id/logs', requireAdmin, async (req, res) => {
   const id = tryParseModuleId(req.params.id);
   if (id === null) {
     res.status(400).json({ error: 'invalid module id format' });

@@ -36,7 +36,9 @@ services:
         # business route under /api/*. Without the suffix, every dashboard
         # fetch 404s.
         - VITE_API_URL=https://api.highfive.schutera.com/api
-        - VITE_API_KEY=${VITE_API_KEY:?VITE_API_KEY must be set in .env.production (see .env.production.example)}
+        # No VITE_API_KEY: the bundle holds no secret (#142 / ADR-019). Reads
+        # are public; admin actions use the server-side session cookie minted
+        # by POST /api/admin/login against HIGHFIVE_API_KEY.
     container_name: highfive-frontend
     # 127.0.0.1 bind: frontend is reachable only via host-Nginx terminator
     # on :443. The previous '80:80' direct bind plus dead '443:443' mapping

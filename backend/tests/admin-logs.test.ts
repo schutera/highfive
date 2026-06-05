@@ -24,23 +24,22 @@ afterEach(() => {
 });
 
 describe('GET /api/modules/:id/logs', () => {
-  it('returns 401 without X-API-Key', async () => {
+  it('returns 401 without any credential', async () => {
     const res = await request(app).get(`/api/modules/${VALID_ID}/logs`);
     expect(res.status).toBe(401);
   });
 
-  it('returns 403 when X-Admin-Key header is missing', async () => {
-    const res = await request(app).get(`/api/modules/${VALID_ID}/logs`).set('X-API-Key', KEY);
-    expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/admin key required/i);
+  it('returns 401 when no admin credential is supplied (#142)', async () => {
+    const res = await request(app).get(`/api/modules/${VALID_ID}/logs`);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/unauthorized/i);
   });
 
-  it('returns 403 when X-Admin-Key is wrong', async () => {
+  it('returns 401 when X-Admin-Key is wrong', async () => {
     const res = await request(app)
       .get(`/api/modules/${VALID_ID}/logs`)
-      .set('X-API-Key', KEY)
       .set('X-Admin-Key', 'not-the-key');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
   it('returns 200 with parsed JSON when both keys are correct and upstream returns 200', async () => {

@@ -22,12 +22,13 @@ import { LanguageProvider } from '../i18n/LanguageContext';
 // Per-test mutable mock — set before each render() call.
 let nextModuleDetail: ModuleDetail | null = null;
 
-// Note: `hasAdminKey` / `isAdminMode` are NOT exported from
-// `../services/api` — they're file-local helpers inside
-// `ModulePanel.tsx` itself. We don't mock them; they default to false
-// in jsdom (empty sessionStorage, no `?admin` URL param), so the
-// admin/non-admin branch the pill is in is the only branch exercised
-// here. That's the right branch — operators don't see admin mode.
+// Note: `isAdminMode` is NOT exported from `../services/api` — it's a
+// file-local helper inside `ModulePanel.tsx`. It defaults to false in jsdom
+// (no `?admin=1` URL param), so the admin-mode effect early-returns and
+// `api.checkSession()` is never called here — the only branch exercised is
+// the non-admin one operators see. `checkSession`/`login`/`logout` are still
+// added to the api mock below so a future admin-mode test can't trip over a
+// missing method (vi.mock replaces the whole module).
 // NOTE(perf/data): <ActivityWeatherChart> and <BatteryHistoryChart> are
 // currently commented out in ModulePanel.tsx (their data is fabricated),
 // so the panel no longer calls getActivity / getMeasurements /
@@ -39,6 +40,9 @@ vi.mock('../services/api', () => ({
   api: {
     getModuleById: vi.fn(() => Promise.resolve(nextModuleDetail)),
     getModuleLogs: vi.fn().mockResolvedValue([]),
+    checkSession: vi.fn().mockResolvedValue(false),
+    login: vi.fn().mockResolvedValue(true),
+    logout: vi.fn().mockResolvedValue(undefined),
     // Dead while the activity chart is shelved — see NOTE above.
     getActivity: vi.fn().mockResolvedValue({
       moduleId: 'e89fa9f23a08',

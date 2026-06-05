@@ -23,29 +23,20 @@ afterEach(() => {
 });
 
 describe('PATCH /api/modules/:id/name', () => {
-  it('returns 401 without X-API-Key', async () => {
+  it('returns 401 without any credential', async () => {
     const res = await request(app)
       .patch(`/api/modules/${VALID_ID}/name`)
       .send({ display_name: 'whatever' });
     expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/unauthorized/i);
   });
 
-  it('returns 403 when X-Admin-Key is missing', async () => {
+  it('returns 401 when X-Admin-Key is wrong', async () => {
     const res = await request(app)
       .patch(`/api/modules/${VALID_ID}/name`)
-      .set('X-API-Key', KEY)
-      .send({ display_name: 'whatever' });
-    expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/admin key required/i);
-  });
-
-  it('returns 403 when X-Admin-Key is wrong', async () => {
-    const res = await request(app)
-      .patch(`/api/modules/${VALID_ID}/name`)
-      .set('X-API-Key', KEY)
       .set('X-Admin-Key', 'not-the-key')
       .send({ display_name: 'whatever' });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
   it('returns 400 for an invalid module id shape', async () => {

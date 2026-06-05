@@ -1,4 +1,3 @@
-import { Request, Response, NextFunction } from 'express';
 import { timingSafeEqual } from 'crypto';
 import { isProduction } from './env';
 
@@ -94,46 +93,13 @@ export function verifyApiKey(provided: string): boolean {
   return constantTimeEqual(provided, API_KEY);
 }
 
-export interface AuthenticatedRequest extends Request {
-  apiKeyValid?: boolean;
-}
-
 /**
- * Middleware to validate API key
- * Accepts key via:
- * - Header: X-API-Key: <key>
- * - Header: Authorization: Bearer <key>
- * - Query param: ?api_key=<key> (not recommended for production)
- */
-export function apiKeyAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
-  const apiKey =
-    req.header('X-API-Key') ||
-    req.header('Authorization')?.replace('Bearer ', '') ||
-    (req.query.api_key as string);
-
-  if (!apiKey) {
-    res.status(401).json({
-      error: 'Unauthorized',
-      message:
-        'API key is required. Provide it via X-API-Key header or Authorization: Bearer <key>',
-    });
-    return;
-  }
-
-  if (!verifyApiKey(apiKey)) {
-    res.status(403).json({
-      error: 'Forbidden',
-      message: 'Invalid API key',
-    });
-    return;
-  }
-
-  req.apiKeyValid = true;
-  next();
-}
-
-/**
- * Get the current API key (for development/testing display)
+ * The resolved admin secret. Two callers, both server-side:
+ *   - `session.ts`'s `requireAdmin` / login compares submitted credentials
+ *     against it via `verifyApiKey`,
+ *   - `session.ts` keys the session-token HMAC on it (`getApiKey()`), so a
+ *     rotation invalidates outstanding sessions.
+ * It is never sent to the browser (issue #142 / ADR-019).
  */
 export function getApiKey(): string {
   return API_KEY;

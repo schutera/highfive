@@ -70,8 +70,8 @@ git clone -b production https://github.com/schutera/highfive.git .
 
 # 3. Set production secrets
 cp .env.production.example .env.production
-$EDITOR .env.production   # fill HIGHFIVE_API_KEY, VITE_API_KEY
-# Generate keys with: openssl rand -base64 32
+$EDITOR .env.production   # fill HIGHFIVE_API_KEY (no VITE_API_KEY — #142)
+# Generate the key with: openssl rand -base64 32
 
 # 4. Build all four services
 docker compose -f docker-compose.prod.yml --env-file .env.production build
@@ -90,10 +90,10 @@ docker compose -f docker-compose.prod.yml exec duckdb-service \
 ```
 
 If `docker compose up` fails fast with
-`HIGHFIVE_API_KEY must be set in .env.production` or
-`VITE_API_KEY must be set in .env.production`, that is by design — the
-compose interpolation rejects missing or empty secrets. Fix
-`.env.production` and re-run.
+`HIGHFIVE_API_KEY must be set in .env.production`, that is by design — the
+compose interpolation rejects a missing or empty secret. Fix
+`.env.production` and re-run. (The homepage bundle carries no secret since
+#142, so there is no `VITE_API_KEY` to set.)
 
 ## Detailed Steps
 
@@ -127,10 +127,9 @@ git status  # Should show production branch
 ```bash
 cp .env.production.example .env.production
 
-# Generate two keys (or one shared key for the single-key model in
-# ADR-003 - both fields can hold the same value)
+# Generate the admin secret (login password + session-cookie HMAC key).
+# Since #142 there is only one secret; the bundle carries none.
 openssl rand -base64 32   # → HIGHFIVE_API_KEY
-openssl rand -base64 32   # → VITE_API_KEY
 
 $EDITOR .env.production
 chmod 600 .env.production  # operator-managed, never enters git
@@ -357,16 +356,17 @@ curl -fsSI https://highfive.schutera.com/ | head -5
 Both should return 200. The frontend root serves the SPA; the API
 health check returns `{ "status": "ok", "timestamp": "..." }`.
 
-Dashboard fetch path (TLS, X-API-Key required):
+Dashboard fetch path (TLS; public read since #142 — no credential):
 
 ```bash
-curl -fsS -H "X-API-Key: $HIGHFIVE_API_KEY" \
-    https://api.highfive.schutera.com/api/modules
+curl -fsS https://api.highfive.schutera.com/api/modules
 ```
 
-This is the path the SPA actually exercises. A 401 means the host-Nginx
-TLS proxy is wired but the key is wrong; a 200 with a JSON array means
-the dashboard will load data correctly.
+This is the path the SPA actually exercises. A 200 with a JSON array means
+the host-Nginx TLS proxy is wired and the dashboard will load data correctly.
+(Admin actions instead log in via `POST /api/admin/login`; verify with
+`curl -fsS -X POST https://api.highfive.schutera.com/api/admin/login -H 'Content-Type: application/json' -d "{\"password\":\"$HIGHFIVE_API_KEY\"}" -i`
+— look for the `Set-Cookie: hf_admin_session=…` header.)
 
 ESP firmware paths (HTTP, no `-f` because /upload returns 405 for HEAD):
 

@@ -23,14 +23,14 @@ afterEach(() => {
 });
 
 describe('DELETE /api/modules/:id', () => {
-  it('returns 401 without X-API-Key', async () => {
+  it('returns 401 without X-Admin-Key', async () => {
     const res = await request(app).delete(`/api/modules/${VALID_ID}`);
     expect(res.status).toBe(401);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it('returns 400 on malformed module id and does not call upstream', async () => {
-    const res = await request(app).delete('/api/modules/not-a-mac').set('X-API-Key', KEY);
+    const res = await request(app).delete('/api/modules/not-a-mac').set('X-Admin-Key', KEY);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/invalid module id format/i);
     expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -43,7 +43,7 @@ describe('DELETE /api/modules/:id', () => {
       json: async () => ({ message: `Module ${VALID_ID} deleted` }),
     });
 
-    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(200);
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
@@ -60,7 +60,7 @@ describe('DELETE /api/modules/:id', () => {
       json: async () => payload,
     });
 
-    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual(payload);
@@ -74,7 +74,7 @@ describe('DELETE /api/modules/:id', () => {
       json: async () => payload,
     });
 
-    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual(payload);
@@ -88,7 +88,7 @@ describe('DELETE /api/modules/:id', () => {
       json: async () => payload,
     });
 
-    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(500);
     expect(res.body).toEqual(payload);
@@ -96,7 +96,7 @@ describe('DELETE /api/modules/:id', () => {
 });
 
 describe('DELETE /api/images/:filename', () => {
-  it('returns 401 without X-API-Key', async () => {
+  it('returns 401 without X-Admin-Key', async () => {
     const res = await request(app).delete('/api/images/foo.jpg');
     expect(res.status).toBe(401);
     expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -109,7 +109,7 @@ describe('DELETE /api/images/:filename', () => {
       json: async () => ({ message: 'Image deleted' }),
     });
 
-    const res = await request(app).delete('/api/images/weird name.jpg').set('X-API-Key', KEY);
+    const res = await request(app).delete('/api/images/weird name.jpg').set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(200);
     const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -126,7 +126,7 @@ describe('DELETE /api/images/:filename', () => {
       json: async () => payload,
     });
 
-    const res = await request(app).delete('/api/images/foo.jpg').set('X-API-Key', KEY);
+    const res = await request(app).delete('/api/images/foo.jpg').set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual(payload);
@@ -140,7 +140,7 @@ describe('DELETE /api/images/:filename', () => {
       json: async () => payload,
     });
 
-    const res = await request(app).delete('/api/images/foo.jpg').set('X-API-Key', KEY);
+    const res = await request(app).delete('/api/images/foo.jpg').set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual(payload);

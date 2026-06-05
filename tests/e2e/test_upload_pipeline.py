@@ -142,15 +142,19 @@ def test_backend_admin_logs_endpoint_proxies_correctly(stack, mock_esp):
     assert proxied[0]["mac"] == mock_esp.mac
 
 
-def test_backend_admin_logs_rejects_missing_admin_key(stack, mock_esp):
-    """API key alone is not enough — admin gate is a separate header."""
+def test_backend_admin_logs_rejects_missing_admin_credential(stack, mock_esp):
+    """No admin credential (cookie or X-Admin-Key) → 401 (#142 / ADR-019).
+
+    A bare X-API-Key is meaningless now: reads are public and the admin gate
+    requires either a session cookie or the X-Admin-Key machine credential.
+    """
     mock_esp.register()
 
     r = requests.get(
         f"{stack['backend']}/api/modules/{mock_esp.mac}/logs",
-        headers={"X-API-Key": TEST_API_KEY},  # no X-Admin-Key
+        headers={"X-API-Key": TEST_API_KEY},  # not an admin credential
     )
-    assert r.status_code == 403, r.text
+    assert r.status_code == 401, r.text
 
 
 # --- multi-cycle behavior -------------------------------------------------

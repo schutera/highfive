@@ -86,6 +86,35 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Production API key shipped in the public JS bundle; the `/admin` gate authenticated nothing (issue #142)
+
+**What happened.** The homepage read `VITE_API_KEY` and Vite inlined the
+**production** `HIGHFIVE_API_KEY` into the shipped `assets/api-*.js` as a string
+literal — recoverable by anyone from `https://highfive.schutera.com`. With it, an
+unauthenticated third party could read every module (incl. GPS) and image **and**
+call the admin/delete routes (deletes used the same key). Separately, the `/admin`
+`LoginGate` did `fetch('/api/health', { headers: { 'X-API-Key': password } })` and
+treated any `res.ok` as success — but `/api/health` is public, so **any string**
+logged in, and the real calls used the baked key, not the typed password. The gate
+was cosmetic.
+
+**Why it happened.** A single-page app cannot hold a secret: anything bundled
+ships to every visitor. The original design treated the frontend↔backend boundary
+as if the browser could keep `HIGHFIVE_API_KEY` private (ADR-003's "one secret,
+two headers" assumed a trusted holder). It can't. And the login gate was wired to
+the one endpoint that ignores the credential, so it never actually validated.
+
+**How to avoid it next time.** Never put a secret behind `import.meta.env.VITE_*`
+(see the new [CLAUDE.md critical rule](../../CLAUDE.md) and
+[ADR-019](../09-architecture-decisions/adr-019-admin-session-no-bundle-secret.md)).
+Privileged browser access means a real login that the **server** validates,
+yielding an `HttpOnly` cookie — the secret never crosses to the client. Gate a
+login form against an endpoint that actually checks the credential, never a public
+liveness probe. When you make reads public to remove a bundle secret, treat the
+read data as genuinely public and shape it accordingly — here, module GPS at ~11 m
+precision is now openly readable; **coordinate generalisation for unauthenticated
+callers is a tracked follow-up** ([#145](https://github.com/schutera/highfive/issues/145), filed from #142).
+
 ### Pinned `GTS Root R1` for geolocation; Google rotated `googleapis.com` to `GTS Root R4` — every module silently stuck at "Standort ausstehend"
 
 **What happened.** A field module (`ready-peach-baer`) was online and heartbeating hourly but never left the `(0,0)` map sentinel — the dashboard showed "Standort ausstehend" (location pending) indefinitely. Not one of 2000+ `duckdb-service` log lines carried a `[heartbeat] patched … lat/lng` recovery. Investigation showed the older "real" module's coordinates were a suspiciously round `48.200000, 11.770000` (manually set), i.e. Wi-Fi geolocation had effectively **never** worked. Root cause: [`ESP32-CAM/esp_init.cpp`'s `attemptGeolocation`](../../ESP32-CAM/esp_init.cpp) pins the Google root via `setCACert`, and `www.googleapis.com` had rotated its served chain from `…->WR2->GTS Root R1` (RSA) to `…->WE2->GTS Root R4` (ECC). The firmware trusted only R1, so every geolocation TLS handshake failed peer verification → negative `httpResponseCode` → `(0,0)`. The key was fine (verified HTTP 200 from the prod box); image upload + heartbeat kept working because those hit `highfive.schutera.com` (a different, ISRG-rooted endpoint).

@@ -17,6 +17,28 @@ Symptom-based guide covering the most common issues during initial hardware setu
 | duckdb-service | `http://localhost:8002/health`     | `ok`              |
 | homepage       | `http://localhost:5173`            | Dashboard loads   |
 
+### Admin login "succeeds" but every admin action still 401s (cookie not set)
+
+The admin session is an `HttpOnly` cookie set by `POST /api/admin/login`
+(#142 / ADR-019). If the cookie never sticks, the SPA looks logged-in for a
+moment but `DELETE`/`PATCH`/`/logs` calls return `401`. Three usual causes:
+
+- **`Secure` cookie over plain http.** In production the cookie is `Secure`, so
+  it is silently dropped unless the page is served over HTTPS. It is set
+  non-`Secure` only when `NODE_ENV` is a dev token (`''`/`development`/`test`,
+  see `backend/src/env.ts`). A prod-mode backend behind plain http will never
+  store the cookie — terminate TLS (host-Nginx) first.
+- **`Access-Control-Allow-Origin: *` with credentials.** Browsers refuse to send
+  or store a cookie on a credentialed cross-origin request whose ACAO is `*`.
+  The backend uses an explicit origin (prod) or reflects the request origin
+  (dev); if you customise CORS, never pair `*` with `credentials: true`.
+- **Missing `credentials: 'include'`.** The homepage client sets this on every
+  request; a hand-rolled `fetch`/`curl` must opt in (`curl -c jar -b jar …`) or
+  the cookie is neither stored nor replayed.
+
+For scripts/CI, skip the cookie entirely and send the machine credential:
+`-H "X-Admin-Key: $HIGHFIVE_API_KEY"`.
+
 ### A service fails to start or exits immediately
 
 ```bash

@@ -29,8 +29,9 @@ async function bootstrap() {
     // so `"Production"` or `"production "` don't accidentally re-enable
     // the print on prod (PR #84 senior-review finding).
     if (!isProduction()) {
-      console.log(`🔑 Dev API Key: ${getApiKey()}`);
-      console.log(`   Use header: X-API-Key: ${getApiKey()}`);
+      console.log(`🔑 Dev admin key: ${getApiKey()}`);
+      console.log(`   Admin login: POST /api/admin/login {"password":"<key>"}`);
+      console.log(`   Or machine credential: X-Admin-Key: ${getApiKey()}`);
     }
   });
 }

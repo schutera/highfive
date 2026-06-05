@@ -31,20 +31,33 @@ service and shapes the response for the frontend.
 
 ## 1.0 Authentication
 
-All `/api/*` routes — except `GET /api/health` — require an API key.
-Three transports are accepted (see `backend/src/auth.ts`):
+Reshaped by [#142](https://github.com/schutera/highfive/issues/142) /
+[ADR-019](09-architecture-decisions/adr-019-admin-session-no-bundle-secret.md).
+The homepage bundle carries **no** secret.
 
-- Header: `X-API-Key: <key>`
-- Header: `Authorization: Bearer <key>`
-- Query: `?api_key=<key>` (not recommended, dev only)
+**Reads are public.** `GET /api/health`, `GET /api/modules`,
+`GET /api/modules/:id`, `GET /api/images` (+ `GET /api/images/:filename`),
+`GET /api/modules/:id/activity`, `.../measurements`, and
+`GET /api/user-location` require no credential.
 
-The dev default key is `hf_dev_key_2026`. Override via the
-`HIGHFIVE_API_KEY` env var in production. The frontend reads its key
-from the build-time `VITE_API_KEY`.
+**Admin / write actions require a session** (`backend/src/session.ts`):
 
-`GET /api/modules/:id/logs` requires an **additional** `X-Admin-Key`
-header that must also match `HIGHFIVE_API_KEY`. The same key is reused
-on purpose so there is no second secret to rotate.
+1. `POST /api/admin/login` with `{ "password": "<HIGHFIVE_API_KEY>" }` sets an
+   `HttpOnly` `hf_admin_session` cookie (rate-limited; constant-time check).
+   The browser sends it automatically (`credentials: 'include'`).
+2. **Or** send header `X-Admin-Key: <HIGHFIVE_API_KEY>` — the server-side
+   machine credential for scripts / CI, never shipped to the browser.
+
+`requireAdmin` gates `DELETE /api/modules/:id`,
+`DELETE /api/images/:filename`, `PATCH /api/modules/:id/name`,
+`POST /api/modules/:id/measurements`, `POST /api/admin/weather/backfill`, and
+`GET /api/modules/:id/logs`; it returns `401` when neither credential is
+valid. Companion routes: `POST /api/admin/logout` (clears the cookie) and
+`GET /api/admin/session` → `{ "authenticated": boolean }`.
+
+The dev default key is `hf_dev_key_2026`; override via `HIGHFIVE_API_KEY` in
+production. (The legacy `X-API-Key` / `Authorization: Bearer` / `?api_key=`
+transports and the blanket read gate were removed in #142.)
 
 ## 1.1 Health
 
@@ -65,10 +78,9 @@ Public, no auth. Liveness probe.
 
 ```
 GET /api/modules
-Headers: X-API-Key: <key>
 ```
 
-Returns an array of `Module` objects shaped for the dashboard:
+Public — no auth (#142). Returns an array of `Module` objects shaped for the dashboard:
 
 ```json
 [
@@ -136,10 +148,9 @@ transient duckdb outage cannot pin partial state past recovery.
 
 ```
 GET /api/modules/:id
-Headers: X-API-Key: <key>
 ```
 
-Same shape as above, plus a `nests` array of `NestData`. Each nest
+Public — no auth (#142). Same shape as above, plus a `nests` array of `NestData`. Each nest
 carries `dailyProgress[]` with `progress_id`, `nest_id`, `date`,
 `empty`, `sealed`, `hatched`. 404 if the module is unknown.
 
@@ -147,9 +158,7 @@ carries `dailyProgress[]` with `progress_id`, `nest_id`, `date`,
 
 ```
 PATCH /api/modules/:id/name
-Headers:
-  X-API-Key:   <key>
-  X-Admin-Key: <key>   # must match HIGHFIVE_API_KEY
+Headers: Cookie: hf_admin_session=…   # or  X-Admin-Key: <HIGHFIVE_API_KEY>
 Body: { "display_name": "Garden Bee" }   # or null to clear
 ```
 
@@ -167,7 +176,7 @@ Status codes:
   newly-stored value (or `null` if cleared).
 - **400** — body missing the `display_name` key, or value is not a string
   or `null`, or exceeds 100 chars.
-- **403** — `X-Admin-Key` missing or wrong.
+- **401** — no valid admin session cookie or `X-Admin-Key`.
 - **404** — module id is well-formed but not registered.
 - **409** — another module already holds this `display_name`. Body:
   `{ error, display_name, conflicting_module_id }`. The homepage's
@@ -182,14 +191,13 @@ override), matching the modal's "leave empty to clear" UX.
 
 ```
 GET /api/modules/:id/logs?limit=10
-Headers:
-  X-API-Key:   <key>
-  X-Admin-Key: <key>   # must match HIGHFIVE_API_KEY
+Headers: Cookie: hf_admin_session=…   # or  X-Admin-Key: <HIGHFIVE_API_KEY>
 ```
 
 Proxies `image-service /modules/<mac>/logs` and returns telemetry
-sidecar entries newest-first. Returns `403` if `X-Admin-Key` is missing
-or wrong, `502` if the image-service is unreachable.
+sidecar entries newest-first. Returns `401` if no valid admin session
+cookie or `X-Admin-Key` is supplied, `502` if the image-service is
+unreachable.
 
 ```json
 [
@@ -237,8 +245,9 @@ end-to-end admin flow.
 
 ```
 GET /api/user-location
-Headers: X-API-Key: <key>
 ```
+
+Public — no auth (#142).
 
 Returns a coarse, IP-based location guess used by the dashboard to
 centre the map near the visitor on first load (issue #14). Accuracy is
@@ -285,8 +294,9 @@ Why a backend proxy rather than reusing `GEO_API_KEY` directly:
 
 ```
 GET /api/modules/:id/activity?interval=hourly&days=7
-Headers: X-API-Key: <key>
 ```
+
+Public — no auth (#142).
 
 Bucketed image-upload counts for a single module, used by the dashboard
 `ActivityWeatherChart` to overlay activity against Open-Meteo weather
@@ -337,8 +347,8 @@ Error responses bubble verbatim from duckdb-service:
 ```
 GET  /api/modules/:id/measurements?metric=battery_pct&interval=hourly&days=7
 POST /api/modules/:id/measurements
-Headers: X-API-Key: <key>            (both)
-         X-Admin-Key: <key>          (POST only)
+Headers: (GET) none — public read (#142)
+         (POST) Cookie: hf_admin_session=…  or  X-Admin-Key: <HIGHFIVE_API_KEY>
 ```
 
 Per-module bucketed time-series read against the canonical
@@ -419,7 +429,7 @@ Errors:
 
 - `400` — invalid body, batch > 1000 rows, missing/oversized field,
   non-finite `value`, malformed `ts`.
-- `403` — `X-Admin-Key` missing or wrong.
+- `401` — no valid admin session cookie or `X-Admin-Key`.
 - `502` — duckdb-service unreachable.
 
 Intended producers: weather worker (#111), classifier (#112).
@@ -432,9 +442,7 @@ for the rationale.
 
 ```
 POST /api/admin/weather/backfill?days=N
-Headers:
-  X-API-Key:   <key>
-  X-Admin-Key: <key>   # must match HIGHFIVE_API_KEY
+Headers: Cookie: hf_admin_session=…   # or  X-Admin-Key: <HIGHFIVE_API_KEY>
 ```
 
 Trigger a one-shot historical weather backfill for every module with
@@ -490,7 +498,7 @@ Status codes:
   Also **200** for the "backfill already in progress" sentinel — the
   request was accepted but no work was done.
 - **400** — `days` query param is non-integer or out of range.
-- **403** — `X-Admin-Key` missing or wrong.
+- **401** — no valid admin session cookie or `X-Admin-Key`.
 - **502** — duckdb-service unreachable.
 
 The endpoint runs synchronously and may take seconds to minutes

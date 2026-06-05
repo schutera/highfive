@@ -24,6 +24,7 @@ vi.mock('../services/api', async () => {
   return {
     api: {
       renameModule: vi.fn(),
+      login: vi.fn(),
     },
     RenameConflictError,
   };
@@ -40,12 +41,9 @@ const mockModule = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Default: admin key present so the input form renders directly.
-  // Individual tests can clear sessionStorage to exercise the
-  // AdminKeyForm prompt branch.
-  if (typeof window !== 'undefined') {
-    sessionStorage.setItem('hf_admin_key', 'hf_dev_key_2026');
-  }
+  // The modal renders the rename input directly (needsKey starts false,
+  // assuming the operator already holds a session cookie — #142 / ADR-019).
+  // The 401 test below drives the api into the AdminKeyForm login branch.
 });
 
 describe('RenameModuleModal', () => {
@@ -130,22 +128,20 @@ describe('RenameModuleModal', () => {
 
   // --- 401: AdminKeyForm appears, retry succeeds ------------------------
 
-  it('shows the admin-key form on 401 and retries after the key is submitted', async () => {
-    // Retry flow at the *modal* layer: the modal opens with a stored
-    // key, the user types a name and clicks Save, the api call
-    // rejects with `Error('unauthorized')`, the modal flips to
-    // AdminKeyForm, the user submits a fresh key, and the modal
+  it('shows the admin-key form on 401 and retries after login succeeds', async () => {
+    // Retry flow at the *modal* layer: the user types a name and clicks
+    // Save, `api.renameModule` rejects with `Error('unauthorized')` (no
+    // session cookie), the modal flips to AdminKeyForm, the user submits a
+    // key, `api.login` succeeds (the server sets the cookie), and the modal
     // auto-retries `performRename` with the unchanged draft.
     //
-    // The key-clearing side-effect on 401 lives in `api.renameModule`,
-    // not in this modal — see `homepage/src/services/api.ts`. That
-    // invariant is pinned by a separate api-layer test (added in PR I
-    // round 2) so the boundary between "api layer clears the key" and
-    // "modal reacts to the cleared key" stays grep-able. Mocking the
-    // api here means we exercise the modal half only.
+    // Auth state lives entirely server-side now (#142 / ADR-019): the modal
+    // never touches sessionStorage. We mock both api methods and assert the
+    // login-then-retry sequence.
     (api.renameModule as ReturnType<typeof vi.fn>)
       .mockRejectedValueOnce(new Error('unauthorized'))
       .mockResolvedValueOnce(undefined);
+    (api.login as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
 
     const onSaved = vi.fn();
     const onClose = vi.fn();
@@ -160,27 +156,21 @@ describe('RenameModuleModal', () => {
     await userEvent.type(screen.getByLabelText(/display name/i), 'Garden Bee');
     await userEvent.click(screen.getByRole('button', { name: /save/i }));
 
-    // Modal flips to the AdminKeyForm branch on the message-string
-    // match. (No assertion on sessionStorage state here — that's the
-    // api layer's responsibility, not the modal's.)
+    // Modal flips to the AdminKeyForm branch on the message-string match.
     const keyInput = await screen.findByPlaceholderText(/enter admin key/i);
     await userEvent.type(keyInput, 'hf_dev_key_2026');
     await userEvent.click(screen.getByRole('button', { name: /unlock/i }));
 
-    // submitAdminKey wrote the typed key to sessionStorage (modal-
-    // owned side effect), then triggered an auto-retry that called
-    // api.renameModule a second time with the unchanged draft. The
-    // three assertions pin both invariants: a refactor that moved
-    // key storage *out* of the modal would break the sessionStorage
-    // check, and a refactor that dropped the auto-retry trigger would
-    // break the call-count + nth-arg checks.
+    // submitAdminKey logged in (api.login), then auto-retried performRename
+    // with the unchanged draft. A refactor that dropped the login call or the
+    // auto-retry would break these assertions.
     await waitFor(() => {
       expect(onSaved).toHaveBeenCalledWith('Garden Bee');
       expect(onClose).toHaveBeenCalled();
     });
+    expect(api.login).toHaveBeenCalledWith('hf_dev_key_2026');
     expect(api.renameModule).toHaveBeenCalledTimes(2);
     expect(api.renameModule).toHaveBeenNthCalledWith(2, mockModule.id, 'Garden Bee');
-    expect(sessionStorage.getItem('hf_admin_key')).toBe('hf_dev_key_2026');
   });
 
   // --- Escape closes the modal -----------------------------------------

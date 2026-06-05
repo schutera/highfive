@@ -19,6 +19,7 @@
 #include "form_query.h"
 
 using hf::getParam;
+using hf::htmlEscape;
 using hf::isValidPortString;
 using hf::joinUrlFromForm;
 using hf::resolveKeepCurrentField;
@@ -471,6 +472,47 @@ static void test_port_invalid_leading_zero(void) {
     TEST_ASSERT_FALSE(isValidPortString("0443"));
 }
 
+// --- htmlEscape ------------------------------------------------------------
+//
+// The captive portal echoes the operator-entered SSID back into the form's
+// `value="..."`. That echo is reflected and the saved page now runs a
+// <script> + holds a window.opener handle to the wizard tab, so an
+// unescaped SSID is a reflected-XSS / reverse-tabnabbing vector. These
+// tests pin that the five attribute-breaking characters are escaped.
+
+static void test_htmlescape_plain_passthrough(void) {
+    TEST_ASSERT_EQUAL_STRING("MyHomeNet", htmlEscape("MyHomeNet").c_str());
+}
+
+static void test_htmlescape_empty(void) {
+    TEST_ASSERT_EQUAL_STRING("", htmlEscape("").c_str());
+}
+
+static void test_htmlescape_all_five_specials(void) {
+    // & must be first in the output for each, and all five escape.
+    TEST_ASSERT_EQUAL_STRING("&amp;&lt;&gt;&quot;&#39;",
+                             htmlEscape("&<>\"'").c_str());
+}
+
+static void test_htmlescape_literal_ampersand(void) {
+    // A literal ampersand in an SSID (e.g. "Bob & Alice") escapes once.
+    TEST_ASSERT_EQUAL_STRING("Bob &amp; Alice", htmlEscape("Bob & Alice").c_str());
+}
+
+static void test_htmlescape_neutralizes_attribute_breakout_xss(void) {
+    // The exact reverse-tabnabbing payload the senior review called out:
+    // an SSID that closes the value attribute and injects a script. After
+    // escaping, no raw '"' or '<' survives, so it cannot break out of the
+    // value="..." attribute or open a tag.
+    const std::string out =
+        htmlEscape("\"></script><script>window.opener.location='http://x'</script>");
+    TEST_ASSERT_EQUAL_STRING(
+        "&quot;&gt;&lt;/script&gt;&lt;script&gt;window.opener.location=&#39;http://x&#39;&lt;/script&gt;",
+        out.c_str());
+    TEST_ASSERT_TRUE(out.find('<') == std::string::npos);
+    TEST_ASSERT_TRUE(out.find('"') == std::string::npos);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -542,6 +584,12 @@ int main(int, char**) {
     RUN_TEST(test_port_invalid_whitespace);
     RUN_TEST(test_port_invalid_overflow_during_accumulation);
     RUN_TEST(test_port_invalid_leading_zero);
+
+    RUN_TEST(test_htmlescape_plain_passthrough);
+    RUN_TEST(test_htmlescape_empty);
+    RUN_TEST(test_htmlescape_all_five_specials);
+    RUN_TEST(test_htmlescape_literal_ampersand);
+    RUN_TEST(test_htmlescape_neutralizes_attribute_breakout_xss);
 
     return UNITY_END();
 }

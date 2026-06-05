@@ -60,6 +60,16 @@ String resolveKeepCurrentField(const String& submitted, const String& current) {
   );
 }
 
+// HTML-attribute-escape an operator-controlled value before echoing it
+// into the config form. The only reflected operator input on this page is
+// the saved SSID (`cfg_ssid`); the password is never echoed and the
+// session token is server-generated hex. See `hf::htmlEscape` for why
+// this matters now that the saved page runs a script and holds a
+// window.opener handle to the wizard tab.
+String htmlEscape(const String& src) {
+  return String(hf::htmlEscape(std::string(src.c_str())).c_str());
+}
+
 /*
   -------------------------------------
   -- LOAD EXISTING CONFIG TO PREFILL --
@@ -173,51 +183,79 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
   client.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
   client.println("<title>ESP32 Configuration</title>");
 
+  // Honey/bee visual language mirrored from the homepage design tokens
+  // (homepage/src/style.css — the sRGB-fallback hex values, chosen for
+  // broad in-app-browser compatibility on phones). Keeps the captive
+  // portal visually consistent with the setup wizard the operator just
+  // came from. Class names are unchanged so the form HTML + validator
+  // below keep working.
   client.println(
   "<style>"
   ":root{"
-  "  --primary:#2563eb;"
-  "  --primary-dark:#1e40af;"
-  "  --bg:#f3f6fb;"
-  "  --card:#ffffff;"
-  "  --text:#1f2937;"
-  "  --muted:#6b7280;"
-  "  --border:#e5e7eb;"
-  "  --error:#dc2626;"
+  "  --primary:#ed8936;"      // hf-honey-500
+  "  --primary-dark:#dd6b20;" // hf-honey-600
+  "  --bg:#fdfcf9;"           // hf-paper
+  "  --card:#ffffff;"         // hf-surface
+  "  --text:#1f1d18;"         // hf-ink
+  "  --soft:#54514a;"         // hf-ink-soft
+  "  --muted:#84807a;"        // hf-ink-mute
+  "  --border:#e8e4dd;"       // hf-line
+  "  --honey-100:#fff3d6;"
+  "  --error:#e11d48;"        // hf-danger
   "}"
 
   "*{box-sizing:border-box;}"
-  "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}"
-  ".container{max-width:760px;margin:40px auto;padding:0 20px;}"
-  ".card{background:var(--card);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);padding:32px;}"
-  "h1{text-align:center;margin-top:0;font-size:26px;}"
+  "body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','Inter','Roboto','Helvetica Neue',Arial,sans-serif;-webkit-font-smoothing:antialiased;background:var(--bg);color:var(--text);line-height:1.55;}"
+  ".container{max-width:460px;margin:0 auto;padding:32px 20px;min-height:100dvh;display:flex;flex-direction:column;justify-content:center;}"
+  ".card{background:var(--card);border-radius:20px;box-shadow:0 2px 6px rgba(0,0,0,0.05),0 8px 24px rgba(0,0,0,0.08);padding:28px;}"
 
-  ".section{margin-top:28px;padding-top:18px;border-top:1px solid var(--border);}"
-  ".section h2,.summary-as-h2{margin:0 0 10px 0;font-size:18px;font-weight:600;cursor:pointer;}"
-  ".section-desc{font-size:13px;color:var(--muted);margin-bottom:16px;}"
+  ".brand{display:flex;justify-content:center;margin-bottom:14px;}"
+  ".brand-badge{width:64px;height:64px;border-radius:999px;background:var(--honey-100);display:flex;align-items:center;justify-content:center;font-size:32px;}"
+  "h1{text-align:center;margin:0 0 6px;font-size:22px;font-weight:700;letter-spacing:-0.02em;}"
+  ".lede{text-align:center;color:var(--soft);font-size:14px;margin:0 0 22px;}"
+
+  ".section{margin-top:4px;}"
+  ".section-desc{font-size:13px;color:var(--muted);margin-bottom:18px;}"
 
   ".field{margin-bottom:18px;}"
   "label{display:block;font-weight:600;font-size:14px;margin-bottom:6px;}"
 
-  "input,select{"
-  "  width:100%;padding:10px 12px;border-radius:8px;"
-  "  border:1px solid var(--border);font-size:14px;background:#fafafa;"
-  "}"
-
-  "input:focus,select:focus{outline:none;border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,0.15);}"
-
-  ".row{display:flex;gap:14px;}"
-  ".row .field{flex:1;}"
+  "input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--border);font-size:16px;background:#fcfbf9;color:var(--text);}"
+  "input:focus{outline:none;border-color:var(--primary);background:#fff;box-shadow:0 0 0 4px rgba(237,137,54,0.22);}"
 
   ".description{font-size:12px;color:var(--muted);margin-top:6px;}"
 
   ".error-field{border-color:var(--error) !important;background:#fff5f5 !important;}"
   ".error-message{color:var(--error);font-size:13px;margin-top:12px;text-align:center;display:none;}"
 
-  "button{margin-top:20px;width:100%;padding:12px;border:none;border-radius:999px;font-size:15px;font-weight:600;background:var(--primary);color:#fff;cursor:pointer;transition:0.2s;}"
+  "button{margin-top:8px;width:100%;padding:13px;border:none;border-radius:999px;font-size:15px;font-weight:600;background:var(--primary);color:#fff;cursor:pointer;transition:background .2s;}"
   "button:hover{background:var(--primary-dark);}"
 
-  ".message{background:#e6f4ea;color:#14532d;padding:12px;border-radius:8px;margin-bottom:16px;font-size:14px;}"
+  ".message{background:#eaf7ee;color:#14532d;border:1px solid #bfe6cc;padding:14px;border-radius:12px;margin-bottom:18px;font-size:14px;text-align:center;}"
+  ".message strong{display:block;margin-bottom:2px;}"
+
+  // Dark mode: honour the device's prefers-color-scheme so the portal
+  // matches the rest of the app (which also flips on this query). The
+  // portal is a separate origin and can't read the homepage's manual theme
+  // toggle, so the OS preference is the only signal — and it's the
+  // homepage's primary trigger too. OKLCH values are copied verbatim from
+  // the homepage dark tokens (homepage/src/style.css); the honey accents
+  // (badge bg, button) intentionally stay as-is, mirroring how the homepage
+  // keeps brand colours constant across themes. A browser without OKLCH
+  // support keeps the light :root hex above — acceptable degradation.
+  "@media (prefers-color-scheme: dark){"
+  "  :root{"
+  "    --bg:oklch(18% 0.015 60);"
+  "    --card:oklch(22% 0.015 60);"
+  "    --text:oklch(96% 0.01 80);"
+  "    --soft:oklch(80% 0.01 80);"
+  "    --muted:oklch(65% 0.01 80);"
+  "    --border:oklch(32% 0.015 60);"
+  "  }"
+  "  input{background:oklch(25% 0.015 60);}"
+  "  input:focus{background:oklch(27% 0.015 60);}"
+  "  .message{background:oklch(32% 0.05 150);color:oklch(90% 0.08 150);border-color:oklch(45% 0.08 150);}"
+  "}"
   "</style>"
   );
 
@@ -258,11 +296,34 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 
   client.println("</head><body>");
   client.println("<div class=\"container\"><div class=\"card\">");
-  client.println("<h1>Connect your module to WiFi</h1>");
-
+  // Bee badge + lede mirror the setup wizard's branded step cards so the
+  // operator sees one continuous visual language. Bee glyph as an HTML
+  // entity (&#128029;) keeps this source file pure-ASCII.
+  client.println("<div class=\"brand\"><div class=\"brand-badge\" aria-hidden=\"true\">&#128029;</div></div>");
+  // Saved render is a clean confirmation that early-returns below — the
+  // WiFi form is NOT re-shown. Re-rendering an editable form with a "Save"
+  // button under a "Saved!" banner reads as "did it actually save?".
   if (saved) {
-    client.println("<div class=\"message\"><strong>Configuration saved successfully.</strong> Your module is connecting to your WiFi now.</div>");
+    client.println("<h1>You&rsquo;re all set</h1>");
+    client.println("<div class=\"message\"><strong>Saved &mdash; your module is connecting.</strong> This page will close and take you back to setup. If it doesn't, switch back to the HiveHive tab.</div>");
+    // Auto-return to the setup wizard. The wizard (the window that opened
+    // this page via window.open) listens for exactly this message string
+    // in homepage/src/components/setup/useSetupWizard.ts and advances to
+    // the verification step. targetOrigin '*' because the wizard origin
+    // varies (production vs LAN dev) and the payload is a non-secret
+    // literal. window.close() only works for script-opened windows; the
+    // banner copy above covers browsers that block it.
+    client.println("<script>");
+    client.println("try{if(window.opener){window.opener.postMessage('hivehive-config-saved','*');}}catch(e){}");
+    client.println("setTimeout(function(){try{window.close();}catch(e){}},1800);");
+    client.println("</script>");
+    client.println("</div></div></body></html>");
+    client.println();
+    return;
   }
+
+  client.println("<h1>Connect your module to WiFi</h1>");
+  client.println("<p class=\"lede\">Enter your home WiFi and your module takes care of the rest.</p>");
 
   client.println("<form action=\"/save\" method=\"POST\" autocomplete=\"off\" onsubmit=\"validateForm(event)\">");
   client.println("<input type=\"hidden\" name=\"session\" value=\"" + sessionToken + "\">");
@@ -273,7 +334,7 @@ void sendConfigForm(WiFiClient &client, bool saved = false) {
 
   client.println("<div class=\"field\">");
   client.println("<label>WiFi SSID</label>");
-  client.println("<input type=\"text\" name=\"ssid\" value=\"" + cfg_ssid + "\">");
+  client.println("<input type=\"text\" name=\"ssid\" value=\"" + htmlEscape(cfg_ssid) + "\">");
   client.println("<div class=\"description\">Your WiFi must be 2.4 GHz — the module cannot use 5 GHz networks.</div>");
   client.println("</div>");
 

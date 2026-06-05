@@ -400,8 +400,11 @@ const translations = {
     // ---- Step 4: Configure ----
     step4: {
       title: 'Configure Your Module',
-      text: 'Open the module\u2019s configuration page. It asks for only your WiFi name and password \u2014 everything else is set up automatically.',
+      text: 'Open the module\u2019s configuration page. It asks for only your WiFi name and password \u2014 everything else is set up automatically. After you save, the page closes itself and brings you back here automatically.',
       openConfigPage: 'Open Configuration Page',
+      waitingForSave:
+        'Waiting for you to save the configuration\u2026 this page will continue automatically.',
+      manualFallbackHint: 'Page didn\u2019t close on its own?',
       configDoneBtn: 'I\u2019ve saved the configuration',
       reconnectTitle: 'Configuration Saved!',
       reconnectText:
@@ -850,8 +853,11 @@ const translations = {
     // ---- Step 4: Configure ----
     step4: {
       title: 'Modul konfigurieren',
-      text: '\u00D6ffne die Konfigurationsseite des Moduls. Sie fragt nur nach deinem WLAN-Namen und Passwort \u2014 alles andere wird automatisch eingerichtet.',
+      text: '\u00D6ffne die Konfigurationsseite des Moduls. Sie fragt nur nach deinem WLAN-Namen und Passwort \u2014 alles andere wird automatisch eingerichtet. Nach dem Speichern schlie\u00DFt sich die Seite von selbst und bringt dich automatisch hierher zur\u00FCck.',
       openConfigPage: 'Konfigurationsseite \u00F6ffnen',
+      waitingForSave:
+        'Warte darauf, dass du die Konfiguration speicherst\u2026 diese Seite geht automatisch weiter.',
+      manualFallbackHint: 'Seite hat sich nicht von selbst geschlossen?',
       configDoneBtn: 'Ich habe die Konfiguration gespeichert',
       reconnectTitle: 'Konfiguration gespeichert!',
       reconnectText:

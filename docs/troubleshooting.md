@@ -217,6 +217,23 @@ The access point name in the firmware is `ESP32-Access-Point` with password `esp
 
 **Fix:** use **Chrome or Firefox**. Open a fresh tab to `http://192.168.4.1` — do not use a cached page.
 
+### Config page didn't close itself / wizard didn't advance after saving
+
+**Symptom:** you saved Wi-Fi credentials and saw the "Saved — your
+module is connecting" banner, but the config tab stayed open and the
+setup wizard did not move to the verification step on its own.
+
+**Cause:** on save, the config page posts a `hivehive-config-saved`
+message back to the wizard and calls `window.close()` so the operator
+is returned to the wizard automatically. Some in-app and
+privacy-hardened browsers block `window.close()` and/or
+`postMessage` from a script-opened window, so neither signal lands.
+
+**Fix:** switch back to the HiveHive tab manually, then click the
+de-emphasized **"I've finished configuring"** fallback link on wizard
+**Step 4** to advance to verification. The save already succeeded — the
+module is connecting regardless of whether the page auto-closed.
+
 ### Board crashes and reboots every ~44 seconds in AP mode (firmware before fix)
 
 **Symptoms:**
@@ -336,6 +353,45 @@ curl http://localhost:8002/modules
 ```
 
 Your module should appear with its MAC-derived ID, name, and battery level. The dashboard-derived `Module.status` (`'online' | 'offline' | 'unknown'`) only exists on the **backend's** `/api/modules` response — duckdb-service's direct `/modules` response does not carry a `status` field after [#69](https://github.com/schutera/highfive/issues/69); status is computed from `lastSeenAt` in `backend/src/database.ts`'s `fetchAndAssemble`.
+
+### Module is registered but never shows up on the dashboard **map**
+
+**Symptom.** `curl http://localhost:8002/modules` lists the module (so
+it joined Wi-Fi and registered fine), but it never appears on the
+dashboard map — the marker is simply absent.
+
+**Cause.** The firmware was built **without a `GEO_API_KEY`**. A keyless
+binary skips the first-boot Google Geolocation lookup, so the module
+reports `(latitude=0, longitude=0, accuracy=0)`. The homepage map
+filters that `(0, 0)` Null Island sentinel client-side, so the module
+plots nowhere. Confirm by checking the module's stored coordinates:
+
+```bash
+curl http://localhost:8002/modules   # look for lat/lng both 0
+```
+
+**Fix.** Rebuild the firmware **with** the Geolocation API key set, then
+re-flash:
+
+```powershell
+# Windows / PowerShell — from repo root, key in env or ESP32-CAM\GEO_API_KEY
+"AIza<your-google-geolocation-api-key>" | Out-File -NoNewline -Encoding ascii ESP32-CAM\GEO_API_KEY
+bash ESP32-CAM/build.sh
+```
+
+`build.sh` now **errors and exits** when no key is found, so a keyless
+release binary can no longer be produced by accident — this symptom only
+occurs with a binary built before that guard, or one built deliberately
+with the `HF_ALLOW_NO_GEO_KEY=1` escape hatch (a CI compile check that
+should never be flashed). See
+[07-deployment-view/esp-flashing.md → "Provide the Geolocation API key"](07-deployment-view/esp-flashing.md#provide-the-geolocation-api-key-one-time-before-first-build)
+and [08-crosscutting-concepts/auth.md → "Third-party API keys: Geolocation"](08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
+
+> A module whose **boot-time** lookup failed transiently (flaky Wi-Fi,
+> not a missing key) can self-recover: the firmware's deferred-retry
+> path attaches a fresh fix to a later heartbeat and duckdb-service
+> patches the `(0, 0)` row (issue #89). That path needs a key baked in —
+> it does nothing for a keyless build.
 
 ---
 

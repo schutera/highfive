@@ -133,4 +133,19 @@ std::string rewriteLegacyHighfiveUrl(const std::string& url);
 // brick the next boot.
 bool isValidPortString(const std::string& port);
 
+// HTML-escape a string for safe interpolation into an HTML attribute
+// value (and element text). Escapes the five characters that can break
+// out of a double-quoted attribute or inject markup: `&`, `<`, `>`,
+// `"`, `'`.
+//
+// Used by `host.cpp`'s `sendConfigForm` to echo the operator-entered
+// Wi-Fi SSID back into the form's `value="..."`. That echo is reflected
+// (the SSID is POSTed to `/save`, stored, then re-rendered on the saved
+// page), and the saved page now runs a `<script>` and holds a
+// `window.opener` handle to the setup-wizard tab — so an unescaped SSID
+// such as `"></script><script>window.opener.location=...</script>`
+// would execute (reflected XSS / reverse tabnabbing). Escaping at the
+// echo site closes that path regardless of what the operator types.
+std::string htmlEscape(const std::string& in);
+
 }  // namespace hf

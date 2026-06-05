@@ -520,11 +520,13 @@ bool captureAndUpload() {
   Serial.println("");
   Serial.printf("-- Trying to capture and post image number %d\n", counter++);
 
-  // Single 50 ms pulse on entry so the operator can see the board is
-  // alive between long sleep intervals. Connected is silent; without
-  // this pulse the board would emit no visible signal whatsoever.
-  ledSetMode(hf::LedMode::Uploading);
-
+  // The single 50 ms "alive + uploading" pulse is deliberately fired from
+  // inside postImage() AFTER esp_camera_fb_get() returns the frame — NOT
+  // here on entry. On this board the bright GPIO4 status LED *is* the camera
+  // flash, and setting Uploading here lit it during the capture instant (a
+  // needless energy cost and a flash in the operator's face). Moving the
+  // pulse past the grab keeps the capture dark while preserving the upload
+  // blink. See postImage() in client.cpp.
   int httpCode = -1;
   for (int attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) {

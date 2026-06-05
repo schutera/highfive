@@ -613,14 +613,17 @@ static bool attemptGeolocation(geolocation_t* out) {
   String requestBody;
   serializeJson(doc, requestBody);
 
-  // Verified TLS to googleapis.com. Pin against GTS Root R1 (the
-  // self-signed Google trust anchor; chain on the wire today is
-  // googleapis.com -> WR2 -> GTS Root R1). Without setCACert the
-  // HTTPClient would still negotiate TLS but skip peer verification,
-  // which leaks the WiFi-BSSID list to any MITM with a self-signed
-  // cert. Issue #79.
+  // Verified TLS to googleapis.com. Pin against the R1+R4 bundle: the
+  // chain on the wire today is googleapis.com -> WE2 -> GTS Root R4
+  // (ECC), but it historically rooted in GTS Root R1 (RSA), so we trust
+  // both anchors and survive Google's CA rotation in either direction.
+  // Pinning R1 alone (pre-2026-06-05) made every handshake fail once
+  // Google moved to the R4 chain, leaving all modules at the (0,0)
+  // sentinel. Without setCACert the HTTPClient would still negotiate TLS
+  // but skip peer verification, which leaks the WiFi-BSSID list to any
+  // MITM with a self-signed cert. Issue #79; CA-rotation fix 2026-06-05.
   WiFiClientSecure secureClient;
-  secureClient.setCACert(hf::tls::kGtsRootR1Pem);
+  secureClient.setCACert(hf::tls::kGoogleApisCaBundlePem);
   HTTPClient http;
   String url = String("https://www.googleapis.com/geolocation/v1/geolocate?key=") + apiKey;
   http.begin(secureClient, url);

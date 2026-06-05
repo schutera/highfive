@@ -393,6 +393,32 @@ and [08-crosscutting-concepts/auth.md → "Third-party API keys: Geolocation"](0
 > patches the `(0, 0)` row (issue #89). That path needs a key baked in —
 > it does nothing for a keyless build.
 
+**Cause 2 — Google rotated its CA and the firmware pins the wrong root
+(fixed in `longhorn` / OTA seq 3).** If the key _is_ baked in but the
+module _still_ sits at `(0, 0)` on **every** boot/heartbeat (and no
+`[heartbeat] patched … lat/lng` ever appears in `duckdb-service` logs),
+the Google Geolocation TLS handshake is failing peer verification. The
+firmware pins a specific Google Trust Services root; `www.googleapis.com`
+rotated its served chain from `GTS Root R1` (RSA) to `GTS Root R4` (ECC),
+so a binary that trusted only R1 rejected every handshake → `(0, 0)`.
+Isolate it from the prod box (the key is never printed):
+
+```bash
+# 1) Is the key/quota OK?  200 + a {"location":…} body = key is fine.
+curl -sX POST "https://www.googleapis.com/geolocation/v1/geolocate?key=$(tr -d '[:space:]' < ESP32-CAM/GEO_API_KEY)" \
+  -H 'Content-Type: application/json' --data '{"considerIp":true}'
+# 2) Which root does the chain use now?  (the last 's:'/'i:' line)
+echo | openssl s_client -connect www.googleapis.com:443 -servername www.googleapis.com 2>/dev/null | grep -E ' s:| i:'
+```
+
+**Fix.** The geolocation call now pins `hf::tls::kGoogleApisCaBundlePem`
+(GTS Root R1 **+** R4), so it verifies against either chain. Rebuild and
+re-flash / OTA (`longhorn` already carries it). If Google rotates to a
+_new_ root again, add that root's PEM to the bundle in
+[`ESP32-CAM/lib/tls_roots/tls_roots.h`](../ESP32-CAM/lib/tls_roots/tls_roots.h)
+and bump the firmware — see [ADR-010](09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)
+and the chapter-11 lesson "Pinned `GTS Root R1` for geolocation".
+
 ---
 
 ## Useful commands reference

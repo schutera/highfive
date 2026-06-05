@@ -1,7 +1,7 @@
 {
   "name": "hf_tls_roots",
   "version": "0.1.0",
-  "description": "Embedded TLS trust anchors (ISRG Root X1 for highfive.schutera.com, GTS Root R1 for googleapis.com) used by WiFiClientSecure::setCACert call sites in client.cpp and esp_init.cpp. Header-only, pure C++17, host-testable.",
+  "description": "Embedded TLS trust anchors (ISRG Root X1 for highfive.schutera.com; a GTS Root R1+R4 bundle for googleapis.com) used by WiFiClientSecure::setCACert call sites in client.cpp, ota.cpp and esp_init.cpp. Header-only, pure C++17, host-testable (test_native_tls_roots).",
   "frameworks": "*",
   "platforms": "*",
   "build": {

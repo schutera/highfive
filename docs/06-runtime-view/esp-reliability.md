@@ -226,14 +226,19 @@ light a small room. The pattern logic in
 [`lib/led_state/`](../../ESP32-CAM/lib/led_state/) is therefore
 deliberately minimal: every pattern fires briefly and then stays
 silent. Steady-state modes (powered, connected, captive-portal-up,
-trying-to-join) emit no LED at all. The Arduino-side wrapper lives in
+trying-to-join) emit no LED at all. The capture instant itself is
+**dark** — the upload pulse is fired from
+[`client.cpp`'s `postImage`](../../ESP32-CAM/client.cpp) only after the
+frame is grabbed, so the flash never lights during `esp_camera_fb_get()`
+(see [hardware-notes.md → "Camera flash LED"](../08-crosscutting-concepts/hardware-notes.md#camera-flash-led--capture-stays-dark)).
+The Arduino-side wrapper lives in
 [`led.cpp`](../../ESP32-CAM/led.cpp).
 
 | Pattern                                      | Meaning                                                                                       |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Off (default)                                | Anything that isn't an active failure or an upload — including AP mode, Connecting, Connected |
 | Three 50 ms pulses (~450 ms total), then off | WiFi join timed out (~1 s LED hold before reboot)                                             |
-| Single 50 ms pulse, then off                 | Capture+upload starting (one pulse per capture)                                               |
+| Single 50 ms pulse, then off                 | Upload starting — fired _after_ the (dark) capture, one pulse per upload                      |
 
 If you need to confirm the board is alive in steady state, use the
 phone WiFi list (AP mode), the serial monitor, or the dashboard

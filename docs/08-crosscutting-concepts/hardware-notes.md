@@ -24,6 +24,18 @@ Brave and some mobile browsers silently fail to submit the session
 token, causing the form to reload blank after Save. There is no error
 message — the form just looks like nothing happened.
 
+## Camera flash LED — capture stays dark
+
+On the AI-Thinker board the bright **GPIO4** status LED doubles as the
+camera flash. Capture is deliberately **dark**: the `Uploading` liveness
+pulse is fired from `ESP32-CAM/client.cpp`'s `postImage` **after** the
+frame is grabbed (`esp_camera_fb_get()` returns), not before it. The LED
+is therefore off during the capture instant — saves energy and stops
+flashing the operator on every shot. The brief ~50 ms upload blink is
+preserved (it now marks the start of upload, just after the dark
+capture). Earlier firmware set the pulse on `captureAndUpload` entry,
+which lit the LED while the camera grabbed the frame.
+
 ## Wi-Fi constraints
 
 - **2.4 GHz only.** The ESP32 does not support 5 GHz Wi-Fi. If your

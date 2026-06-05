@@ -64,11 +64,20 @@ int postImage(esp_config_t *esp_config) {
 
   char *UPLOAD_URL = esp_config->UPLOAD_URL;
   
-  // Capture image (flash off)
+  // Capture image with the flash OFF. On the AI-Thinker board the bright
+  // GPIO4 status LED doubles as the camera flash, so the capture instant is
+  // kept dark on purpose — the Uploading liveness pulse is fired only AFTER
+  // the grab below, not before it (it used to be set on captureAndUpload
+  // entry, i.e. during the capture). Saves energy and stops flashing the
+  // operator on every shot.
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
     return -1;
   }
+  // Frame is in hand — now fire the single 50 ms "alive + uploading" blink.
+  // ledOnAt(Uploading) is HIGH only for the first 50 ms, so this is one
+  // brief pulse at the *start of upload*, after the (dark) capture.
+  ledSetMode(hf::LedMode::Uploading);
 
   String filename = createFileName();
   String boundary = "------------------------esp32" + String(millis());

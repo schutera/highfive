@@ -98,8 +98,15 @@ void setWifiFailCount(uint8_t value);
 String generateModuleName();
 bool loadConfig(esp_config_t *esp_config);
 void initEspPinout();
-void initEspCamera(framesize_t resolution);
+// abortOnFailure=true (boot path): abort() on esp_camera_init failure so the
+// OTA rollback counter reverts a bad slot (#26). abortOnFailure=false: return
+// false instead, for the steady-state #143 scheduled-capture re-prime that must
+// never panic the module from loop(). Returns true iff the camera initialised.
+bool initEspCamera(framesize_t resolution, bool abortOnFailure = true);
 void recoverCamera(framesize_t resolution);
+// Non-aborting deinit + reinit for the #143 scheduled-capture re-prime.
+// Returns false on reinit failure (caller skips the capture) instead of abort().
+bool recoverCameraSoft(framesize_t resolution);
 void configure_camera_sensor(esp_config_t *esp_config);
 void setupWifiConnection(wifi_configuration_t *wifi_config);
 // getGeolocation: 3-attempt retry at boot (PR II / issue #89). Returns

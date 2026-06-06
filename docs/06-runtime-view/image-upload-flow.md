@@ -73,11 +73,34 @@ sequenceDiagram
 
 ## Step-by-step
 
-0. **Capture.** ESP32-CAM captures an image on its configured
-   interval (typically every few minutes). Builds a JSON telemetry
-   payload: firmware version, uptime, free heap, RSSI, last reset
-   reason, last HTTP codes, the last ~2 KB of the on-device circular
-   log buffer.
+0. **Capture.** ESP32-CAM captures an image at **two triggers only**:
+   once on boot (the first-capture-on-boot, skipped on the silent
+   daily reboot) and once a day at **local noon** — both in
+   [`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino)'s `loop`.
+   Each builds a JSON telemetry payload: firmware version, uptime,
+   free heap, RSSI, last reset reason, last HTTP codes, the last ~2 KB
+   of the on-device circular log buffer.
+
+   > **Scheduled capture re-primes the camera (#143).** The boot
+   > capture is preceded by the full camera bring-up in `setup()`
+   > (PWDN power-cycle → `esp_camera_init` → sensor config → 3-frame
+   > auto-exposure warm-up), so a restart reliably yields a
+   > well-exposed frame. The **noon** capture used to be a bare single
+   > `esp_camera_fb_get()` after ~8 h of sensor idle, and a field
+   > module then uploaded near-black noon frames while a restart always
+   > produced a good image. `loop()`'s noon branch now calls
+   > `primeCameraLikeBoot()` — a PWDN power-cycle + reinit
+   > (`recoverCameraSoft()`, the **non-aborting** variant) + 3-frame
+   > warm-up, the same cold-start the boot path runs — immediately
+   > before the grab, so the daily image takes the proven-good path. It
+   > is fail-safe: a reinit failure skips that day's capture and retries
+   > next loop rather than `abort()`-ing, so the mitigation can never
+   > panic a marginal board at noon. A bench A/B could **not** reproduce
+   > the black frame on healthy hardware (neither the missing warm-up
+   > nor the VGA/DRAM fallback path), so the root cause is most likely
+   > the field board's marginal PSRAM/power and this is an _unvalidated
+   > mitigation_ — see [chapter 11 → Lessons
+   > learned](../11-risks-and-technical-debt/README.md#lessons-learned).
 
    > **Onboarding precondition.** Before any of this runs, the module
    > must be onboarded once. The captive portal at `http://192.168.4.1`

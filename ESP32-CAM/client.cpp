@@ -82,8 +82,13 @@ int postImage(esp_config_t *esp_config) {
   String filename = createFileName();
   String boundary = "------------------------esp32" + String(millis());
 
-  // for now the battery percentage is randomized!
-  esp_config->battery_level = random(1, 100);
+  // Battery level is SCAFFOLDING — there is no battery-voltage ADC sensing
+  // wired up yet. Emit a 0 sentinel instead of the old random(1,100): the
+  // random value looked like a real charge level and actively misled the
+  // dashboard and field diagnosis (a "6%" reading read as a dying battery
+  // when it was pure noise). Keep sending the field so the wire shape and the
+  // duckdb `battery` column stay stable for when real sensing lands.
+  esp_config->battery_level = 0;
   int battery_level = esp_config->battery_level;
 
   // Canonical 12-char lowercase-hex module ID. Previously this stringified

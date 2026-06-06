@@ -392,8 +392,12 @@ bool loadConfig(esp_config_t *esp_config) {
   Serial.printf("------ ESP module identifier: %llu\n",
                 (unsigned long long)esp_config->esp_ID);
 
-  // ---- set initial battery level ---- //
-  esp_config->battery_level = 90;
+  // ---- battery level (SCAFFOLDING) ---- //
+  // No battery-voltage ADC sensing exists yet; 0 is a clear "no real reading"
+  // sentinel. This was a hardcoded 90, which masqueraded as a healthy charge
+  // level on the dashboard and during diagnosis. See client.cpp's upload-time
+  // battery note for the wider context.
+  esp_config->battery_level = 0;
   esp_config->email[0] = '\0';
 
   /* DEFAULTS — production fallbacks for the "no config file at all" path.
@@ -613,6 +617,45 @@ static bool attemptGeolocation(geolocation_t* out) {
   String requestBody;
   serializeJson(doc, requestBody);
 
+  // Free the WiFi scan result table now that the request body is built.
+  // scanNetworks() holds a per-AP allocation until the next scan or an
+  // explicit delete; carrying it through the TLS handshake below needlessly
+  // raises the heap peak. Defense-in-depth for the longhorn reboot loop
+  // (the no-timeout note below is the primary cause).
+  WiFi.scanDelete();
+
+  // --- longhorn geolocation reboot-loop fix ---
+  // Field modules looped on ~15–30 min reboots right after the longhorn OTA.
+  //
+  // PRIMARY cause: the HTTPClient call below had NO timeout. On the prior
+  // `mining` firmware the TLS handshake to googleapis FAILED FAST at
+  // cert-verify (R1 pinned vs the served R4 chain), so the call always
+  // returned well under the 60 s task-WDT budget. The R1+R4 bundle (the
+  // CA-rotation fix) makes the handshake SUCCEED, so the call now actually
+  // connects, POSTs and reads a response — and a stalled handshake or slow
+  // response can block past the 60 s WDT → clean reboot, on the ~30 min
+  // deferred-retry cadence. Bounding every blocking step under the WDT budget
+  // removes that: setHandshakeTimeout caps the TLS handshake (ESP32 default
+  // is 120 s!), setConnectTimeout caps the TCP connect, setTimeout caps a
+  // per-read stall. getGeolocation()'s 3-attempt boot path (2+6+14 s backoff)
+  // stays under 60 s with these and feeds the WDT between attempts.
+  //
+  // SECONDARY guard: skip the attempt when free heap is low, so an mbedTLS
+  // allocation can't tip the device over mid-handshake. Below the floor we
+  // DEFER — the module stays online and heartbeating, and the loop's 30-min
+  // deferred-retry tries again once heap recovers. Boot geolocation runs
+  // pre-camera (~160 KB free) and sails past; the post-camera loop retry
+  // (~70 KB free) is the one this guards. The "[geo] free heap" serial log
+  // lets you re-tune the floor against real numbers.
+  const uint32_t kMinHeapForGeoTlsBytes = 45000;
+  const uint32_t freeHeapBeforeTls = ESP.getFreeHeap();
+  Serial.printf("[geo] free heap=%u before TLS (floor %u)\n",
+                freeHeapBeforeTls, kMinHeapForGeoTlsBytes);
+  if (freeHeapBeforeTls < kMinHeapForGeoTlsBytes) {
+    Serial.println("[geo] heap below floor — deferring to protect the main loop");
+    return false;
+  }
+
   // Verified TLS to googleapis.com. Pin against the R1+R4 bundle: the
   // chain on the wire today is googleapis.com -> WE2 -> GTS Root R4
   // (ECC), but it historically rooted in GTS Root R1 (RSA), so we trust
@@ -623,10 +666,13 @@ static bool attemptGeolocation(geolocation_t* out) {
   // but skip peer verification, which leaks the WiFi-BSSID list to any
   // MITM with a self-signed cert. Issue #79; CA-rotation fix 2026-06-05.
   WiFiClientSecure secureClient;
+  secureClient.setHandshakeTimeout(8);  // seconds (ESP32 default 120 s) — see above
   secureClient.setCACert(hf::tls::kGoogleApisCaBundlePem);
   HTTPClient http;
   String url = String("https://www.googleapis.com/geolocation/v1/geolocate?key=") + apiKey;
   http.begin(secureClient, url);
+  http.setConnectTimeout(8000);  // ms — bound TCP connect (see above)
+  http.setTimeout(8000);         // ms — bound a per-read stall (see above)
   http.addHeader("Content-Type", "application/json");
 
   hf::breadcrumbSet("getGeolocation:http_post");

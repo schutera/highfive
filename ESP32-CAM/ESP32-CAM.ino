@@ -516,6 +516,69 @@ void setup() {
 }
 
 
+// #143: re-prime the camera the way a fresh boot does, immediately before
+// the scheduled daily capture. Field investigation found the daily noon
+// image could come back near-black while a *restart* always produced a good
+// frame. The restart path hands the OV2640 a clean cold-start — PWDN
+// power-cycle, fresh esp_camera_init, sensor re-config, and a 3-frame
+// auto-exposure warm-up — whereas the scheduled noon path was a bare single
+// esp_camera_fb_get() after ~8 h of sensor idle.
+//
+// Honest caveat (see issue #143): a bench A/B on healthy hardware could NOT
+// reproduce the black frame — neither the missing warm-up nor the VGA/DRAM
+// fallback path reproduced it, which points the root cause at the specific
+// field board's marginal PSRAM/power rather than firmware logic. This is
+// therefore an UNVALIDATED mitigation: it routes the daily capture through the
+// one path observed to always work, which is robust regardless of mechanism.
+//
+// Fail-safe by design: the re-init goes through recoverCameraSoft(), the
+// NON-aborting variant. A capture-quality mitigation must never introduce a
+// steady-state panic — on the marginal hardware this targets, an abort() here
+// would risk a panic→reboot→(after 3) firmware rollback *every noon*. So on a
+// re-init failure we log, skip this scheduled capture, and let loop() retry on
+// the next iteration; the boot path keeps its own abort(), which is the
+// load-bearing OTA-rollback trigger. The serial line + the
+// `loop:primeCamera:noon` breadcrumb make it observable that this path ran
+// (it can't be validated on the bench — see issue #143).
+//
+// Returns true iff the camera reinitialised AND at least one warm-up frame
+// came back non-NULL — i.e. there is a live sensor for captureAndUpload() to
+// grab from. On reinit failure OR all-3-NULL warm-up it returns false and the
+// noon branch retries next loop instead of burning the day's slot on a dead
+// sensor. Honest limit: this catches init failure and NULL frames, but NOT a
+// valid-but-near-black frame — which is the actual #143 field symptom (init
+// succeeds, a JPEG is produced, it's just near-black). Distinguishing that
+// from a legitimately dark scene needs a fragile luminance/size heuristic we
+// can't validate, so the near-black case is left to the cold-start itself to
+// fix; this guard only stops us committing the day on a clearly-dead sensor.
+static bool primeCameraLikeBoot() {
+  Serial.println("-- priming camera (restart-equivalent cold-start) before scheduled capture");
+  if (!recoverCameraSoft(esp_config.RESOLUTION)) {
+    Serial.println("-- camera re-prime failed (reinit) — skipping this scheduled capture (will retry next loop)");
+    return false;
+  }
+  configure_camera_sensor(&esp_config);   // re-apply brightness/saturation/vflip
+  esp_task_wdt_reset();                    // the warm-up delays below don't feed the WDT
+  int warmupNulls = 0;
+  for (int i = 0; i < 3; i++) {
+    delay(500);
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (fb) {
+      size_t fb_len = fb->len;
+      esp_camera_fb_return(fb);
+      Serial.printf("---- prime warm-up frame %d OK (%u bytes)\n", i + 1, (unsigned)fb_len);
+    } else {
+      Serial.printf("---- prime warm-up frame %d skipped (NULL)\n", i + 1);
+      warmupNulls++;
+    }
+  }
+  if (warmupNulls == 3) {
+    Serial.println("-- all 3 prime warm-up frames NULL — skipping this scheduled capture (will retry next loop)");
+    return false;
+  }
+  return true;
+}
+
 bool captureAndUpload() {
   Serial.println("");
   Serial.printf("-- Trying to capture and post image number %d\n", counter++);
@@ -678,9 +741,22 @@ void loop() {
   if (getLocalTime(&timeinfo, 200)) {
     if (timeinfo.tm_hour == 12 && timeinfo.tm_yday != lastCaptureDay) {
       Serial.println("-- Noon capture");
-      hf::breadcrumbSet("loop:captureAndUpload:noon");
-      captureAndUpload();
-      lastCaptureDay = timeinfo.tm_yday;
+      // #143: take the scheduled shot via the proven-good restart cold-start
+      // (PWDN re-init + warm-up) rather than a bare single grab after hours
+      // of sensor idle. See primeCameraLikeBoot() for the full rationale.
+      // Mark today's slot done only when the re-prime AND the upload both
+      // succeed — mirrors the first-capture-on-boot gate above. A failed
+      // re-prime or a failed upload leaves lastCaptureDay unset so the next
+      // loop iteration retries while it's still local noon, rather than
+      // dropping today's image on a transient hiccup. captureAndUpload()'s
+      // own circuit breaker still reboots after 5 consecutive failures.
+      hf::breadcrumbSet("loop:primeCamera:noon");
+      if (primeCameraLikeBoot()) {
+        hf::breadcrumbSet("loop:captureAndUpload:noon");
+        if (captureAndUpload()) {
+          lastCaptureDay = timeinfo.tm_yday;
+        }
+      }
     }
   }
 

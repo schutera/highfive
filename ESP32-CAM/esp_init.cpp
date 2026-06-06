@@ -140,7 +140,7 @@ void configure_camera_sensor(esp_config_t *esp_config) {
   }
 }
 
-void initEspCamera(framesize_t resolution) {
+bool initEspCamera(framesize_t resolution, bool abortOnFailure) {
   // Loud diagnostic: print PSRAM state + camera-relevant settings up front so
   // we never have to guess what the runtime environment looks like.
   Serial.printf("-- PSRAM: found=%d size=%u bytes\n",
@@ -197,12 +197,21 @@ void initEspCamera(framesize_t resolution) {
     // HF_OTA_MAX_PENDING_BOOTS retries. Caught by senior-review of
     // PR-F #26. The 5 s delay + Serial.printf are preserved so the
     // operator-visible UX (error message + LED) is unchanged.
-    Serial.printf("---- camera init failed: 0x%x. Aborting in 5s...\n", err);
-    delay(5000);
-    abort();
+    if (abortOnFailure) {
+      Serial.printf("---- camera init failed: 0x%x. Aborting in 5s...\n", err);
+      delay(5000);
+      abort();
+    }
+    // Non-aborting caller (#143 scheduled-capture re-prime via
+    // recoverCameraSoft): report failure so the caller can skip this
+    // capture and continue loop(), rather than panic the whole module
+    // from steady-state for a daily capture-quality operation.
+    Serial.printf("---- camera init failed: 0x%x (non-fatal — caller will skip)\n", err);
+    return false;
   } else {
     initialized = 1;
     Serial.println("---- camera initialized");
+    return true;
   }
 }
 
@@ -219,6 +228,21 @@ void recoverCamera(framesize_t resolution) {
   delay(100);
   initialized = 0;
   initEspCamera(resolution);
+}
+
+// Non-aborting sibling of recoverCamera() for the #143 scheduled-capture
+// re-prime. Deinit + reinit (initEspCamera does the PWDN power-cycle — one
+// clean cold-start, matching what the boot path runs). On reinit failure it
+// returns false instead of abort()-ing, so a transient camera hiccup during a
+// daily capture never panics the module from steady-state loop() or trips the
+// OTA faulty-boot counter. The boot path keeps initEspCamera()'s abort(),
+// which is load-bearing for OTA slot rollback (#26).
+bool recoverCameraSoft(framesize_t resolution) {
+  Serial.println("[CAM] soft re-prime: deinit + reinit (non-fatal)");
+  esp_camera_deinit();
+  delay(200);
+  initialized = 0;
+  return initEspCamera(resolution, /*abortOnFailure=*/false);
 }
 
 /* -------------------------------- */

@@ -86,8 +86,11 @@ int postImage(esp_config_t *esp_config) {
   // wired up yet. Emit a 0 sentinel instead of the old random(1,100): the
   // random value looked like a real charge level and actively misled the
   // dashboard and field diagnosis (a "6%" reading read as a dying battery
-  // when it was pure noise). Keep sending the field so the wire shape and the
-  // duckdb `battery` column stay stable for when real sensing lands.
+  // when it was pure noise). This upload value feeds the current-reading
+  // scalar `module_configs.battery_level` (the image-service /upload contract
+  // requires a 0-100 battery), NOT the #110 time-series — sendHeartbeat OMITS
+  // battery so the `measurements` dual-write stays a true gap. Keep sending it
+  // here so the wire shape and column stay stable for when real sensing lands.
   esp_config->battery_level = 0;
   int battery_level = esp_config->battery_level;
 
@@ -314,8 +317,18 @@ int sendHeartbeat(esp_config_t *esp_config) {
     return -2;
   }
 
+  // Battery is deliberately OMITTED here (not sent as a 0). There's no
+  // battery-voltage ADC yet, and the bare /heartbeat route dual-writes any
+  // battery it receives into the #110 `measurements` store as a real
+  // `battery_pct` sample. To that layer a 0 is NOT "no data": a missing
+  // reading must be an absent sample (the server skips the dual-write when
+  // `battery is None` — see duckdb-service/routes/heartbeats.py), whereas a
+  // stream of 0.0 would render as a real "battery flat at empty" discharge.
+  // Omitting the field keeps the series an honest gap until real sensing
+  // lands (#8a/#8b). The upload multipart still carries the 0 sentinel for
+  // `module_configs.battery_level` (a current-value scalar that is never
+  // promoted into the time-series).
   String body = String("mac=") + macStr
-              + "&battery=" + String(esp_config->battery_level)
               + "&rssi=" + String(WiFi.RSSI())
               + "&uptime_ms=" + String(millis())
               + "&free_heap=" + String(ESP.getFreeHeap())

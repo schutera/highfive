@@ -472,9 +472,11 @@ serial first** and confirm from the boot log (`esp_reset_reason` + the
 issue-#42 breadcrumb) before OTA-ing the fleet. Do not roll back to `mining`
 (`allow_downgrade:false`; seq only moves forward).
 
-> **Note:** the `battery` field in heartbeats/uploads is scaffolding
-> (`random(1,100)` pre-`carpenter`, a `0` sentinel after) — **not** a real
-> charge level. Don't diagnose power problems from it.
+> **Note:** there is no real battery sensing. Pre-`carpenter` firmware sent
+> `random(1,100)`; `carpenter`+ omits battery from the heartbeat entirely and
+> sends a `0` sentinel only on upload (for `module_configs.battery_level`, which
+> the `/upload` endpoint requires). Either way it is **not** a real charge
+> level — don't diagnose power problems from it.
 
 ---
 

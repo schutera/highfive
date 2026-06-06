@@ -153,13 +153,15 @@ def post_heartbeat():
         # tell live samples from the one-time backfill
         # (`esp-heartbeat-backfill` in `db/schema.py`'s init block).
         #
-        # Caveat carried forward, not introduced here: the
-        # `battery` value the firmware sends is currently
-        # `random(1, 100)` (see issue #8 investigation comment).
-        # The dual-write records it honestly under the
-        # `battery_pct` metric name; once #8a / #8b land the same
-        # path starts emitting real percentages and (later)
-        # millivolts under a new metric name.
+        # Producer note: `carpenter`+ firmware OMITS the battery field
+        # from the heartbeat (no ADC sensing yet), so `battery is None`
+        # and this dual-write is skipped — the #110 series stays a true
+        # gap, not a fabricated `random(1,100)`/0% stream that an
+        # averaging read would render as a real discharge. (Older
+        # firmware still sends a value and lands here.) When real sensing
+        # arrives (#8a / #8b) the firmware emits genuine percentages
+        # (then millivolts under a new metric) and this path resumes
+        # recording them.
         if battery is not None:
             con.execute(
                 """

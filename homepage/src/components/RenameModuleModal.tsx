@@ -4,13 +4,6 @@ import { api, RenameConflictError } from '../services/api';
 import { displayLabel } from '../lib/displayLabel';
 import AdminKeyForm from './AdminKeyForm';
 
-const ADMIN_KEY_STORAGE = 'hf_admin_key';
-
-function hasAdminKey(): boolean {
-  if (typeof window === 'undefined') return false;
-  return !!sessionStorage.getItem(ADMIN_KEY_STORAGE);
-}
-
 interface RenameModuleModalProps {
   module: Pick<Module, 'id' | 'name' | 'displayName'>;
   onClose: () => void;
@@ -23,9 +16,10 @@ interface RenameModuleModalProps {
 // Lightweight modal: input + Save + Cancel. Surfaces 409 collision errors
 // inline. Empty input clears the override (sends `display_name: null`).
 //
-// Reuses the existing `hf_admin_key` sessionStorage plumbing via
-// `api.renameModule`. If no key is stored when the user hits Save, the
-// inline AdminKeyForm prompts for it and the rename retries automatically.
+// Auth rides the admin session cookie via `api.renameModule` (#142 / ADR-019).
+// Operators reaching this from /admin are already logged in, so Save succeeds
+// directly; if the cookie is missing/expired the PATCH 401s and the inline
+// AdminKeyForm prompts for a login, then the rename retries automatically.
 // See ADR-011 and issue #93.
 export default function RenameModuleModal({ module, onClose, onSaved }: RenameModuleModalProps) {
   // Pre-fill with current displayName (or empty string when null) so the
@@ -33,7 +27,9 @@ export default function RenameModuleModal({ module, onClose, onSaved }: RenameMo
   const [draft, setDraft] = useState<string>(module.displayName ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [needsKey, setNeedsKey] = useState<boolean>(!hasAdminKey());
+  // Optimistic: assume a session is present (the common path from /admin). The
+  // PATCH's 401 handler flips this to true and renders the login form.
+  const [needsKey, setNeedsKey] = useState<boolean>(false);
   const [keyError, setKeyError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -70,7 +66,7 @@ export default function RenameModuleModal({ module, onClose, onSaved }: RenameMo
           `Name "${err.displayName}" is already used by module ${macLabel}. Pick a different name.`,
         );
       } else if (err instanceof Error && err.message === 'unauthorized') {
-        // api.renameModule already cleared the key from sessionStorage.
+        // No valid session cookie — prompt for a login via the inline form.
         setNeedsKey(true);
         setKeyError('Invalid admin key. Try again.');
       } else {
@@ -83,13 +79,23 @@ export default function RenameModuleModal({ module, onClose, onSaved }: RenameMo
     }
   };
 
-  const submitAdminKey = (key: string) => {
-    if (typeof window === 'undefined') return;
-    sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
-    setNeedsKey(false);
+  const submitAdminKey = async (key: string) => {
+    // Log in via the session endpoint (#142 / ADR-019); the key is never
+    // stored client-side. On success, retry the save with the new cookie.
+    setBusy(true);
     setKeyError(null);
-    // Retry the save now that the key is in place.
-    void performRename();
+    try {
+      if (await api.login(key)) {
+        setNeedsKey(false);
+        await performRename();
+      } else {
+        setKeyError('Invalid admin key. Try again.');
+      }
+    } catch {
+      setKeyError('Invalid admin key. Try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {

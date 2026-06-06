@@ -16,18 +16,19 @@ import type { ImageUploadsPage } from '@highfive/contracts';
 
 const GALLERY_MAC = 'ff2222222222';
 const PAGE_SIZE = 5;
-const API_KEY = 'hf_test_key'; // matches docker-compose.ui.yml VITE_API_KEY / HIGHFIVE_API_KEY
+const ADMIN_PASSWORD = 'hf_test_key'; // matches docker-compose.ui.yml HIGHFIVE_API_KEY
 
 test.describe('admin image gallery pagination', () => {
   test.beforeEach(async ({ page }) => {
-    // AdminPage gates render on a truthy `highfive_admin_auth` in
-    // sessionStorage (the value LoginGate stores is the API key). Set it
-    // so the spec lands on the gallery instead of the login form. The
-    // gallery's own /api/images fetch authenticates with the build-time
-    // VITE_API_KEY, not this value — but the gate still needs it present.
-    await page.addInitScript((key) => {
-      sessionStorage.setItem('highfive_admin_auth', key);
-    }, API_KEY);
+    // AdminPage gates render on a real server-side session (#142 / ADR-019):
+    // it calls api.checkSession() on mount. Log in via /api/admin/login so the
+    // context cookie jar holds the session cookie and the gate lands on the
+    // gallery instead of the login form. The gallery's /api/images reads are
+    // public now, so they need no credential.
+    const login = await page.request.post('http://localhost:4002/api/admin/login', {
+      data: { password: ADMIN_PASSWORD },
+    });
+    expect(login.ok()).toBeTruthy();
   });
 
   test('first page caps at PAGE_SIZE and "Load more" appends in capture order', async ({
@@ -39,7 +40,6 @@ test.describe('admin image gallery pagination', () => {
     //    this fails before we touch the DOM.
     const full = await page.request.get(
       `http://localhost:4002/api/images?module_id=${GALLERY_MAC}`,
-      { headers: { 'X-API-Key': API_KEY } },
     );
     expect(full.ok()).toBeTruthy();
     const allPage = (await full.json()) as ImageUploadsPage;
@@ -51,7 +51,6 @@ test.describe('admin image gallery pagination', () => {
     // PAGE_SIZE, in the same order — pin that at the API too.
     const firstResp = await page.request.get(
       `http://localhost:4002/api/images?module_id=${GALLERY_MAC}&limit=${PAGE_SIZE}&offset=0`,
-      { headers: { 'X-API-Key': API_KEY } },
     );
     const firstJson = (await firstResp.json()) as ImageUploadsPage;
     expect(firstJson.images.map((i) => i.filename)).toEqual(expectedOrder.slice(0, PAGE_SIZE));

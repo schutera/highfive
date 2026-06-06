@@ -8,14 +8,7 @@ import type {
   UserLocation,
 } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
-// The build-time validator + DEV_FALLBACK_KEY live in their own module
-// so main.tsx can side-effect-import them and the throw fires on first
-// page load. See ./api-key-validator.ts for the rationale; importing
-// here would land them in the lazy api-* chunk and the home-page route
-// would not trigger them. Re-exported for unit tests.
-import { DEV_FALLBACK_KEY, validateBuildTimeApiKey } from './api-key-validator';
 
-export { DEV_FALLBACK_KEY, validateBuildTimeApiKey };
 export type { TelemetryEntry } from '@highfive/contracts';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
@@ -40,23 +33,64 @@ export class RenameConflictError extends Error {
   }
 }
 
-// API key for authentication - in production, this should come from environment variables
-const API_KEY = import.meta.env.VITE_API_KEY || DEV_FALLBACK_KEY;
-
+// Auth model (issue #142 / ADR-019): the bundle holds NO secret. Read
+// endpoints are public; admin/write actions are gated by an HttpOnly session
+// cookie minted by `login()`. Every request therefore uses
+// `credentials: 'include'` so that cookie rides along (same-site:
+// highfive.schutera.com → api.highfive.schutera.com share schutera.com).
 class ApiService {
   private baseUrl: string;
-  private apiKey: string;
 
-  constructor(baseUrl: string = API_BASE_URL, apiKey: string = API_KEY) {
+  constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl;
-    this.apiKey = apiKey;
   }
 
   private getHeaders(): HeadersInit {
     return {
       'Content-Type': 'application/json',
-      'X-API-Key': this.apiKey,
     };
+  }
+
+  /**
+   * Admin login. POSTs the operator key to the backend, which validates it
+   * server-side and (on success) sets the HttpOnly session cookie. Returns
+   * true on success, false on a wrong key. The key is never stored
+   * client-side — only the resulting cookie, which JS cannot read.
+   */
+  async login(password: string): Promise<boolean> {
+    const response = await fetch(`${this.baseUrl}/admin/login`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'include',
+      body: JSON.stringify({ password }),
+    });
+    if (response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { authenticated?: boolean };
+      return body.authenticated === true;
+    }
+    return false;
+  }
+
+  /** Clear the admin session cookie server-side. */
+  async logout(): Promise<void> {
+    await fetch(`${this.baseUrl}/admin/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => undefined);
+  }
+
+  /** Whether the current browser holds a valid admin session cookie. */
+  async checkSession(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/admin/session`, {
+        credentials: 'include',
+      });
+      if (!response.ok) return false;
+      const body = (await response.json()) as { authenticated?: boolean };
+      return body.authenticated === true;
+    } catch {
+      return false;
+    }
   }
 
   async getAllModules(): Promise<Module[]> {
@@ -75,6 +109,7 @@ class ApiService {
   }> {
     const response = await fetch(`${this.baseUrl}/modules`, {
       headers: this.getHeaders(),
+      credentials: 'include',
     });
     if (!response.ok) {
       throw new Error('Failed to fetch modules');
@@ -98,6 +133,7 @@ class ApiService {
   async getModuleById(id: string): Promise<ModuleDetail> {
     const response = await fetch(`${this.baseUrl}/modules/${id}`, {
       headers: this.getHeaders(),
+      credentials: 'include',
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch module ${id}`);
@@ -114,6 +150,7 @@ class ApiService {
     const response = await fetch(`${this.baseUrl}/modules/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
+      credentials: 'include',
     });
     if (!response.ok) {
       throw new Error(`Failed to delete module ${id}`);
@@ -122,24 +159,21 @@ class ApiService {
 
   /**
    * Set or clear the admin-settable display-name override for a module.
-   * Pass `null` (or empty string) to clear. Reuses the `hf_admin_key`
-   * sessionStorage plumbing established by `getModuleLogs` — on 401/403
-   * we clear the stored key and throw `'unauthorized'` so the caller
-   * can re-prompt. On 409 we throw a `RenameConflictError` carrying the
-   * conflicting MAC so the UI can render an inline message.
-   * See backend route `PATCH /api/modules/:id/name` and ADR-011.
+   * Pass `null` (or empty string) to clear. Auth rides the admin session
+   * cookie (`credentials: 'include'`); on 401/403 we throw `'unauthorized'`
+   * so the caller can prompt for login. On 409 we throw a
+   * `RenameConflictError` carrying the conflicting MAC so the UI can render
+   * an inline message. See backend route `PATCH /api/modules/:id/name`,
+   * ADR-011, and ADR-019.
    */
   async renameModule(id: string, displayName: string | null): Promise<void> {
-    const adminKey = typeof window !== 'undefined' ? sessionStorage.getItem('hf_admin_key') : null;
-    const headers: Record<string, string> = { ...(this.getHeaders() as Record<string, string>) };
-    if (adminKey) headers['X-Admin-Key'] = adminKey;
     const response = await fetch(`${this.baseUrl}/modules/${encodeURIComponent(id)}/name`, {
       method: 'PATCH',
-      headers,
+      headers: this.getHeaders(),
+      credentials: 'include',
       body: JSON.stringify({ display_name: displayName }),
     });
     if (response.status === 401 || response.status === 403) {
-      if (typeof window !== 'undefined') sessionStorage.removeItem('hf_admin_key');
       throw new Error('unauthorized');
     }
     if (response.status === 409) {
@@ -158,14 +192,11 @@ class ApiService {
   }
 
   async getModuleLogs(id: string, limit: number = 10): Promise<TelemetryEntry[]> {
-    const adminKey = typeof window !== 'undefined' ? sessionStorage.getItem('hf_admin_key') : null;
-    const headers: Record<string, string> = { ...(this.getHeaders() as Record<string, string>) };
-    if (adminKey) headers['X-Admin-Key'] = adminKey;
     const response = await fetch(`${this.baseUrl}/modules/${id}/logs?limit=${limit}`, {
-      headers,
+      headers: this.getHeaders(),
+      credentials: 'include',
     });
     if (response.status === 401 || response.status === 403) {
-      if (typeof window !== 'undefined') sessionStorage.removeItem('hf_admin_key');
       throw new Error('unauthorized');
     }
     if (!response.ok) {
@@ -186,7 +217,7 @@ class ApiService {
     days: number = 7,
   ): Promise<ActivityTimeSeries> {
     const url = `${this.baseUrl}/modules/${encodeURIComponent(id)}/activity?interval=${interval}&days=${days}`;
-    const response = await fetch(url, { headers: this.getHeaders() });
+    const response = await fetch(url, { headers: this.getHeaders(), credentials: 'include' });
     if (!response.ok) {
       throw new Error(`Failed to fetch activity for module ${id}`);
     }
@@ -216,7 +247,7 @@ class ApiService {
     days: number = 7,
   ): Promise<MeasurementTimeSeries> {
     const url = `${this.baseUrl}/modules/${encodeURIComponent(id)}/measurements?metric=${encodeURIComponent(metric)}&interval=${interval}&days=${days}`;
-    const response = await fetch(url, { headers: this.getHeaders() });
+    const response = await fetch(url, { headers: this.getHeaders(), credentials: 'include' });
     if (!response.ok) {
       throw new Error(`Failed to fetch measurements for module ${id}`);
     }
@@ -248,6 +279,7 @@ class ApiService {
     const url = `${this.baseUrl}/images${qs ? `?${qs}` : ''}`;
     const response = await fetch(url, {
       headers: this.getHeaders(),
+      credentials: 'include',
     });
     if (!response.ok) throw new Error('Failed to fetch images');
     const data = await response.json();
@@ -258,6 +290,7 @@ class ApiService {
     const response = await fetch(`${this.baseUrl}/images/${encodeURIComponent(filename)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
+      credentials: 'include',
     });
     if (!response.ok) throw new Error('Failed to delete image');
   }
@@ -291,6 +324,7 @@ class ApiService {
     try {
       const response = await fetch(`${this.baseUrl}/user-location`, {
         headers: this.getHeaders(),
+        credentials: 'include',
       });
       if (response.status === 204 || !response.ok) return null;
       return await response.json();

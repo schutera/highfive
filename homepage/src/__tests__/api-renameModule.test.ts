@@ -2,11 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { api, RenameConflictError } from '../services/api';
 import { parseModuleId } from '@highfive/contracts';
 
-// Pin the side-effects of `api.renameModule` at the api-layer boundary —
-// specifically the "401/403 clears hf_admin_key and throws 'unauthorized'"
-// invariant. The `RenameModuleModal` test exercises the modal's reaction
-// to a thrown 'unauthorized'; this file pins the source of that throw.
-// Together they form the two halves of the contract.
+// Pin the side-effects of `api.renameModule` at the api-layer boundary.
+// Auth is the HttpOnly session cookie (#142 / ADR-019): the request carries
+// no secret header and uses `credentials: 'include'`; a 401/403 surfaces as a
+// thrown 'unauthorized' so the modal can prompt for login. The
+// `RenameModuleModal` test exercises the modal's reaction to that throw; this
+// file pins its source. Together they form the two halves of the contract.
 
 const VALID_ID = parseModuleId('e89fa9f23a08');
 
@@ -16,12 +17,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  sessionStorage.clear();
 });
 
 describe('api.renameModule', () => {
-  it('clears hf_admin_key from sessionStorage and throws on 401', async () => {
-    sessionStorage.setItem('hf_admin_key', 'stale-key');
+  it("throws 'unauthorized' on 401", async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
       status: 401,
@@ -29,11 +28,9 @@ describe('api.renameModule', () => {
     });
 
     await expect(api.renameModule(VALID_ID, 'Garden Bee')).rejects.toThrow(/unauthorized/);
-    expect(sessionStorage.getItem('hf_admin_key')).toBeNull();
   });
 
-  it('clears hf_admin_key from sessionStorage and throws on 403', async () => {
-    sessionStorage.setItem('hf_admin_key', 'wrong-key');
+  it("throws 'unauthorized' on 403", async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
       status: 403,
@@ -41,11 +38,9 @@ describe('api.renameModule', () => {
     });
 
     await expect(api.renameModule(VALID_ID, 'Garden Bee')).rejects.toThrow(/unauthorized/);
-    expect(sessionStorage.getItem('hf_admin_key')).toBeNull();
   });
 
   it('throws RenameConflictError with the conflicting MAC on 409', async () => {
-    sessionStorage.setItem('hf_admin_key', 'hf_dev_key_2026');
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
       status: 409,
@@ -68,9 +63,6 @@ describe('api.renameModule', () => {
       expect(conflict.displayName).toBe('Garden Bee');
       expect(conflict.conflictingModuleId).toBe('001122334455');
     }
-    // 409 must NOT clear the key — the user is authenticated, the
-    // *name* is the problem.
-    expect(sessionStorage.getItem('hf_admin_key')).toBe('hf_dev_key_2026');
   });
 
   it('serialises display_name: <string> on the happy path', async () => {
@@ -79,7 +71,6 @@ describe('api.renameModule', () => {
     // two through `value === '' ? null : value` so pinning both ends
     // here catches a future api-layer regression that, e.g., started
     // sending the trimmed value or wrapping in a top-level key.
-    sessionStorage.setItem('hf_admin_key', 'hf_dev_key_2026');
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,
@@ -98,8 +89,7 @@ describe('api.renameModule', () => {
     expect(JSON.parse(opts.body as string)).toEqual({ display_name: 'Garden Bee' });
   });
 
-  it('sends the X-Admin-Key header from sessionStorage', async () => {
-    sessionStorage.setItem('hf_admin_key', 'hf_dev_key_2026');
+  it('sends credentials:include and no secret header (cookie auth, #142)', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,
@@ -112,12 +102,13 @@ describe('api.renameModule', () => {
       string,
       RequestInit,
     ];
-    const headers = opts.headers as Record<string, string>;
-    expect(headers['X-Admin-Key']).toBe('hf_dev_key_2026');
+    expect(opts.credentials).toBe('include');
+    const headers = (opts.headers ?? {}) as Record<string, string>;
+    expect(headers['X-Admin-Key']).toBeUndefined();
+    expect(headers['X-API-Key']).toBeUndefined();
   });
 
   it('serialises display_name: null when called with null', async () => {
-    sessionStorage.setItem('hf_admin_key', 'hf_dev_key_2026');
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,

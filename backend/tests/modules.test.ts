@@ -27,9 +27,11 @@ beforeEach(() => {
 });
 
 describe('GET /api/modules', () => {
-  it('returns 401 without an API key', async () => {
+  it('is public — returns 200 without any credential (#142)', async () => {
+    mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: false });
     const res = await request(app).get('/api/modules');
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
   });
 
   it('returns 200 with the array from db.listModules()', async () => {

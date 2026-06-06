@@ -14,14 +14,18 @@ auth-gated JSON API. Stateless read-through projection on top of
 
 ## Endpoints
 
-| Endpoint                        | Auth                        | Purpose                                                                                                                                                                |
-| ------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`               | public                      | Liveness check (`{"status":"ok"}`)                                                                                                                                     |
-| `GET /api/modules`              | `X-API-Key`                 | List all modules + their nests + latest progress                                                                                                                       |
-| `GET /api/modules/:id`          | `X-API-Key`                 | One module + its detail                                                                                                                                                |
-| `PATCH /api/modules/:id/name`   | `X-API-Key` + `X-Admin-Key` | Sets or clears the operator-settable `display_name` override. Proxies to `duckdb-service /modules/<id>/display_name`. 409 on collision                                 |
-| `GET /api/modules/:id/logs`     | `X-API-Key` + `X-Admin-Key` | Proxies to `image-service /modules/<mac>/logs` for admin telemetry inspection                                                                                          |
-| `GET /api/modules/:id/activity` | `X-API-Key`                 | Bucketed image-upload counts for the dashboard weather-correlation chart. Proxies `duckdb-service /modules/<id>/activity_timeseries` and maps `module_id` → `moduleId` |
+Auth (since #142 / ADR-019): **public** = no credential; **admin** =
+`requireAdmin` (session cookie from `POST /api/admin/login`, or `X-Admin-Key`).
+
+| Endpoint                        | Auth   | Purpose                                                                                                                                                                |
+| ------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`               | public | Liveness check (`{"status":"ok"}`)                                                                                                                                     |
+| `POST /api/admin/login`         | public | Validates the admin password, sets the `hf_admin_session` cookie                                                                                                       |
+| `GET /api/modules`              | public | List all modules + their nests + latest progress                                                                                                                       |
+| `GET /api/modules/:id`          | public | One module + its detail                                                                                                                                                |
+| `PATCH /api/modules/:id/name`   | admin  | Sets or clears the operator-settable `display_name` override. Proxies to `duckdb-service /modules/<id>/display_name`. 409 on collision                                 |
+| `GET /api/modules/:id/logs`     | admin  | Proxies to `image-service /modules/<mac>/logs` for admin telemetry inspection                                                                                          |
+| `GET /api/modules/:id/activity` | public | Bucketed image-upload counts for the dashboard weather-correlation chart. Proxies `duckdb-service /modules/<id>/activity_timeseries` and maps `module_id` → `moduleId` |
 
 Full request/response shapes in [docs/api-reference.md](../api-reference.md).
 
@@ -37,12 +41,17 @@ expected read volume (one operator, polling).
 
 ## Auth flow
 
-The dev fallback is `HIGHFIVE_API_KEY=hf_dev_key_2026`. The frontend
-sends it as `X-API-Key` for all `/api/modules*` calls. Admin-only
-endpoints additionally require `X-Admin-Key`, checked against the
-**same** secret (see [ADR-003](../09-architecture-decisions/adr-003-shared-api-key-for-admin.md)).
-The admin UI is gated by `?admin=1` and stores the prompt-collected
-key in `sessionStorage['hf_admin_key']`.
+Reads are public (#142 / ADR-019); the frontend bundle holds no secret.
+Admin/write endpoints are gated by `requireAdmin`
+([`backend/src/session.ts`](../../backend/src/session.ts)), which accepts a
+valid `hf_admin_session` cookie (minted by `POST /api/admin/login` after a
+constant-time check of `HIGHFIVE_API_KEY`) **or** an `X-Admin-Key` header
+(server-side machine credential). The dev fallback is
+`HIGHFIVE_API_KEY=hf_dev_key_2026`. The admin UI logs in via `api.login()`
+and relies on the cookie; nothing privileged is stored client-side. See
+[ADR-019](../09-architecture-decisions/adr-019-admin-session-no-bundle-secret.md)
+and the superseded-in-part
+[ADR-003](../09-architecture-decisions/adr-003-shared-api-key-for-admin.md).
 
 ## Operational notes
 

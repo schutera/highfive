@@ -39,7 +39,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
   it('GET /api/modules logs and 500s when db.listModules rejects', async () => {
     mocks.listModules.mockRejectedValue(new Error('duckdb gone'));
 
-    const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
+    const res = await request(app).get('/api/modules').set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(500);
     expect(consoleError).toHaveBeenCalledWith(
@@ -51,7 +51,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
   it('GET /api/modules/:id logs and 500s when db.getModuleDetail rejects', async () => {
     mocks.getModuleDetail.mockRejectedValue(new Error('detail boom'));
 
-    const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(500);
     expect(consoleError).toHaveBeenCalledWith(
@@ -81,7 +81,9 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
   it('GET /api/images logs and 502s when fetch rejects', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('img-list down')) as typeof fetch;
 
-    const res = await request(app).get('/api/images?module_id=aabbccddeeff').set('X-API-Key', KEY);
+    const res = await request(app)
+      .get('/api/images?module_id=aabbccddeeff')
+      .set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(502);
     expect(consoleError).toHaveBeenCalledWith(
@@ -96,7 +98,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
   it('DELETE /api/images/:filename logs and 502s when fetch rejects', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('delete fetch down')) as typeof fetch;
 
-    const res = await request(app).delete('/api/images/foo.jpg').set('X-API-Key', KEY);
+    const res = await request(app).delete('/api/images/foo.jpg').set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(502);
     expect(consoleError).toHaveBeenCalledWith(
@@ -111,7 +113,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
   it('DELETE /api/modules/:id logs and 502s when fetch rejects', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('mod delete down')) as typeof fetch;
 
-    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    const res = await request(app).delete(`/api/modules/${VALID_ID}`).set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(502);
     expect(consoleError).toHaveBeenCalledWith(
@@ -128,7 +130,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
 
     const res = await request(app)
       .get(`/api/modules/${VALID_ID}/logs`)
-      .set('X-API-Key', KEY)
+      .set('X-Admin-Key', KEY)
       .set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(502);
@@ -148,7 +150,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
     // ships) on every successful request. Pin the absence here.
     mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: false });
 
-    const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
+    const res = await request(app).get('/api/modules').set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(200);
     expect(consoleError).not.toHaveBeenCalled();
@@ -174,7 +176,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
       heartbeatsFailed: false,
     });
 
-    const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-Admin-Key', KEY);
 
     expect(res.status).toBe(200);
     expect(consoleError).not.toHaveBeenCalled();

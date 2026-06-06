@@ -358,8 +358,7 @@ openssl rand -base64 32
 
 ```bash
 # Create or edit .env file in project root
-HIGHFIVE_API_KEY=your_generated_key_here
-VITE_API_KEY=your_generated_key_here
+HIGHFIVE_API_KEY=your_generated_key_here   # the only secret (#142)
 
 # Deploy with docker-compose
 docker-compose up -d
@@ -385,17 +384,16 @@ Environment="HIGHFIVE_API_KEY=your_generated_key_here"
 
 ### Frontend Configuration
 
-The frontend API key is built into the image during Docker build. The
-homepage Dockerfile requires the **repo root** as build context (so npm
-workspaces resolve `@highfive/contracts`), and `VITE_API_URL` must
-include the `/api` suffix (`homepage/src/services/api.ts`'s `ApiService`
-appends resource paths directly to it):
+The frontend bundle carries **no** secret (#142 / ADR-019) — only the API
+base URL is baked in. The homepage Dockerfile requires the **repo root** as
+build context (so npm workspaces resolve `@highfive/contracts`), and
+`VITE_API_URL` must include the `/api` suffix (`homepage/src/services/api.ts`'s
+`ApiService` appends resource paths directly to it):
 
 ```bash
 # From the repo root (NOT from ./homepage - the workspace wouldn't resolve)
 docker build \
   -f homepage/Dockerfile \
-  --build-arg VITE_API_KEY=your_key \
   --build-arg VITE_API_URL=https://api.highfive.schutera.com/api \
   -t highfive-frontend \
   .

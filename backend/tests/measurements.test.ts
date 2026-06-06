@@ -25,10 +25,15 @@ afterEach(() => {
 });
 
 describe('GET /api/modules/:id/measurements', () => {
-  it('returns 401 without X-API-Key', async () => {
+  it('is public — no credential required; reaches the upstream proxy (#142)', async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: 'upstream down' }),
+    });
     const res = await request(app).get(`/api/modules/${VALID_ID}/measurements?metric=battery_pct`);
-    expect(res.status).toBe(401);
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(res.status).not.toBe(401);
+    expect(globalThis.fetch).toHaveBeenCalled();
   });
 
   it('returns 400 on malformed module id and does not call upstream', async () => {
@@ -140,21 +145,19 @@ describe('POST /api/modules/:id/measurements', () => {
     source: 'weather-api',
   };
 
-  it('returns 401 without X-API-Key', async () => {
-    const res = await request(app)
-      .post(`/api/modules/${VALID_ID}/measurements`)
-      .send(validBody);
+  it('returns 401 without any admin credential', async () => {
+    const res = await request(app).post(`/api/modules/${VALID_ID}/measurements`).send(validBody);
     expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/unauthorized/i);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('returns 403 without X-Admin-Key (regular API key is not enough)', async () => {
+  it('returns 401 when X-Admin-Key is wrong', async () => {
     const res = await request(app)
       .post(`/api/modules/${VALID_ID}/measurements`)
-      .set('X-API-Key', KEY)
+      .set('X-Admin-Key', 'not-the-key')
       .send(validBody);
-    expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/admin/i);
+    expect(res.status).toBe(401);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -202,15 +205,27 @@ describe('POST /api/modules/:id/measurements', () => {
       .set('X-Admin-Key', KEY)
       .send({
         measurements: [
-          { ts: '2026-05-20T12:00:00Z', metric: 'temperature_c', value: 21.5, source: 'weather-api' },
-          { ts: '2026-05-20T13:00:00Z', metric: 'temperature_c', value: 22.5, source: 'weather-api' },
+          {
+            ts: '2026-05-20T12:00:00Z',
+            metric: 'temperature_c',
+            value: 21.5,
+            source: 'weather-api',
+          },
+          {
+            ts: '2026-05-20T13:00:00Z',
+            metric: 'temperature_c',
+            value: 22.5,
+            source: 'weather-api',
+          },
         ],
       });
 
     const [, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     const forwarded = JSON.parse((init as { body: string }).body);
     expect(forwarded.measurements).toHaveLength(2);
-    expect(forwarded.measurements.every((m: { module_mac: string }) => m.module_mac === VALID_ID)).toBe(true);
+    expect(
+      forwarded.measurements.every((m: { module_mac: string }) => m.module_mac === VALID_ID),
+    ).toBe(true);
   });
 
   it('forwards upstream validation error verbatim', async () => {
@@ -225,7 +240,12 @@ describe('POST /api/modules/:id/measurements', () => {
       .post(`/api/modules/${VALID_ID}/measurements`)
       .set('X-API-Key', KEY)
       .set('X-Admin-Key', KEY)
-      .send({ ts: '2026-05-20T12:00:00Z', metric: 'battery_pct', value: 'not-a-number', source: 'x' });
+      .send({
+        ts: '2026-05-20T12:00:00Z',
+        metric: 'battery_pct',
+        value: 'not-a-number',
+        source: 'x',
+      });
 
     expect(res.status).toBe(400);
     expect(res.body).toEqual(payload);

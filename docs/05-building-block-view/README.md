@@ -33,7 +33,7 @@ flowchart TD
     ESP -->|"POST /heartbeat<br/>(telemetry; hourly; mac, battery, rssi, uptime_ms, free_heap, fw_version)"| DDB
     IMG -->|"POST /add_progress_for_module<br/>POST /modules/&lt;mac&gt;/heartbeat (post-upload aggregate; battery only)<br/>GET /modules/&lt;mac&gt;/progress_count"| DDB
     BE -->|"GET /modules /nests /progress"| DDB
-    HP -->|"fetch (X-API-Key)"| BE
+    HP -->|"fetch (public reads; admin session cookie for writes)"| BE
 ```
 
 > Two endpoints share the word "heartbeat":

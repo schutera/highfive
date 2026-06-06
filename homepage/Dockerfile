@@ -18,16 +18,12 @@ RUN npm ci
 COPY contracts ./contracts
 COPY homepage ./homepage
 
+# The homepage bundle carries NO API secret (issue #142 / ADR-019): reads are
+# public and admin actions ride a server-side session cookie. Only the API base
+# URL is baked in. (VITE_API_KEY was removed here — a single-page app cannot hold
+# a secret, so anything inlined is public.)
 ARG VITE_API_URL=https://api.highfive.schutera.com
-# No default: docker-compose.prod.yml passes this via build-args with a
-# fail-fast ${VITE_API_KEY:?...} so a missing secret aborts before build.
-# A standalone `docker build` without --build-arg produces an image with
-# an empty key and the running app rejects every request - acceptable
-# failure mode, strictly better than baking a broken sentinel into the
-# image.
-ARG VITE_API_KEY
 ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_API_KEY=$VITE_API_KEY
 
 WORKDIR /app/homepage
 RUN npm run build

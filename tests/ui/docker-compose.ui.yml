@@ -91,10 +91,12 @@ services:
       # `'https://highfive.schutera.com'` under isProduction() - which
       # blocks `http://localhost:6173`. `'test'` is in the
       # isProduction() dev safelist (see `backend/src/env.ts`'s
-      # DEV_ENV_TOKENS) so CORS falls back to '*' and the cross-origin
-      # fetch from the homepage container to the backend works.
-      # HIGHFIVE_API_KEY is still set explicitly so the dev-fallback
-      # off-ramp the safelist allows is never exercised.
+      # DEV_ENV_TOKENS) so CORS reflects the request origin
+      # (`origin: true`) — which, paired with `credentials: true`, lets the
+      # admin session cookie flow on the cross-origin (but same-site)
+      # localhost fetch. `'test'` also keeps the cookie non-Secure so it is
+      # stored over plain http. HIGHFIVE_API_KEY below is the admin LOGIN
+      # PASSWORD the Playwright specs POST to /api/admin/login.
       NODE_ENV: test
       PORT: '3002'
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
@@ -115,9 +117,10 @@ services:
       dockerfile: homepage/Dockerfile
       args:
         # Baked into the bundle at build time. The browser running on the
-        # host resolves these URLs against the host port mappings above.
+        # host resolves this URL against the host port mappings above.
+        # No VITE_API_KEY: the bundle holds no secret (#142 / ADR-019); the
+        # specs log in via POST /api/admin/login to obtain the session cookie.
         VITE_API_URL: http://localhost:4002/api
-        VITE_API_KEY: hf_test_key
     ports:
       - '6173:80'
     depends_on:

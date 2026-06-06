@@ -299,7 +299,7 @@ flowchart TD
     IMG["image-service<br/>/upload"]
     Files["images/&lt;file&gt;.jpg<br/>images/&lt;file&gt;.jpg.log.json"]
     LogsAPI["image-service<br/>GET /modules/&lt;mac&gt;/logs"]
-    BE["backend<br/>GET /api/modules/:id/logs<br/>(proxies, X-API-Key)"]
+    BE["backend<br/>GET /api/modules/:id/logs<br/>(proxies, requireAdmin)"]
     HP["homepage<br/>ModulePanel<br/>'Telemetry' section"]
 
     ESP -->|"multipart: mac, battery, logs, image"| IMG
@@ -311,7 +311,7 @@ flowchart TD
 
 1. ESP uploads an image. The `logs` part is parsed and wrapped in a typed envelope (`image-service/services/sidecar.py`'s `LogSidecarEnvelope`), then written to `{image_path}.log.json`.
 2. `GET /modules/<mac>/logs?limit=N` (image-service) globs `*.log.json`, filters by `mac`, sorts by mtime, returns the newest N entries — each entry is the envelope shape below.
-3. `GET /api/modules/:id/logs` (backend) proxies the above behind the existing `X-API-Key` middleware so the frontend can use a single origin.
+3. `GET /api/modules/:id/logs` (backend) proxies the above behind `requireAdmin` (session cookie or `X-Admin-Key`; #142 / ADR-019) so the frontend can use a single origin.
 4. `ModulePanel.tsx` has a collapsible "Telemetry" section that lazy-loads logs when opened. The `TelemetryRow` component reads service-injected metadata at the top level and the raw ESP telemetry from `entry.payload`.
 
 ### Sidecar file contents
@@ -357,17 +357,20 @@ The Telemetry section is **admin-only** and hidden from the normal dashboard. To
 
 Reading the telemetry is a good first stop whenever a module looks unhealthy: a spike in `wifi_reconnects`, a low `min_free_heap`, or non-2xx `last_http_codes` will usually point at the problem immediately.
 
-### Admin key (backend gate)
+### Admin gate (backend)
 
-On top of the `?admin=1` UI flag, the `GET /api/modules/:id/logs` endpoint requires an `X-Admin-Key` header matching the existing `HIGHFIVE_API_KEY`. This is the same key used by all `/api` routes, but regular dashboard pages send it automatically (via the bundled `VITE_API_KEY`). The admin endpoint demands it be provided _explicitly_ as `X-Admin-Key` — casual visitors who just open the dashboard will never trigger that header.
+On top of the `?admin=1` UI flag, `GET /api/modules/:id/logs` is gated by
+`requireAdmin` (#142 / ADR-019): it needs **either** a valid `hf_admin_session`
+cookie **or** an `X-Admin-Key: <HIGHFIVE_API_KEY>` header (the server-side
+machine credential). Reads are public, but the dashboard does not hold any
+secret, so casual visitors never satisfy this gate.
 
-**Frontend UX:** the admin key is **not** sent automatically. The first
-time a user opens the Telemetry section in a tab, the page renders an
-inline `AdminKeyForm` (React component, replaced the legacy
-`window.prompt()` flow in PR 17 commit `5b110de`) and stores the
-submitted key in `sessionStorage['hf_admin_key']` (cleared on tab
-close). If the backend returns 403, the stored key is cleared and the
-form is re-shown. No extra env vars needed — you reuse the
+**Frontend UX:** the first time a user opens the Telemetry section in a tab,
+the page renders an inline `AdminKeyForm` that **logs in** via
+`POST /api/admin/login` (`api.login()`), and the resulting `HttpOnly` cookie
+authorises the `/logs` fetch (`credentials: 'include'`). The key is never
+stored client-side — only the cookie, which JS cannot read. If the backend
+returns 401, the form is re-shown. No extra env vars: you reuse the
 `HIGHFIVE_API_KEY` you already have.
 
 The same `AdminPage` is the admin telemetry table at `/admin?admin=1`

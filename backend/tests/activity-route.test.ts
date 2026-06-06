@@ -26,10 +26,15 @@ afterEach(() => {
 });
 
 describe('GET /api/modules/:id/activity', () => {
-  it('returns 401 without X-API-Key', async () => {
+  it('is public — no credential required; reaches the upstream proxy (#142)', async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: 'upstream down' }),
+    });
     const res = await request(app).get(`/api/modules/${VALID_ID}/activity`);
-    expect(res.status).toBe(401);
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(res.status).not.toBe(401);
+    expect(globalThis.fetch).toHaveBeenCalled();
   });
 
   it('returns 400 on malformed module id and does not call upstream', async () => {

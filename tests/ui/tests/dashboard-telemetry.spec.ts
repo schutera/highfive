@@ -32,13 +32,16 @@ const EXPECTED: TelemetryEntry = {
 
 test.describe('dashboard telemetry render', () => {
   test.beforeEach(async ({ page }) => {
-    // Pre-seed sessionStorage with the admin key so the panel skips the
-    // AdminKeyForm prompt and goes straight to /api/modules/:id/logs.
-    // Mirrors what AdminKeyForm.submitAdminKey writes after a key entry.
-    await page.addInitScript(() => {
-      sessionStorage.setItem('hf_admin', '1');
-      sessionStorage.setItem('hf_admin_key', 'hf_test_key');
+    // Establish a real admin session (#142 / ADR-019): POST the key to
+    // /api/admin/login so the context cookie jar holds the HttpOnly session
+    // cookie. The browser then sends it on the panel's /logs fetch
+    // (credentials: 'include'). page.request shares cookies with the page's
+    // browser context. The old sessionStorage hf_admin_key seed is gone — the
+    // bundle holds no secret and the panel reads the cookie, not storage.
+    const login = await page.request.post('http://localhost:4002/api/admin/login', {
+      data: { password: 'hf_test_key' },
     });
+    expect(login.ok()).toBeTruthy();
   });
 
   test('TelemetryRow renders literal values from the seeded sidecar', async ({ page }) => {
@@ -49,10 +52,9 @@ test.describe('dashboard telemetry render', () => {
     const response = await page.request.get(
       `http://localhost:4002/api/modules/${TELEMETRY_MAC}/logs?limit=5`,
       {
-        headers: {
-          'X-API-Key': 'hf_test_key',
-          'X-Admin-Key': 'hf_test_key',
-        },
+        // X-Admin-Key is the machine credential for this direct fetch; the
+        // browser walkthrough below uses the cookie from beforeEach's login.
+        headers: { 'X-Admin-Key': 'hf_test_key' },
       },
     );
     expect(response.ok()).toBeTruthy();

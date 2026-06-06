@@ -15,16 +15,11 @@ import { displayLabel } from '../lib/displayLabel';
 // import ActivityWeatherChart from './ActivityWeatherChart';
 // import BatteryHistoryChart from './BatteryHistoryChart';
 
-const ADMIN_KEY_STORAGE = 'hf_admin_key';
-
-function hasAdminKey(): boolean {
-  if (typeof window === 'undefined') return false;
-  return !!sessionStorage.getItem(ADMIN_KEY_STORAGE);
-}
-
 // Admin-only UI is unlocked by opening the dashboard with ?admin=1 in the URL.
 // The flag persists in sessionStorage so it survives navigation within the
-// session but is gone after the tab is closed.
+// session but is gone after the tab is closed. This only reveals the admin
+// *affordances*; the privileged telemetry fetch is gated server-side by the
+// session cookie (#142 / ADR-019), not by this flag.
 function isAdminMode(): boolean {
   if (typeof window === 'undefined') return false;
   const params = new URLSearchParams(window.location.search);
@@ -56,9 +51,9 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [keyError, setKeyError] = useState<string | null>(null);
-  // Tracks whether a key is currently stored. Updated explicitly on submit /
-  // forget so the AdminKeyForm shows or hides reactively.
-  const [hasKey, setHasKey] = useState<boolean>(hasAdminKey);
+  // Tracks whether we believe an admin session cookie is present. Drives the
+  // AdminKeyForm-vs-telemetry render; the backend is the real gate.
+  const [hasKey, setHasKey] = useState<boolean>(false);
   const adminMode = isAdminMode();
 
   useEffect(() => {
@@ -67,9 +62,22 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
     setLogsOpen(false);
     setLogsError(null);
     setKeyError(null);
-    setHasKey(hasAdminKey());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [module.id]);
+
+  // In admin mode, learn up-front whether a session cookie is already present
+  // so opening Telemetry goes straight to the logs rather than flashing the
+  // login form at an already-authenticated operator.
+  useEffect(() => {
+    if (!adminMode) return;
+    let cancelled = false;
+    api.checkSession().then((ok) => {
+      if (!cancelled) setHasKey(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [adminMode]);
 
   const loadModuleDetail = async () => {
     try {
@@ -88,22 +96,17 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   };
 
   const loadLogs = async () => {
-    if (!hasAdminKey()) {
-      // No key stored — the inline AdminKeyForm will be rendered instead.
-      // We deliberately don't set logsError here; the form is the prompt.
-      setHasKey(false);
-      return;
-    }
     try {
       setLogsLoading(true);
       setLogsError(null);
       setKeyError(null);
       const data = await api.getModuleLogs(module.id, 10);
       setLogs(data);
+      setHasKey(true);
     } catch (err) {
       console.error('Error loading telemetry:', err);
       if (err instanceof Error && err.message === 'unauthorized') {
-        // api.getModuleLogs already cleared sessionStorage on 401/403.
+        // No valid session cookie — render the login form (AdminKeyForm).
         setHasKey(false);
         setKeyError(t('adminKey.invalid'));
       } else {
@@ -117,26 +120,36 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   const toggleLogs = () => {
     const next = !logsOpen;
     setLogsOpen(next);
-    if (next && logs === null && !logsLoading && hasAdminKey()) {
+    // The fetch itself gates on the session cookie; if it 401s, loadLogs
+    // flips hasKey to false and the login form renders.
+    if (next && logs === null && !logsLoading) {
       loadLogs();
     }
   };
 
-  const submitAdminKey = (key: string) => {
-    if (typeof window === 'undefined') return;
-    sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
-    setHasKey(true);
+  // AdminKeyForm now collects the admin password and logs in via the session
+  // endpoint (#142 / ADR-019); the key is never stored client-side — only the
+  // resulting HttpOnly cookie. On success we fetch the logs; on a wrong key we
+  // surface an inline error and keep the form up.
+  const submitAdminKey = async (key: string) => {
+    setLogsLoading(true);
     setKeyError(null);
-    // Re-attempt the fetch with the freshly stored key. If it 401/403s,
-    // api.getModuleLogs clears sessionStorage and loadLogs flips hasKey
-    // back to false + sets keyError, re-rendering the form.
-    loadLogs();
+    try {
+      if (await api.login(key)) {
+        setHasKey(true);
+        await loadLogs();
+      } else {
+        setKeyError(t('adminKey.invalid'));
+      }
+    } catch {
+      setKeyError(t('adminKey.invalid'));
+    } finally {
+      setLogsLoading(false);
+    }
   };
 
-  const forgetAdminKey = () => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem(ADMIN_KEY_STORAGE);
-    }
+  const forgetAdminKey = async () => {
+    await api.logout();
     setHasKey(false);
     setLogs(null);
     setLogsError(null);

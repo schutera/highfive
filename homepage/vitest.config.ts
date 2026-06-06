@@ -14,9 +14,9 @@ export default defineConfig({
   },
   define: {
     // Provide stable VITE_* env values for tests so import.meta.env
-    // doesn't leak undefined into components.
+    // doesn't leak undefined into components. (No VITE_API_KEY: the bundle
+    // holds no secret — #142 / ADR-019.)
     'import.meta.env.VITE_API_URL': JSON.stringify('http://localhost:3002/api'),
-    'import.meta.env.VITE_API_KEY': JSON.stringify('hf_test_key'),
     'import.meta.env.VITE_STRIPE_LINK': JSON.stringify('#'),
     'import.meta.env.VITE_INIT_BASE_URL': JSON.stringify('http://localhost:8002'),
     'import.meta.env.VITE_UPLOAD_BASE_URL': JSON.stringify('http://localhost:8000'),

@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted (commit `a094792`).
+Accepted (commit `a094792`). **Partially superseded by
+[ADR-019](adr-019-admin-session-no-bundle-secret.md):** the homepage no longer
+holds the secret (there is no `VITE_API_KEY`, and the `X-API-Key` blanket
+middleware described below is gone — reads are public). Admin auth is now a
+server-side session cookie. The single-secret server-side model and the
+`X-Admin-Key` machine credential described below remain in force.
 
 ## Context
 

@@ -23,7 +23,7 @@ First tagged release aimed at keeping deployed modules alive in the field and ma
 - **Task watchdog.** `esp_task_wdt_init(30, true)` with per-iteration reset. Any 30-second hang now auto-reboots.
 - **Daily reboot.** After 24 hours of uptime the device restarts automatically, clearing heap fragmentation and stale TCP state.
 - **No more `while(true)` hard-locks.** Camera init failure and WiFi initial-connect timeout now call `ESP.restart()` instead of spinning forever.
-- **Circular log buffer.** New `logbuf.{h,cpp}` exposes `logf()` — writes to Serial *and* to a 2 KB in-memory ring buffer.
+- **Circular log buffer.** New `logbuf.{h,cpp}` exposes `logf()` — writes to Serial _and_ to a 2 KB in-memory ring buffer.
 - **Reset-reason & boot-count persistence.** Reset reason is read from `esp_reset_reason()` at boot and logged. Boot count is incremented in NVS via `Preferences` namespace `"telemetry"`.
 - **Keep-alive socket cleanup.** Every error path in `postImage()` now calls `client.stop()` before returning.
 - **`FIRMWARE_VERSION` macro** introduced in `esp_init.h` (currently `"1.0.0"`).
@@ -44,6 +44,12 @@ First tagged release aimed at keeping deployed modules alive in the field and ma
 - New `TelemetryEntry` TypeScript type.
 
 ### Admin key (backend gate)
+
+> **Superseded by #142 / ADR-019.** The `X-API-Key` blanket gate and the
+> `sessionStorage['hf_admin_key']` / `window.prompt()` flow described in this
+> historical entry no longer reflect current behaviour: reads are public, and
+> admin actions use a server-side session cookie (`POST /api/admin/login`) or
+> the `X-Admin-Key` machine credential. See `docs/08-crosscutting-concepts/auth.md`.
 
 - **`GET /api/modules/:id/logs`** now requires an `X-Admin-Key` header matching the existing `HIGHFIVE_API_KEY` — no new secrets to manage.
 - **Frontend** prompts for the key via `window.prompt()` on first Telemetry open per tab, stores it in `sessionStorage['hf_admin_key']`, and sends it as `X-Admin-Key`. On 403 the key is cleared and re-requested. The key is not sent automatically by normal dashboard pages.

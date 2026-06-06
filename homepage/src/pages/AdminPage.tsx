@@ -7,7 +7,6 @@ import RenameModuleModal from '../components/RenameModuleModal';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
 
-const SESSION_KEY = 'highfive_admin_auth';
 // Admin image gallery loads newest-first in pages of this size; the rest
 // come in via the "Load more" button. Keeps the initial render fast on a
 // large image_uploads table (see the slow-list incident in chapter 11).
@@ -16,22 +15,27 @@ const PAGE_SIZE = 5;
 function LoginGate({ onAuth }: { onAuth: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
+  // Real login (#142 / ADR-019): POST the key to the backend, which validates
+  // it server-side and sets an HttpOnly session cookie on success. The key is
+  // never stored in the browser — only the cookie, which JS cannot read. The
+  // old gate `fetch('/api/health', …)` authenticated nothing (health is
+  // public, so any string "succeeded").
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(false);
+    setSubmitting(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/health`, {
-        headers: { 'X-API-Key': password },
-      });
-      if (res.ok) {
-        sessionStorage.setItem(SESSION_KEY, password);
+      if (await api.login(password)) {
         onAuth();
       } else {
         setError(true);
       }
     } catch {
       setError(true);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -57,9 +61,10 @@ function LoginGate({ onAuth }: { onAuth: () => void }) {
         {error && <p className="text-red-600 text-xs mb-3">Invalid API key. Try again.</p>}
         <button
           type="submit"
-          className="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
+          disabled={submitting}
+          className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
         >
-          Sign in
+          {submitting ? 'Signing in…' : 'Sign in'}
         </button>
         <Link to="/" className="block text-center text-xs text-gray-400 hover:text-gray-600 mt-4">
           Back to Home
@@ -70,7 +75,12 @@ function LoginGate({ onAuth }: { onAuth: () => void }) {
 }
 
 export default function AdminPage() {
-  const [authed, setAuthed] = useState(() => !!sessionStorage.getItem(SESSION_KEY));
+  // Auth is a server-side session cookie (#142 / ADR-019); ask the backend
+  // whether this browser holds a valid one rather than trusting any
+  // client-side flag. `checkingAuth` covers the round-trip so we don't flash
+  // the login form for an already-authenticated operator.
+  const [authed, setAuthed] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [modules, setModules] = useState<Module[]>([]);
   const [images, setImages] = useState<ImageUpload[]>([]);
   const [total, setTotal] = useState(0);
@@ -98,6 +108,29 @@ export default function AdminPage() {
   useEffect(() => {
     if (authed) loadImages();
   }, [selectedModule, authed]);
+
+  // Ask the backend once on mount whether we already hold a valid session
+  // cookie (e.g. operator returning to /admin in the same browser).
+  useEffect(() => {
+    let cancelled = false;
+    api.checkSession().then((ok) => {
+      if (!cancelled) {
+        setAuthed(ok);
+        setCheckingAuth(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!authed) {
     return <LoginGate onAuth={() => setAuthed(true)} />;
@@ -250,8 +283,8 @@ export default function AdminPage() {
               Dashboard
             </Link>
             <button
-              onClick={() => {
-                sessionStorage.removeItem(SESSION_KEY);
+              onClick={async () => {
+                await api.logout();
                 setAuthed(false);
               }}
               className="text-sm text-gray-400 hover:text-gray-600 font-medium"
@@ -621,9 +654,9 @@ export default function AdminPage() {
       )}
 
       {/* Rename modal — opens when a row's pencil icon is clicked. The
-          modal carries the api call + admin-key prompt + 409-collision
+          modal carries the api call + login prompt (on 401) + 409-collision
           inline error; we just give it a Module and an `onSaved`
-          callback to keep the local list in sync. See ADR-011. */}
+          callback to keep the local list in sync. See ADR-011 / ADR-019. */}
       {renameTarget && (
         <RenameModuleModal
           module={renameTarget}

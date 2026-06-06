@@ -6,8 +6,10 @@ import { parseModuleId } from '@highfive/contracts';
 import { LanguageProvider } from '../i18n/LanguageContext';
 
 // NOTE(perf/data): <BatteryHistoryChart> is currently shelved — its only
-// consumer (ModulePanel.tsx) has the import commented out because the
-// battery series is fabricated firmware data (`random(1,100)`). These
+// consumer (ModulePanel.tsx) has the import commented out because there
+// is no real battery telemetry — `carpenter`+ firmware omits battery, so
+// the production series is empty (the dev seed is a synthetic cosine, see
+// db/schema.py; older firmware sent `random(1,100)`). These
 // tests still pass but exercise a component not mounted in production
 // today; keep them as re-enable scaffolding. Green here does NOT mean
 // the feature is live (its Playwright gate is skipped for the same

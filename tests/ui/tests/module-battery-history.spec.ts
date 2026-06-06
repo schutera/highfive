@@ -21,8 +21,10 @@ import { test, expect } from '@playwright/test';
 
 // TODO(perf/data): Re-enable together with <BatteryHistoryChart> in
 // ModulePanel.tsx. The chart was commented out (perf/dashboard-load)
-// because the seeded `battery_pct` series is fabricated firmware data
-// (`random(1,100)`). While the chart is shelved this spec is skipped —
+// because there is no real battery telemetry — `carpenter`+ firmware omits
+// battery (the seeded `battery_pct` is a synthetic cosine, not a real
+// reading; older firmware sent `random(1,100)`). While the chart is shelved
+// this spec is skipped —
 // keep it intact so re-enabling the chart re-enables its Playwright gate
 // in the same change (CLAUDE.md rule 4 / ADR-014). The
 // `data-testid="battery-history-chart"` node never mounts today, so

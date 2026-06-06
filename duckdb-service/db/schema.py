@@ -444,8 +444,8 @@ def init_db():
             # The value is a per-module phase-shifted cosine in [55, 95]
             # so the dashboard chart shows visible motion instead of a
             # flat 75% line — demonstrates the read shape; the *real*
-            # battery story is the open #8a / #8b work to replace
-            # `random(1, 100)` in the firmware. Glossary entry
+            # battery story is the open #8a / #8b work to add real ADC
+            # sensing (current firmware omits battery entirely). Glossary entry
             # "Measurement" notes the caveat so a future reader doesn't
             # mistake this for a realistic sensor trace.
             measurements_seeded = con.execute(

@@ -441,6 +441,43 @@ _new_ root again, add that root's PEM to the bundle in
 and bump the firmware — see [ADR-010](09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)
 and the chapter-11 lesson "Pinned `GTS Root R1` for geolocation".
 
+## Module was online, then greys out and reboot-loops after the `longhorn` OTA
+
+**Symptom.** A module that heartbeated reliably starts going grey on the
+dashboard. Server-side, its `/heartbeats/<id>` history shows every heartbeat
+at a tiny `uptime_ms` (~15–20 s, i.e. a fresh boot each time) and nginx logs
+show repeated `POST /new_module` (sent only from `setup()`) — i.e. it is
+**reboot-looping**, roughly every 25–30 minutes, then goes silent.
+
+**Cause.** The `longhorn` geolocation fix (above) made the googleapis TLS
+handshake _succeed_ where it used to fail-fast — but the geolocation
+`HTTPClient` call had **no timeout**, so the now-completing call (or a stalled
+handshake; the ESP32 default handshake timeout is 120 s) can block past the
+60 s task watchdog and reboot the device. The 30-min cadence is the loop's
+geolocation deferred-retry. Full write-up: chapter-11 lesson "A fix that makes
+a failing network call _succeed_ exposes the now-longer path".
+
+**Isolate it (server-side, no serial needed).**
+
+```bash
+# Tiny uptime_ms on consecutive heartbeats = boot loop (run on the prod host)
+curl -s "http://127.0.0.1:8000/heartbeats/<module_id>?limit=12" | python3 -m json.tool
+# Repeated /new_module from one IP in a short window = repeated boots
+grep -hE "POST /new_module" /var/log/nginx/access.log* | tail
+```
+
+**Fix.** `carpenter` / OTA seq 4 bounds the handshake/connect/read timeouts
+and adds a free-heap preflight in `attemptGeolocation`. **Flash one module via
+serial first** and confirm from the boot log (`esp_reset_reason` + the
+issue-#42 breadcrumb) before OTA-ing the fleet. Do not roll back to `mining`
+(`allow_downgrade:false`; seq only moves forward).
+
+> **Note:** there is no real battery sensing. Pre-`carpenter` firmware sent
+> `random(1,100)`; `carpenter`+ omits battery from the heartbeat entirely and
+> sends a `0` sentinel only on upload (for `module_configs.battery_level`, which
+> the `/upload` endpoint requires). Either way it is **not** a real charge
+> level — don't diagnose power problems from it.
+
 ---
 
 ## Useful commands reference

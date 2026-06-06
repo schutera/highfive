@@ -7,11 +7,13 @@ import AdminKeyForm from './AdminKeyForm';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
 // TODO(perf/data): Re-enable once these panels are backed by real data.
-// Both were disabled because the series are currently fabricated — the
-// battery trace is firmware `random(1,100)` (see BatteryHistoryChart
-// docstring) and the activity/weather chart fired a slow browser-direct
+// Both were disabled because the series are not real telemetry — the ESP
+// has no battery-voltage sensing, so `carpenter`+ firmware OMITS battery from
+// the heartbeat (the `battery_pct` dual-write source), leaving an honest gap
+// rather than a fabricated 0%/`random(1,100)` series (see BatteryHistoryChart
+// docstring), and the activity/weather chart fired a slow browser-direct
 // Open-Meteo fetch on every panel open. Removing them is the bulk of the
-// side-panel load-time fix.
+// side-panel load-time fix. Keep them OFF until real battery sensing lands.
 // import ActivityWeatherChart from './ActivityWeatherChart';
 // import BatteryHistoryChart from './BatteryHistoryChart';
 

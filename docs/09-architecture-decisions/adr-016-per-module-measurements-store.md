@@ -20,7 +20,7 @@ Today those signals are scattered:
 
 - `module_heartbeats.battery` — per-heartbeat integer percentage.
 - `image_uploads.uploaded_at` — already projected to hourly/daily
-  buckets by ``routes/modules.py``'s `activity_timeseries`.
+  buckets by `routes/modules.py`'s `activity_timeseries`.
 - `image-service` classifier output (stub today; in flight per
   [#112](https://github.com/schutera/highfive/issues/112)) — no
   canonical store at all.
@@ -258,10 +258,12 @@ ambiguity.
 
 ### Out of scope, tracked elsewhere
 
-- The `random(1, 100)` noise the firmware currently sends as
-  `battery` — [#8a](https://github.com/schutera/highfive/issues/8).
-  The measurements store records what the firmware sends honestly;
-  once #8a lands, the same column starts holding real percentages.
+- Real battery sensing — [#8a](https://github.com/schutera/highfive/issues/8).
+  There is no battery ADC yet; `carpenter`+ firmware omits `battery`
+  from the heartbeat so the dual-write skips and no fabricated
+  `battery_pct` enters the store (older firmware sent `random(1, 100)`).
+  Once #8a/#8b land, the heartbeat resumes sending the field and the
+  same column starts holding real percentages.
 - A measurements writer for the image classifier — gated on the ML
   pipeline work in
   [#112](https://github.com/schutera/highfive/issues/112).

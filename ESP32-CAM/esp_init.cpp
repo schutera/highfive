@@ -392,8 +392,12 @@ bool loadConfig(esp_config_t *esp_config) {
   Serial.printf("------ ESP module identifier: %llu\n",
                 (unsigned long long)esp_config->esp_ID);
 
-  // ---- set initial battery level ---- //
-  esp_config->battery_level = 90;
+  // ---- battery level (SCAFFOLDING) ---- //
+  // No battery-voltage ADC sensing exists yet; 0 is a clear "no real reading"
+  // sentinel. This was a hardcoded 90, which masqueraded as a healthy charge
+  // level on the dashboard and during diagnosis. See client.cpp's upload-time
+  // battery note for the wider context.
+  esp_config->battery_level = 0;
   esp_config->email[0] = '\0';
 
   /* DEFAULTS — production fallbacks for the "no config file at all" path.
@@ -590,10 +594,10 @@ static bool attemptGeolocation(geolocation_t* out) {
   }
 
   // Issue #42 instrumentation: breadcrumb each blocking call inside
-  // attemptGeolocation. The HTTPClient calls below have NO explicit
-  // setTimeout(), so a slow Google response can block past the 60 s
-  // TASK_WDT budget undetected. If the WDT fires, the next boot's
-  // last_stage_before_reboot field will name the section.
+  // attemptGeolocation. The HTTPClient + TLS calls below are now explicitly
+  // bounded (setHandshakeTimeout / setConnectTimeout / setTimeout — see the
+  // longhorn reboot-loop fix below); the breadcrumb still names the active
+  // section in last_stage_before_reboot if anything ever trips the WDT.
   hf::breadcrumbSet("getGeolocation:wifi_scan");
   int n = WiFi.scanNetworks();
   Serial.println("Scan complete");
@@ -613,6 +617,56 @@ static bool attemptGeolocation(geolocation_t* out) {
   String requestBody;
   serializeJson(doc, requestBody);
 
+  // Free the WiFi scan result table now that the request body is built.
+  // scanNetworks() holds a per-AP allocation until the next scan or an
+  // explicit delete; carrying it through the TLS handshake below needlessly
+  // raises the heap peak. Defense-in-depth for the longhorn reboot loop
+  // (the no-timeout note below is the primary cause).
+  WiFi.scanDelete();
+
+  // --- longhorn geolocation reboot-loop fix ---
+  // After the longhorn OTA, field modules looped on ~25-30 min reboots, then
+  // went silent (dashboard greys them out). Diagnosed from SERVER telemetry
+  // only — not reproduced on a device — so treat the mechanism below as the
+  // leading hypothesis and confirm reset_reason + the #42 breadcrumb on a
+  // bench module before trusting it.
+  //
+  // LEADING HYPOTHESIS: this HTTPClient call had NO timeout. On the prior
+  // `mining` firmware the googleapis TLS handshake FAILED FAST at cert-verify
+  // (R1 pinned vs the served R4 chain), so the call always returned well
+  // under the 60 s task-WDT budget. The R1+R4 bundle (the CA-rotation fix)
+  // lets the handshake proceed, so the call now actually connects and reads —
+  // and a stalled handshake or read can block past the 60 s WDT → clean
+  // reboot. The observed cadence points at the loop's 30-min deferred retry
+  // (tickGeolocationDeferredRetry), NOT boot geolocation: setup() runs
+  // getGeolocation before initNewModuleOnServer, yet the field modules
+  // re-POSTed /new_module every cycle, so boot geolocation must have
+  // completed — the WDT fires later, on the loop retry. Bounding every
+  // blocking step under the WDT budget removes it: setHandshakeTimeout caps
+  // the TLS handshake (ESP32 default is 120 s!), setConnectTimeout the TCP
+  // connect, setTimeout a per-read stall. getGeolocation()'s 3-attempt boot
+  // path (2+6+14 s backoff) stays under 60 s and feeds the WDT between
+  // attempts. The same three bounds are applied to initNewModuleOnServer,
+  // which carries the identical unbounded-call defect.
+  //
+  // SECONDARY guard: skip the attempt when the largest CONTIGUOUS free block
+  // is low (not total free heap — mbedTLS needs large contiguous allocations,
+  // and a long-running fragmented heap can show ample total-free while the
+  // biggest block is too small). Below the floor we DEFER — the module stays
+  // online and heartbeating, and the loop's 30-min deferred-retry tries again
+  // once heap recovers. Boot geolocation runs pre-camera (~160 KB free) and
+  // sails past; the post-camera loop retry (~70 KB free) is the one this
+  // guards. The "[geo] ... block" serial log lets you re-tune the floor
+  // against real numbers.
+  const uint32_t kMinContigHeapForGeoTlsBytes = 45000;
+  const uint32_t largestFreeBlock = ESP.getMaxAllocHeap();
+  Serial.printf("[geo] largest free block=%u (total free=%u, floor %u) before TLS\n",
+                largestFreeBlock, ESP.getFreeHeap(), kMinContigHeapForGeoTlsBytes);
+  if (largestFreeBlock < kMinContigHeapForGeoTlsBytes) {
+    Serial.println("[geo] contiguous heap below floor — deferring to protect the main loop");
+    return false;
+  }
+
   // Verified TLS to googleapis.com. Pin against the R1+R4 bundle: the
   // chain on the wire today is googleapis.com -> WE2 -> GTS Root R4
   // (ECC), but it historically rooted in GTS Root R1 (RSA), so we trust
@@ -623,10 +677,13 @@ static bool attemptGeolocation(geolocation_t* out) {
   // but skip peer verification, which leaks the WiFi-BSSID list to any
   // MITM with a self-signed cert. Issue #79; CA-rotation fix 2026-06-05.
   WiFiClientSecure secureClient;
+  secureClient.setHandshakeTimeout(8);  // seconds (ESP32 default 120 s) — see above
   secureClient.setCACert(hf::tls::kGoogleApisCaBundlePem);
   HTTPClient http;
   String url = String("https://www.googleapis.com/geolocation/v1/geolocate?key=") + apiKey;
   http.begin(secureClient, url);
+  http.setConnectTimeout(8000);  // ms — bound TCP connect (see above)
+  http.setTimeout(8000);         // ms — bound a per-read stall (see above)
   http.addHeader("Content-Type", "application/json");
 
   hf::breadcrumbSet("getGeolocation:http_post");
@@ -773,6 +830,12 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
                                    : plainClient;
     if (useTls) {
       tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
+      // Bound the TLS handshake (ESP32 default is 120 s) so a stalled
+      // connect can't block past the 60 s task-WDT. Same unbounded-call
+      // defect as attemptGeolocation's pre-`carpenter` geolocation POST —
+      // hardened here too so the whole boot-path TLS class is covered, not
+      // just the one call the longhorn telemetry happened to fingerprint.
+      tlsClient.setHandshakeTimeout(8);  // seconds
     }
 
     HTTPClient http;
@@ -781,6 +844,8 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
 
     http.begin(netClient, esp_config->INIT_URL);
     //http.begin("http://192.168.0.36:8002/new_module");
+    http.setConnectTimeout(8000);  // ms — bound TCP connect
+    http.setTimeout(8000);         // ms — bound a per-read stall
     http.addHeader("Content-Type", "application/json");
 
     // Canonical 12-char lowercase-hex module ID (same as /upload + /heartbeat).
@@ -802,9 +867,10 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
     String jsonData;
     serializeJson(doc, jsonData);
 
-    // Issue #42 instrumentation: same shape as getGeolocation —
-    // HTTPClient with no explicit setTimeout, prime suspect for the
-    // first-boot TASK_WDT reboot the issue describes.
+    // Issue #42 instrumentation: same shape as getGeolocation. The
+    // connect/handshake/read are now bounded above (carpenter), so this is
+    // no longer the unbounded first-boot TASK_WDT suspect it once was; the
+    // breadcrumb still names the section if the WDT ever fires here.
     hf::breadcrumbSet("initNewModuleOnServer:http_post");
     int httpResponseCode = http.POST(jsonData);
     hf::breadcrumbSet("initNewModuleOnServer:get_string");

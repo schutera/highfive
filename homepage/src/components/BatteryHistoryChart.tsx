@@ -34,10 +34,11 @@ interface ChartRow {
  * 016 records the rationale; the chart deliberately exposes one
  * metric only, the broader "many-metric drawer" stays future work.
  *
- * The value semantics caveat (firmware currently sends
- * `random(1,100)` for battery per issue #8a) is the operator's to
- * understand; the chart renders what's there honestly and the
- * glossary entry "Measurement" carries the note.
+ * The value semantics caveat: there is no battery ADC yet, so
+ * `carpenter`+ firmware OMITS battery from the heartbeat (the
+ * dual-write source). This chart therefore renders honest null gaps for
+ * current firmware; only older `random(1,100)` rows show a (fake) line.
+ * Real sensing is issue #8a/#8b; the glossary "Measurement" carries the note.
  */
 export default function BatteryHistoryChart({ moduleId }: BatteryHistoryChartProps) {
   const { t, lang } = useTranslation();

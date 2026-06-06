@@ -52,10 +52,9 @@ test.describe('dashboard telemetry render', () => {
     const response = await page.request.get(
       `http://localhost:4002/api/modules/${TELEMETRY_MAC}/logs?limit=5`,
       {
-        headers: {
-          'X-API-Key': 'hf_test_key',
-          'X-Admin-Key': 'hf_test_key',
-        },
+        // X-Admin-Key is the machine credential for this direct fetch; the
+        // browser walkthrough below uses the cookie from beforeEach's login.
+        headers: { 'X-Admin-Key': 'hf_test_key' },
       },
     );
     expect(response.ok()).toBeTruthy();

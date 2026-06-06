@@ -654,9 +654,9 @@ export default function AdminPage() {
       )}
 
       {/* Rename modal — opens when a row's pencil icon is clicked. The
-          modal carries the api call + admin-key prompt + 409-collision
+          modal carries the api call + login prompt (on 401) + 409-collision
           inline error; we just give it a Module and an `onSaved`
-          callback to keep the local list in sync. See ADR-011. */}
+          callback to keep the local list in sync. See ADR-011 / ADR-019. */}
       {renameTarget && (
         <RenameModuleModal
           module={renameTarget}

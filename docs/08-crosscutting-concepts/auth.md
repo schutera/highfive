@@ -95,6 +95,10 @@ which browsers reject for credentialed requests):
 (`origin: true`) in dev. The homepage client sends `credentials: 'include'`
 on every request so the cookie flows. See
 [`backend/src/app.ts`'s `corsOptions`](../../backend/src/app.ts).
+There is no middle state: anything `isProduction()` treats as production
+(including `staging`/`qa`) is pinned to the one prod origin, so a staging host
+on a different domain would have its cookie CORS-blocked — add an explicit
+allowlist if staging becomes real (ADR-019 "Consequences").
 
 ## Admin gate (`requireAdmin`)
 

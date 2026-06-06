@@ -63,8 +63,23 @@ Remove every secret from the browser bundle and split the API by trust level:
   Generalising coordinates for unauthenticated callers is deferred to
   [#145](https://github.com/schutera/highfive/issues/145) (noted in
   [chapter 11](../11-risks-and-technical-debt/README.md)).
-- The login rate-limiter is in-memory, so it is per-process; a future
-  multi-instance backend would need a shared store.
+- The login rate-limiter is in-memory (per-process) **and** keys on `req.ip`,
+  which honours `app.set('trust proxy', 'loopback, linklocal, uniquelocal')`.
+  In the single-host nginx topology this is safe (private ranges are
+  unreachable from the internet), but a future deployment behind a CDN / mesh
+  that forwards client-controlled `X-Forwarded-For` could rotate the keyed IP
+  per request and bypass the 10/15-min budget. Revisit the limiter (shared
+  store + a trusted-proxy/XFF policy) before going multi-instance or
+  behind-a-CDN.
+- CORS has only two states: localhost reflect-all (dev/test) or the single
+  pinned prod origin. `isProduction()` treats `staging`/`qa`/unrecognised
+  `NODE_ENV` as production, so a staging deployment on a different hostname
+  would have its session cookie blocked by CORS. Add an explicit origin
+  allowlist if staging becomes a real environment.
+- The session token has no per-session id/nonce, so individual sessions cannot
+  be revoked short of rotating `HIGHFIVE_API_KEY` (which drops all sessions).
+  Fine for a single-operator gate; revisit for multi-operator / selective
+  revocation.
 
 **Forbidden**:
 

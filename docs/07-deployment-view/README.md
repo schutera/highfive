@@ -9,3 +9,4 @@ over USB and then operates autonomously.
 - [production-deployment.md](production-deployment.md) — **supported production path**: `docker-compose.prod.yml` (all four services: backend + frontend + image-service + duckdb-service, with `duckdb_data` volume) behind a host-Nginx terminator that handles TLS for `highfive.schutera.com` + `api.highfive.schutera.com` via Let's Encrypt
 - [production-runbook.md](production-runbook.md) — non-recommended legacy bare-metal path (PM2 + Nginx, no Docker, Node backend only — upload pipeline not covered)
 - [esp-flashing.md](esp-flashing.md) — ESP32-CAM firmware flashing & onboarding (incl. `ESP32-CAM/build.sh` and `ESP32-CAM/VERSION`)
+- [firmware-release.md](firmware-release.md) — **how to cut an OTA firmware release**: the end-to-end runbook (bump `VERSION`+`SEQUENCE` → `build.sh` → republish frontend → commit + `prod-<codename>` tag), the `main`-vs-`production` branch model, and where each OTA mechanism is defined

@@ -12,6 +12,14 @@ For a non-Docker production option (Nginx + PM2 on bare metal), see
 [production-runbook.md](production-runbook.md). For dev-laptop setup,
 see [docker-compose.md](docker-compose.md).
 
+> **This doc covers the web services only.** Shipping new **ESP32-CAM
+> firmware** to the field is a separate track — cut on `main` and marked
+> by `prod-<codename>` tags, not deployed from this branch. See
+> [firmware-release.md](firmware-release.md). ⚠️ The `production` branch
+> this guide clones is currently behind `main` while the live services
+> run `main`-only code; verify your actual services deploy source before
+> relying on it — [chapter 11 → "`production` branch drifted"](../11-risks-and-technical-debt/README.md#production-branch-drifted-from-the-deployed-services-undocumented-deploy-source).
+
 ## Topology at a glance
 
 ```

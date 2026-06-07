@@ -68,6 +68,20 @@ The `pio run -e esp32cam` line builds the firmware as a smoke test — it works 
 
 Full testing strategy: [`docs/10-quality-requirements/`](docs/10-quality-requirements/README.md). CI gate manifest: [`docs/10-quality-requirements/ci-gates.md`](docs/10-quality-requirements/ci-gates.md).
 
+## Cutting a firmware OTA release
+
+To ship new ESP32-CAM firmware to the field, follow the runbook — do **not** improvise: [`docs/07-deployment-view/firmware-release.md`](docs/07-deployment-view/firmware-release.md). **The one rule:** bump `ESP32-CAM/SEQUENCE` (not just `VERSION`) — the on-device comparator flashes only when the published manifest's `sequence` is strictly greater, so merging firmware source to `main` ships nothing until a higher-`SEQUENCE` build is published and a `prod-<codename>` tag exists. This silent no-op has shipped twice (#150, #132).
+
+Ground truth, in execution order:
+
+- **The checklist** — [`firmware-release.md` → Release checklist](docs/07-deployment-view/firmware-release.md#release-checklist): bump both `ESP32-CAM/VERSION` + `ESP32-CAM/SEQUENCE` → `bash ESP32-CAM/build.sh` (needs `GEO_API_KEY`) → republish the **frontend image** (the artifacts are gitignored, so `git pull` doesn't carry them) → commit on `main` + annotated `prod-<codename>` tag → verify `curl https://highfive.schutera.com/firmware.json`.
+- **Why `SEQUENCE` is the gate** — [`ADR-008` → Sequence + allow_downgrade addendum](docs/09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83) and [`ESP32-CAM/lib/ota_version/ota_version.h`](ESP32-CAM/lib/ota_version/ota_version.h).
+- **The build/publish script** — [`ESP32-CAM/build.sh`](ESP32-CAM/build.sh) (writes the 3 artifacts + manifest into `homepage/public/`).
+- **Runtime fetch/flash/rollback** — [`docs/06-runtime-view/ota-update-flow.md`](docs/06-runtime-view/ota-update-flow.md).
+- **The trap to avoid** — [chapter 11 → "Merging firmware source is not a release"](docs/11-risks-and-technical-debt/README.md#merging-firmware-source-is-not-a-release--the-sequence-bump-is-the-release-150-132).
+
+Firmware OTA is cut on `main` + `prod-*` tags; the `production` branch is the Docker-services deploy track only ([branch & tag model](docs/07-deployment-view/firmware-release.md#git-branch--tag-model)).
+
 ## Documentation map (arc42)
 
 The `docs/` folder follows arc42. Use this table to find the chapter relevant to your task — and to know **which chapter to update when you finish a change**.

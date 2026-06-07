@@ -409,6 +409,13 @@ existing 30 s sleeps).
 
 ### Boot-time HTTP pull
 
+> **Cutting a release for the whole fleet?** Use the canonical
+> end-to-end runbook: [firmware-release.md](firmware-release.md). It
+> covers the full sequence (build → republish the frontend image →
+> commit → `prod-<codename>` tag → verify), the gitignored-artifact
+> publish step, and the `main`-vs-`production` branch model. The two
+> paragraphs below are the firmware-side mechanics it builds on.
+
 Bump `ESP32-CAM/VERSION` (per [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)
 the value is the next bee-species name), **and** bump
 `ESP32-CAM/SEQUENCE` (PR II / issue #83) to the next integer. The

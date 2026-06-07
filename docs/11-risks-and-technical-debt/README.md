@@ -86,6 +86,71 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Merging firmware source is not a release — the SEQUENCE bump is the release (#150, #132)
+
+**What happened.** PR #150 merged the noon-capture firmware source to
+`main` but left `ESP32-CAM/VERSION=carpenter` / `ESP32-CAM/SEQUENCE=4` —
+identical version identifiers to the already-deployed release. The
+on-device OTA comparator
+([`shouldOtaUpdate`](../../ESP32-CAM/lib/ota_version/ota_version.h)) only
+flashes when the published manifest's `sequence` is **strictly greater**
+than the running one, so **every field module silently ignored the
+merge**: the fix sat on `main`, looked shipped, and reached zero
+modules. A colleague had to cut a real release (`woolcarder` / sequence
+5, commit `39d2faa`) — bump both files, rebuild, republish — before the
+fleet pulled it. Per that release commit, **#132 was an earlier instance
+of the same class** (a rebuilt same-sequence binary that silently drifts
+from the deployed one).
+
+**Why it happened.** "Merge to `main`" is the release ritual for the web
+services, so it reads as done — but firmware has a second, manual gate:
+the artifacts are gitignored and served from a **rebuilt frontend
+image**, and the comparator keys on `SEQUENCE`, not on the source being
+present. Nothing fails loudly — CI is green, the diff is merged, and the
+only signal that the fleet didn't update is the dashboard **Firmware**
+pill never advancing, which nobody watches by default. Bumping `VERSION`
+alone has the same trap: the label differs but `sequence` doesn't, so
+the comparator still refuses.
+
+**How to avoid it next time.** Treat a firmware change as **unshipped
+until a `prod-<codename>` tag exists**. Follow the runbook at
+[`docs/07-deployment-view/firmware-release.md`](../07-deployment-view/firmware-release.md):
+bump **both** `VERSION` and `SEQUENCE`, run `build.sh`, republish the
+frontend image, commit, and tag. After publishing, verify
+`curl https://highfive.schutera.com/firmware.json` shows the new
+`sequence` and that a module's `latestHeartbeat.fwVersion` flips within a
+daily-reboot cycle. The one-line invariant: **the `SEQUENCE` integer
+must increment for a release to reach the field; if it didn't change,
+nothing shipped.**
+
+### `production` branch drifted from the deployed services (undocumented deploy source)
+
+**What happened.** While auditing the OTA-release docs, `origin/production`
+— the branch
+[`production-deployment.md`](../07-deployment-view/production-deployment.md)
+names as the prod services source — was found sitting far behind `main`
+with a divergent history, while the **live** services clearly run
+`main`-only code: e.g. the #142 admin-session endpoints
+(`POST /api/admin/login`) respond in production, and that commit is on
+`main` but not on `production`. So the documented deploy source does not
+match what is actually deployed.
+
+**Why it happened.** Two deploy tracks share the repo — firmware OTA (cut
+on `main` + `prod-*` tags) and the Docker services (documented as
+deployed from `production`). The services track was evidently re-pointed
+at `main` (or deployed ad hoc) without updating the `production` branch
+or the doc, so the branch became a stale artifact that still reads as
+authoritative.
+
+**How to avoid it next time.** Pick and document one services deploy
+source. If services now deploy from `main`, update
+[`production-deployment.md`](../07-deployment-view/production-deployment.md)
+and retire the `production` branch; if `production` is still intended,
+fast-forward it on every services deploy. Until reconciled, do not trust
+the `production` branch as a picture of prod. Firmware OTA is unaffected
+(it lives on `main` + `prod-*` tags) — see
+[`firmware-release.md` → Git: branch & tag model](../07-deployment-view/firmware-release.md#git-branch--tag-model).
+
 ### Production API key shipped in the public JS bundle; the `/admin` gate authenticated nothing (issue #142)
 
 **What happened.** The homepage read `VITE_API_KEY` and Vite inlined the

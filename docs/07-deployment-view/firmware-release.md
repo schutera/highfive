@@ -28,7 +28,7 @@ flowchart TD
     A["Bump ESP32-CAM/VERSION (next bee name)<br/>+ ESP32-CAM/SEQUENCE (+1)"] --> B["bash ESP32-CAM/build.sh<br/>(GEO_API_KEY required)"]
     B --> C["3 artifacts in homepage/public/:<br/>firmware.bin (merged, web installer)<br/>firmware.app.bin (app-only, OTA)<br/>firmware.json (manifest)"]
     C --> D["Stage artifacts into the prod host's<br/>checkout homepage/public/ — gitignored,<br/>so 'git pull' does NOT carry them"]
-    D --> E["Rebuild + restart the frontend container<br/>(Vite copies public/ → dist/ → nginx html)"]
+    D --> E["Rebuild the frontend image<br/>(Vite copies public/ → dist/ → nginx html)"]
     E --> F["host-Nginx serves /firmware.json<br/>+ /firmware.app.bin"]
     F --> G["Module's next daily reboot:<br/>GET /firmware.json → seq higher? →<br/>GET /firmware.app.bin → flash → reboot"]
     A --> H["Commit bump on main<br/>+ tag prod-&lt;codename&gt; (release ledger)"]
@@ -99,8 +99,11 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    > ([production-deployment.md → OTA firmware artifacts](production-deployment.md));
    > and (2) you are rebuilding the checkout your services actually deploy
    > from, which is itself unsettled (see
-   > [Git: branch & tag model](#git-branch--tag-model)). No Nginx change
-   > is needed per release.
+   > [Git: branch & tag model](#git-branch--tag-model)). **If (1) is
+   > false** — `public/` is served from a host static path or a bind-mount
+   > rather than baked into the image — then the publish _action_ changes:
+   > drop the three files at that path directly, with **no** image
+   > rebuild. No Nginx change is needed per release.
 
 4. **Verify it is served.** From anywhere:
 
@@ -198,7 +201,8 @@ app-side counter reverts to the previous slot after 3 faulty boots
 | Version label scheme (bee names)             | [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)                                                                                                                                               |
 | Sequence gate + `allow_downgrade` comparator | [ADR-008 addendum](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83), [`lib/ota_version/ota_version.h`](../../ESP32-CAM/lib/ota_version/ota_version.h) |
 | Build + 3-artifact publish + manifest fields | [`ESP32-CAM/build.sh`](../../ESP32-CAM/build.sh), [ADR-008 decision §3](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md)                                                                          |
-| Runtime fetch / flash / rollback sequence    | [ota-update-flow.md](../06-runtime-view/ota-update-flow.md), [`ESP32-CAM/ota.cpp`](../../ESP32-CAM/ota.cpp)                                                                                                                   |
+| Runtime fetch / flash sequence               | [ota-update-flow.md](../06-runtime-view/ota-update-flow.md), [`ESP32-CAM/ota.cpp`](../../ESP32-CAM/ota.cpp)                                                                                                                   |
+| App-side rollback (faulty-boot counter)      | [ADR-008](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md), [`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino)'s `forceRollbackIfPendingTooLong`                                          |
 | Host-Nginx serving of `/firmware.*`          | [production-deployment.md](production-deployment.md)                                                                                                                                                                          |
 | First-time USB migration (one-way)           | [esp-flashing.md](esp-flashing.md#first-time-ota-migration-one-way-usb-only)                                                                                                                                                  |
 | Incident: source-merge ≠ release             | [chapter 11](../11-risks-and-technical-debt/README.md#merging-firmware-source-is-not-a-release--the-sequence-bump-is-the-release-150-132)                                                                                     |

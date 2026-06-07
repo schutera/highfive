@@ -70,14 +70,15 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    than the previously-published manifest (an accidental downgrade).
 
 3. **Publish the artifacts to prod.** The three files are **gitignored
-   build outputs** ([.gitignore](../../.gitignore) → `homepage/public/firmware.json`),
-   so a `git pull` on the prod host does **not** carry them. They are
-   baked into the **frontend container** at image-build time (Vite
-   copies `homepage/public/*` → `dist/`, which
+   build outputs** (the `*.bin` glob and the explicit
+   `homepage/public/firmware.json` line in [.gitignore](../../.gitignore)),
+   so a `git pull` on the prod host does **not** carry them. With the
+   committed topology they are baked into the **frontend container** at
+   image-build time (Vite copies `homepage/public/*` → `dist/`, which
    [homepage/Dockerfile](../../homepage/Dockerfile) serves as the nginx
-   html root). So publishing means: get the three files into the prod
-   host's checkout `homepage/public/`, then **rebuild the frontend
-   image**:
+   html root; the container has no bind-mount). So publishing means: get
+   the three files into the prod host's checkout `homepage/public/`, then
+   **rebuild the frontend image**:
 
    ```bash
    # On the prod host, with the new firmware.{bin,app.bin,json} staged
@@ -86,10 +87,20 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    docker compose -f docker-compose.prod.yml up -d --build frontend
    ```
 
-   Host-Nginx already proxies `/firmware.json` and `/firmware.app.bin`
-   (exact-match `location =` blocks) to the frontend container —
-   [production-deployment.md → OTA firmware artifacts](production-deployment.md).
-   No Nginx change is needed per release.
+   > **Verify this transport against your live prod host before relying
+   > on it.** The step is _derived from the committed topology_
+   > (host-Nginx → frontend container; `public/` baked into the image; no
+   > bind-mount) — it is **not** confirmed against how the last release
+   > (`woolcarder`) actually shipped, because the binaries are published
+   > out-of-band and are not in git. Confirm two things on the host: (1)
+   > `/firmware.json` is really served by the frontend container — the
+   > documented host-Nginx `location =` blocks proxy it to
+   > `127.0.0.1:8081`, not a host static path
+   > ([production-deployment.md → OTA firmware artifacts](production-deployment.md));
+   > and (2) you are rebuilding the checkout your services actually deploy
+   > from, which is itself unsettled (see
+   > [Git: branch & tag model](#git-branch--tag-model)). No Nginx change
+   > is needed per release.
 
 4. **Verify it is served.** From anywhere:
 
@@ -128,7 +139,7 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    one-time USB flash — see
    [esp-flashing.md → First-time OTA migration](esp-flashing.md#first-time-ota-migration-one-way-usb-only)),
    or it OTA-flashed and rolled back (a setup-stage panic — the next
-   telemetry sidecar names the failing stage).
+   telemetry sidecar names the failing stage; see [Rollback](#rollback)).
 
 ## How a module decides to flash
 

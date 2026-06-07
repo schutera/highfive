@@ -70,7 +70,7 @@ Full testing strategy: [`docs/10-quality-requirements/`](docs/10-quality-require
 
 ## Cutting a firmware OTA release
 
-To ship new ESP32-CAM firmware to the field, follow the runbook — do **not** improvise: [`docs/07-deployment-view/firmware-release.md`](docs/07-deployment-view/firmware-release.md). **The one rule:** bump `ESP32-CAM/SEQUENCE` (not just `VERSION`) — the on-device comparator flashes only when the published manifest's `sequence` is strictly greater, so merging firmware source to `main` ships nothing until a higher-`SEQUENCE` build is published and a `prod-<codename>` tag exists. This silent no-op has shipped twice (#150, #132).
+To ship new ESP32-CAM firmware to the field, follow the runbook — do **not** improvise: [`docs/07-deployment-view/firmware-release.md`](docs/07-deployment-view/firmware-release.md). **The one rule:** bump `ESP32-CAM/SEQUENCE` (a new `VERSION` codename alone won't flash) — the on-device comparator requires the manifest's `version` to differ **and** its `sequence` to be strictly greater, so merging firmware source to `main` ships nothing until a higher-`SEQUENCE` build is published and a `prod-<codename>` tag exists. This silent no-op has shipped twice (#150, #132).
 
 Ground truth, in execution order:
 

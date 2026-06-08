@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from db.connection import lock, get_conn
+from models.geo import PUBLIC_COORD_DECIMALS
 
 
 # Single source of truth for the three FK-chained table DDLs. Referenced by
@@ -336,6 +337,34 @@ def init_db():
                 "DB state is unchanged (transaction rolled back). Restore from "
                 "a backup before re-running."
             ) from e
+
+        # Coarsen any precise coordinates already stored on existing volumes
+        # (issue #145, ADR-020). Modules in the field reported exact lat/lng
+        # before round-on-write landed, so those precise values are sitting in
+        # `module_configs` right now; this generalizes them to ~1 km in place.
+        # Count-gated so it is a true no-op once every row is already at the
+        # target precision (round-on-write keeps it that way), and the
+        # `WHERE lat <> round(...)` filter touches only rows that need it.
+        # Deliberately does NOT bump `updated_at` — this is a privacy backfill,
+        # not a device event. Destructive by design: the precise value is gone
+        # after this runs (the intended GDPR posture — see ADR-020).
+        needs_coarsen = con.execute(
+            f"SELECT COUNT(*) FROM module_configs "
+            f"WHERE lat <> round(lat, {PUBLIC_COORD_DECIMALS}) "
+            f"   OR lng <> round(lng, {PUBLIC_COORD_DECIMALS})"
+        ).fetchone()[0]
+        if needs_coarsen:
+            con.execute(
+                f"UPDATE module_configs "
+                f"SET lat = round(lat, {PUBLIC_COORD_DECIMALS}), "
+                f"    lng = round(lng, {PUBLIC_COORD_DECIMALS}) "
+                f"WHERE lat <> round(lat, {PUBLIC_COORD_DECIMALS}) "
+                f"   OR lng <> round(lng, {PUBLIC_COORD_DECIMALS})"
+            )
+            print(
+                f"✅ Coarsened {needs_coarsen} module coordinate(s) to "
+                f"{PUBLIC_COORD_DECIMALS} dp (issue #145, ADR-020)"
+            )
 
         # One-time backfill: surface historical heartbeat batteries in the
         # new measurements store so the dashboard chart isn't blank on

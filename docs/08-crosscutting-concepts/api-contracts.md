@@ -142,8 +142,16 @@ constant-shaped metadata.
 This is **not** the same concept as `Module.location`:
 
 - `Module.location` is the _module's_ GPS coordinates from Google
-  Geolocation API at first boot. Per-module, stored in DuckDB,
-  displayed fuzzed on the map.
+  Geolocation API at first boot. Per-module, stored in DuckDB.
+  **Generalized to ~1 km (2 dp) for every caller** as a privacy control —
+  not displayed at full precision to anyone, admin included. The transform
+  is a constant, irreversibly-lossy round applied at three layers (firmware,
+  duckdb round-on-write, backend response boundary); the precision constant
+  is `PUBLIC_COORD_DECIMALS` in `@highfive/contracts`. See
+  [ADR-020](../09-architecture-decisions/adr-020-coordinate-generalization.md)
+  and [#145](https://github.com/schutera/highfive/issues/145). (The earlier
+  client-side `fuzzLocation` was cosmetic — it shipped exact coords over the
+  wire — and is removed.)
 - `UserLocation` is the _dashboard visitor's_ approximate position.
   Not stored anywhere, not joined to any module, lives entirely in
   the browser after the fetch resolves.

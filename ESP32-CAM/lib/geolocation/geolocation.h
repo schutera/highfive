@@ -21,4 +21,20 @@ namespace hf {
 // without having to flash hardware.
 bool isPlausibleFix(float lat, float lng, float acc);
 
+// Number of decimal places a served/stored coordinate is generalized to
+// (~1.1 km grid). Keep in sync with `PUBLIC_COORD_DECIMALS` in
+// `contracts/src/index.ts` and `duckdb-service/models/geo.py` — "one rule,
+// mirrored at three layers", the same pattern as `isPlausibleFix`.
+constexpr int kPublicCoordDecimals = 2;
+
+// Generalize a single coordinate to `kPublicCoordDecimals` decimal places
+// before it ever leaves the device — data minimization at source (issue
+// #145, ADR-020). The server still rounds on write because it cannot trust
+// the client (old firmware, spoofed upload), but rounding here means the
+// precise fix never even traverses the network. Preserves the (0,0)
+// sentinel (rounding 0 stays 0) and passes NaN/Inf through unchanged so a
+// parser glitch surfaces to `isPlausibleFix` rather than becoming 0. Pure
+// C++17, no Arduino deps, host-testable.
+float roundCoord(float value);
+
 }  // namespace hf

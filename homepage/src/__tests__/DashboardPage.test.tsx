@@ -90,13 +90,13 @@ vi.mock('leaflet', () => {
       }
     },
     LatLng,
-    // `L.latLng(lat, lng)` is called by MapView's bounds-filter useMemo
-    // (`L.latLng(fuzzedLocation[0], fuzzedLocation[1])`); add the
-    // factory form so non-empty `modules` fixtures don't trip the
-    // bounds path with an "is not a function" exception. The actual
-    // bounds.contains() result is stubbed to `true` above, so the
-    // returned value's content doesn't matter — only that it's an
-    // instance-shaped object (see LatLng comment above).
+    // `L.latLng(lat, lng)` is provided as a factory so any leaflet code
+    // path that constructs a LatLng from a module's plotted `position`
+    // tuple doesn't trip with an "is not a function" exception on
+    // non-empty `modules` fixtures. The actual bounds.contains() result
+    // is stubbed to `true` above, so the returned value's content doesn't
+    // matter — only that it's an instance-shaped object (see LatLng
+    // comment above).
     latLng: (lat: number, lng: number) => new LatLng(lat, lng),
   };
   return { default: L, ...L };

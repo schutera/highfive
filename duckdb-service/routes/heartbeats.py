@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from db.connection import lock, get_conn
 from db.repository import write_transaction
+from models.geo import coarsen_coord
 from models.module_id import ModuleId
 
 heartbeats_bp = Blueprint("heartbeats", __name__)
@@ -198,6 +199,14 @@ def post_heartbeat():
                 existing_lat = float(row[0]) if row[0] is not None else 0.0
                 existing_lng = float(row[1]) if row[1] is not None else 0.0
                 if existing_lat == 0.0 and existing_lng == 0.0:
+                    # Generalize to ~1 km before persisting (issue #145,
+                    # ADR-020). This write path does not go through the
+                    # `ModuleData` model, so it must coarsen explicitly — the
+                    # server is the enforcement boundary and cannot trust the
+                    # firmware to have already rounded (old firmware, spoofed
+                    # heartbeat). See `models/geo.py`.
+                    lat = coarsen_coord(lat)
+                    lng = coarsen_coord(lng)
                     con.execute(
                         "UPDATE module_configs SET lat = ?, lng = ?, "
                         "updated_at = NOW() WHERE id = ?",

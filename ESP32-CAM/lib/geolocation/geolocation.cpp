@@ -13,4 +13,13 @@ bool isPlausibleFix(float lat, float lng, float acc) {
     return true;
 }
 
+float roundCoord(float value) {
+    if (std::isnan(value) || std::isinf(value)) return value;
+    // factor = 10 ^ kPublicCoordDecimals; the static_assert guards the
+    // literal so a precision change can't silently drift from the constant.
+    static_assert(kPublicCoordDecimals == 2, "update factor when precision changes");
+    const float factor = 100.0f;
+    return std::roundf(value * factor) / factor;
+}
+
 }  // namespace hf

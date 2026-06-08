@@ -353,3 +353,40 @@ def test_heartbeat_geo_patch_bumps_updated_at_not_last_seen_at(client, fresh_db)
         f"already recorded in module_heartbeats); "
         f"was {before_seen!r}, is {after_seen!r}"
     )
+
+
+def test_heartbeat_geo_patch_coarsens_precise_fix(client, fresh_db):
+    """The heartbeat-side (0,0) → real-fix recovery generalizes coordinates
+    to ~1 km before persisting (issue #145, ADR-020). This write path does
+    not go through the `ModuleData` model, so it must coarsen explicitly —
+    the server is the enforcement boundary and cannot trust the firmware to
+    have already rounded (old firmware, spoofed heartbeat).
+    """
+    # Seed at (0,0) so the geo-patch guard fires.
+    resp = client.post(
+        "/new_module",
+        json={
+            "esp_id": CANONICAL_MAC,
+            "module_name": "TestHive",
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "battery_level": 80,
+        },
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    # A precise fix arrives via heartbeat (e.g. firmware that hasn't OTA'd yet).
+    resp = client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "battery": 50,
+            "latitude": "47.794321",
+            "longitude": "9.621987",
+            "accuracy": "50",
+        },
+    )
+    assert resp.status_code == 200
+
+    # Stored at 2 dp, not the precise heartbeat value.
+    assert _fetch_module_lat_lng(fresh_db, CANONICAL_MAC) == (47.79, 9.62)

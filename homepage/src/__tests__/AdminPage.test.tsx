@@ -24,6 +24,26 @@ const mockApi = vi.hoisted(() => ({
 vi.mock('../services/api', () => ({ api: mockApi }));
 
 import AdminPage from '../pages/AdminPage';
+import { parseModuleId, type Module } from '@highfive/contracts';
+
+function makeModule(location: { lat: number; lng: number }): Module {
+  return {
+    id: parseModuleId('aabbccddeeff'),
+    name: 'fierce-apricot-specht',
+    displayName: null,
+    location,
+    status: 'online',
+    lastApiCall: '2026-05-16T20:00:00.000Z',
+    batteryLevel: 88,
+    firstOnline: '2026-05-16',
+    totalHatches: 0,
+    imageCount: 0,
+    email: null,
+    updatedAt: '2026-05-16T20:00:00.000Z',
+    lastSeenAt: '2026-05-16T20:00:00.000Z',
+    latestHeartbeat: null,
+  };
+}
 
 function renderAdmin() {
   return render(
@@ -82,5 +102,23 @@ describe('AdminPage login gate', () => {
 
     await waitFor(() => expect(mockApi.getAllModules).toHaveBeenCalled());
     expect(screen.queryByText(/admin access/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('AdminPage coordinate display (issue #145, ADR-020)', () => {
+  it('renders module coordinates at 2 dp, never finer', async () => {
+    // The wire is already generalized server-side (see backend
+    // coarsen-location.test). This pins the admin table as the last line of
+    // defence: even fed a precise value it must render ~1 km / 2 dp — admins
+    // get no finer precision than anyone else ("coarsen for everyone").
+    mockApi.checkSession.mockResolvedValue(true);
+    mockApi.getAllModules.mockResolvedValue([makeModule({ lat: 47.808612, lng: 9.643301 })]);
+    renderAdmin();
+
+    // Coords are rendered as two adjacent text nodes ("47.81", "9.64").
+    expect(await screen.findByText(/47\.81/)).toBeInTheDocument();
+    expect(screen.getByText(/9\.64/)).toBeInTheDocument();
+    // The precise low-order digits must never reach the DOM.
+    expect(screen.queryByText(/47\.8086/)).not.toBeInTheDocument();
   });
 });

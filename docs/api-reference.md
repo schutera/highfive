@@ -88,7 +88,7 @@ Public — no auth (#142). Returns an array of `Module` objects shaped for the d
     "id": "aabbccddeeff",
     "name": "fierce-apricot-specht",
     "displayName": "Klostergarten",
-    "location": { "lat": 47.8086, "lng": 9.6433 },
+    "location": { "lat": 47.81, "lng": 9.64 },
     "status": "online",
     "lastApiCall": "2026-04-25T12:34:56.000Z",
     "batteryLevel": 85,
@@ -98,6 +98,13 @@ Public — no auth (#142). Returns an array of `Module` objects shaped for the d
   }
 ]
 ```
+
+`location.lat`/`lng` are **generalized to ~1 km (2 decimal places) for every
+caller, admin included** — a privacy control for wild-bee nest sites, not a
+precision bug. The exact fix is never served and (after duckdb round-on-write)
+never persisted. See
+[ADR-020](09-architecture-decisions/adr-020-coordinate-generalization.md) /
+[#145](https://github.com/schutera/highfive/issues/145).
 
 `name` is the firmware-reported value (mutable on every UPSERT; same-batch
 collisions auto-suffixed by `duckdb-service` `add_module`). `displayName`

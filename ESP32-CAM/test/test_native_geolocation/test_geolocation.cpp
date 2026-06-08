@@ -15,6 +15,7 @@
 #include "geolocation.h"
 
 using hf::isPlausibleFix;
+using hf::roundCoord;
 
 void setUp() {}
 void tearDown() {}
@@ -101,6 +102,42 @@ static void test_accepts_boundary_coords(void) {
     TEST_ASSERT_TRUE(isPlausibleFix(-90.0f, -180.0f, 100.0f));
 }
 
+// --- roundCoord (coordinate generalization, issue #145 / ADR-020) --------
+
+static void test_round_generalizes_to_two_dp(void) {
+    // A precise Google fix is coarsened to ~1 km before it ever leaves the
+    // device. 52.520077 -> 52.52, 13.404954 -> 13.40.
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 52.52f, roundCoord(52.520077f));
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 13.40f, roundCoord(13.404954f));
+}
+
+static void test_round_rounds_up_third_decimal(void) {
+    // .137 -> .14 (nearest), proving it rounds rather than truncates.
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 48.14f, roundCoord(48.137154f));
+}
+
+static void test_round_handles_negative(void) {
+    // Southern/western hemispheres round symmetrically.
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, -8.12f, roundCoord(-8.123456f));
+}
+
+static void test_round_preserves_null_island_sentinel(void) {
+    // (0,0) must survive rounding so the "no fix yet" sentinel and the
+    // isPlausibleFix guard downstream still see exact zero.
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, roundCoord(0.0f));
+}
+
+static void test_round_is_idempotent_on_coarse_value(void) {
+    // An already-2-dp value is unchanged — the server-side migration relies
+    // on this (round(round(x)) == round(x)) to be a true no-op on re-run.
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 52.52f, roundCoord(52.52f));
+}
+
+static void test_round_passes_nan_through(void) {
+    // A parser glitch must surface to isPlausibleFix as NaN, not collapse to 0.
+    TEST_ASSERT_TRUE(std::isnan(roundCoord(std::nanf(""))));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_rejects_null_island);
@@ -118,5 +155,11 @@ int main(int, char**) {
     RUN_TEST(test_accepts_lat_only_zero);
     RUN_TEST(test_accepts_lng_only_zero);
     RUN_TEST(test_accepts_boundary_coords);
+    RUN_TEST(test_round_generalizes_to_two_dp);
+    RUN_TEST(test_round_rounds_up_third_decimal);
+    RUN_TEST(test_round_handles_negative);
+    RUN_TEST(test_round_preserves_null_island_sentinel);
+    RUN_TEST(test_round_is_idempotent_on_coarse_value);
+    RUN_TEST(test_round_passes_nan_through);
     return UNITY_END();
 }

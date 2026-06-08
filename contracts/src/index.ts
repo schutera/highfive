@@ -58,6 +58,40 @@ export const tryParseModuleId = (input: string): ModuleId | null => {
   }
 };
 
+// ---- Coordinate generalization (issue #145, ADR-020) ----
+//
+// Module coordinates are a privacy/safety concern: read endpoints went public
+// in #142 / ADR-019, so exact nest locations would otherwise be readable by
+// anyone (vandalism, disturbance, collection). We generalize every served
+// coordinate to 2 decimal places (~1.1 km grid cells). The transform is a
+// *constant, irreversibly lossy* round — it cannot be statistically averaged
+// back to the true point (unlike re-randomized per-request jitter) and cannot
+// be reversed even if this code leaks.
+//
+// "Coarsen for everyone": admins receive the same 2 dp as anonymous callers —
+// the exact value is never served and (after the duckdb-service round-on-write
+// + migration) never persisted. This TS constant is the canonical declaration
+// for the JS/TS layers; `duckdb-service` and the ESP firmware hardcode the same
+// `2` with a cross-reference comment ("one rule, mirrored at three layers",
+// the same pattern as `isPlausibleFix`). See ADR-020.
+export const PUBLIC_COORD_DECIMALS = 2;
+
+/**
+ * Round a single coordinate to `PUBLIC_COORD_DECIMALS`. Preserves the `(0,0)`
+ * "no fix yet" sentinel (rounding 0 stays 0). `NaN`/`Infinity` pass through
+ * unchanged so a malformed upstream value surfaces rather than becoming `0`.
+ */
+export function coarsenCoord(value: number): number {
+  if (!Number.isFinite(value)) return value;
+  const factor = 10 ** PUBLIC_COORD_DECIMALS;
+  return Math.round(value * factor) / factor;
+}
+
+/** Coarsen both axes of a location to the public precision. Pure; no mutation. */
+export function coarsenLocation(loc: { lat: number; lng: number }): { lat: number; lng: number } {
+  return { lat: coarsenCoord(loc.lat), lng: coarsenCoord(loc.lng) };
+}
+
 export interface HeartbeatSnapshot {
   receivedAt: string; // ISO timestamp
   battery: number | null;
@@ -82,6 +116,10 @@ export interface Module {
   // OR the empty string; resolution to the operator-visible label
   // happens client-side via `homepage/src/lib/displayLabel.ts`.
   displayName: string | null;
+  // Generalized to `PUBLIC_COORD_DECIMALS` (~1.1 km) as a privacy control —
+  // NOT a precision bug. The exact fix is never served to any caller (admin
+  // included) and, after the duckdb-service round-on-write + migration, never
+  // persisted. See `coarsenLocation`, issue #145, and ADR-020.
   location: {
     lat: number;
     lng: number;

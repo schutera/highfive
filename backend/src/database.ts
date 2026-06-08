@@ -6,6 +6,7 @@ import {
   HeartbeatSnapshot,
   ModuleId,
   parseModuleId,
+  coarsenLocation,
 } from '@highfive/contracts';
 import { DUCKDB_URL } from './duckdbClient';
 
@@ -371,7 +372,13 @@ export class ModuleReadModel {
         // null here lands on the firmware-reported name — the right
         // behaviour for modules that have never been renamed.
         displayName: m.display_name ?? null,
-        location: { lat: Number(m.lat), lng: Number(m.lng) },
+        // Generalize to ~1 km at the response boundary (issue #145, ADR-020).
+        // Defence-in-depth: duckdb-service already rounds on write + migrates
+        // existing rows, but re-rounding here guarantees the public API never
+        // emits >2 dp even for a not-yet-migrated row (the 5 s read-model
+        // cache window) or a future write path that forgets. "Coarsen for
+        // everyone" — no auth branch; admins receive the same precision.
+        location: coarsenLocation({ lat: Number(m.lat), lng: Number(m.lng) }),
         status,
         firstOnline: firstOnlineStr,
         lastApiCall: m.last_image_at ? new Date(m.last_image_at).toISOString() : '',

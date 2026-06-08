@@ -1,7 +1,8 @@
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from models.geo import coarsen_coord
 from models.module_id import ModuleId
 
 
@@ -34,3 +35,14 @@ class ModuleData(BaseModel):
     longitude: float = Field(ge=-180.0, le=180.0)
     battery: int = Field(ge=0, le=100, validation_alias="battery_level")
     email: Optional[str] = None
+
+    # Generalize coordinates to ~1 km at the registration front door (issue
+    # #145, ADR-020). Runs in ``mode="after"`` so the range constraints above
+    # have already validated; this is the single chokepoint for the
+    # registration path, so the stored row, the ``add_module`` UPSERT, AND the
+    # Discord "Location" message all see the coarsened value — no precise
+    # coordinate is persisted or echoed. The ``(0,0)`` sentinel is preserved.
+    @field_validator("latitude", "longitude", mode="after")
+    @classmethod
+    def _coarsen(cls, v: float) -> float:
+        return coarsen_coord(v)

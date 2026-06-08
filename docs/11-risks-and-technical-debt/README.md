@@ -86,6 +86,34 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### A client-side privacy transform protects nothing (#145, ADR-020)
+
+**What happened.** Module GPS coordinates were "fuzzed" by ~1 km before
+plotting on the map — but the fuzzing (`fuzzLocation` in
+[`homepage/src/components/MapView.tsx`](../../homepage/src/components/MapView.tsx))
+ran **in the browser**, so the backend still shipped the **exact**
+coordinates over the wire (`GET /api/modules`), visible to anyone in
+DevTools or the raw JSON. Worse, the offset was a pure function of
+`moduleId` with no secret and the algorithm shipped in the public JS
+bundle, so even the displayed pin was trivially reversible to the true
+point. After #142 made reads public, this meant precise nest locations
+were readable by anyone with no credential.
+
+**Why it happened.** "We fuzz the location on the map" reads as a privacy
+control, but the map is the _last_ consumer — the data is already public
+by the time the browser rounds it. A privacy transform on the client is
+cosmetic by construction: the client receives the secret (here, the exact
+coordinate) before it can hide it.
+
+**How to avoid it next time.** Enforce data-minimization at or before the
+**trust boundary**, never after it. If a value must not reach a caller,
+the server must not send it — round/redact server-side (ideally
+round-on-write so it is never persisted either), and treat any client-side
+"masking" as presentation only. The fix generalizes coordinates at three
+layers (firmware, duckdb round-on-write, backend response boundary) so the
+exact fix is never served or stored — see
+[ADR-020](../09-architecture-decisions/adr-020-coordinate-generalization.md).
+
 ### Merging firmware source is not a release — the SEQUENCE bump is the release (#150, #132)
 
 **What happened.** PR #150 merged the noon-capture firmware source to

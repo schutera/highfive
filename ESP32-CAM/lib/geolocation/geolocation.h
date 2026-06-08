@@ -22,9 +22,12 @@ namespace hf {
 bool isPlausibleFix(float lat, float lng, float acc);
 
 // Number of decimal places a served/stored coordinate is generalized to
-// (~1.1 km grid). Keep in sync with `PUBLIC_COORD_DECIMALS` in
-// `contracts/src/index.ts` and `duckdb-service/models/geo.py` — "one rule,
-// mirrored at three layers", the same pattern as `isPlausibleFix`.
+// (~1.1 km grid). This *precision* constant is the shared contract — keep it
+// in sync with `PUBLIC_COORD_DECIMALS` in `contracts/src/index.ts` and
+// `duckdb-service/models/geo.py`. (The tie-break is per-layer: `roundCoord`
+// below rounds half-away-from-zero, like the JS/SQL layers, while Python's
+// `coarsen_coord` is half-to-even — they only differ on an exact x.xx5 fix,
+// which never occurs, so live data is identical everywhere.)
 constexpr int kPublicCoordDecimals = 2;
 
 // Generalize a single coordinate to `kPublicCoordDecimals` decimal places

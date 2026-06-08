@@ -112,7 +112,9 @@ static void test_round_generalizes_to_two_dp(void) {
 }
 
 static void test_round_rounds_up_third_decimal(void) {
-    // .137 -> .14 (nearest), proving it rounds rather than truncates.
+    // .137 -> .14, proving it rounds rather than truncates (this is not a tie,
+    // so it does not pin the half-away-from-zero tie-break direction — that
+    // divergence between layers is inert because real fixes never hit x.xx5).
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, 48.14f, roundCoord(48.137154f));
 }
 

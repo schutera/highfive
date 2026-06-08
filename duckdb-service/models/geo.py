@@ -12,12 +12,16 @@ anywhere**. The transform is a constant, irreversibly lossy round — it cannot
 be statistically averaged back to the true point (unlike re-randomized
 per-request jitter) and cannot be reversed even if this code leaks.
 
-"One rule, mirrored at three layers" (the same pattern as ``isPlausibleFix``):
-the ESP firmware rounds before reporting (``hf::roundCoord`` in
-``ESP32-CAM/lib/geolocation/``), the backend re-rounds at the response boundary
-(``coarsenLocation`` in ``@highfive/contracts``), and this module is the
-server-side persistence guarantee. Keep the ``2`` here in sync with
-``PUBLIC_COORD_DECIMALS`` in ``contracts/src/index.ts``. See ADR-020 and #145.
+Mirrored at four layers — the ESP firmware rounds before reporting
+(``hf::roundCoord`` in ``ESP32-CAM/lib/geolocation/``), the backend re-rounds at
+the response boundary (``coarsenLocation`` in ``@highfive/contracts``), the SQL
+migration below coarsens existing rows, and this module is the server-side
+persistence guarantee. What is shared across all four is the **precision
+constant** ``PUBLIC_COORD_DECIMALS`` (2 dp) — keep it in sync everywhere. NOT
+the tie-break: this module's ``round`` is half-to-even while the other three
+round half-away-from-zero, so they diverge only on an exact ``x.xx5`` third
+decimal, which a real GPS fix never produces (so live data is identical at every
+layer — never compare layers on a contrived half-way value). See ADR-020, #145.
 """
 
 from __future__ import annotations
@@ -30,8 +34,10 @@ def coarsen_coord(value: float) -> float:
 
     Preserves the ``(0, 0)`` "no fix yet" sentinel (rounding 0 stays 0), so the
     geo-retention ``CASE`` logic in ``add_module`` and the plausibility checks
-    are unaffected. ``round`` is Python's banker's rounding, which is fine here:
-    the goal is ~1 km generalization, not a specific tie-break direction.
+    are unaffected. ``round`` is Python's half-to-even (banker's) rounding; the
+    other layers round half-away-from-zero (see the module docstring) — the
+    difference only shows on an exact ``x.xx5`` input, which a live fix never
+    yields, so the generalization is identical for real data.
 
     Edge case: a *plausible* fix within ~0.005 deg of Null Island (e.g.
     ``0.004, 0.004`` — passes ``isPlausibleFix`` because it is not exactly

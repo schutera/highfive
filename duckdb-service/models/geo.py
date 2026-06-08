@@ -32,5 +32,14 @@ def coarsen_coord(value: float) -> float:
     geo-retention ``CASE`` logic in ``add_module`` and the plausibility checks
     are unaffected. ``round`` is Python's banker's rounding, which is fine here:
     the goal is ~1 km generalization, not a specific tie-break direction.
+
+    Edge case: a *plausible* fix within ~0.005 deg of Null Island (e.g.
+    ``0.004, 0.004`` — passes ``isPlausibleFix`` because it is not exactly
+    ``(0, 0)``) rounds to ``(0.0, 0.0)`` and so becomes indistinguishable from
+    the sentinel, which would then trip the geo-retention guard and the
+    "Location pending" filter. The blast radius is open ocean in the Gulf of
+    Guinea with no Wi-Fi APs to geolocate against, so it cannot occur for a real
+    wild-bee module — not worth guarding in code, but noted so it isn't a
+    surprise.
     """
     return round(float(value), PUBLIC_COORD_DECIMALS)

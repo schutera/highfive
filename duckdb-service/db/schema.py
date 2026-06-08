@@ -399,12 +399,19 @@ def init_db():
                 # which always has manufacturer OUI bytes set.
                 con.execute(
                     """
+                    -- Seed coordinates are written at the public 2-dp
+                    -- precision (issue #145, ADR-020) so the "no precise
+                    -- coordinate is persisted anywhere" invariant holds on the
+                    -- very first boot too — the coarsen migration above runs
+                    -- before this insert, so 4-dp seeds would otherwise sit at
+                    -- full precision until the next boot. These are demo
+                    -- locations, not real fixes; 2 dp loses nothing here.
                     INSERT INTO module_configs (id, name, lat, lng, first_online, image_count) VALUES
-                    ('000000000001', 'Elias123',    47.8086, 9.6433, '2023-04-15', 142),
-                    ('000000000002', 'Garten 12',   47.8100, 9.6450, '2023-05-20', 87),
-                    ('000000000003', 'Waldrand',    47.7819, 9.6107, '2024-03-10', 53),
-                    ('000000000004', 'Schussental', 47.7850, 9.6200, '2024-06-01', 24),
-                    ('000000000005', 'Bergblick',   47.8050, 9.6350, '2025-02-14', 3);
+                    ('000000000001', 'Elias123',    47.81, 9.64, '2023-04-15', 142),
+                    ('000000000002', 'Garten 12',   47.81, 9.65, '2023-05-20', 87),
+                    ('000000000003', 'Waldrand',    47.78, 9.61, '2024-03-10', 53),
+                    ('000000000004', 'Schussental', 47.79, 9.62, '2024-06-01', 24),
+                    ('000000000005', 'Bergblick',   47.81, 9.64, '2025-02-14', 3);
 
                     INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
                     ('nest-001', '000000000001', 'blackmasked'),

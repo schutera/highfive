@@ -107,10 +107,12 @@ describe('AdminPage login gate', () => {
 
 describe('AdminPage coordinate display (issue #145, ADR-020)', () => {
   it('renders module coordinates at 2 dp, never finer', async () => {
-    // The wire is already generalized server-side (see backend
-    // coarsen-location.test). This pins the admin table as the last line of
-    // defence: even fed a precise value it must render ~1 km / 2 dp — admins
-    // get no finer precision than anyone else ("coarsen for everyone").
+    // NOTE: the privacy boundary is server-side (the wire is already
+    // generalized — see backend coarsen-location.test). `toFixed(2)` here is
+    // display formatting only, not a security control: it rounds the rendered
+    // glyphs, not the data a DevTools Network tab would show. This pins the
+    // admin table's *presentation* at 2 dp so it never implies finer precision
+    // than the wire carries — admins get no special precision affordance.
     mockApi.checkSession.mockResolvedValue(true);
     mockApi.getAllModules.mockResolvedValue([makeModule({ lat: 47.808612, lng: 9.643301 })]);
     renderAdmin();

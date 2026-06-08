@@ -128,8 +128,10 @@ static void test_round_preserves_null_island_sentinel(void) {
 }
 
 static void test_round_is_idempotent_on_coarse_value(void) {
-    // An already-2-dp value is unchanged — the server-side migration relies
-    // on this (round(round(x)) == round(x)) to be a true no-op on re-run.
+    // Re-rounding an already-2-dp value is a no-op, so a module that re-reports
+    // its stored fix doesn't drift. (This is the firmware's own float32
+    // idempotency only — the server re-rounds on arrival with DuckDB doubles,
+    // so cross-layer bit-equality is neither claimed nor relied upon.)
     TEST_ASSERT_FLOAT_WITHIN(1e-4f, 52.52f, roundCoord(52.52f));
 }
 

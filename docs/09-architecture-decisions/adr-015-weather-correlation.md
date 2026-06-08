@@ -204,9 +204,9 @@ know how to fabricate buckets matching DuckDB's truncation semantics.
   see "weather unavailable" indefinitely. The fallback path
   exists; surface to the operator via the inline notice.
 - Open-Meteo see the visitor's lat/lng (per-call). The coordinates
-  are a public, fuzzed-by-design value (`Module.location` is the
-  Google-Geolocation result, intentionally coarse — see
-  ADR-006 / chapter 11), but the request itself does leave our
+  are a public, ~1 km-generalized value (`Module.location` is the
+  Google-Geolocation result, generalized to 2 dp for every caller —
+  see [ADR-020](adr-020-coordinate-generalization.md)), but the request itself does leave our
   infrastructure. Briefly. The browser is the originator; nothing
   HiveHive logs is augmented by this traffic.
 

@@ -404,8 +404,11 @@ def init_db():
                     -- coordinate is persisted anywhere" invariant holds on the
                     -- very first boot too — the coarsen migration above runs
                     -- before this insert, so 4-dp seeds would otherwise sit at
-                    -- full precision until the next boot. These are demo
-                    -- locations, not real fixes; 2 dp loses nothing here.
+                    -- full precision until the next boot. These are the exact
+                    -- values DuckDB's round(orig, 2) produces from the former
+                    -- 4-dp demo points, so Elias123 and Bergblick legitimately
+                    -- collapse to the same cell (47.81, 9.64) — the expected
+                    -- ~1 km collision ADR-020 documents, not a copy-paste slip.
                     INSERT INTO module_configs (id, name, lat, lng, first_online, image_count) VALUES
                     ('000000000001', 'Elias123',    47.81, 9.64, '2023-04-15', 142),
                     ('000000000002', 'Garten 12',   47.81, 9.65, '2023-05-20', 87),

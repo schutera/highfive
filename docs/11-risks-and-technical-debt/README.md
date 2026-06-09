@@ -121,9 +121,12 @@ pinned by `test_native_loop_health`. Lesson: any "self-healing on failure X"
 claim in the firmware must be backed by code in `loop()` **and** a native
 test that injects the failure and asserts the recovery fires at the
 threshold — an aspirational doc paragraph is worse than none, because it
-stops people looking. Related gap found while here: `logbufNoteWifiReconnect()`
-is defined but never called, so the `wifi_reconnects` telemetry reads 0 in
-the field — left for #148's diagnostics work.
+stops people looking. Related gap found while here and **fixed in the same
+PR**: `logbufNoteWifiReconnect()` was defined but never called, so the
+`wifi_reconnects` telemetry read 0 in the field — now wired into
+`onWifiEvent`'s `STA_DISCONNECTED` branch so the reconnect count is a real
+signal (the first diagnostics slice of #148; the rest of #148's heap-leak /
+silent-hang root-cause work remains open).
 
 ### Merging firmware source is not a release — the SEQUENCE bump is the release (#150, #132)
 

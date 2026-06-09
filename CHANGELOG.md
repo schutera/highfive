@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### ESP32-CAM firmware
+
+- **WiFi-health reboot fallback (#149).** If WiFi stays disconnected for > 10 min (async auto-reconnect stalled), `loop()` does a software `ESP.restart()` to recover, instead of going silent until the 24 h daily reboot. The reboot is `ESP_RST_SW`, so it does not trip the OTA rollback counter.
+- **Heartbeat retry backoff (#149).** A skipped/failed heartbeat now reschedules ~5 min out instead of advancing a full hour, so a transient blip costs ~5 min of dashboard silence rather than 60. Decision logic extracted to `ESP32-CAM/lib/loop_health/` and pinned by native tests.
+- **`wifi_reconnects` telemetry wired (#149; #148 diagnostics).** `logbufNoteWifiReconnect()` is now called from `onWifiEvent` on each `STA_DISCONNECTED` event (drops and failed re-association attempts) — previously defined but never called, so the field read 0 in the field. First diagnostics slice of the #148 umbrella.
+
 ### Documentation
 
 - arc42 restructure (PR 27): the `documentation/` folder is gone; all docs live under `docs/<chapter>/`. Notable relocations:

@@ -5,6 +5,7 @@
 #include "form_query.h"        // hf::rewriteLegacyHighfiveUrl — issue #79
 #include "geolocation.h"       // hf::isPlausibleFix — issue #89
 #include "led.h"
+#include "logbuf.h"           // logbufNoteWifiReconnect — wifi_reconnects telemetry (#149; #148 umbrella)
 #include "module_id.h"
 #include "module_name.h"       // hf::moduleNameFromMac — issue #92
 #include "url.h"               // hf::parseUrl — scheme-aware TLS dispatch (#79)
@@ -312,6 +313,14 @@ void tuneWifiForLatency() {
 static void onWifiEvent(WiFiEvent_t event) {
   if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
     Serial.println("[WIFI] disconnected — reconnecting");
+    // Count each STA_DISCONNECTED event (drops AND failed re-association
+    // attempts, so this measures link instability, not clean reconnect
+    // successes) so the `wifi_reconnects` telemetry field stops reading 0 —
+    // the counter existed but had no caller. This is the signal that
+    // confirms the #149 WiFi-health reboot path is firing. Runs in the WiFi
+    // event task; the non-atomic increment vs. the loop-task read in
+    // buildTelemetryJson is a benign race for a monotonic diagnostic.
+    logbufNoteWifiReconnect();
     WiFi.reconnect();
   } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
     Serial.printf("[WIFI] (re)connected, IP: %s\n", WiFi.localIP().toString().c_str());

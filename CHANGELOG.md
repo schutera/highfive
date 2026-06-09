@@ -20,6 +20,7 @@ First tagged release aimed at keeping deployed modules alive in the field and ma
 ### ESP32-CAM firmware
 
 - **WiFi watchdog.** `loop()` now checks `WiFi.status()` and calls `reconnectWifi()` when disconnected. Five consecutive reconnect failures trigger a device restart. Fixes the single most likely cause of the ~8–10 day field death (router reboot / DHCP lease expiry with no recovery path).
+  - _Correction (#149):_ `reconnectWifi()` was only ever **declared** in `esp_init.h`, never defined or called — this loop-side watchdog never actually shipped. Real recovery was async-only (`onWifiEvent` → `WiFi.reconnect()`) until #149 added the `WifiHealthMonitor` 10-min reboot fallback and removed the dead declaration.
 - **Task watchdog.** `esp_task_wdt_init(30, true)` with per-iteration reset. Any 30-second hang now auto-reboots.
 - **Daily reboot.** After 24 hours of uptime the device restarts automatically, clearing heap fragmentation and stale TCP state.
 - **No more `while(true)` hard-locks.** Camera init failure and WiFi initial-connect timeout now call `ESP.restart()` instead of spinning forever.

@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from db.connection import lock, get_conn
+from models.geo import PUBLIC_COORD_DECIMALS
 
 
 # Single source of truth for the three FK-chained table DDLs. Referenced by
@@ -337,6 +338,34 @@ def init_db():
                 "a backup before re-running."
             ) from e
 
+        # Coarsen any precise coordinates already stored on existing volumes
+        # (issue #145, ADR-020). Modules in the field reported exact lat/lng
+        # before round-on-write landed, so those precise values are sitting in
+        # `module_configs` right now; this generalizes them to ~1 km in place.
+        # Count-gated so it is a true no-op once every row is already at the
+        # target precision (round-on-write keeps it that way), and the
+        # `WHERE lat <> round(...)` filter touches only rows that need it.
+        # Deliberately does NOT bump `updated_at` — this is a privacy backfill,
+        # not a device event. Destructive by design: the precise value is gone
+        # after this runs (the intended GDPR posture — see ADR-020).
+        needs_coarsen = con.execute(
+            f"SELECT COUNT(*) FROM module_configs "
+            f"WHERE lat <> round(lat, {PUBLIC_COORD_DECIMALS}) "
+            f"   OR lng <> round(lng, {PUBLIC_COORD_DECIMALS})"
+        ).fetchone()[0]
+        if needs_coarsen:
+            con.execute(
+                f"UPDATE module_configs "
+                f"SET lat = round(lat, {PUBLIC_COORD_DECIMALS}), "
+                f"    lng = round(lng, {PUBLIC_COORD_DECIMALS}) "
+                f"WHERE lat <> round(lat, {PUBLIC_COORD_DECIMALS}) "
+                f"   OR lng <> round(lng, {PUBLIC_COORD_DECIMALS})"
+            )
+            print(
+                f"✅ Coarsened {needs_coarsen} module coordinate(s) to "
+                f"{PUBLIC_COORD_DECIMALS} dp (issue #145, ADR-020)"
+            )
+
         # One-time backfill: surface historical heartbeat batteries in the
         # new measurements store so the dashboard chart isn't blank on
         # existing volumes. Idempotent via the `esp-heartbeat-backfill`
@@ -370,12 +399,22 @@ def init_db():
                 # which always has manufacturer OUI bytes set.
                 con.execute(
                     """
+                    -- Seed coordinates are written at the public 2-dp
+                    -- precision (issue #145, ADR-020) so the "no precise
+                    -- coordinate is persisted anywhere" invariant holds on the
+                    -- very first boot too — the coarsen migration above runs
+                    -- before this insert, so 4-dp seeds would otherwise sit at
+                    -- full precision until the next boot. These are the exact
+                    -- values DuckDB's round(orig, 2) produces from the former
+                    -- 4-dp demo points, so Elias123 and Bergblick legitimately
+                    -- collapse to the same cell (47.81, 9.64) — the expected
+                    -- ~1 km collision ADR-020 documents, not a copy-paste slip.
                     INSERT INTO module_configs (id, name, lat, lng, first_online, image_count) VALUES
-                    ('000000000001', 'Elias123',    47.8086, 9.6433, '2023-04-15', 142),
-                    ('000000000002', 'Garten 12',   47.8100, 9.6450, '2023-05-20', 87),
-                    ('000000000003', 'Waldrand',    47.7819, 9.6107, '2024-03-10', 53),
-                    ('000000000004', 'Schussental', 47.7850, 9.6200, '2024-06-01', 24),
-                    ('000000000005', 'Bergblick',   47.8050, 9.6350, '2025-02-14', 3);
+                    ('000000000001', 'Elias123',    47.81, 9.64, '2023-04-15', 142),
+                    ('000000000002', 'Garten 12',   47.81, 9.65, '2023-05-20', 87),
+                    ('000000000003', 'Waldrand',    47.78, 9.61, '2024-03-10', 53),
+                    ('000000000004', 'Schussental', 47.79, 9.62, '2024-06-01', 24),
+                    ('000000000005', 'Bergblick',   47.81, 9.64, '2025-02-14', 3);
 
                     INSERT INTO nest_data (nest_id, module_id, beeType) VALUES
                     ('nest-001', '000000000001', 'blackmasked'),

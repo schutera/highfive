@@ -349,6 +349,17 @@ The ESP32 must be able to reach the server's IP. A common mistake is configuring
 
 **Rule:** the ESP32 must join the **same network** the server is on. Production modules reach `https://highfive.schutera.com` (baked in at build time, no operator action). For a **local dev** stack, the server URL is set from the host's **LAN IP** via the gitignored `ESP32-CAM/DEV_SERVER_HOST` build file — not `localhost`, which would resolve to the ESP32 itself.
 
+### Module registered to production instead of my local dev stack
+
+The server URL is **baked at build time, not set in the captive portal** — the `192.168.4.1` page only takes Wi-Fi SSID + password (ADR-018), so there is no "localhost/server" field. A firmware built **without** `DEV_SERVER_HOST` bakes the production URLs, so the module registers to `https://highfive.schutera.com` no matter which Wi-Fi you give it. To target a dev stack you must **rebuild + re-flash** with the host's LAN IP (see [Point a dev module at a local stack](07-deployment-view/esp-flashing.md#point-a-dev-module-at-a-local-stack-dev_server_host)):
+
+```powershell
+$env:DEV_SERVER_HOST = "192.168.1.50"   # your PC's LAN IP, reachable from the ESP (not localhost)
+bash ESP32-CAM/build.sh                   # bakes init :8002 / upload :8000 at that IP
+```
+
+Then re-flash and re-onboard Wi-Fi (a full flash wipes NVS, so credentials must be re-entered). **A module already registered to the wrong server keeps reappearing there on its next boot/heartbeat until it is re-flashed** — so delete the stray module from that server's `/admin` **after** the retargeted firmware is running, never before, or the next registration just recreates it.
+
 Find your LAN IP: `ipconfig` (Windows, look at WLAN/Ethernet adapter), `ip addr` (Linux/Mac).
 
 ### Windows Firewall blocking inbound connections

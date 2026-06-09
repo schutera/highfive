@@ -60,9 +60,10 @@ Remove every secret from the browser bundle and split the API by trust level:
 **Negative**:
 
 - Read endpoints are now openly public, including module GPS at ~11 m precision.
-  Generalising coordinates for unauthenticated callers is deferred to
-  [#145](https://github.com/schutera/highfive/issues/145) (noted in
-  [chapter 11](../11-risks-and-technical-debt/README.md)).
+  Generalising coordinates for unauthenticated callers was deferred to
+  [#145](https://github.com/schutera/highfive/issues/145) — now **resolved** by
+  [ADR-020](adr-020-coordinate-generalization.md) (coordinates are generalized to
+  ~1 km for every caller).
 - The login rate-limiter is in-memory (per-process) **and** keys on `req.ip`,
   which honours `app.set('trust proxy', 'loopback, linklocal, uniquelocal')`.
   In the single-host nginx topology this is safe (private ranges are

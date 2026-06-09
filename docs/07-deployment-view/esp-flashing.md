@@ -81,6 +81,13 @@ The chip is now waiting for firmware.
 > `pio run -e esp32cam` smoke env stays keyless without this flag,
 > because it is a compile-only gate (not a release path) and produces
 > a binary that is never flashed.
+>
+> **Coordinate generalization (ADR-020 / #145):** the firmware rounds the
+> Google fix to ~1 km (2 dp) the moment it parses it (`hf::roundCoord` in
+> `ESP32-CAM/lib/geolocation/`), so a newly onboarded module registers and
+> reports an already-coarsened location — the precise fix never leaves the
+> device. The server rounds independently too, so this changes nothing an
+> operator sees beyond the module pin being deliberately ~1 km imprecise.
 
 Write the key to the gitignored `ESP32-CAM/GEO_API_KEY` file once
 (it's listed in the repo root `.gitignore` next to `secrets.h`):

@@ -42,6 +42,30 @@ def test_new_module_creates_row_and_calls_discord(client, fresh_db):
     assert listed[0]["battery_level"] == 80
 
 
+def test_new_module_coarsens_precise_coordinates(client, fresh_db):
+    """Registration generalizes coordinates to ~1 km before persisting
+    (issue #145, ADR-020). The `ModuleData` validator is the chokepoint, so
+    the stored row AND the Discord echo must both show the coarse value — no
+    precise coordinate is persisted or leaked to the webhook.
+    """
+    resp = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=47.808612, longitude=9.643301),
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    # Stored at 2 dp, not the precise input.
+    listed = client.get("/modules").get_json()["modules"]
+    assert float(listed[0]["lat"]) == 47.81
+    assert float(listed[0]["lng"]) == 9.64
+
+    # The Discord "Location" line is built from the same (now-coarse) model
+    # fields — the precise value never reaches the webhook either.
+    msg = fresh_db.discord_calls[0]
+    assert "47.81" in msg
+    assert "47.808612" not in msg
+
+
 def test_new_module_canonicalises_legacy_colon_form(client, fresh_db):
     """Inbound colon-separated/uppercase MACs are normalised to canonical."""
     resp = client.post("/new_module", json=_valid_payload(esp_id=TEST_MAC_LEGACY))

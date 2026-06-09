@@ -720,8 +720,14 @@ static bool attemptGeolocation(geolocation_t* out) {
     DynamicJsonDocument responseDoc(2048);
     DeserializationError error = deserializeJson(responseDoc, response);
     if (!error) {
-      out->latitude  = responseDoc["location"]["lat"];
-      out->longitude = responseDoc["location"]["lng"];
+      // Generalize to ~1 km at the source before the fix is ever stored or
+      // reported (issue #145, ADR-020). Rounding here — the single parse
+      // point — means every consumer (boot registration AND the heartbeat
+      // geo-patch, both of which read esp_config->geolocation) transmits
+      // only the coarse value. Rounding before isPlausibleFix is safe: the
+      // range check and (0,0) sentinel survive a 2-dp round.
+      out->latitude  = hf::roundCoord(responseDoc["location"]["lat"].as<float>());
+      out->longitude = hf::roundCoord(responseDoc["location"]["lng"].as<float>());
       out->accuracy  = responseDoc["accuracy"];
       ok = true;
     } else {

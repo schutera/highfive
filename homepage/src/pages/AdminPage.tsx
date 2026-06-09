@@ -393,8 +393,11 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-gray-600 text-xs">
                         {m.email || <span className="text-gray-300">&mdash;</span>}
                       </td>
+                      {/* Coordinates are generalized to ~1 km for every caller,
+                          admin included (issue #145, ADR-020). Render 2 dp so the
+                          text doesn't imply precision the value no longer carries. */}
                       <td className="px-4 py-3 text-gray-500 text-xs font-mono">
-                        {m.location.lat.toFixed(4)}, {m.location.lng.toFixed(4)}
+                        {m.location.lat.toFixed(2)}, {m.location.lng.toFixed(2)}
                       </td>
                       <td className="px-4 py-3 text-gray-600">{m.imageCount}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">

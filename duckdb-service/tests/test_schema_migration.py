@@ -280,6 +280,59 @@ def test_migration_is_idempotent_on_fresh_db(fresh_db):
         con.close()
 
 
+# ---------- coordinate generalization (issue #145 / ADR-020) ----------
+
+
+def test_migration_coarsens_existing_precise_coordinates(fresh_db):
+    """An operator volume that stored exact coordinates before round-on-write
+    shipped must have them generalized to ~1 km in place on the next boot
+    (issue #145, ADR-020). The migration is destructive by design — the
+    precise value is irrecoverable afterwards — and count-gated so a second
+    boot is a true no-op.
+    """
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO module_configs "
+            "(id, name, lat, lng, first_online, battery_level, image_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("aabbccddeeff", "TestHive", 47.808612, 9.643301, "2024-01-01", 80, 0),
+        )
+        con.commit()
+        # The precise value is present before the migration runs.
+        before = con.execute(
+            "SELECT lat, lng FROM module_configs WHERE id = ?", ("aabbccddeeff",)
+        ).fetchone()
+        assert (float(before[0]), float(before[1])) == (47.808612, 9.643301)
+    finally:
+        con.close()
+
+    fresh_db.schema.init_db()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT lat, lng FROM module_configs WHERE id = ?", ("aabbccddeeff",)
+        ).fetchone()
+        assert (float(row[0]), float(row[1])) == (47.81, 9.64), (
+            f"coords should be coarsened to 2 dp; got {row!r}"
+        )
+    finally:
+        con.close()
+
+    # Second init_db is a no-op (the count-gate matches nothing now): the
+    # already-coarse value is untouched and nothing raises.
+    fresh_db.schema.init_db()
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT lat, lng FROM module_configs WHERE id = ?", ("aabbccddeeff",)
+        ).fetchone()
+        assert (float(row[0]), float(row[1])) == (47.81, 9.64)
+    finally:
+        con.close()
+
+
 # ---------- display_name column (PR I — issue #93) ----------
 
 

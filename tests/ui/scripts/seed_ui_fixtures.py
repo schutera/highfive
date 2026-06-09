@@ -58,6 +58,15 @@ TELEMETRY_MAC = "ff1111111111"
 # assert the first page caps at 5 and "Load more" reveals the rest.
 GALLERY_MAC = "ff2222222222"
 GALLERY_IMAGE_COUNT = 6
+# Module seeded with a DELIBERATELY PRECISE fix so
+# coordinate-generalization.spec.ts can prove the server coarsens it to
+# ~1 km end-to-end (round-on-write in duckdb + the backend response
+# boundary, served through nginx). Issue #145, ADR-020.
+COARSEN_MAC = "ff3333333333"
+COARSEN_PRECISE_LAT = "47.808612"
+COARSEN_PRECISE_LNG = "9.643301"
+COARSEN_EXPECTED_LAT = 47.81
+COARSEN_EXPECTED_LNG = 9.64
 
 
 def wait_for_stack(timeout_s: int = 180) -> None:
@@ -185,11 +194,32 @@ def seed_admin_gallery_images() -> None:
     )
 
 
+def seed_precise_coordinate_module() -> None:
+    """Register a module with a precise (6-dp) fix.
+
+    The server must generalize it to ~1 km before it is ever served:
+    `add_module` rounds on write (issue #145, ADR-020), so the row lands at
+    2 dp and `coordinate-generalization.spec.ts` can assert the served value
+    is coarse end-to-end. UPSERT-idempotent on `id`, so re-runs are safe.
+    """
+    payload = {
+        "esp_id": COARSEN_MAC,
+        "module_name": "UI Test Precise Coords",
+        "latitude": COARSEN_PRECISE_LAT,
+        "longitude": COARSEN_PRECISE_LNG,
+        "battery_level": "63",
+    }
+    r = requests.post(f"{DUCKDB_URL}/new_module", json=payload, timeout=10)
+    r.raise_for_status()
+    print(f"[ui-seed] registered precise-coords module {COARSEN_MAC}", flush=True)
+
+
 def main() -> int:
     wait_for_stack()
     seed_null_island_module()
     seed_telemetry_upload()
     seed_admin_gallery_images()
+    seed_precise_coordinate_module()
     print("[ui-seed] done", flush=True)
     return 0
 

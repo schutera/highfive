@@ -69,19 +69,15 @@ const AmberIcon = L.divIcon({
 // longer rendered — clusters use a count-badge icon for both states.
 // Kept intentionally removed to satisfy noUnusedLocals.)
 
-// Function to add random offset within ~1km radius for data protection
-function fuzzLocation(location: { lat: number; lng: number }, moduleId: string): [number, number] {
-  // Use module ID as seed for consistent fuzzing
-  const seed = moduleId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-
-  // Pseudo-random based on seed
-  const random1 = Math.sin(seed * 12.9898) * 43758.5453;
-  const random2 = Math.sin(seed * 78.233) * 43758.5453;
-
-  const offsetLat = (random1 - Math.floor(random1)) * 0.018 - 0.009; // ~1km
-  const offsetLng = (random2 - Math.floor(random2)) * 0.018 - 0.009; // ~1km
-
-  return [location.lat + offsetLat, location.lng + offsetLng];
+// Convert a module's location into the [lat, lng] tuple Leaflet expects.
+// There is no client-side fuzzing any more: coordinates now arrive already
+// generalized to ~1 km from the backend (issue #145, ADR-020). The old
+// `fuzzLocation` here was cosmetic — it shipped the exact coords over the
+// wire and re-derived the offset from `moduleId` alone in the public JS
+// bundle, so it was trivially reversible and protected nothing. Privacy
+// generalization now lives server-side (and in the firmware), not here.
+function plotPosition(location: { lat: number; lng: number }): [number, number] {
+  return [location.lat, location.lng];
 }
 
 // `hasPlausibleLocation` lives in `src/lib/location.ts`. The
@@ -140,10 +136,10 @@ function getDistance(loc1: [number, number], loc2: [number, number]): number {
 
 // Cluster modules that are within 12km of each other
 function clusterModules(
-  modules: Array<Module & { fuzzedLocation: [number, number] }>,
+  modules: Array<Module & { position: [number, number] }>,
   clusterThreshold: number = 12,
 ) {
-  const clusters: Array<Array<Module & { fuzzedLocation: [number, number] }>> = [];
+  const clusters: Array<Array<Module & { position: [number, number] }>> = [];
   const processed = new Set<string>();
 
   modules.forEach((module) => {
@@ -157,8 +153,7 @@ function clusterModules(
 
       // Check if this module is close to any module in the current cluster
       const isClose = cluster.some(
-        (clusterModule) =>
-          getDistance(clusterModule.fuzzedLocation, other.fuzzedLocation) < clusterThreshold,
+        (clusterModule) => getDistance(clusterModule.position, other.position) < clusterThreshold,
       );
 
       if (isClose) {
@@ -174,9 +169,9 @@ function clusterModules(
 }
 
 // Calculate centroid of a cluster
-function getClusterCenter(cluster: Array<{ fuzzedLocation: [number, number] }>): [number, number] {
-  const lat = cluster.reduce((sum, m) => sum + m.fuzzedLocation[0], 0) / cluster.length;
-  const lng = cluster.reduce((sum, m) => sum + m.fuzzedLocation[1], 0) / cluster.length;
+function getClusterCenter(cluster: Array<{ position: [number, number] }>): [number, number] {
+  const lat = cluster.reduce((sum, m) => sum + m.position[0], 0) / cluster.length;
+  const lng = cluster.reduce((sum, m) => sum + m.position[1], 0) / cluster.length;
   return [lat, lng];
 }
 
@@ -196,13 +191,13 @@ interface MapViewProps {
 // Component to track zoom level and handle map interactions
 function MapController({
   selectedModule,
-  selectedFuzzedLocation,
+  selectedPosition,
   userLocationHint,
   hasInitialPlausibleCentre,
   onZoomChange,
 }: {
   selectedModule: Module | null;
-  selectedFuzzedLocation: [number, number] | null;
+  selectedPosition: [number, number] | null;
   userLocationHint: UserLocation | null | undefined;
   hasInitialPlausibleCentre: boolean;
   onZoomChange: (zoom: number) => void;
@@ -231,16 +226,16 @@ function MapController({
   });
 
   useEffect(() => {
-    if (selectedModule && selectedFuzzedLocation) {
+    if (selectedModule && selectedPosition) {
       // Zoom to level 14 to show the full 1km circle
-      map.flyTo(selectedFuzzedLocation, 14, {
+      map.flyTo(selectedPosition, 14, {
         duration: 1.5,
       });
       // Selecting a module is a deliberate user intent — don't override it
       // with a late-arriving IP-geo hint.
       hintApplied.current = true;
     }
-  }, [selectedModule, selectedFuzzedLocation, map]);
+  }, [selectedModule, selectedPosition, map]);
 
   useEffect(() => {
     if (userLocationHint && !hintApplied.current) {
@@ -419,7 +414,7 @@ function ClusterMarker({
   clusterZoomThreshold,
   maxHatches,
 }: {
-  cluster: Array<Module & { fuzzedLocation: [number, number] }>;
+  cluster: Array<Module & { position: [number, number] }>;
   clusterCenter: [number, number];
   onModuleSelect: (module: Module) => void;
   clusterZoomThreshold: number;
@@ -474,7 +469,7 @@ function ClusterMarker({
   return (
     <>
       <Circle
-        center={cluster[0].fuzzedLocation}
+        center={cluster[0].position}
         radius={3000}
         pathOptions={{
           color: singleColor,
@@ -488,7 +483,7 @@ function ClusterMarker({
         }}
       />
       <Marker
-        position={cluster[0].fuzzedLocation}
+        position={cluster[0].position}
         icon={createBadgeIcon(singleOnlineCount, singleHasOnline)}
         eventHandlers={{
           click: () => onModuleSelect(cluster[0]),
@@ -519,26 +514,26 @@ export default function MapView({
     ? [firstPlausible.location.lat, firstPlausible.location.lng]
     : [47.78, 9.61];
 
-  // Memoize fuzzed locations to keep them consistent. (0,0) and
-  // out-of-range modules are FILTERED OUT entirely from the rendered
-  // map circle set — they still appear in the dashboard side-list
-  // (with the "Location pending" pill), but no marker is plotted at
-  // Null Island. The filter happens at the fuzzedModules construction
-  // step so every downstream consumer (clustering, individual
-  // circles, the `selectedFuzzedLocation` lookup) sees a clean list.
-  const fuzzedModules = useMemo(
+  // Memoize the plotted [lat, lng] tuples. (0,0) and out-of-range modules
+  // are FILTERED OUT entirely from the rendered map circle set — they still
+  // appear in the dashboard side-list (with the "Location pending" pill), but
+  // no marker is plotted at Null Island. The filter happens at the
+  // plottedModules construction step so every downstream consumer
+  // (clustering, individual circles, the `selectedPosition` lookup) sees a
+  // clean list.
+  const plottedModules = useMemo(
     () =>
       modules
         .filter((module) => hasPlausibleLocation(module.location))
         .map((module) => ({
           ...module,
-          fuzzedLocation: fuzzLocation(module.location, module.id),
+          position: plotPosition(module.location),
         })),
     [modules],
   );
 
   // Create clusters
-  const clusters = useMemo(() => clusterModules(fuzzedModules), [fuzzedModules]);
+  const clusters = useMemo(() => clusterModules(plottedModules), [plottedModules]);
 
   // Calculate max hatches for normalization
   const maxHatches = useMemo(
@@ -568,9 +563,9 @@ export default function MapView({
 
       <MapController
         selectedModule={selectedModule}
-        selectedFuzzedLocation={
+        selectedPosition={
           selectedModule
-            ? fuzzedModules.find((m) => m.id === selectedModule.id)?.fuzzedLocation || null
+            ? plottedModules.find((m) => m.id === selectedModule.id)?.position || null
             : null
         }
         userLocationHint={userLocationHint ?? null}
@@ -593,7 +588,7 @@ export default function MapView({
             />
           ))
         : // Show individual circles when zoomed in
-          fuzzedModules.map((module) => {
+          plottedModules.map((module) => {
             const circleColor =
               module.status === 'online'
                 ? getColorFromHatches(module.totalHatches || 0, maxHatches)
@@ -601,7 +596,7 @@ export default function MapView({
             return (
               <Circle
                 key={module.id}
-                center={module.fuzzedLocation}
+                center={module.position}
                 radius={1000}
                 pathOptions={{
                   color: circleColor,

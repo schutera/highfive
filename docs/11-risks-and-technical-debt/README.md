@@ -128,6 +128,34 @@ PR**: `logbufNoteWifiReconnect()` was defined but never called, so the
 signal (the first diagnostics slice of #148; the rest of #148's heap-leak /
 silent-hang root-cause work remains open).
 
+### A client-side privacy transform protects nothing (#145, ADR-020)
+
+**What happened.** Module GPS coordinates were "fuzzed" by ~1 km before
+plotting on the map — but the fuzzing (`fuzzLocation` in
+[`homepage/src/components/MapView.tsx`](../../homepage/src/components/MapView.tsx))
+ran **in the browser**, so the backend still shipped the **exact**
+coordinates over the wire (`GET /api/modules`), visible to anyone in
+DevTools or the raw JSON. Worse, the offset was a pure function of
+`moduleId` with no secret and the algorithm shipped in the public JS
+bundle, so even the displayed pin was trivially reversible to the true
+point. After #142 made reads public, this meant precise nest locations
+were readable by anyone with no credential.
+
+**Why it happened.** "We fuzz the location on the map" reads as a privacy
+control, but the map is the _last_ consumer — the data is already public
+by the time the browser rounds it. A privacy transform on the client is
+cosmetic by construction: the client receives the secret (here, the exact
+coordinate) before it can hide it.
+
+**How to avoid it next time.** Enforce data-minimization at or before the
+**trust boundary**, never after it. If a value must not reach a caller,
+the server must not send it — round/redact server-side (ideally
+round-on-write so it is never persisted either), and treat any client-side
+"masking" as presentation only. The fix generalizes coordinates at three
+layers (firmware, duckdb round-on-write, backend response boundary) so the
+exact fix is never served or stored — see
+[ADR-020](../09-architecture-decisions/adr-020-coordinate-generalization.md).
+
 ### Merging firmware source is not a release — the SEQUENCE bump is the release (#150, #132)
 
 **What happened.** PR #150 merged the noon-capture firmware source to
@@ -1258,8 +1286,10 @@ heartbeat-side recovery (see the previous "First-boot geolocation
 race" entry). Three rule definitions were aligned across firmware,
 server, and frontend (`hf::isPlausibleFix`, `_is_plausible_fix`,
 `hasPlausibleLocation`). The comment block at
-[`homepage/src/components/MapView.tsx`'s `fuzzedModules`](../../homepage/src/components/MapView.tsx)
-explicitly says "(0,0) and out-of-range modules are FILTERED OUT
+[`homepage/src/components/MapView.tsx`'s `plottedModules`](../../homepage/src/components/MapView.tsx)
+(named `fuzzedModules` at the time of this incident; renamed in #145 / ADR-020
+when the cosmetic client-side fuzzing was removed — the filtering role is
+unchanged) explicitly says "(0,0) and out-of-range modules are FILTERED OUT
 entirely from the rendered map circle set — they still appear in
 the dashboard side-list (with the 'Location pending' pill), but no
 marker is plotted at Null Island". The PR description, the manual-
@@ -1270,7 +1300,7 @@ The dashboard side-list silently filtered them out anyway.
 [`homepage/src/pages/DashboardPage.tsx`](../../homepage/src/pages/DashboardPage.tsx)
 maps `visibleModules` (the bounds-filtered set MapView emits via
 `onVisibleModulesChange`) into both the desktop floating list and
-the mobile bottom-sheet. `MapView.tsx::fuzzedModules` already pre-
+the mobile bottom-sheet. `MapView.tsx::plottedModules` already pre-
 filters pending modules out before they can reach the callback, so
 `visibleModules` is a plausible-only set by construction. Operator
 impact: AdminPage rendered the pill correctly, the header counter
@@ -1283,17 +1313,17 @@ asymmetry between admin/header (correct) and dashboard list
 **Why it happened.** The contract was prose-only.
 
 1. **The contract lived in comments + the PR description, not in
-   code.** The MapView comment block at `fuzzedModules`, the PR
+   code.** The MapView comment block at `plottedModules`, the PR
    description's "side-list shows it with 'Location pending' pill"
    line, and the existing "First-boot geolocation race" entry one
    section above all asserted that pending modules appear in the
    dashboard side-list with the pill. None of those is an enforced
    contract — they're prose. The actual code never enforced what
-   they asserted: `MapView.tsx::fuzzedModules` carried the
+   they asserted: `MapView.tsx::plottedModules` carried the
    `.filter((module) => hasPlausibleLocation(module.location))` from
    the original PR II commit `ef548e5` onward, and the downstream
    `visibleModules` (which `onVisibleModulesChange` feeds to
-   `DashboardPage`) is derived from `fuzzedModules`. The side-list
+   `DashboardPage`) is derived from `plottedModules`. The side-list
    has consumed a plausible-only set since day one of PR II. The
    bug shipped with the first commit; round-1's later edit to the
    pre-bounds fallback branch was defensive consistency on a code
@@ -1335,7 +1365,7 @@ in the same way: after PR-104's "dashboard side-list rework"
 `DashboardPage`'s `sideListModules` is derived from the `/api/modules`
 response with its own pending-bottom sort, not from MapView's
 `visibleModules`. Re-introducing the original `.filter(hasPlausibleLocation)`
-in MapView's `fuzzedModules` would leave the side-list unaffected.
+in MapView's `plottedModules` would leave the side-list unaffected.
 The new failure mode the spec catches is "`sideListModules` learns
 to filter pending modules out" or "the pill JSX branch is dropped".
 
@@ -1359,7 +1389,7 @@ by `MapView`. PR 1 removed the coupling:
    nondeterministic order of `duckdb-service/routes/modules.py::get_modules`
    (no `ORDER BY` there today) into operator-visible behaviour.
    [`homepage/src/components/MapView.tsx`](../../homepage/src/components/MapView.tsx)
-   consumes `modules` as a prop, filters via `fuzzedModules` for marker
+   consumes `modules` as a prop, filters via `plottedModules` for marker
    rendering, and emits no list-shaped data back. There is no
    `onVisibleModulesChange` and no `bounds` state.
 2. **The side-list is no longer viewport-coupled** — operator-visible

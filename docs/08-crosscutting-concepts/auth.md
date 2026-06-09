@@ -266,10 +266,11 @@ keeps onboarding to one secret while preserving the gating semantics.
   `GET /api/images` (list) and `GET /api/images/:filename` (bytes),
   `GET /api/modules/:id/activity`, `.../measurements`, and
   `GET /api/user-location`. These feed the public dashboard/map and are
-  intentionally credential-free (#142). They expose module locations to
-  ~11 m precision; generalising coordinates for unauthenticated callers is
-  tracked in [#145](https://github.com/schutera/highfive/issues/145) (see also
-  [chapter 11](../11-risks-and-technical-debt/README.md)).
+  intentionally credential-free (#142). Module coordinates in these responses
+  are **generalized to ~1 km (2 dp) for every caller, admin included** — a
+  privacy control for nest sites (ADR-020 / #145). The exact fix is never
+  served and (after duckdb round-on-write) never persisted, so making these
+  reads public does not expose precise locations.
 - `image-service /upload` — accepts uploads from any client that
   knows the URL. Authentication for ESP modules is "you must be on
   the LAN" (the module's upload URL is the host's LAN IP in a dev

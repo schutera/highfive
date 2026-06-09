@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### ESP32-CAM firmware
+
+- **WiFi-health reboot fallback (#149).** If WiFi stays disconnected for > 10 min (async auto-reconnect stalled), `loop()` does a software `ESP.restart()` to recover, instead of going silent until the 24 h daily reboot. The reboot is `ESP_RST_SW`, so it does not trip the OTA rollback counter.
+- **Heartbeat retry backoff (#149).** A skipped/failed heartbeat now reschedules ~5 min out instead of advancing a full hour, so a transient blip costs ~5 min of dashboard silence rather than 60. Decision logic extracted to `ESP32-CAM/lib/loop_health/` and pinned by native tests.
+- **`wifi_reconnects` telemetry wired (#149; #148 diagnostics).** `logbufNoteWifiReconnect()` is now called from `onWifiEvent` on each `STA_DISCONNECTED` event (drops and failed re-association attempts) — previously defined but never called, so the field read 0 in the field. First diagnostics slice of the #148 umbrella.
+
 ### Documentation
 
 - arc42 restructure (PR 27): the `documentation/` folder is gone; all docs live under `docs/<chapter>/`. Notable relocations:
@@ -20,6 +26,7 @@ First tagged release aimed at keeping deployed modules alive in the field and ma
 ### ESP32-CAM firmware
 
 - **WiFi watchdog.** `loop()` now checks `WiFi.status()` and calls `reconnectWifi()` when disconnected. Five consecutive reconnect failures trigger a device restart. Fixes the single most likely cause of the ~8–10 day field death (router reboot / DHCP lease expiry with no recovery path).
+  - _Correction (#149):_ `reconnectWifi()` was only ever **declared** in `esp_init.h`, never defined or called — this loop-side watchdog never actually shipped. Real recovery was async-only (`onWifiEvent` → `WiFi.reconnect()`) until #149 added the `WifiHealthMonitor` 10-min reboot fallback and removed the dead declaration.
 - **Task watchdog.** `esp_task_wdt_init(30, true)` with per-iteration reset. Any 30-second hang now auto-reboots.
 - **Daily reboot.** After 24 hours of uptime the device restarts automatically, clearing heap fragmentation and stale TCP state.
 - **No more `while(true)` hard-locks.** Camera init failure and WiFi initial-connect timeout now call `ESP.restart()` instead of spinning forever.

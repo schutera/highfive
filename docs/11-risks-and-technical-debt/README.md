@@ -86,6 +86,48 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Modules went silently offline within ~1 h of restart — async WiFi reconnect + unconditional heartbeat-timer advance (#143, #149)
+
+**What happened.** During the #143 investigation, two field modules
+(`b0696ef23a08`, `680183ca4b70`) repeatedly went offline within ~1 h of a
+manual restart and stayed silent for hours. The dashboard marks a module
+offline after 2 h with no liveness signal, while the firmware heartbeats
+hourly — so "last seen 4–5 h ago" meant the hourly heartbeat had **stopped**,
+i.e. the module was alive-but-disconnected (a "WiFi zombie": CPU fine,
+feeding the WDT, but offline), not waiting for the daily photo. Two `loop()`
+gaps caused it: (1) WiFi recovery relied **entirely** on the async path
+(`onWifiEvent` → `WiFi.reconnect()`), which can stall under weak RSSI / AP
+rotation with nothing to reboot the module until the 24 h daily reboot; and
+(2) `loop()` stamped `lastHeartbeatMs = millis()` **unconditionally** after
+`sendHeartbeat()`, which returns early without sending when WiFi is down, so
+a single bad moment cost a full hour of silence before the next attempt.
+
+**Why it happened.** The reliability doc
+([`esp-reliability.md`](../06-runtime-view/esp-reliability.md)) described a
+loop-side `reconnectWifi()` that rebooted after ~1 min of failed reconnects
+— but that function was only ever **declared** in `esp_init.h`, never defined
+or called (a doc that documented intent, not code: exactly the "never trust
+commit messages/docs over code" trap). The real recovery was async-only.
+(#149 removed the dead declaration so the next person who greps it isn't
+misled by the doc correction.) And the heartbeat timer
+advanced regardless of outcome because the success/skip/fail distinction was
+never modelled — the branch only knew "we called it."
+
+**How to avoid it next time.** #149 added `hf::WifiHealthMonitor` (reboot via
+`ESP.restart()` after WiFi is down > 10 min — `ESP_RST_SW`, so it does not
+trip the OTA rollback counter) and `hf::HeartbeatScheduler` (5-min retry
+backoff on a failed/skipped ping instead of a full hour), both pure and
+pinned by `test_native_loop_health`. Lesson: any "self-healing on failure X"
+claim in the firmware must be backed by code in `loop()` **and** a native
+test that injects the failure and asserts the recovery fires at the
+threshold — an aspirational doc paragraph is worse than none, because it
+stops people looking. Related gap found while here and **fixed in the same
+PR**: `logbufNoteWifiReconnect()` was defined but never called, so the
+`wifi_reconnects` telemetry read 0 in the field — now wired into
+`onWifiEvent`'s `STA_DISCONNECTED` branch so the reconnect count is a real
+signal (the first diagnostics slice of #148; the rest of #148's heap-leak /
+silent-hang root-cause work remains open).
+
 ### A client-side privacy transform protects nothing (#145, ADR-020)
 
 **What happened.** Module GPS coordinates were "fuzzed" by ~1 km before

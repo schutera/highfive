@@ -6,6 +6,7 @@
 #include "logbuf.h"
 #include "breadcrumb.h"
 #include "module_id.h"
+#include "loop_health.h"
 #include "ota.h"
 #include <Arduino.h>
 #include <ArduinoOTA.h>
@@ -16,7 +17,9 @@
 #include <esp_ota_ops.h>
 
 
-#define HEARTBEAT_INTERVAL_MS (60UL * 60UL * 1000UL)  // 1 hour
+// Heartbeat cadence + retry-backoff and the WiFi-down reboot threshold now
+// live in lib/loop_health (hf::kHeartbeatIntervalMs / kHeartbeatRetryMs /
+// kWifiDownRebootMs) so the scheduling logic is host-testable (#149).
 #define DAILY_REBOOT_MS       (24UL * 3600UL * 1000UL)
 // Watchdog timeout: budget = capture+upload+heartbeat (~10–25 s under
 // retries) + 30 s sleep at end of loop = up to ~55 s between feeds in
@@ -47,7 +50,11 @@ esp_config_t esp_config;
 int counter = 0;
 bool firstCaptureDone = false;
 int lastCaptureDay = -1;
-unsigned long lastHeartbeatMs = 0;
+// Heartbeat retry scheduler + WiFi-health reboot watchdog (#149). Both hold
+// only the small amount of timing state the loop()-health decisions need;
+// the pure logic lives in lib/loop_health and is native-tested.
+hf::HeartbeatScheduler hbScheduler;
+hf::WifiHealthMonitor wifiHealth;
 
 // App-side OTA rollback (#26 / manual T4). Counts consecutive boots in
 // PENDING_VERIFY state. Once the threshold is exceeded, calls
@@ -390,8 +397,9 @@ void setup() {
   // Boot-time heartbeat (#15): plant freshness signal before slow
   // camera init so the dashboard reflects the post-reflash / daily-
   // reboot live state in seconds, not after the full setup pipeline.
-  // Gate `lastHeartbeatMs` stamping on success so a failed boot POST
-  // falls through to the loop's `lastHeartbeatMs == 0` retry branch.
+  // Record the outcome with the scheduler so a failed boot POST schedules
+  // a short retry (kHeartbeatRetryMs) rather than waiting a full hour, and
+  // a never-primed scheduler still fires on the loop's first iteration.
   // `sendHeartbeat` fails quiet — chapter-11 "Post-reflash dashboard
   // latency" carries the full rationale.
   //
@@ -406,9 +414,7 @@ void setup() {
   // in docs/06-runtime-view/ota-update-flow.md's Rollback section.
   hf::breadcrumbSet("setup:sendHeartbeat:boot");
   stageStartMs = millis();
-  if (sendHeartbeat(&esp_config) == 0) {
-    lastHeartbeatMs = millis();
-  }
+  hbScheduler.recordResult(millis(), sendHeartbeat(&esp_config) == 0);
   logf("[STAGE] sendHeartbeat:boot took=%lums", millis() - stageStartMs);
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
@@ -703,24 +709,45 @@ void loop() {
     ESP.restart();
   }
 
+  // WiFi-health reboot fallback (#149). The async path (onWifiEvent →
+  // WiFi.reconnect() + setAutoReconnect) normally recovers a dropped link,
+  // but under weak RSSI / AP rotation it can stall, leaving the module a
+  // "WiFi zombie" (CPU fine, feeds the WDT, but offline) until the 24h
+  // daily reboot — the silent-offline mode behind #143/#149. If WiFi stays
+  // disconnected for > kWifiDownRebootMs (10 min), reboot to re-run the
+  // full setup() WiFi join. This is a clean ESP.restart() (reset_reason =
+  // ESP_RST_SW), so forceRollbackIfPendingTooLong() does NOT count it
+  // toward the OTA faulty-boot rollback threshold. We deliberately do NOT
+  // set the "boot"/daily_reboot NVS flag: a recovery reboot should take a
+  // fresh boot image (a useful liveness smoke test), unlike the silent
+  // daily wake. If WiFi is genuinely gone, setup()'s 30s join timeout will
+  // escalate via wifiFailCount → AP-fallback captive portal.
+  if (wifiHealth.shouldReboot(WiFi.status() == WL_CONNECTED, millis())) {
+    hf::breadcrumbSet("loop:wifiHealthReboot");
+    Serial.println("[REBOOT] WiFi down > 10 min — restarting to recover");
+    delay(500);
+    ESP.restart();
+  }
+
   // Geolocation deferred-retry tick (PR II / issue #89). Cheap call —
   // returns immediately unless the boot fix failed AND the 30-minute
   // backoff has elapsed. On a successful retry it queues the new fix
   // to be picked up by the next heartbeat.
   tickGeolocationDeferredRetry(&esp_config);
 
-  // Hourly telemetry heartbeat so the dashboard's lastSeenAt stays
-  // fresh between captures. Tiny payload, no camera work, fails-quiet
-  // — never restarts. The setup-time boot heartbeat (#15) primes
-  // `lastHeartbeatMs` before this branch is ever reached, so the
-  // `lastHeartbeatMs == 0` short-circuit below is now a defence-in-depth
-  // path for the case where the boot heartbeat's POST failed — the
-  // first loop iteration still gets a chance to plant the freshness
-  // signal in `module_heartbeats`.
-  if (millis() - lastHeartbeatMs > HEARTBEAT_INTERVAL_MS || lastHeartbeatMs == 0) {
+  // Telemetry heartbeat so the dashboard's lastSeenAt stays fresh between
+  // captures. Tiny payload, no camera work, fails-quiet — never restarts.
+  // The setup-time boot heartbeat (#15) primes hbScheduler before this
+  // branch is ever reached; until then shouldSend() returns true so the
+  // first loop iteration still plants the freshness signal. On a 2xx the
+  // next attempt is one hour out; on a skip (WiFi down → -2) or non-2xx it
+  // is only kHeartbeatRetryMs (5 min) out, so a transient blip costs ~5 min
+  // of silence instead of a full hour (#149 — the timer no longer advances
+  // a full interval on a failed/skipped ping).
+  if (hbScheduler.shouldSend(millis())) {
     hf::breadcrumbSet("loop:sendHeartbeat");
-    sendHeartbeat(&esp_config);
-    lastHeartbeatMs = millis();
+    const int hbRc = sendHeartbeat(&esp_config);
+    hbScheduler.recordResult(millis(), hbRc == 0);
   }
 
   // First capture immediately after boot. Retry every loop iteration on

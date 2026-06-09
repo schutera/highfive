@@ -25,17 +25,46 @@ The firmware has eight independent safety nets, each handling a
 different failure mode. Nets 1–6 were the original architecture
 (v1.0.0 + PR 17); net 7 (WiFi-fail AP fallback) was added in
 `feat/onboarding-feedback`; net 8 (cross-reboot stage breadcrumb)
-landed in `feat/esp-wdt-stage-breadcrumb` for issue #42.
+landed in `feat/esp-wdt-stage-breadcrumb` for issue #42. Net 1 gained a
+loop-side WiFi-health reboot fallback in #149 (the async reconnect alone
+could stall and go silent until the daily reboot).
 
 ### 1. WiFi watchdog
 
-[ESP32-CAM/esp_init.cpp](../../ESP32-CAM/esp_init.cpp) — `reconnectWifi()`
+[ESP32-CAM/esp_init.cpp](../../ESP32-CAM/esp_init.cpp) — `onWifiEvent`;
+[ESP32-CAM/lib/loop_health/](../../ESP32-CAM/lib/loop_health/) —
+`hf::WifiHealthMonitor`.
 
-At the top of `loop()`, firmware checks `WiFi.status()`. If
-disconnected it tries to reconnect for up to 15 seconds. If five
-consecutive reconnect attempts fail (~1 minute), the device reboots.
+Two layers recover a dropped link:
 
-Covers: router reboots, DHCP lease expiry, AP channel changes.
+1. **Async auto-reconnect (first line).** `setupWifiConnection` registers
+   `onWifiEvent` and sets `WiFi.setAutoReconnect(true)`. On a
+   `STA_DISCONNECTED` event the handler calls `WiFi.reconnect()` (full
+   re-association + DHCP renew). This recovers the common cases — router
+   reboots, DHCP lease expiry, AP channel changes — without a device reboot.
+
+2. **WiFi-health reboot fallback (#149, second line).** The async path can
+   stall under weak RSSI / AP rotation, leaving the module a "WiFi zombie":
+   CPU fine, feeding the WDT, but offline — silent until net 4's 24 h daily
+   reboot. To bound that, `loop()` ticks `hf::WifiHealthMonitor` each
+   iteration with the live `WiFi.status()`; if WiFi stays disconnected for
+   `> kWifiDownRebootMs` (**10 min**) it does `ESP.restart()` to re-run the
+   full `setup()` WiFi join. A reconnect at any point resets the timer, so a
+   recovered blip never reboots. The reboot is `reset_reason = ESP_RST_SW`,
+   so `forceRollbackIfPendingTooLong()` does **not** count it toward the OTA
+   rollback threshold; and it deliberately does **not** set the
+   `boot`/`daily_reboot` NVS flag, so the recovery boot takes a fresh image
+   (a useful liveness smoke test). If WiFi is genuinely gone, the post-reboot
+   30 s join timeout escalates via net 7 (`wifiFailCount` → AP fallback).
+
+> Historical note: an earlier revision of this doc described a `loop()`-side
+> `reconnectWifi()` that rebooted after ~1 min of failed reconnects. No such
+> function ever existed in the shipped firmware — recovery was async-only
+> until #149 added the `WifiHealthMonitor` fallback above. The decision logic
+> is pinned by [`test_native_loop_health`](../../ESP32-CAM/test/test_native_loop_health/test_loop_health.cpp).
+
+Covers: router reboots, DHCP lease expiry, AP channel changes, and a
+stalled async reconnect that would otherwise go silent until the daily reboot.
 
 ### 2. Task watchdog
 
@@ -82,6 +111,18 @@ heartbeat status code is **not** wired to `consecutiveFailures` — the
 breaker only counts upload failures. See
 [ADR-007](../09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md)
 for the full rationale.
+
+**Heartbeat retry backoff (#149).** Heartbeat scheduling lives in
+[`hf::HeartbeatScheduler`](../../ESP32-CAM/lib/loop_health/loop_health.h),
+ticked from `loop()`. On a 2xx the next attempt is one hour out
+(`kHeartbeatIntervalMs`); on a skip (WiFi down → `-2`) or any non-2xx it is
+only `kHeartbeatRetryMs` (**5 min**) out. Previously `loop()` stamped the
+heartbeat timer **unconditionally** after every attempt, so a single
+transient blip cost a full hour of dashboard silence before the next try —
+a contributor to the "offline, last seen hours ago" symptom in #143/#149.
+The scheduler still always advances the timer (so the loop never busy-spins
+on heartbeats), just by the short retry interval on failure. Decision logic
+pinned by [`test_native_loop_health`](../../ESP32-CAM/test/test_native_loop_health/test_loop_health.cpp).
 
 ### 4. Daily reboot (with capture-skip)
 
@@ -277,7 +318,7 @@ The ESP piggybacks a JSON telemetry payload onto every image upload as an additi
 | `free_heap`                | `ESP.getFreeHeap()`                                                                                                                        | Current free heap in bytes                                                                                                                                                                                                                                                                     |
 | `min_free_heap`            | `ESP.getMinFreeHeap()`                                                                                                                     | Low-water mark over this boot session                                                                                                                                                                                                                                                          |
 | `rssi`                     | `WiFi.RSSI()`                                                                                                                              | WiFi signal strength in dBm                                                                                                                                                                                                                                                                    |
-| `wifi_reconnects`          | logbuf counter                                                                                                                             | Count of `reconnectWifi()` fires since boot                                                                                                                                                                                                                                                    |
+| `wifi_reconnects`          | logbuf counter (`logbufNoteWifiReconnect` → `s_reconnects`)                                                                                 | WiFi reconnect count since boot. **Caveat:** `logbufNoteWifiReconnect()` is currently never called, so this reads 0 in the field — a wiring gap for #148's diagnostics, not #149.                                                                                                               |
 | `last_http_codes`          | logbuf ring                                                                                                                                | Last 8 HTTP status codes from `postImage()`                                                                                                                                                                                                                                                    |
 | `log`                      | logbuf ring                                                                                                                                | Last ~2 KB of `logf()` output, oldest→newest                                                                                                                                                                                                                                                   |
 

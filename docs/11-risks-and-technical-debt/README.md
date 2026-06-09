@@ -105,9 +105,11 @@ a single bad moment cost a full hour of silence before the next attempt.
 **Why it happened.** The reliability doc
 ([`esp-reliability.md`](../06-runtime-view/esp-reliability.md)) described a
 loop-side `reconnectWifi()` that rebooted after ~1 min of failed reconnects
-— but **no such function ever existed in the shipped firmware** (a doc that
-documented intent, not code: exactly the "never trust commit messages/docs
-over code" trap). The real recovery was async-only. And the heartbeat timer
+— but that function was only ever **declared** in `esp_init.h`, never defined
+or called (a doc that documented intent, not code: exactly the "never trust
+commit messages/docs over code" trap). The real recovery was async-only.
+(#149 removed the dead declaration so the next person who greps it isn't
+misled by the doc correction.) And the heartbeat timer
 advanced regardless of outcome because the success/skip/fail distinction was
 never modelled — the branch only knew "we called it."
 

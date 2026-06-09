@@ -144,8 +144,7 @@ void tickGeolocationDeferredRetry(esp_config_t *esp_config);
 // site in ESP32-CAM.ino can reuse it for breadcrumb labelling.
 #define HF_GEOLOCATION_DEFERRED_RETRY_MS (30UL * 60UL * 1000UL)
 
-/* Telemetry: reset-reason + boot count persistence + WiFi recovery */
+/* Telemetry: reset-reason + boot count persistence */
 uint32_t incrementBootCount();
-bool reconnectWifi(wifi_configuration_t *wifi_config);
 
 #endif

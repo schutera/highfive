@@ -58,9 +58,10 @@ Two layers recover a dropped link:
    30 s join timeout escalates via net 7 (`wifiFailCount` → AP fallback).
 
 > Historical note: an earlier revision of this doc described a `loop()`-side
-> `reconnectWifi()` that rebooted after ~1 min of failed reconnects. No such
-> function ever existed in the shipped firmware — recovery was async-only
-> until #149 added the `WifiHealthMonitor` fallback above. The decision logic
+> `reconnectWifi()` that rebooted after ~1 min of failed reconnects. That
+> function was only ever **declared** in `esp_init.h` — never defined, never
+> called — so recovery was async-only until #149 added the `WifiHealthMonitor`
+> fallback above. (#149 also removed the dead declaration.) The decision logic
 > is pinned by [`test_native_loop_health`](../../ESP32-CAM/test/test_native_loop_health/test_loop_health.cpp).
 
 Covers: router reboots, DHCP lease expiry, AP channel changes, and a

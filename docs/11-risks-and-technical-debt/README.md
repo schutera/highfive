@@ -210,7 +210,11 @@ would have **skipped `brave-kiwi-gans` outright** — the sequence jump
 short-circuits first — stranding it on the old, buggy build forever. We
 renamed the codename to `squash` (sequence unchanged at 7) and published
 `squash`/seq7; `squash` differs from `woolcarder`, `digger`, and every
-prior codename, so all field modules OTA forward.
+prior codename, **and** seq7 exceeds every published field sequence
+(`woolcarder`/5 being the highest), so both AND-conditions hold and all
+field modules OTA forward. The rename alone is necessary but not
+sufficient — a hypothetical straggler already at seq≥7 would still need
+the sequence gate to pass.
 
 **Why it happened.** Bee-name codenames _look_ like throwaway labels —
 the docs called the value "just a human label, must differ from the

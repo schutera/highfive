@@ -133,6 +133,8 @@ Check `esp_log.txt`. A healthy unconfigured board shows:
 
 **Browser:** Chrome or Firefox only. Brave and some mobile browsers silently break the config form's session-token submission (form reloads blank after Save).
 
+**Pair from your phone, not a laptop with a Bluetooth mouse/keyboard (#137).** The AP is 2.4 GHz-only, and most laptops share one 2.4 GHz radio between Wi-Fi and Bluetooth — joining the AP can drop a BT mouse/keyboard mid-setup ("the laptop froze"), leaving the user unable to type `esp-12345`. This is a host-side radio quirk, not a firmware bug; there is no firmware fix. A phone has its own radio + a touchscreen and sidesteps it. If the user must stay on a laptop, tell them to use a **wired or built-in** keyboard/mouse (a 2.4 GHz USB dongle has the same problem). See [hardware-notes.md → "Host-side Wi-Fi/Bluetooth radio coexistence"](../../../docs/08-crosscutting-concepts/hardware-notes.md) and [troubleshooting.md](../../../docs/troubleshooting.md).
+
 1. Connect to Wi-Fi: **`ESP32-Access-Point`** / password **`esp-12345`**
 2. Open **http://192.168.4.1**
 3. Fill in the form — **Wi-Fi credentials only**:
@@ -193,4 +195,5 @@ The new module should appear with its name, battery level, location, and status 
 | Board crashes every ~44 s in AP mode          | Outdated firmware — reflash from current repo             |
 | Module on network but not registering         | Check Windows Firewall (ports 8000, 8002)                 |
 | Module never joins Wi-Fi                      | 2.4 GHz only; case-sensitive SSID; same network as server |
+| BT mouse/keyboard drops when joining the AP   | Combo Wi-Fi+BT radio coexistence — pair from a phone, or use wired/built-in input |
 | `python -m platformio` not found              | Multiple Python versions — use explicit path              |

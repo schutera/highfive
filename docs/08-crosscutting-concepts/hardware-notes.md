@@ -45,6 +45,31 @@ which lit the LED while the camera grabbed the frame.
 - **SSID is case-sensitive** and special characters matter. Copy-paste
   from your device's Wi-Fi settings rather than retyping.
 
+## Host-side Wi-Fi/Bluetooth radio coexistence (onboarding, #137)
+
+The softAP is **2.4 GHz-only** (`WiFi.softAP(HOST_SSID, HOST_PASSWORD, 1, 0)`
+in `ESP32-CAM/host.cpp` — channel 1, 2.4 GHz band). Most laptops use a
+**combo Wi-Fi + Bluetooth card sharing a single 2.4 GHz radio/antenna**
+(Intel AX2xx, Realtek, …). When the card switches to 2.4 GHz to associate
+with the ESP AP, it can starve the Bluetooth side and **drop a Bluetooth
+mouse/keyboard** — which reads as a "freeze" and blocks the user from
+typing the AP password (`esp-12345`), dead-ending the setup wizard at
+Step 3.
+
+This is a **host-side radio quirk, not a firmware bug** — the ESP32 has no
+5 GHz radio to move the AP to, so there is no firmware fix. Mitigations:
+
+- **Pair from a phone (recommended).** A phone has its own radio + a
+  touchscreen, so the coexistence fight and the BT peripherals are out of
+  the loop. The setup wizard Step 3 now surfaces this as the default path
+  (`homepage/src/components/setup/Step3WiFi.tsx`).
+- **On the laptop:** use a **wired USB** or the **built-in**
+  keyboard/trackpad (a 2.4 GHz USB dongle has the same shared-radio
+  problem — must be wired or built-in). Joining via a saved
+  `netsh wlan add profile` profile also avoids typing into the OS popup.
+
+Symptom + fix also in [../troubleshooting.md](../troubleshooting.md).
+
 ## Server URLs
 
 Operators no longer enter server URLs — the config form is Wi-Fi-only and

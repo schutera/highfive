@@ -381,6 +381,9 @@ const translations = {
         'This network is password-protected \u2014 enter the password above exactly (including the dash) when your device prompts for it.',
       disconnectNotice:
         "Your internet connection will temporarily disconnect when you connect to the module's network. That's completely normal.",
+      btCoexistenceTitle: 'On a laptop with a Bluetooth mouse or keyboard?',
+      btCoexistenceText:
+        'Pair from your phone instead. Joining the module’s 2.4 GHz network can knock out a Bluetooth mouse/keyboard mid-setup — most laptops share one radio between Wi-Fi and Bluetooth — leaving you unable to type the password. Your phone has its own radio and a touchscreen, so it sidesteps the problem. On Settings → Wi-Fi pick the network above, then open http://192.168.4.1 in Chrome or Firefox (not Brave). If you must stay on the laptop, use a wired or built-in keyboard/mouse.',
       connected: "I'm Connected",
       skip: 'Already configured — skip to verification',
       cantSeeNetwork: "Can't see the network?",
@@ -834,6 +837,9 @@ const translations = {
         'Dieses Netzwerk ist passwortgesch\u00FCtzt \u2014 gib das Passwort oben genau so ein (mit dem Bindestrich), wenn dein Ger\u00E4t danach fragt.',
       disconnectNotice:
         'Deine Internetverbindung wird vor\u00FCbergehend unterbrochen, wenn du dich mit dem Modul-Netzwerk verbindest. Das ist v\u00F6llig normal.',
+      btCoexistenceTitle: 'Laptop mit Bluetooth-Maus oder -Tastatur?',
+      btCoexistenceText:
+        'Nutze stattdessen dein Smartphone. Beim Verbinden mit dem 2,4-GHz-Netzwerk des Moduls kann eine Bluetooth-Maus/Tastatur mitten im Setup ausfallen \u2014 die meisten Laptops teilen sich ein Funkmodul f\u00FCr WLAN und Bluetooth \u2014 und du kannst das Passwort nicht mehr eingeben. Dein Smartphone hat ein eigenes Funkmodul und einen Touchscreen und umgeht das Problem. W\u00E4hle unter Einstellungen \u2192 WLAN das Netzwerk oben und \u00F6ffne dann http://192.168.4.1 in Chrome oder Firefox (nicht Brave). Wenn es der Laptop sein muss, verwende eine kabelgebundene oder eingebaute Tastatur/Maus.',
       connected: 'Ich bin verbunden',
       skip: 'Bereits konfiguriert \u2014 direkt zur Pr\u00FCfung',
       cantSeeNetwork: 'Netzwerk nicht sichtbar?',

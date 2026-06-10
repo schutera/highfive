@@ -841,11 +841,82 @@ void tickGeolocationDeferredRetry(esp_config_t *esp_config) {
     g_pending_geolocation_fix = tmp;
     g_has_pending_fix_to_report = true;
     g_needs_geolocation_retry = false;  // success: stop retrying
+    // #148 Phase 3: persist so the next boot skips the TLS call entirely.
+    saveCachedGeolocation(tmp);
     Serial.printf("[getGeolocation] deferred retry SUCCESS (lat=%.6f lng=%.6f acc=%.1f) — will report on next heartbeat\n",
                   tmp.latitude, tmp.longitude, tmp.accuracy);
   } else {
     Serial.println("[getGeolocation] deferred retry failed — will try again in 30 minutes");
   }
+}
+
+/* NVS-CACHED GEOLOCATION (#148 Phase 3) */
+// Namespace/keys are separate from the "config"/"telemetry"/"ota" namespaces
+// so a future geo-cache clear can't disturb Wi-Fi creds or counters. Floats
+// are stored individually via putFloat (rather than putBytes(struct)) so the
+// stored shape is introspectable and robust to struct padding. Note this is
+// the codebase's first putFloat; the begin/end pairing follows the existing
+// "telemetry"/"config" Preferences precedent.
+static const char *kGeoNamespace = "geo";
+
+// Boot-count TTL for the cached fix (#148 Phase 3 review). Caching the fix
+// forever would silently remove the pre-change self-healing property: a module
+// that is physically RELOCATED but merely power-cycled (not reflashed) would
+// report its old coordinates indefinitely, and duckdb-service only patches a
+// fix FROM the (0,0) sentinel (see initNewModuleOnServer), so the deferred-
+// retry path cannot correct a stale non-(0,0) cache. Re-resolving every
+// kGeoCacheMaxBoots boots restores automatic self-correction (within ~2 weeks
+// given the 24 h daily reboot) while still skipping the heap-hungry Google TLS
+// call on the other ~13/14 boots. A crash-loop inflates boot_count and would
+// re-trigger the call sooner, but attemptGeolocation's 45 KB contiguous-heap
+// floor still defers it under memory pressure.
+static const uint32_t kGeoCacheMaxBoots = 14;
+
+bool loadCachedGeolocation(geolocation_t *out) {
+  if (!out) return false;
+  preferences.begin(kGeoNamespace, true);  // read-only
+  geolocation_t fix;
+  fix.latitude  = preferences.getFloat("lat", 0.0f);
+  fix.longitude = preferences.getFloat("lng", 0.0f);
+  fix.accuracy  = preferences.getFloat("acc", 0.0f);
+  const uint32_t cachedAtBoot = preferences.getUInt("boots", 0);
+  preferences.end();  // close "geo" BEFORE getBootCount() opens "telemetry" —
+                      // the shared global `preferences` allows only one open
+                      // namespace at a time (no nesting).
+  // A fresh/empty NVS reads back the (0,0,0) defaults, which fail
+  // isPlausibleFix → reported as a cache miss so the caller does the TLS call.
+  if (!hf::isPlausibleFix(fix.latitude, fix.longitude, fix.accuracy)) {
+    return false;
+  }
+  // Stale-cache TTL. Unsigned subtraction: if boot_count ever reads lower than
+  // the cached value (e.g. the "telemetry" namespace was wiped but "geo" was
+  // not), it wraps huge → treated as stale → re-resolve, which is the safe
+  // direction.
+  const uint32_t nowBoot = getBootCount();
+  if (nowBoot - cachedAtBoot >= kGeoCacheMaxBoots) {
+    Serial.printf("[geo] cached fix stale (%u boots old) — will re-resolve\n",
+                  (unsigned)(nowBoot - cachedAtBoot));
+    return false;
+  }
+  *out = fix;
+  return true;
+}
+
+void saveCachedGeolocation(const geolocation_t &fix) {
+  // Never cache the (0,0) sentinel or any implausible value — that would make
+  // every later boot skip the TLS call AND start from a bad fix.
+  if (!hf::isPlausibleFix(fix.latitude, fix.longitude, fix.accuracy)) {
+    return;
+  }
+  const uint32_t nowBoot = getBootCount();  // read BEFORE opening "geo" (no nesting)
+  preferences.begin(kGeoNamespace, false);
+  preferences.putFloat("lat", fix.latitude);
+  preferences.putFloat("lng", fix.longitude);
+  preferences.putFloat("acc", fix.accuracy);
+  preferences.putUInt("boots", nowBoot);  // stamp the boot at which we cached
+  preferences.end();
+  Serial.printf("[geo] cached fix to NVS (lat=%.2f lng=%.2f acc=%.0f) at boot %u\n",
+                fix.latitude, fix.longitude, fix.accuracy, (unsigned)nowBoot);
 }
 
 

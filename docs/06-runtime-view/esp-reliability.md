@@ -156,6 +156,28 @@ all three fields → stored `NULL` → type-safe on a mixed fleet mid-OTA. This
 is Phase 1 of #148; the firmware self-heal / liveness-watchdog work
 (Phases 3–4) is tracked there.
 
+### 3a. Liveness self-heal watchdog (#148 Phase 3)
+
+[`hf::LivenessMonitor`](../../ESP32-CAM/lib/loop_health/loop_health.h), ticked
+from `loop()`, closes the gap between the two guards above. The WiFi-health
+reboot (§1) only fires when WiFi is **down**; the upload circuit breaker (§3)
+only counts **failed uploads** (and uploads are ~daily). Neither catches the
+mode behind #148's "ready-peach went silent for 3 h": WiFi associated, the
+task-WDT fed, `loop()` running, but every server call silently hangs or fails
+— a module that is mute yet looks healthy locally and is only recovered by the
+24 h daily reboot. `LivenessMonitor` tracks the last **successful** server
+contact (a 2xx heartbeat **or** a 2xx upload, fed via `noteContact()` in
+`loop()`); if none lands for `kNoContactRebootMs` (**2 h** — equal to the
+dashboard offline window, and two full hourly-heartbeat cycles) it requests an
+`ESP.restart()`. The first `shouldReboot()` call anchors the clock, so a
+freshly-booted module gets a full 2 h to make first contact and `nowMs == 0`
+on the first tick does not instantly trip. The reboot is a clean `ESP_RST_SW`
+(breadcrumb `loop:livenessReboot`), **not** a panic — a transient server-side
+outage must not feed the OTA faulty-boot rollback counter; a bad firmware
+*image* is handled by the mark-valid gate, not by this watchdog. Decision
+logic is pure and native-tested in
+[`test_native_loop_health`](../../ESP32-CAM/test/test_native_loop_health/test_loop_health.cpp).
+
 ### 4. Daily reboot (with capture-skip)
 
 After 24 hours of uptime the module restarts itself. Before
@@ -245,6 +267,7 @@ firmware grep `breadcrumbSet`):
 | `getGeolocation:wifi_scan` / `:http_post` / `:get_string`                                                | `ESP32-CAM/esp_init.cpp`'s `getGeolocation` per section            |
 | `initNewModuleOnServer:http_post` / `:get_string`                                                        | `ESP32-CAM/esp_init.cpp`'s `initNewModuleOnServer` per section     |
 | `loop:sendHeartbeat` / `:captureAndUpload:first` / `:captureAndUpload:noon` / `:sleep`                   | `ESP32-CAM/ESP32-CAM.ino`'s `loop`                                 |
+| `loop:wifiHealthReboot` / `loop:livenessReboot`                                                          | `ESP32-CAM/ESP32-CAM.ino`'s `loop` reboot guards (§1 WiFi-down, §3 no-contact #148) |
 | `postImage:connect` / `:write_headers` / `:write_body` / `:read_status` / `:read_headers` / `:read_body` | `ESP32-CAM/client.cpp`'s `postImage` per section                   |
 | `sendHeartbeat:connect` / `:write` / `:read_status`                                                      | `ESP32-CAM/client.cpp`'s `sendHeartbeat` per section               |
 

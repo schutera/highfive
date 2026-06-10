@@ -564,3 +564,82 @@ def test_last_seen_at_migration_backfills_from_updated_at(fresh_db):
         )
     finally:
         con.close()
+
+
+# ---------- module_heartbeats diagnostic-column migration (#148) ----------
+
+
+def _stage_old_heartbeats_schema(con) -> None:
+    """Recreate the pre-#148 `module_heartbeats` (no diagnostic columns).
+
+    `module_heartbeats` carries no foreign key, so unlike `module_configs`
+    the migration is a plain `ALTER TABLE ADD COLUMN` rather than the
+    table-rebuild dance. Stage one legacy row so the migration's
+    data-preservation (old rows get NULL for the new columns) is observable.
+    """
+    con.execute("DROP TABLE IF EXISTS module_heartbeats")
+    con.execute("DROP SEQUENCE IF EXISTS module_heartbeats_seq")
+    con.execute("CREATE SEQUENCE module_heartbeats_seq START 1")
+    con.execute(
+        """
+        CREATE TABLE module_heartbeats (
+            id INTEGER PRIMARY KEY DEFAULT nextval('module_heartbeats_seq'),
+            module_id VARCHAR(20) NOT NULL,
+            received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            battery INTEGER,
+            rssi INTEGER,
+            uptime_ms BIGINT,
+            free_heap INTEGER,
+            fw_version VARCHAR(40)
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO module_heartbeats "
+        "(module_id, received_at, rssi, uptime_ms, free_heap, fw_version) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("aabbccddeeff", "2026-05-01 12:00:00", -70, 123456, 150000, "mason"),
+    )
+
+
+def test_migration_adds_heartbeat_diagnostic_columns(fresh_db):
+    """Old-shape `module_heartbeats` gains reset_reason/min_free_heap/boot_count;
+    legacy rows survive with NULL in the new columns; a second init_db is a no-op."""
+    con = fresh_db.connection.get_conn()
+    try:
+        _stage_old_heartbeats_schema(con)
+    finally:
+        con.close()
+
+    fresh_db.schema.init_db()
+    # Idempotency: a second run must not throw on already-present columns.
+    fresh_db.schema.init_db()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        cols = {
+            c[1] for c in con.execute("PRAGMA table_info(module_heartbeats)").fetchall()
+        }
+        assert {"reset_reason", "min_free_heap", "boot_count"} <= cols
+
+        # The legacy row survived and reads NULL for the new columns.
+        row = con.execute(
+            "SELECT fw_version, reset_reason, min_free_heap, boot_count "
+            "FROM module_heartbeats WHERE module_id = ?",
+            ("aabbccddeeff",),
+        ).fetchone()
+        assert row == ("mason", None, None, None)
+
+        # A new-shape insert lands in the migrated table.
+        con.execute(
+            "INSERT INTO module_heartbeats "
+            "(module_id, reset_reason, min_free_heap, boot_count) VALUES (?, ?, ?, ?)",
+            ("aabbccddeeff", "TASK_WDT", 51234, 9),
+        )
+        new_row = con.execute(
+            "SELECT reset_reason, min_free_heap, boot_count "
+            "FROM module_heartbeats WHERE reset_reason = 'TASK_WDT'"
+        ).fetchone()
+        assert new_row == ("TASK_WDT", 51234, 9)
+    finally:
+        con.close()

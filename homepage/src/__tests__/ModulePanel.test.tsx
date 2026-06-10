@@ -95,6 +95,9 @@ const baseModule: ModuleDetail = {
     uptimeMs: 9999,
     freeHeap: 210000,
     fwVersion: 'leafcutter',
+    resetReason: 'POWERON',
+    minFreeHeap: 180000,
+    bootCount: 1,
   },
   nests: [],
 };

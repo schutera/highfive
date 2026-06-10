@@ -125,6 +125,37 @@ The scheduler still always advances the timer (so the loop never busy-spins
 on heartbeats), just by the short retry interval on failure. Decision logic
 pinned by [`test_native_loop_health`](../../ESP32-CAM/test/test_native_loop_health/test_loop_health.cpp).
 
+**Heartbeat diagnostic fields (#148).** The heartbeat body
+(`sendHeartbeat` in [`ESP32-CAM/client.cpp`](../../ESP32-CAM/client.cpp))
+carries three diagnostic fields beyond `rssi`/`uptime_ms`/`free_heap`/`fw_version`:
+`reset_reason` (`resetReasonStr(esp_reset_reason())`), `min_free_heap`
+(`ESP.getMinFreeHeap()`), and `boot_count` (`getBootCount()`, the
+NVS-backed monotonic reboot counter). These values already existed on the
+device, but were only reported on the **telemetry sidecar attached to image
+uploads** — which happen ~daily at noon. A crash-looping or hung module
+**never reaches that upload**, so the reason it keeps dying was invisible.
+Boot heartbeats fire on *every* reboot, so moving these onto the heartbeat
+is the highest-leverage fully-remote diagnostic: the very next heartbeat
+after a reset reports *why*. The fields thread through
+`duckdb-service/routes/heartbeats.py` → `module_heartbeats` →
+`/heartbeats_summary` → `backend/src/database.ts` → `HeartbeatSnapshot`
+([`contracts/src/index.ts`](../../contracts/src/index.ts)) → the
+`HeartbeatDiagnostics` card in
+[`homepage/src/components/ModulePanel.tsx`](../../homepage/src/components/ModulePanel.tsx).
+From a **single** heartbeat the card flags a **recent fault reset** — the
+latest `reset_reason` is a watchdog/panic/brownout (not the clean `ESP_RST_SW`
+of the daily reboot) **and** `uptime_ms` has not yet recovered past ~5 min —
+a state the binary online/offline badge keeps misleadingly green (boot
+heartbeats keep arriving). It deliberately does **not** flag the healthy
+`SW` daily reboot or a fresh `POWERON`, and clears once uptime recovers.
+Confirming an actual **boot _loop_** needs the `boot_count`-rising-while-
+`uptime_ms`-flat trend **across** consecutive heartbeats, which a single
+snapshot cannot see — that cross-heartbeat verdict is **#148 Phase 4**
+(server-side, where the heartbeat history is queryable). Older firmware omits
+all three fields → stored `NULL` → type-safe on a mixed fleet mid-OTA. This
+is Phase 1 of #148; the firmware self-heal / liveness-watchdog work
+(Phases 3–4) is tracked there.
+
 ### 4. Daily reboot (with capture-skip)
 
 After 24 hours of uptime the module restarts itself. Before

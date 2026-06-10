@@ -937,3 +937,10 @@ uint32_t incrementBootCount() {
   preferences.end();
   return count;
 }
+
+uint32_t getBootCount() {
+  preferences.begin("telemetry", true);  // read-only
+  uint32_t count = preferences.getUInt("boot_count", 0);
+  preferences.end();
+  return count;
+}

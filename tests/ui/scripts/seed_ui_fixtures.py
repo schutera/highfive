@@ -67,6 +67,18 @@ COARSEN_PRECISE_LAT = "47.808612"
 COARSEN_PRECISE_LNG = "9.643301"
 COARSEN_EXPECTED_LAT = 47.81
 COARSEN_EXPECTED_LNG = 9.64
+# Module seeded with a heartbeat carrying the #148 diagnostic fields
+# (reset_reason / min_free_heap / boot_count) so
+# module-heartbeat-diagnostics.spec.ts can prove they render in the
+# HeartbeatDiagnostics card end-to-end (duckdb /heartbeat ->
+# /heartbeats_summary -> backend HeartbeatSnapshot -> nginx -> browser).
+# reset_reason is a real fault reason (watchdog) so the HeartbeatDiagnostics
+# card's single-sample "recent fault reset" flag fires; 8 chars, well clear of
+# the VARCHAR(16) column boundary.
+HEARTBEAT_MAC = "ff4444444444"
+HEARTBEAT_RESET_REASON = "TASK_WDT"
+HEARTBEAT_MIN_FREE_HEAP = 51234  # round(51234/1024) = 50 KB
+HEARTBEAT_BOOT_COUNT = 4242
 
 
 def wait_for_stack(timeout_s: int = 180) -> None:
@@ -214,12 +226,46 @@ def seed_precise_coordinate_module() -> None:
     print(f"[ui-seed] registered precise-coords module {COARSEN_MAC}", flush=True)
 
 
+def seed_heartbeat_diagnostics() -> None:
+    """Register a module and send one heartbeat carrying the #148
+    diagnostic fields.
+
+    The values are literals the spec asserts on — keep them in sync with
+    module-heartbeat-diagnostics.spec.ts. `reset_reason` is a real fault
+    reason (TASK_WDT) at seconds-low uptime so the card's "recent fault reset"
+    flag fires. `min_free_heap` rounds to a clean KB value; `boot_count` is a
+    high, recognisable number (displayed, not part of the single-sample flag).
+    """
+    esp = MockEsp(
+        upload_url=f"{IMAGE_SERVICE_URL}/upload",
+        init_url=f"{DUCKDB_URL}/new_module",
+        mac=HEARTBEAT_MAC,
+        module_name="UI Test Heartbeat",
+        fw_version="ui-hb-9.9.9",
+    )
+    esp.register().raise_for_status()
+    r = esp.heartbeat(
+        reset_reason=HEARTBEAT_RESET_REASON,
+        min_free_heap=HEARTBEAT_MIN_FREE_HEAP,
+        boot_count=HEARTBEAT_BOOT_COUNT,
+        uptime_ms=16_000,  # seconds-low uptime at high boot_count → boot-loop flag
+        rssi=-58,
+    )
+    r.raise_for_status()
+    print(
+        f"[ui-seed] sent diagnostic heartbeat for {HEARTBEAT_MAC} "
+        f"(reset={HEARTBEAT_RESET_REASON} boots={HEARTBEAT_BOOT_COUNT})",
+        flush=True,
+    )
+
+
 def main() -> int:
     wait_for_stack()
     seed_null_island_module()
     seed_telemetry_upload()
     seed_admin_gallery_images()
     seed_precise_coordinate_module()
+    seed_heartbeat_diagnostics()
     print("[ui-seed] done", flush=True)
     return 0
 

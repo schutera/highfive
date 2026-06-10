@@ -31,7 +31,7 @@ static hf::ReconnectCounter s_reconnects;
 // upload until reboot.
 static char s_last_stage_before_reboot[64] = {0};
 
-static const char *resetReasonStr(esp_reset_reason_t r) {
+const char *resetReasonStr(esp_reset_reason_t r) {
   switch (r) {
     case ESP_RST_POWERON:   return "POWERON";
     case ESP_RST_EXT:       return "EXT";

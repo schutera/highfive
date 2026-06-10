@@ -17,6 +17,13 @@ interface ApiHeartbeatSummaryEntry {
   uptime_ms: number | null;
   free_heap: number | null;
   fw_version: string | null;
+  // Diagnostic fields (#148) — null when the latest heartbeat came from
+  // firmware predating the change. snake_case here mirrors the
+  // duckdb-service /heartbeats_summary wire shape; camelCased into
+  // HeartbeatSnapshot below.
+  reset_reason: string | null;
+  min_free_heap: number | null;
+  boot_count: number | null;
 }
 
 interface ApiHeartbeatSummaryResponse {
@@ -299,6 +306,9 @@ export class ModuleReadModel {
             uptimeMs: hbEntry.uptime_ms,
             freeHeap: hbEntry.free_heap,
             fwVersion: hbEntry.fw_version,
+            resetReason: hbEntry.reset_reason ?? null,
+            minFreeHeap: hbEntry.min_free_heap ?? null,
+            bootCount: hbEntry.boot_count ?? null,
           }
         : null;
 

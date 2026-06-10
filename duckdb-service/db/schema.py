@@ -149,7 +149,10 @@ def init_db():
                 rssi INTEGER,
                 uptime_ms BIGINT,
                 free_heap INTEGER,
-                fw_version VARCHAR(40)
+                fw_version VARCHAR(40),
+                reset_reason VARCHAR(16),
+                min_free_heap INTEGER,
+                boot_count BIGINT
             );
             CREATE INDEX IF NOT EXISTS idx_heartbeat_module ON module_heartbeats(module_id);
             CREATE INDEX IF NOT EXISTS idx_heartbeat_received ON module_heartbeats(received_at);
@@ -245,6 +248,29 @@ def init_db():
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_module_configs_display_name "
                 "ON module_configs(display_name)"
             )
+
+        # Additive heartbeat-diagnostics columns (issue #148). A crash-
+        # looping or hung module never reaches the daily image upload that
+        # carries the telemetry sidecar, so `reset_reason` / `min_free_heap`
+        # are lifted onto the hourly heartbeat; `boot_count` (monotonic,
+        # NVS-backed on the device) climbing without `uptime_ms` growing is
+        # the boot-loop signature. Gated on `PRAGMA table_info` like the
+        # `module_configs` block above. `module_heartbeats` carries no
+        # foreign key, so plain `ALTER TABLE ADD COLUMN` is accepted (unlike
+        # `module_configs`, which needs the table-rebuild dance below).
+        heartbeat_cols = {
+            c[1] for c in con.execute("PRAGMA table_info(module_heartbeats)").fetchall()
+        }
+        if "reset_reason" not in heartbeat_cols:
+            con.execute(
+                "ALTER TABLE module_heartbeats ADD COLUMN reset_reason VARCHAR(16)"
+            )
+        if "min_free_heap" not in heartbeat_cols:
+            con.execute(
+                "ALTER TABLE module_heartbeats ADD COLUMN min_free_heap INTEGER"
+            )
+        if "boot_count" not in heartbeat_cols:
+            con.execute("ALTER TABLE module_heartbeats ADD COLUMN boot_count BIGINT")
 
         # Migration: drop the dead-weight `status` column from existing DBs
         # (issue #69). DuckDB v1.4 rejects every ALTER on `module_configs`

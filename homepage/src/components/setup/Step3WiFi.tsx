@@ -102,6 +102,26 @@ export default function Step3WiFi({ onNext, onBack, onSkip }: Step3WiFiProps) {
         </p>
       </aside>
 
+      {/* Wi-Fi/Bluetooth radio-coexistence callout (#137). Joining the ESP's
+          2.4 GHz softAP can knock out a Bluetooth mouse/keyboard on laptops
+          with a combo Wi-Fi+BT card (shared radio), blocking password entry
+          and dead-ending setup at this step. Firmware can't fix it (no 5 GHz
+          radio), so we steer users to the phone-first path. See
+          docs/08-crosscutting-concepts/hardware-notes.md and
+          docs/troubleshooting.md. */}
+      <aside
+        className="rounded-hf-lg p-4 mb-4 w-full max-w-sm border text-left"
+        style={{
+          background: 'color-mix(in oklch, var(--hf-honey-400) 12%, transparent)',
+          borderColor: 'color-mix(in oklch, var(--hf-honey-400) 40%, transparent)',
+        }}
+      >
+        <p className="text-hf-sm font-semibold text-hf-fg mb-1">
+          {t('step3.btCoexistenceTitle')}
+        </p>
+        <p className="text-hf-xs text-hf-fg-soft">{t('step3.btCoexistenceText')}</p>
+      </aside>
+
       <div className="w-full max-w-sm mb-6">
         <button
           onClick={() => setShowTroubleshoot(!showTroubleshoot)}

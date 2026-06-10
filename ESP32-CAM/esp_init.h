@@ -147,4 +147,12 @@ void tickGeolocationDeferredRetry(esp_config_t *esp_config);
 /* Telemetry: reset-reason + boot count persistence */
 uint32_t incrementBootCount();
 
+/*
+  Reads the persisted boot counter WITHOUT incrementing it. setup()
+  owns the single increment (via incrementBootCount); every later
+  reader — e.g. the heartbeat payload (#148) — must use this so the
+  count reflects reboots, not heartbeats.
+*/
+uint32_t getBootCount();
+
 #endif

@@ -231,6 +231,48 @@ which python3  # Linux/Mac
 
 The access point name in the firmware is `ESP32-Access-Point` with password `esp-12345`. The documentation previously had an incorrect name.
 
+### Bluetooth mouse/keyboard drops when joining the module's Wi-Fi (laptop freezes at Step 3)
+
+**Symptom:** you click `ESP32-Access-Point` in the laptop's Wi-Fi list, and
+your Bluetooth mouse and keyboard immediately stop responding ("the computer
+froze"). The OS password prompt is on screen, but you have no working input
+device to type `esp-12345` into it, so setup wizard **Step 3** can never
+complete.
+
+**Cause:** most laptops use a **combo Wi-Fi + Bluetooth card sharing a single
+2.4 GHz radio** (Intel AX2xx, Realtek, …). The ESP softAP is 2.4 GHz-only
+(`WiFi.softAP(HOST_SSID, HOST_PASSWORD, 1, 0)` in `ESP32-CAM/host.cpp`), so
+when the card switches to 2.4 GHz to join the AP it starves the Bluetooth
+side and BT HID peripherals drop. This is a host-side radio-coexistence
+quirk — **not** a firmware bug and not a crash; the machine is fine, you just
+lose input. The ESP32 has no 5 GHz radio, so there is no firmware-side fix.
+
+**Fix (recommended): pair from your phone.** A phone has its own radio and a
+touchscreen, so the coexistence fight and the BT peripherals are out of the
+loop entirely:
+
+1. Phone → Settings → Wi-Fi → `ESP32-Access-Point`, password `esp-12345`.
+2. Open `http://192.168.4.1` in **Chrome or Firefox** (not Brave — it
+   silently breaks the form).
+3. Fill the form (home 2.4 GHz Wi-Fi SSID + password) → Save Configuration.
+
+**Fix (stay on the laptop):** use a **wired USB** or the **built-in**
+keyboard/trackpad — a 2.4 GHz USB dongle has the same shared-radio problem,
+so it must be wired or built-in. Joining via a saved `netsh wlan` profile
+also avoids typing into the OS popup:
+
+```powershell
+$AP = "ESP32-Access-Point"
+netsh wlan connect name="$AP"
+```
+
+(if the profile does not exist yet, add it once with
+`netsh wlan add profile filename="esp32-ap.xml"` — see
+[08-crosscutting-concepts/hardware-notes.md](08-crosscutting-concepts/hardware-notes.md)
+"Host-side Wi-Fi/Bluetooth radio coexistence").
+
+The setup wizard Step 3 now surfaces the phone-first path inline. Related: #137.
+
 ### Configuration form reloads blank after clicking Save
 
 **Symptom:** you fill in all fields, click Save Configuration, and the form reappears empty with no confirmation message.

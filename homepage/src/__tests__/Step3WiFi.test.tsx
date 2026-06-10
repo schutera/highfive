@@ -48,4 +48,17 @@ describe('Step3WiFi AP credentials', () => {
     }
     expect(screen.getByText('esp-12345')).toBeInTheDocument();
   });
+
+  // #137 — joining the 2.4 GHz softAP can drop a Bluetooth mouse/keyboard on
+  // laptops with a combo Wi-Fi+BT card, dead-ending setup at this step. The
+  // wizard can't fix the radio, so it must steer users to the phone-first
+  // path. Pin the callout in both locales so the guidance can't silently drop.
+  it.each<[string, RegExp]>([
+    ['en', /pair from your phone/i],
+    ['de', /nutze stattdessen dein smartphone/i],
+  ])('surfaces the phone-first Bluetooth-coexistence callout (%s locale)', (lang, pattern) => {
+    localStorage.setItem('lang', lang);
+    renderStep();
+    expect(screen.getByText(pattern)).toBeInTheDocument();
+  });
 });

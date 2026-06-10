@@ -1,11 +1,13 @@
 #include "esp_camera.h"
 #include "client.h"
+#include "esp_init.h"   // getBootCount() — #148 heartbeat diagnostics
 #include "led.h"
 #include "logbuf.h"
 #include "module_id.h"
 #include "url.h"
 #include "http_status.h"
 #include "breadcrumb.h"
+#include <esp_system.h> // esp_reset_reason() — #148 heartbeat diagnostics
 #include <string>
 #include <time.h>
 #include <HTTPClient.h>
@@ -328,11 +330,22 @@ int sendHeartbeat(esp_config_t *esp_config) {
   // lands (#8a/#8b). The upload multipart still carries the 0 sentinel for
   // `module_configs.battery_level` (a current-value scalar that is never
   // promoted into the time-series).
+  // Diagnostic fields (#148): a crash-looping or hung module never
+  // reaches the daily noon image upload, so the telemetry sidecar —
+  // which already carries reset_reason / min_free_heap — never lands.
+  // Boot heartbeats fire on *every* reboot, so moving these onto the
+  // heartbeat is the single highest-leverage, fully-remote diagnostic:
+  // the very next heartbeat after a reset reports *why* it reset, the
+  // heap low-water mark, and the monotonic reboot count (a count that
+  // climbs without uptime growing is the boot-loop signature).
   String body = String("mac=") + macStr
               + "&rssi=" + String(WiFi.RSSI())
               + "&uptime_ms=" + String(millis())
               + "&free_heap=" + String(ESP.getFreeHeap())
-              + "&fw_version=" + String(FIRMWARE_VERSION);
+              + "&fw_version=" + String(FIRMWARE_VERSION)
+              + "&reset_reason=" + String(resetReasonStr(esp_reset_reason()))
+              + "&min_free_heap=" + String(ESP.getMinFreeHeap())
+              + "&boot_count=" + String(getBootCount());
 
   // PR II / issue #89: if a deferred geolocation retry succeeded
   // mid-uptime, attach the fresh fix to this heartbeat so the server

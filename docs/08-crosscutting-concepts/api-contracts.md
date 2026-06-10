@@ -53,8 +53,26 @@ export interface HeartbeatSnapshot {
   uptimeMs: number | null;
   freeHeap: number | null;
   fwVersion: string | null; // bee-name string, see ADR-006
+  resetReason: string | null; // #148 — "POWERON"/"BROWNOUT"/"TASK_WDT"/… ; null on pre-#148 firmware
+  minFreeHeap: number | null; // #148 — heap low-water mark since boot (bytes)
+  bootCount: number | null; // #148 — NVS-backed monotonic reboot counter
 }
 ```
+
+The three `null`-able diagnostic fields (`resetReason`, `minFreeHeap`,
+`bootCount`) were added in #148. A crash-looping or hung module never
+reaches the daily noon image upload that carries the telemetry sidecar,
+so these — which previously lived only in that sidecar
+(`ESP32-CAM/logbuf.cpp`'s `buildTelemetryJson`) — are lifted onto the
+hourly heartbeat. They are `null` when the latest heartbeat came from
+firmware predating #148, so a mixed fleet mid-OTA is type-safe. The
+dashboard surfaces them in `HeartbeatDiagnostics`
+([`homepage/src/components/ModulePanel.tsx`](../../homepage/src/components/ModulePanel.tsx)),
+which flags a **recent fault reset** (latest `resetReason` is a
+watchdog/panic/brownout and `uptimeMs` has not recovered) from the single
+snapshot. Confirming an actual boot _loop_ — `bootCount` rising while
+`uptimeMs` stays flat **across** heartbeats — needs the queryable history
+and is deferred to #148 Phase 4 (server-side).
 
 `Module` gained `displayName`, `email`, `updatedAt`, `lastSeenAt`, and
 `latestHeartbeat`. `displayName` is the admin-settable label override

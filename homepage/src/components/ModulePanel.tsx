@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type TelemetryEntry } from '../services/api';
-import type { Module, ModuleDetail } from '@highfive/contracts';
+import type { HeartbeatSnapshot, Module, ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
@@ -431,6 +431,12 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
                 className="border-t border-hf-border p-3 space-y-3 md:max-h-[40vh] md:overflow-y-auto"
                 style={{ background: 'var(--hf-line-soft)' }}
               >
+                {/* Freshest heartbeat diagnostics (#148). Sourced from the
+                    already-loaded module payload (latestHeartbeat), so it
+                    renders without the admin key — the per-upload logs below
+                    still require it. This is the surface that distinguishes
+                    "healthy" from "boot-looping/hung". */}
+                <HeartbeatDiagnostics heartbeat={moduleDetail.latestHeartbeat} />
                 {!hasKey && (
                   <AdminKeyForm
                     onSubmit={submitAdminKey}
@@ -627,6 +633,88 @@ export function TelemetryRow({ entry }: { entry: TelemetryEntry }) {
             {t.log}
           </pre>
         </details>
+      )}
+    </div>
+  );
+}
+
+// Renders the freshest heartbeat's diagnostic fields (#148). The
+// per-upload TelemetryRow above only lands ~daily (it rides the noon
+// image upload), so a crash-looping or hung module — which never reaches
+// that upload — would show nothing there. The hourly heartbeat carries
+// reset_reason / min_free_heap / boot_count on *every* boot, so this card
+// is the freshest "why did it reset / is it boot-looping" signal.
+//
+// Fault reset reasons — a crash / watchdog / brownout, as opposed to the
+// clean `SW` restart the daily reboot and OTA-apply use (see
+// docs/06-runtime-view/esp-reliability.md "Daily reboot" → `ESP_RST_SW`).
+// This is the same faulty-reboot set `forceRollbackIfPendingTooLong()` counts
+// in ESP32-CAM.ino.
+const FAULT_RESET_REASONS = new Set(['PANIC', 'TASK_WDT', 'INT_WDT', 'WDT', 'BROWNOUT']);
+
+// Copy is hardcoded English to match TelemetryRow — admin-only diagnostic
+// surface, deliberately not routed through i18n (see TelemetryRow note).
+export function HeartbeatDiagnostics({ heartbeat }: { heartbeat: HeartbeatSnapshot | null }) {
+  if (!heartbeat) return null;
+  const { receivedAt, fwVersion, uptimeMs, resetReason, minFreeHeap, freeHeap, rssi, bootCount } =
+    heartbeat;
+
+  const uptime = typeof uptimeMs === 'number' ? formatUptime(Math.floor(uptimeMs / 1000)) : '—';
+  const heap = typeof freeHeap === 'number' ? `${Math.round(freeHeap / 1024)} KB` : '—';
+  const minHeap = typeof minFreeHeap === 'number' ? `${Math.round(minFreeHeap / 1024)} KB` : '—';
+  const rssiStr = typeof rssi === 'number' ? `${rssi} dBm` : '—';
+  // What a SINGLE snapshot can honestly assert: "the most recent reset was a
+  // fault (watchdog/panic/brownout) and the module hasn't sustained uptime
+  // since." That deliberately does NOT fire on the clean `SW` daily reboot
+  // (which every healthy module does every 24h at seconds-low uptime), nor on
+  // a fresh `POWERON`. It clears once uptime recovers past the threshold.
+  //
+  // It is NOT "boot-looping" — confirming a *loop* needs the boot_count-rising-
+  // while-uptime-flat trend ACROSS consecutive heartbeats, which one snapshot
+  // cannot see. That cross-heartbeat verdict is #148 Phase 4 (server-side, where
+  // the history is queryable); this card only renders the single-sample signal.
+  const recentFaultReset =
+    typeof resetReason === 'string' &&
+    FAULT_RESET_REASONS.has(resetReason) &&
+    typeof uptimeMs === 'number' &&
+    uptimeMs < 5 * 60 * 1000;
+
+  return (
+    <div className="hf-card p-2.5 text-hf-xs">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-semibold text-hf-fg-soft">latest heartbeat</span>
+        <span className="font-mono text-hf-fg-mute">{receivedAt}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-hf-fg-soft">
+        <div>
+          <span className="text-hf-fg-mute">uptime</span> {uptime}
+        </div>
+        <div>
+          <span className="text-hf-fg-mute">reset</span> {resetReason || '—'}
+        </div>
+        <div>
+          <span className="text-hf-fg-mute">boots</span>{' '}
+          {typeof bootCount === 'number' ? bootCount : '—'}
+        </div>
+        <div>
+          <span className="text-hf-fg-mute">rssi</span> {rssiStr}
+        </div>
+        <div>
+          <span className="text-hf-fg-mute">heap</span> {heap}
+        </div>
+        <div>
+          <span className="text-hf-fg-mute">min heap</span> {minHeap}
+        </div>
+        {fwVersion && (
+          <div className="col-span-2">
+            <span className="text-hf-fg-mute">fw</span> {fwVersion}
+          </div>
+        )}
+      </div>
+      {recentFaultReset && (
+        <div className="mt-1.5 font-semibold" style={{ color: 'var(--hf-danger)' }}>
+          ⚠ recent fault reset ({resetReason}) — uptime {uptime}, not yet recovered
+        </div>
       )}
     </div>
   );

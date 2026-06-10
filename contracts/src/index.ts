@@ -99,6 +99,16 @@ export interface HeartbeatSnapshot {
   uptimeMs: number | null;
   freeHeap: number | null;
   fwVersion: string | null;
+  // Diagnostic fields (#148). A crash-looping or hung module never reaches
+  // the daily image upload that carries the telemetry sidecar, so these are
+  // lifted onto the hourly heartbeat — the very next heartbeat after a reset
+  // reports *why* it reset. Null when the emitting firmware predates #148.
+  // `resetReason` is the device reset-reason string ("POWERON"/"BROWNOUT"/
+  // "TASK_WDT"/…); `bootCount` is the NVS-backed monotonic reboot counter —
+  // climbing without `uptimeMs` growing is the boot-loop signature.
+  resetReason: string | null;
+  minFreeHeap: number | null;
+  bootCount: number | null;
 }
 
 export interface Module {

@@ -99,6 +99,15 @@ def post_heartbeat():
     free_heap = _to_int(data.get("free_heap"))
     fw_version = (data.get("fw_version") or "")[:40] or None
 
+    # Diagnostic fields (issue #148). Older firmware omits all three →
+    # None → stored NULL, so a mixed fleet during an OTA rollout is fine.
+    # `reset_reason` is the device's `resetReasonStr(esp_reset_reason())`
+    # ("POWERON"/"BROWNOUT"/"TASK_WDT"/…); capped to the column width.
+    # `boot_count` is the NVS-backed monotonic reboot counter.
+    reset_reason = (data.get("reset_reason") or "")[:16] or None
+    min_free_heap = _to_int(data.get("min_free_heap"))
+    boot_count = _to_int(data.get("boot_count"))
+
     # Optional geolocation-recovery fields. Absent → None → not
     # written. Present-but-implausible → silently dropped (logged
     # below for observability).
@@ -108,7 +117,9 @@ def post_heartbeat():
 
     print(
         f"[heartbeat] mac={mac} battery={battery} rssi={rssi} "
-        f"uptime_ms={uptime_ms} free_heap={free_heap} fw={fw_version}"
+        f"uptime_ms={uptime_ms} free_heap={free_heap} fw={fw_version} "
+        f"reset_reason={reset_reason} min_free_heap={min_free_heap} "
+        f"boot_count={boot_count}"
         + (
             f" lat={lat} lng={lng} acc={acc}"
             if (lat is not None or lng is not None)
@@ -139,10 +150,12 @@ def post_heartbeat():
         con.execute(
             """
             INSERT INTO module_heartbeats
-              (module_id, received_at, battery, rssi, uptime_ms, free_heap, fw_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+              (module_id, received_at, battery, rssi, uptime_ms, free_heap,
+               fw_version, reset_reason, min_free_heap, boot_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [mac, received_at, battery, rssi, uptime_ms, free_heap, fw_version],
+            [mac, received_at, battery, rssi, uptime_ms, free_heap,
+             fw_version, reset_reason, min_free_heap, boot_count],
         )
 
         # Dual-write into the per-module measurements store (issue
@@ -230,7 +243,8 @@ def get_heartbeats(module_id):
         con = get_conn()
         rows = con.execute(
             """
-            SELECT received_at, battery, rssi, uptime_ms, free_heap, fw_version
+            SELECT received_at, battery, rssi, uptime_ms, free_heap, fw_version,
+                   reset_reason, min_free_heap, boot_count
               FROM module_heartbeats
              WHERE module_id = ?
              ORDER BY received_at DESC
@@ -249,6 +263,9 @@ def get_heartbeats(module_id):
                     "uptime_ms": r[3],
                     "free_heap": r[4],
                     "fw_version": r[5],
+                    "reset_reason": r[6],
+                    "min_free_heap": r[7],
+                    "boot_count": r[8],
                 }
                 for r in rows
             ]
@@ -270,7 +287,10 @@ def get_heartbeats_summary():
                    ARG_MAX(rssi, received_at) AS rssi,
                    ARG_MAX(uptime_ms, received_at) AS uptime_ms,
                    ARG_MAX(free_heap, received_at) AS free_heap,
-                   ARG_MAX(fw_version, received_at) AS fw_version
+                   ARG_MAX(fw_version, received_at) AS fw_version,
+                   ARG_MAX(reset_reason, received_at) AS reset_reason,
+                   ARG_MAX(min_free_heap, received_at) AS min_free_heap,
+                   ARG_MAX(boot_count, received_at) AS boot_count
               FROM module_heartbeats
           GROUP BY module_id
             """
@@ -286,6 +306,9 @@ def get_heartbeats_summary():
                     "uptime_ms": r[4],
                     "free_heap": r[5],
                     "fw_version": r[6],
+                    "reset_reason": r[7],
+                    "min_free_heap": r[8],
+                    "boot_count": r[9],
                 }
                 for r in rows
             }

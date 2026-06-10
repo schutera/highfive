@@ -2,6 +2,7 @@
 #define LOGBUF_H
 
 #include <Arduino.h>
+#include <esp_system.h>
 
 #define LOGBUF_SIZE       2048
 #define HTTP_CODES_LEN    8
@@ -16,6 +17,15 @@
 */
 void logbufInit();
 void logf(const char *fmt, ...);
+
+/*
+  Human-readable name for an esp_reset_reason_t ("POWERON", "BROWNOUT",
+  "TASK_WDT", …). Shared by the telemetry sidecar (buildTelemetryJson)
+  and the heartbeat payload (#148) so a crash-looping or hung module —
+  which never reaches the daily image upload — still reports *why* it
+  reset on its very next hourly heartbeat.
+*/
+const char *resetReasonStr(esp_reset_reason_t r);
 
 /* Metrics that upload_image includes in the telemetry payload */
 void logbufNoteHttpCode(int code);

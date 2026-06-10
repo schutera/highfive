@@ -129,6 +129,54 @@ class MockEsp:
             self.upload_url, files=files, data=data, timeout=self.timeout_s
         )
 
+    def heartbeat(
+        self,
+        *,
+        reset_reason: Optional[str] = None,
+        min_free_heap: Optional[int] = None,
+        boot_count: Optional[int] = None,
+        uptime_ms: Optional[int] = None,
+        rssi: Optional[int] = None,
+    ) -> requests.Response:
+        """POST /heartbeat on duckdb-service, mirrors sendHeartbeat in client.cpp.
+
+        Form-encoded body. The diagnostic fields (#148) — `reset_reason`,
+        `min_free_heap`, `boot_count` — default to the telemetry snapshot's
+        values so a caller that just wants "a heartbeat with known values"
+        gets a consistent one. The heartbeat path is a *sibling* of
+        `init_url`: the firmware reuses INIT_URL's host+port and swaps the
+        path to `/heartbeat`, so we derive it the same way rather than
+        taking a separate URL.
+        """
+        if not self.init_url:
+            raise ValueError("init_url not configured")
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(self.init_url)
+        hb_url = urlunsplit((parts.scheme, parts.netloc, "/heartbeat", "", ""))
+        data = {
+            "mac": self.mac,
+            "rssi": str(rssi if rssi is not None else self.telemetry.rssi),
+            "uptime_ms": str(
+                uptime_ms if uptime_ms is not None else self.telemetry.uptime_s * 1000
+            ),
+            "free_heap": str(self.telemetry.free_heap),
+            "fw_version": self.fw_version,
+            "reset_reason": (
+                reset_reason
+                if reset_reason is not None
+                else self.telemetry.last_reset_reason
+            ),
+            "min_free_heap": str(
+                min_free_heap
+                if min_free_heap is not None
+                else self.telemetry.min_free_heap
+            ),
+        }
+        if boot_count is not None:
+            data["boot_count"] = str(boot_count)
+        return requests.post(hb_url, data=data, timeout=self.timeout_s)
+
     def upload_loop(self, cycles: int, interval_s: float) -> List[int]:
         """Run `cycles` uploads `interval_s` apart. Returns response codes.
 

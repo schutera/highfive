@@ -390,3 +390,104 @@ def test_heartbeat_geo_patch_coarsens_precise_fix(client, fresh_db):
 
     # Stored at 2 dp, not the precise heartbeat value.
     assert _fetch_module_lat_lng(fresh_db, CANONICAL_MAC) == (47.79, 9.62)
+
+
+# ---------- diagnostic fields: reset_reason / min_free_heap / boot_count (#148) ----------
+#
+# A crash-looping or hung module never reaches the daily noon image upload
+# that carries the telemetry sidecar, so these fields are lifted onto the
+# hourly heartbeat — the very next heartbeat after a reset reports *why*.
+# These tests assert the values actually round-trip into the persisted row
+# and back out of both read endpoints (not merely that the response envelope
+# has the keys — see CLAUDE.md rule 5, "envelope right, behaviour wrong").
+
+
+def test_heartbeat_persists_diagnostic_fields(client, fresh_db):
+    resp = client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "rssi": -72,
+            "uptime_ms": 16462,
+            "free_heap": 167888,
+            "fw_version": "carpenter",
+            "reset_reason": "TASK_WDT",
+            "min_free_heap": 69916,
+            "boot_count": 3169,
+        },
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT reset_reason, min_free_heap, boot_count "
+            "FROM module_heartbeats WHERE module_id = ?",
+            (CANONICAL_MAC,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert row == ("TASK_WDT", 69916, 3169)
+
+
+def test_heartbeats_get_returns_diagnostic_fields(client, fresh_db):
+    client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "reset_reason": "BROWNOUT",
+            "min_free_heap": 42000,
+            "boot_count": 7,
+        },
+    )
+    resp = client.get(f"/heartbeats/{CANONICAL_MAC}")
+    assert resp.status_code == 200
+    hb = resp.get_json()["heartbeats"][0]
+    assert hb["reset_reason"] == "BROWNOUT"
+    assert hb["min_free_heap"] == 42000
+    assert hb["boot_count"] == 7
+
+
+def test_heartbeats_summary_returns_latest_diagnostic_fields(client, fresh_db):
+    # Two heartbeats: the summary must reflect the MOST RECENT one's
+    # diagnostic values (ARG_MAX over received_at), not the first.
+    client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "reset_reason": "POWERON",
+            "min_free_heap": 100000,
+            "boot_count": 1,
+        },
+    )
+    client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "reset_reason": "PANIC",
+            "min_free_heap": 51234,
+            "boot_count": 2,
+        },
+    )
+    resp = client.get("/heartbeats_summary")
+    assert resp.status_code == 200
+    entry = resp.get_json()["summary"][CANONICAL_MAC]
+    assert entry["reset_reason"] == "PANIC"
+    assert entry["min_free_heap"] == 51234
+    assert entry["boot_count"] == 2
+
+
+def test_heartbeat_omitting_diagnostic_fields_stores_null(client, fresh_db):
+    # Older firmware (pre-#148) omits all three. A mixed fleet during an OTA
+    # rollout must not 500 and must store NULL, not 0 (0 boots / 0 KB heap
+    # would be an honest-looking lie).
+    resp = client.post(
+        "/heartbeat",
+        data={"mac": CANONICAL_MAC, "rssi": -80, "fw_version": "mason"},
+    )
+    assert resp.status_code == 200
+    resp = client.get(f"/heartbeats/{CANONICAL_MAC}")
+    hb = resp.get_json()["heartbeats"][0]
+    assert hb["reset_reason"] is None
+    assert hb["min_free_heap"] is None
+    assert hb["boot_count"] is None

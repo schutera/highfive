@@ -55,6 +55,12 @@ int lastCaptureDay = -1;
 // the pure logic lives in lib/loop_health and is native-tested.
 hf::HeartbeatScheduler hbScheduler;
 hf::WifiHealthMonitor wifiHealth;
+// Liveness self-heal watchdog (#148 Phase 3): reboots the module if NO server
+// contact (2xx heartbeat or 2xx upload) succeeds for kNoContactRebootMs (2 h).
+// Catches the "WiFi up, loop alive, but every call silently hangs/fails"
+// zombie that wifiHealth (WiFi-down only) and the upload breaker (failed
+// uploads only) both miss. Pure logic in lib/loop_health, native-tested.
+hf::LivenessMonitor livenessMon;
 
 // App-side OTA rollback (#26 / manual T4). Counts consecutive boots in
 // PENDING_VERIFY state. Once the threshold is exceeded, calls
@@ -414,7 +420,16 @@ void setup() {
   // in docs/06-runtime-view/ota-update-flow.md's Rollback section.
   hf::breadcrumbSet("setup:sendHeartbeat:boot");
   stageStartMs = millis();
-  hbScheduler.recordResult(millis(), sendHeartbeat(&esp_config) == 0);
+  const bool bootHbOk = (sendHeartbeat(&esp_config) == 0);
+  hbScheduler.recordResult(millis(), bootHbOk);
+  // #148 Phase 3: a 2xx boot heartbeat already proved live server contact, so
+  // seed the liveness watchdog with it. Without this the watchdog's first
+  // knowledge is the loop-entry anchor, not the contact that actually
+  // happened — harmless today (loop entry re-anchors with a full 2 h window)
+  // but an honest anchor if kNoContactRebootMs is ever shortened.
+  if (bootHbOk) {
+    livenessMon.noteContact(millis());
+  }
   logf("[STAGE] sendHeartbeat:boot took=%lums", millis() - stageStartMs);
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
@@ -729,6 +744,26 @@ void loop() {
     ESP.restart();
   }
 
+  // Liveness self-heal reboot (#148 Phase 3). The guard above only fires when
+  // WiFi is *down*; this one catches the nastier mode where WiFi is associated
+  // and the loop is alive (WDT fed) but every server call silently hangs or
+  // fails, so the module is mute yet looks healthy locally. If NO 2xx
+  // heartbeat or upload has landed for kNoContactRebootMs (2 h) we restart to
+  // re-run setup()'s clean WiFi join + TLS handshake. livenessMon.noteContact()
+  // is called below on each successful heartbeat/upload; the first
+  // shouldReboot() call anchors the clock so a just-booted module gets a full
+  // 2 h window. Like the WiFi-health reboot this is a clean ESP.restart()
+  // (ESP_RST_SW) — a server-side outage must not feed the OTA faulty-boot
+  // rollback counter (a bad firmware *image* is handled by the mark-valid
+  // gate, not by this watchdog). Distinct breadcrumb so the post-reboot
+  // telemetry shows which guard fired.
+  if (livenessMon.shouldReboot(millis())) {
+    hf::breadcrumbSet("loop:livenessReboot");
+    Serial.println("[REBOOT] no server contact > 2 h — restarting to recover");
+    delay(500);
+    ESP.restart();
+  }
+
   // Geolocation deferred-retry tick (PR II / issue #89). Cheap call —
   // returns immediately unless the boot fix failed AND the 30-minute
   // backoff has elapsed. On a successful retry it queues the new fix
@@ -748,6 +783,12 @@ void loop() {
     hf::breadcrumbSet("loop:sendHeartbeat");
     const int hbRc = sendHeartbeat(&esp_config);
     hbScheduler.recordResult(millis(), hbRc == 0);
+    // #148 Phase 3: a 2xx heartbeat is the cheapest proof of live server
+    // contact — feed the liveness watchdog so a healthy hourly cadence keeps
+    // the no-contact timer perpetually fresh.
+    if (hbRc == 0) {
+      livenessMon.noteContact(millis());
+    }
   }
 
   // First capture immediately after boot. Retry every loop iteration on
@@ -760,6 +801,7 @@ void loop() {
     hf::breadcrumbSet("loop:captureAndUpload:first");
     if (captureAndUpload()) {
       firstCaptureDone = true;
+      livenessMon.noteContact(millis());  // #148 Phase 3: 2xx upload == live contact
     }
   }
 
@@ -782,6 +824,7 @@ void loop() {
         hf::breadcrumbSet("loop:captureAndUpload:noon");
         if (captureAndUpload()) {
           lastCaptureDay = timeinfo.tm_yday;
+          livenessMon.noteContact(millis());  // #148 Phase 3: 2xx upload == live contact
         }
       }
     }

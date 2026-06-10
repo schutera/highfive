@@ -40,6 +40,20 @@ constexpr uint32_t kHeartbeatIntervalMs = 60UL * 60UL * 1000UL;
 // is not hammered, while still beating the old full-hour gap by 12x.
 constexpr uint32_t kHeartbeatRetryMs = 5UL * 60UL * 1000UL;
 
+// 2 h: if NOTHING the module sends has reached the server for this long — no
+// successful heartbeat AND no successful image upload — force a recovery
+// reboot (issue #148 Phase 3). This is the gap the other two guards miss:
+// WifiHealthMonitor only fires when WiFi is *down*, and the upload circuit
+// breaker only counts *failed* uploads (which happen ~daily) — neither
+// catches a "WiFi up, loop alive, but every server call silently hangs or
+// fails" zombie, which otherwise stays mute until the 24 h daily reboot.
+// 2 h matches the dashboard's offline window and gives the hourly heartbeat
+// + 5 min retries two full cycles to make contact before we give up. The
+// reboot is ESP.restart() (ESP_RST_SW) — deliberately NOT a panic, so a mere
+// server-side outage cannot feed the OTA faulty-boot rollback counter (a bad
+// *firmware* image is handled by the mark-valid gate, not here).
+constexpr uint32_t kNoContactRebootMs = 2UL * 60UL * 60UL * 1000UL;
+
 // Tracks how long WiFi has been continuously disconnected and decides when
 // a recovery reboot is due. Stateless w.r.t. the clock: the caller passes
 // the current millis() value and the current connectivity each tick.
@@ -88,6 +102,36 @@ class HeartbeatScheduler {
   bool primed_ = false;       // has at least one attempt been recorded?
   uint32_t lastAttemptMs_ = 0;
   bool lastOk_ = false;
+};
+
+// Liveness self-heal watchdog (issue #148 Phase 3). Tracks the last time the
+// module had SUCCESSFUL contact with the server — a 2xx heartbeat OR a 2xx
+// image upload — and asks for a recovery reboot once that goes stale. This
+// catches the silent-hang failure mode (WiFi associated, task-WDT fed, loop
+// running, but every server call hangs/fails) that neither WifiHealthMonitor
+// (WiFi-down only) nor the upload circuit breaker (failed-uploads only, and
+// uploads are ~daily) detects. Stateless w.r.t. the clock, like the monitors
+// above: the caller injects millis() and reports each success.
+class LivenessMonitor {
+ public:
+  explicit LivenessMonitor(uint32_t rebootAfterMs = kNoContactRebootMs)
+      : rebootAfterMs_(rebootAfterMs) {}
+
+  // Report a successful server contact (sendHeartbeat() == 0, or a 2xx
+  // upload). Resets the staleness timer.
+  void noteContact(uint32_t nowMs);
+
+  // Call once per loop iteration. Returns true exactly when there has been NO
+  // successful contact for strictly longer than the threshold. The FIRST call
+  // anchors the clock (so a freshly-booted module that hasn't yet reached the
+  // server gets a full threshold window, and nowMs == 0 on the first tick does
+  // not instantly trip) — same bool-flag anchoring as WifiHealthMonitor.
+  bool shouldReboot(uint32_t nowMs);
+
+ private:
+  uint32_t rebootAfterMs_;
+  bool primed_ = false;        // has the clock been anchored / a contact seen?
+  uint32_t lastContactMs_ = 0; // millis() of the most recent successful contact
 };
 
 }  // namespace hf

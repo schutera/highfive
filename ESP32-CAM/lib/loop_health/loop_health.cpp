@@ -34,4 +34,25 @@ void HeartbeatScheduler::recordResult(uint32_t nowMs, bool ok) {
   lastOk_ = ok;
 }
 
+void LivenessMonitor::noteContact(uint32_t nowMs) {
+  primed_ = true;
+  lastContactMs_ = nowMs;
+}
+
+bool LivenessMonitor::shouldReboot(uint32_t nowMs) {
+  if (!primed_) {
+    // First observation: anchor the clock instead of treating "no contact
+    // yet" as an infinitely-stale outage. A module that has only just booted
+    // therefore gets a full threshold window to establish its first contact,
+    // and the nowMs == 0 first-tick case does not instantly reboot. Mirrors
+    // WifiHealthMonitor's tracking_ anchoring.
+    primed_ = true;
+    lastContactMs_ = nowMs;
+    return false;
+  }
+  // Unsigned subtraction wraps correctly across the millis() rollover; the
+  // 24 h daily reboot means we never approach the ~49 day wrap anyway.
+  return (nowMs - lastContactMs_) > rebootAfterMs_;
+}
+
 }  // namespace hf

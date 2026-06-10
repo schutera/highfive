@@ -48,9 +48,15 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    chapter-11 "keyless release" lesson).
 
 1. **Bump both version files.** This is the release itself:
-   - `ESP32-CAM/VERSION` → the next bee-species codename
-     ([ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md);
-     the value is just a human label, must differ from the deployed one).
+   - `ESP32-CAM/VERSION` → a bee-species codename that has **never been
+     used before** — not merely different from the currently-deployed
+     release ([ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md)).
+     The comparator skips any module whose running `version` _string
+     equals_ the manifest's, so reusing an old codename strands every
+     straggler still on it (see the chapter-11 `digger`→`squash`
+     codename-collision lesson). Cross-check against **both** namespaces
+     before picking: `git log --oneline -- ESP32-CAM/VERSION` (past
+     firmware codenames) and `git tag -l 'prod-*'` (past deploy tags).
    - `ESP32-CAM/SEQUENCE` → the current integer **+ 1** (the actual OTA
      gate; monotonic, never reused, never decremented).
 
@@ -153,8 +159,14 @@ true **iff**:
 > `manifest.version != my_version` **AND** `my_sequence != 0` **AND**
 > (`manifest.sequence > my_sequence` **OR** `manifest.allow_downgrade == true`)
 
-- The **sequence** is the real lever; the version label only has to
-  differ. This is why step 1 bumps _both_.
+- The **sequence** is the real lever, but `manifest.version != my_version`
+  is a hard **AND** condition, not a formality: a module whose running
+  codename equals the manifest's is skipped _regardless of sequence_.
+  "Differ" therefore means differ from **every codename still alive in
+  the field** — including stale stragglers on a codename older than the
+  currently-deployed release — not just from the last release. Never
+  reuse a codename. This is why step 1 bumps _both_ files to fresh
+  values.
 - `my_sequence != 0` is the **dev escape hatch**: an Arduino-IDE build
   that bypasses `build.sh` compiles with `FIRMWARE_SEQUENCE = 0` and
   refuses to auto-flash itself onto a fleet release.

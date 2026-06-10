@@ -193,6 +193,44 @@ daily-reboot cycle. The one-line invariant: **the `SEQUENCE` integer
 must increment for a release to reach the field; if it didn't change,
 nothing shipped.**
 
+### Reusing a firmware codename strands every module still on it — `digger`→`squash` (#149)
+
+**What happened.** The #149 silent-offline `loop_health` watchdog landed
+on `main` as `ESP32-CAM/VERSION=digger` / `SEQUENCE=7` — but
+`build.sh` was never run, so it sat unpublished (the
+"[merging is not a release](#merging-firmware-source-is-not-a-release--the-sequence-bump-is-the-release-150-132)"
+trap, recurring). While cutting the real release we caught a second,
+subtler bug: **`digger` was already a live field codename** — an early
+web-installer build (`sequence 2`); module `brave-kiwi-gans` was still
+reporting `fwVersion=digger` in its heartbeats. The comparator
+([`shouldOtaUpdate`](../../ESP32-CAM/lib/ota_version/ota_version.h))
+requires `manifest.version != my_version`, so a `digger`/seq7 manifest
+would have **skipped `brave-kiwi-gans` outright** — the sequence jump
+(2→7) never even gets evaluated because the equal-version check
+short-circuits first — stranding it on the old, buggy build forever. We
+renamed the codename to `squash` (sequence unchanged at 7) and published
+`squash`/seq7; `squash` differs from `woolcarder`, `digger`, and every
+prior codename, so all field modules OTA forward.
+
+**Why it happened.** Bee-name codenames _look_ like throwaway labels —
+the docs called the value "just a human label, must differ from the
+deployed one." But the deployed release (`woolcarder`/seq5) is not the
+only firmware alive in the field; a straggler that never rebooted can
+sit on a much older codename. The namespace is also routinely
+reused/overloaded — `digger` was simultaneously an early **firmware**
+codename (seq2) and a **deploy tag** (`prod-digger`, the #147 merge) —
+which makes "is this name free?" non-obvious and easy to get wrong.
+
+**How to avoid it next time.** Treat the **codename like the sequence: a
+forward-only identifier, never reused.** Before picking one, cross-check
+both namespaces — `git log --oneline -- ESP32-CAM/VERSION` (firmware
+codenames) and `git tag -l 'prod-*'` (deploy tags). The
+[firmware-release runbook](../07-deployment-view/firmware-release.md#release-checklist)
+step 1 and its [comparator note](../07-deployment-view/firmware-release.md#how-a-module-decides-to-flash)
+now spell out that `version != my_version` is a hard AND condition and
+that "differ" means differ from every codename still alive in the field,
+not just the last release.
+
 ### `production` branch drifted from the deployed services (undocumented deploy source)
 
 **What happened.** While auditing the OTA-release docs, `origin/production`

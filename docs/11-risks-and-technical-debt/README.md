@@ -86,6 +86,40 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Surviving `setup()` is not proof of a healthy OTA image — mark-valid gated on first server contact (#148 Phase 3)
+
+**What happened.** The #26 OTA rollback gate validated a freshly-flashed slot
+by **surviving `setup()`** (`esp_ota_mark_app_valid_cancel_rollback()` at
+end-of-`setup()`), and the faulty-boot counter only counts panic/WDT/brownout
+reboots. So an OTA image that boots clean, completes `setup()`, but can **never
+reach the server** — broken TLS root bundle, malformed heartbeat, a Wi-Fi join
+bug that associates but never routes — validated itself and was **never rolled
+back**. It ran mute (or, once the Phase 3 liveness watchdog landed, rebooted
+every ~2 h via `ESP_RST_SW`, which the counter ignores by design). The original
+gate proved "the boot path doesn't crash," not "this image actually works."
+
+**Why it happened.** "Healthy" was modelled as "didn't panic during setup,"
+which is necessary but not sufficient — a mute image clears that bar. The
+faulty-reset gate (correctly) excludes clean reboots to avoid false rollbacks on
+transient WiFi outages (ADR-008 invariant #1), but that same exclusion means a
+clean-booting-but-mute image produces no faulty resets and so never accumulates
+toward rollback.
+
+**How to avoid it next time.** #148 Phase 3 redefines validation as **first
+successful server contact** (2xx heartbeat/upload), not surviving `setup()`. An
+`ota/unproven` NVS flag — set **only** by the OTA writer before booting a new
+slot — gates a second rollback trigger (`nc_boots`): an unproven slot that never
+phones home across `HF_OTA_MAX_NOCONTACT_BOOTS` boots reverts. The flag makes it
+**safe by construction**: a proven/factory slot is `unproven = 0` and immune, so
+a multi-hour outage never rolls back good firmware. Logic is pure + native-tested
+in [`lib/ota_rollback`](../../ESP32-CAM/lib/ota_rollback/ota_rollback.h)
+(`test_native_ota_rollback`). Lesson: a self-validation signal for a remote
+auto-rollback system must assert the thing the system exists to deliver
+(reaching the server), not a cheap proxy (not crashing); and gate any
+destructive recovery on a flag that only the relevant actor can set, so the
+recovery can't fire on the innocent majority. Full design: ADR-008's
+mark-valid-on-first-contact addendum.
+
 ### Modules went silently offline within ~1 h of restart — async WiFi reconnect + unconditional heartbeat-timer advance (#143, #149)
 
 **What happened.** During the #143 investigation, two field modules

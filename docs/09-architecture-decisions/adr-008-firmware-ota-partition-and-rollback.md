@@ -184,11 +184,14 @@ watchdog feed.
   bootloader-config drift and is good enough for #26.
 
   **Invariants for future maintainers.** The rollback gate's
-  correctness depends on two constraints; both were surfaced by
-  senior-review of this PR and the trail of failures is in chapter 11
-  ([`docs/11-risks-and-technical-debt/README.md`](../11-risks-and-technical-debt/README.md)'s
-  "OTA rollback isn't bootloader-driven on Arduino-ESP32" entry).
-  Future changes to firmware setup() or NVS keys must preserve them:
+  correctness depends on the constraints below — #1–#3 surfaced by
+  senior-review of the #26 PR (trail of failures in chapter 11's
+  ([`docs/11-risks-and-technical-debt/README.md`](../11-risks-and-technical-debt/README.md))
+  "OTA rollback isn't bootloader-driven on Arduino-ESP32" entry), and
+  **#4 added by #148 Phase 3** (in the mark-valid-on-first-contact
+  addendum below: a proven/factory slot is immune to no-contact
+  rollback). Future changes to firmware setup() or NVS keys must
+  preserve all four:
   1. **No setup-time `ESP.restart()` for fatal-this-slot-is-broken
      signals.** `esp_reset_reason()` returns `ESP_RST_SW` after an
      `ESP.restart()` call, which the gate deliberately treats as a
@@ -232,16 +235,30 @@ watchdog feed.
      round-2 reviewer found. Search for other "after N boots
      restart" patterns before changing either constant.
 
-  3. **NVS namespace `"ota"` / key `"pv_boots"` is the hidden contract
-     between increment and reset.** The counter is incremented in
-     `forceRollbackIfPendingTooLong()` at the top of setup() and
-     reset to 0 inside the `esp_ota_mark_app_valid_cancel_rollback()`
-     block at the end of setup(). Renaming either site without the
-     other (or claiming a different NVS namespace) silently breaks
-     the contract: the counter will increment but never reset, every
-     module rolls back to its previous slot on the third boot. If
-     the NVS shape needs to change, change both sites in the same
-     commit.
+  3. **NVS namespace `"ota"` is a multi-site hidden contract.** Its
+     keys are written across several sites that must move in lockstep;
+     renaming a key (or the namespace) at one site without the others
+     silently breaks rollback. As of #148 Phase 3 the keys and their
+     sites are:
+     - `pv_boots` (faulty-boot counter, #26): incremented in
+       `forceRollbackIfPendingTooLong()` at the top of setup();
+       reset in the `esp_ota_mark_app_valid_cancel_rollback()` block
+       at end of setup(), in the first-contact path
+       (`noteServerContactForOtaGate`), and on rollback.
+     - `unproven` (fresh-OTA flag, #148): **set only** in
+       `ota.cpp`'s `httpOtaCheckAndApply` before the post-flash
+       reboot; cleared in `noteServerContactForOtaGate` (first
+       contact) and on rollback (`otaResetForRollback`). It gates the
+       entire no-contact rollback path — see Invariant #4 in the
+       mark-valid-on-first-contact addendum.
+     - `nc_boots` (no-contact counter, #148): incremented in
+       `forceRollbackIfPendingTooLong()` for an unproven slot; reset
+       on first contact and on rollback.
+
+     The decision logic over these three keys is the pure state
+     machine in `ESP32-CAM/lib/ota_rollback`; the NVS reads/writes are
+     the glue in `ESP32-CAM.ino` + `ota.cpp`. If the NVS shape needs
+     to change, change every site in the same commit.
 
 **Costs:**
 
@@ -395,3 +412,73 @@ no weaker than the rest of the manifest under the current threat
 model. A future TLS + signed-manifest ADR will close both gaps
 together — they share an implementation seam (a signed envelope) and
 splitting them would force two migration cycles instead of one.
+
+## Mark-valid-on-first-contact addendum (#148 Phase 3)
+
+The original gate (above) validated a slot by **surviving `setup()`** —
+reaching `esp_ota_mark_app_valid_cancel_rollback()` at end-of-`setup()`. Issue
+#148's field incident ("ready-peach went silent for 3 h") exposed the gap: a
+freshly-OTA'd image that boots clean, completes `setup()`, but can **never
+reach the server** (broken TLS root bundle, malformed request shape, a Wi-Fi
+join bug that associates but never routes) validates itself and is **never
+rolled back**. It just runs mute — or, with the Phase 3 liveness watchdog,
+reboots every ~2 h forever via `ESP_RST_SW`, which the faulty-boot counter
+deliberately ignores. Surviving `setup()` is necessary but not sufficient proof
+of a healthy image.
+
+**Decision.** Validation now requires a real **server contact**, not merely
+surviving `setup()`:
+
+- The OTA writer (`ota.cpp`'s `httpOtaCheckAndApply`) sets a new NVS flag
+  `ota/unproven = 1` immediately before booting the just-flashed slot, and
+  zeroes the counters. This is the **only** site that sets the flag.
+- The first 2xx heartbeat or upload (`noteServerContactForOtaGate` in the
+  `.ino`, reached via the boot heartbeat, loop heartbeat, or upload) **clears
+  `unproven`** and zeroes the counters. It does **not** itself call
+  `esp_ota_mark_app_valid_cancel_rollback()` — that IDF call is permanent (a
+  VALID slot can no longer be reverted by
+  `esp_ota_mark_app_invalid_rollback_and_reboot()`), so it stays at
+  end-of-`setup()`, **after** the stages that can panic (camera init). Clearing
+  `unproven` early is safe: a slot that gets one good heartbeat and then panics
+  in `initEspCamera` never reaches end-of-`setup()`, so mark-valid never fires
+  and the faulty-boot counter (`pv_boots`) still reverts it — preserving the
+  "every stage that can panic has succeeded" mark-valid placement (the
+  "Auto-rollback for bricked binaries" bullet under **Enables** above). (An
+  earlier draft of this PR called
+  mark-valid on the boot heartbeat, *before* camera init; senior-review flagged
+  it as a P0 reintroduction of the brick-on-camera-panic hazard.)
+- A new counter `ota/nc_boots` counts consecutive boots of an unproven slot
+  that did **not** validate. The liveness watchdog (Phase 3 item 2) reboots a
+  mute slot every ~2 h, so this accumulates; at `HF_OTA_MAX_NOCONTACT_BOOTS`
+  (3) `forceRollbackIfPendingTooLong()` reverts the slot — ~6–8 h of total
+  radio silence. A Wi-Fi-broken slot (rebooted every 10 min by the WiFi-health
+  watchdog) reverts faster, closing the "reboots forever" hole that invariant
+  #1 warns about for the no-contact case too.
+
+The decision logic is the pure, native-tested state machine in
+[`ESP32-CAM/lib/ota_rollback`](../../ESP32-CAM/lib/ota_rollback/ota_rollback.h)
+(`test_native_ota_rollback`); the `.ino`/`ota.cpp` are NVS + `esp_ota` glue.
+
+**Invariant #4 (new): a proven/factory slot is immune to no-contact rollback.**
+The entire no-contact path is gated on `unproven`, which only the OTA writer
+sets. A factory/USB-flashed slot is `unproven = 0` from birth; a slot that has
+ever made contact is cleared to 0. So `nc_boots` can never increment for a
+proven slot — a multi-hour **server or Wi-Fi outage can never roll back good
+firmware**, no matter how long it lasts. The only residual false-rollback case
+is a fresh OTA pushed immediately before a total blackout that lasts longer
+than `HF_OTA_MAX_NOCONTACT_BOOTS` × the reboot interval with **zero** successful
+contacts; the revert is to the previously-good slot and is recoverable by the
+next OTA. The 6–8 h window makes a transient outage an unlikely cause.
+
+**Migration note.** The first #148 image is flashed by *pre-*#148 firmware,
+whose `httpOtaCheckAndApply` does not set `unproven` — so that first image boots
+`unproven = 0` and is validated the old way (survives `setup()`). The
+contact-gated protection takes effect for the *next* OTA, which is cut by #148
+firmware. No bricking risk in either direction; downgrades clear `unproven` on
+rollback.
+
+**Why no new `abort()` site (respects invariant #1).** An earlier sketch made
+the liveness watchdog `abort()` (→ `ESP_RST_PANIC`) on an unproven slot so the
+faulty counter would catch it. The shipped design instead counts unproven boots
+in `nc_boots` regardless of *why* they rebooted, so the watchdog stays a clean
+`ESP.restart()` and no `ESP.restart()`-vs-`abort()` invariant is touched.

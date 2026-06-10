@@ -145,6 +145,24 @@ operator typing coordinates. The API key is **not a HiveHive
 secret**; it is a Google Cloud Console key tied to a specific
 project's billing account.
 
+**The call runs roughly once per nest, not once per boot (#148 Phase 3).** A
+nest rarely moves, and the geolocation path is a heap-hungry TLS handshake
+that re-ran on every boot — a standing contributor to the `longhorn` heap
+leak. So the first plausible fix is cached in NVS (namespace `geo`, via
+`saveCachedGeolocation`) and `setup()` loads it through `loadCachedGeolocation`
+to skip the Google call on most boots. The (0,0) sentinel is never cached, so
+a first-ever boot still does the live lookup.
+
+Caching forever would remove the pre-change self-healing property (every boot
+used to re-resolve location). To keep a **relocated** module from reporting
+stale coordinates indefinitely — duckdb-service only patches a fix *from*
+(0,0), so the heartbeat recovery path cannot correct a stale non-(0,0) cache —
+the cache carries a **boot-count TTL** (`kGeoCacheMaxBoots`, currently 14): the
+fix is re-resolved roughly every 14 boots (~2 weeks given the 24 h daily
+reboot), so a relocated-and-power-cycled module self-corrects automatically
+within that window without a reflash. A full reflash (`eraseAll`) also wipes
+NVS and forces immediate re-resolution.
+
 **Key never lives in source.** The literal previously sat at the
 top of `getGeolocation`'s body and ended up public on GitHub
 ([issue #18](https://github.com/schutera/highfive/issues/18)).

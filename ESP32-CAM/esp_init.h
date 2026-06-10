@@ -117,6 +117,22 @@ void setupWifiConnection(wifi_configuration_t *wifi_config);
 bool getGeolocation(esp_config_t *esp_config);
 void initNewModuleOnServer(esp_config_t *esp_config);
 
+// NVS-cached geolocation (#148 Phase 3). A nest does not move, but the
+// boot-time Google geolocation call is a heap-hungry TLS handshake that
+// previously re-ran on every boot (a standing contributor to the longhorn
+// heap leak). Once a plausible fix is resolved we persist it; subsequent
+// boots load it and skip the TLS call entirely. The cache lives in NVS and
+// is wiped by a full reflash (eraseAll), which is the documented
+// "reconfigure / relocate = reflash" path — so a relocated module
+// re-resolves its fix.
+//   loadCachedGeolocation — returns true and fills *out only if a PLAUSIBLE
+//     fix is stored (a fresh/empty NVS reads back the (0,0,0) sentinel, which
+//     fails isPlausibleFix → cache miss → caller does the TLS call).
+//   saveCachedGeolocation — persists a fix; no-op if it isn't plausible, so
+//     the (0,0) sentinel is never cached.
+bool loadCachedGeolocation(geolocation_t *out);
+void saveCachedGeolocation(const geolocation_t &fix);
+
 // Heartbeat-side geolocation recovery (PR II / issue #89). loop()
 // schedules retries every HF_GEOLOCATION_DEFERRED_RETRY_MS while the
 // boot fix is missing; on success the next heartbeat carries the

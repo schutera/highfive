@@ -366,9 +366,26 @@ void setup() {
 
   hf::breadcrumbSet("setup:getGeolocation");
   stageStartMs = millis();
-  const bool gotFix = getGeolocation(&esp_config);
-  logf("[STAGE] getGeolocation took=%lums fix=%s",
-       millis() - stageStartMs, gotFix ? "ok" : "deferred");
+  // #148 Phase 3: a nest doesn't move, so once we've resolved a plausible fix
+  // we cache it in NVS and skip the heap-hungry boot-time Google TLS handshake
+  // on every subsequent boot (the geo path was a standing contributor to the
+  // longhorn heap leak, and re-running it each boot bought nothing). A cache
+  // hit counts as a fix; a miss (first ever boot, or post-reflash NVS wipe)
+  // falls through to the live call, and a fresh success is persisted.
+  bool gotFix;
+  if (loadCachedGeolocation(&esp_config.geolocation)) {
+    gotFix = true;
+    logf("[STAGE] getGeolocation skipped — NVS-cached fix lat=%.2f lng=%.2f acc=%.0f",
+         esp_config.geolocation.latitude, esp_config.geolocation.longitude,
+         esp_config.geolocation.accuracy);
+  } else {
+    gotFix = getGeolocation(&esp_config);
+    logf("[STAGE] getGeolocation took=%lums fix=%s",
+         millis() - stageStartMs, gotFix ? "ok" : "deferred");
+    if (gotFix) {
+      saveCachedGeolocation(esp_config.geolocation);
+    }
+  }
 
   Serial.print("Latitude: ");
   Serial.println(esp_config.geolocation.latitude, 6);

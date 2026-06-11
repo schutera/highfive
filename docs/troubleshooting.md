@@ -533,6 +533,52 @@ issue-#42 breadcrumb) before OTA-ing the fleet. Do not roll back to `mining`
 
 ---
 
+## Bench OTA download stalls on Windows: `[OTA] binary read deadline exceeded at N/…`
+
+**Symptom.** While bench-testing the HTTP boot-pull OTA
+([manual-tests-ota.md T2](10-quality-requirements/manual-tests-ota.md)) on a
+**Windows + Docker Desktop** dev stack, the module finds the update but the
+binary download dies: serial shows `[OTA] update available: … -> … seq=N`
+followed ~120 s later by `[OTA] binary read deadline exceeded at 7001/1155744`
+(the byte count varies, always ≈ one initial TCP window, 7–13 KB). Manifest
+fetches, heartbeats, registration, and image **uploads** all work; downloading
+the same `firmware.app.bin` from the host with `curl`/`Invoke-WebRequest` is
+instant.
+
+**Cause.** Docker Desktop's Windows port-forwarder does not sustain bulk
+host→Wi-Fi-client streams to a slow LAN receiver: the first receive-window's
+worth of data arrives, then the stream stalls (window updates from the ESP
+appear to be lost in the forwarder). Small request/response flows and
+client→host bulk (uploads) are unaffected, which is why everything else
+looks healthy. Host-side downloads short-circuit via loopback and never
+traverse the forwarder, so they can't reproduce it.
+
+**Fix (bench workaround).** Take Docker out of the OTA download path: serve
+`homepage/public/` from a **native** process and point a stepping-stone build
+at it. Port `55555` already has an any-program inbound allow rule ("HiveHive
+ArduinoOTA"), so no elevation is needed:
+
+```powershell
+# 1) native server: GET /firmware.json + /firmware.app.bin from homepage/public,
+#    POST /new_module + /heartbeat forwarded to localhost:8002 (see the script
+#    used in PR #161's bench validation; any static server + proxy works)
+python c:\tmp\hf_bench_ota_server.py   # listens on 0.0.0.0:55555
+```
+
+```bash
+# 2) stepping-stone build whose INIT_URL points at the native server
+cd ESP32-CAM
+PLATFORMIO_BUILD_FLAGS='-DHF_INIT_URL_DEFAULT=\"http://<LAN-IP>:55555/new_module\" -DHF_UPLOAD_URL_DEFAULT=\"http://<LAN-IP>:8000/upload\"' \
+  pio run -e esp32cam -t upload --upload-port COM9
+```
+
+Through the native server the same 1.1 MB binary downloads and flashes in
+seconds. Production is unaffected (host-nginx serves the artifacts directly;
+no Docker forwarder in the path). Linux/macOS dev stacks have not shown the
+stall.
+
+---
+
 ## Useful commands reference
 
 ```bash

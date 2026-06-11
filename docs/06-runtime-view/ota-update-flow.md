@@ -84,37 +84,60 @@ forever. Verified empirically during manual T4 of #26 (see
 [`docs/10-quality-requirements/manual-tests-ota.md`](../10-quality-requirements/manual-tests-ota.md)).
 
 `ESP32-CAM/ESP32-CAM.ino`'s `forceRollbackIfPendingTooLong`, called
-near the top of `setup()`, owns the recovery. On any boot whose
-previous run died via panic/WDT/brownout (gated by
-`esp_reset_reason()`), it increments an NVS counter
-(`Preferences("ota").pv_boots`). When the counter crosses
-`HF_OTA_MAX_PENDING_BOOTS = 3`, the app calls
-`esp_ota_mark_app_invalid_rollback_and_reboot()`, which marks the
-running slot invalid and asks the bootloader to boot the previous
-valid one. Reaching `esp_ota_mark_app_valid_cancel_rollback()` at
-the end of `setup()` resets the counter to 0. Clean reboots
-(POWERON, SW from AP-fallback, daily reboot, OTA post-flash) do not
-increment, so transient WiFi flakes that trip `WIFI_FAIL_AP_FALLBACK_THRESH`
-do not also trip rollback. Full reasoning lives in
-[`docs/09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md`](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md).
+near the top of `setup()`, owns the recovery. Its decision logic is the
+pure, native-tested state machine in
+[`ESP32-CAM/lib/ota_rollback`](../../ESP32-CAM/lib/ota_rollback/ota_rollback.h);
+the function is just NVS + `esp_ota` glue. There are **two** rollback triggers:
 
-The boot heartbeat fires before mark-valid, so a new-`fwVersion`
-heartbeat may briefly appear on the server (and in the dashboard's
-**Firmware** pill — see `homepage/src/components/ModulePanel.tsx`)
-while the slot is still pending verify. If camera init then panics
-and the slot rolls back, the next boot's heartbeat (from the
-previous slot) will correct the reported version. This brief
-flicker is intentional — planting the heartbeat early keeps the
-"boot latency → dashboard refresh" benefit described in the
-image-upload-flow doc.
+1. **Faulty-boot loop (#26).** On any boot whose previous run died via
+   panic/WDT/brownout (gated by `esp_reset_reason()`), it increments
+   `Preferences("ota").pv_boots`. At `HF_OTA_MAX_PENDING_BOOTS = 3` it calls
+   `esp_ota_mark_app_invalid_rollback_and_reboot()`. Clean reboots (POWERON, SW
+   from AP-fallback, daily reboot, liveness/WiFi-health recovery, OTA
+   post-flash) do not increment, so transient WiFi flakes that trip
+   `WIFI_FAIL_AP_FALLBACK_THRESH` do not also trip rollback.
+2. **No-contact loop (#148 Phase 3).** A slot flashed by OTA boots with
+   `Preferences("ota").unproven = 1` (set by `ota.cpp` before the post-flash
+   reboot — the only site that sets it). Such a slot validates only on its
+   first **server contact** (2xx heartbeat/upload), which marks the app valid
+   and clears `unproven`; merely surviving `setup()` no longer validates it.
+   Each unproven boot that fails to make contact increments `nc_boots`; at
+   `HF_OTA_MAX_NOCONTACT_BOOTS = 3` the slot is reverted. Because the liveness
+   watchdog reboots a mute slot every ~2 h, this catches a "boots-clean-but-
+   can't-reach-the-server" image (~6–8 h) that the faulty-boot trigger misses.
 
-Operator-observable: a bricked OTA shows up on the dashboard as a
-module whose **Firmware** pill keeps showing the **old** bee-name
-(the flicker corrects itself), with a breadcrumb in the next
-telemetry sidecar naming which stage of the new firmware's setup()
-failed (e.g. `setup:initEspCamera`, `setup:initNewModuleOnServer`).
-No manual intervention needed — the unit recovers on its own after
-~3 panic-reboot cycles ≈ 30–60 s.
+A **proven/factory slot** (`unproven = 0` — never OTA'd, or already validated)
+is immune to trigger 2: a multi-hour server/Wi-Fi outage never rolls back good
+firmware. Full reasoning + invariants live in
+[`docs/09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md`](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md)
+(see the mark-valid-on-first-contact addendum).
+
+Since #148 Phase 3, the `esp_ota_mark_app_valid_cancel_rollback()` IDF call
+**still fires only at end-of-`setup()`** (after camera init — see the "earned
+stage placement" rule below), but it is now **gated on the slot being proven**.
+The first 2xx boot/loop heartbeat clears the `unproven` flag (it does *not*
+mark-valid early — that would be permanent and would defeat the camera-panic
+rollback); the end-of-`setup()` block then marks valid for any proven slot. A
+new-`fwVersion` heartbeat appears on the server (and the dashboard's
+**Firmware** pill — see `homepage/src/components/ModulePanel.tsx`) at first
+contact, slightly before the slot is formally marked valid. Two failure modes,
+two triggers:
+
+- **Reaches the server, then panics in a later setup stage** (e.g.
+  `initEspCamera`): the panic loop reboots before end-of-`setup()`, so
+  mark-valid never fires and the slot stays revert-eligible — `pv_boots`
+  accumulates and reverts it at ~3 cycles, exactly as in the original #26
+  design. Clearing `unproven` at first contact does not undermine this.
+- **Cannot reach the server at all**: never clears `unproven`, so the
+  no-contact trigger (`nc_boots`) reverts it.
+
+Operator-observable: a bricked OTA shows up on the dashboard as a module whose
+**Firmware** pill reverts to (or never leaves) the **old** bee-name, with a
+breadcrumb in the next telemetry sidecar naming which stage of the new
+firmware's setup() failed (e.g. `setup:initEspCamera`,
+`setup:initNewModuleOnServer`, `setup:ota_mark_valid`). No manual intervention
+needed — a panic-loop recovers in ~3 cycles ≈ 30–60 s; a can't-reach-server
+image in ~6–8 h.
 
 ## Partition layout migration
 

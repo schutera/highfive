@@ -6,6 +6,7 @@
 #include "url.h"
 
 #include <Arduino.h>
+#include <Preferences.h>
 #include <Update.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -402,7 +403,21 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
         logf("[OTA] Update.isFinished false after end()");
         return;
     }
-    logf("[OTA] flash complete — restarting onto new slot");
+    // Mark the just-flashed slot UNPROVEN (#148 Phase 3) before booting it.
+    // This is the ONLY place the flag is set — so a factory / USB-flashed slot
+    // is never unproven and is immune to the no-contact rollback path. The new
+    // slot clears this flag once it makes its first successful server contact
+    // (noteServerContactForOtaGate in the .ino); until then it accumulates
+    // toward rollback. Counters are zeroed so the new slot starts clean.
+    {
+        Preferences otaPrefs;
+        otaPrefs.begin("ota", false);
+        otaPrefs.putUChar("unproven", 1);
+        otaPrefs.putUInt("pv_boots", 0);
+        otaPrefs.putUInt("nc_boots", 0);
+        otaPrefs.end();
+    }
+    logf("[OTA] flash complete — slot marked unproven, restarting onto new slot");
     delay(200);
     ESP.restart();
 }

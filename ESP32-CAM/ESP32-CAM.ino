@@ -7,6 +7,7 @@
 #include "breadcrumb.h"
 #include "module_id.h"
 #include "loop_health.h"
+#include "ota_rollback.h"
 #include "ota.h"
 #include <Arduino.h>
 #include <ArduinoOTA.h>
@@ -42,6 +43,14 @@ static_assert(TASK_WDT_TIMEOUT_S >= 60,
 // `forceRollbackIfPendingTooLong()` below and the comment that calls
 // it in setup() for the design context.
 #define HF_OTA_MAX_PENDING_BOOTS 3
+// Max consecutive boots a freshly-OTA'd ("unproven") slot may run WITHOUT ever
+// making successful server contact before this firmware reverts it (#148
+// Phase 3). The liveness watchdog reboots a mute slot every ~2 h, so 3 ≈ 6–8 h
+// of total silence before rollback — long enough that a transient outage is an
+// unlikely cause, short enough to self-heal a genuinely broken push same-day.
+// Only ever consulted while the "unproven" flag is set, so a proven/factory
+// slot is immune (see lib/ota_rollback and ADR-008 invariant #3).
+#define HF_OTA_MAX_NOCONTACT_BOOTS 3
 // FACTORY_RESET_SETTLE_MS and WIFI_FAIL_AP_FALLBACK_THRESH live in
 // esp_init.h alongside the NVS helpers they gate on.
 
@@ -62,75 +71,132 @@ hf::WifiHealthMonitor wifiHealth;
 // uploads only) both miss. Pure logic in lib/loop_health, native-tested.
 hf::LivenessMonitor livenessMon;
 
-// App-side OTA rollback (#26 / manual T4). Counts consecutive boots in
-// PENDING_VERIFY state. Once the threshold is exceeded, calls
-// esp_ota_mark_app_invalid_rollback_and_reboot() which forces the
-// bootloader to revert to the previously-valid slot. Required because
-// arduino-esp32's prebuilt bootloader does NOT enable
-// CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE — without this app-side check,
-// a setup()-panicking slot would reboot forever.
+// App-side OTA rollback (#26 / manual T4, extended for #148 Phase 3). Required
+// because arduino-esp32's prebuilt bootloader does NOT enable
+// CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE — without this app-side check a bad slot
+// would reboot forever. Two NVS-backed rollback triggers, both reverting via
+// esp_ota_mark_app_invalid_rollback_and_reboot():
+//   pv_boots — consecutive faulty (panic/WDT/brownout) reboots (#26)
+//   nc_boots — consecutive boots of an UNPROVEN (freshly-OTA'd) slot that never
+//              made server contact (#148; never increments for a proven slot)
+// Decision logic is the pure, native-tested state machine in lib/ota_rollback;
+// this function is the NVS + esp_ota glue around it.
 static void forceRollbackIfPendingTooLong() {
-  // Manual T4 showed that gating on `esp_ota_get_state_partition()`
-  // does not work here: arduino-esp32's prebuilt loader leaves the
-  // ROM `app_state` field untouched, and `esp_ota_set_boot_partition`
-  // in the IDF version we ship can in practice leave a newly-flashed
-  // slot reporting ESP_OTA_IMG_VALID immediately. A check that
-  // returns early when state == VALID therefore silently skips every
-  // bricked OTA, which is what round-1 + round-2 of manual T4
-  // reproduced (mining slot heartbeat→abort→heartbeat→abort with no
-  // rollback ever firing).
+  // Why not gate on esp_ota_get_state_partition(): manual T4 showed it does not
+  // work here — arduino-esp32's prebuilt loader leaves the ROM `app_state`
+  // field untouched and can leave a newly-flashed slot reporting
+  // ESP_OTA_IMG_VALID immediately, so a "return early if VALID" check silently
+  // skips every bricked OTA. Hence the state-free counter design above.
   //
-  // State-free design instead: count consecutive faulty reboots
-  // (panic/WDT/brownout) since the last successful mark-valid. A
-  // healthy slot's setup reaches the reset path at end-of-setup() and
-  // the counter cycles 0→0–1; a slot that crashes between this check
-  // and mark-valid accumulates monotonically until the threshold
-  // trips, at which point we force a bootloader-side rollback to the
-  // previous slot.
-  //
-  // Reset-reason gate: count only boots whose previous run died
-  // ungracefully (PANIC/TASK_WDT/INT_WDT/BROWNOUT). Clean reboots
-  // (POWERON, EXT, SW, DEEPSLEEP) do NOT increment, because the
-  // existing AP-fallback path in `setup()` and `setupWifiConnection`
-  // already calls `ESP.restart()` (reset_reason=SW) on three
-  // consecutive WiFi-join failures, and three of those in a row
-  // would otherwise hit `HF_OTA_MAX_PENDING_BOOTS = 3` and trigger a
-  // false rollback to old firmware on a transient WiFi outage. The
-  // collision was caught by senior-review of this PR before merge;
-  // see lessons-learned in chapter-11.
+  // Reset-reason gate (load-bearing — ADR-008 invariant #1): count only boots
+  // whose previous run died ungracefully (PANIC/TASK_WDT/INT_WDT/BROWNOUT).
+  // Clean reboots (POWERON, EXT, SW, DEEPSLEEP) do NOT increment pv_boots — the
+  // AP-fallback / WiFi-join-timeout and the liveness/WiFi-health watchdogs all
+  // use ESP.restart() (reset_reason=SW), so e.g. three transient WiFi outages
+  // (WIFI_FAIL_AP_FALLBACK_THRESH) can't trip the faulty counter. Collision
+  // caught by senior-review before the #26 merge; see chapter-11.
   esp_reset_reason_t rr = esp_reset_reason();
   const bool faulty = (rr == ESP_RST_PANIC) || (rr == ESP_RST_TASK_WDT) ||
                       (rr == ESP_RST_INT_WDT) || (rr == ESP_RST_WDT) ||
                       (rr == ESP_RST_BROWNOUT);
-  if (!faulty) return;
 
+  hf::OtaGateState st;
   Preferences p;
   p.begin("ota", false);
-  uint32_t attempts = p.getUInt("pv_boots", 0) + 1;
-  p.putUInt("pv_boots", attempts);
-  p.end();
+  st.unproven = p.getUChar("unproven", 0) != 0;
+  st.pvBoots  = p.getUInt("pv_boots", 0);
+  st.ncBoots  = p.getUInt("nc_boots", 0);
 
-  logf("[OTA] faulty-boot %u/%u (reset_reason=%d)",
-       (unsigned)attempts, (unsigned)HF_OTA_MAX_PENDING_BOOTS, (int)rr);
+  const hf::OtaGateAction action = hf::otaBootGate(
+      st, faulty, HF_OTA_MAX_PENDING_BOOTS, HF_OTA_MAX_NOCONTACT_BOOTS);
 
-  if (attempts >= HF_OTA_MAX_PENDING_BOOTS) {
-    logf("[OTA] threshold reached — forcing rollback");
-    // Reset the counter so the slot we roll back TO (which will boot
-    // next) starts fresh — otherwise a legitimate future OTA would
-    // see a stale counter and roll back prematurely.
-    Preferences q;
-    q.begin("ota", false);
-    q.putUInt("pv_boots", 0);
-    q.end();
+  if (action == hf::OtaGateAction::Rollback) {
+    logf("[OTA] rollback (pv=%u/%u nc=%u/%u unproven=%d rr=%d) — reverting slot",
+         (unsigned)st.pvBoots, (unsigned)HF_OTA_MAX_PENDING_BOOTS,
+         (unsigned)st.ncBoots, (unsigned)HF_OTA_MAX_NOCONTACT_BOOTS,
+         (int)st.unproven, (int)rr);
+    // Persist a clean, proven state for the slot we revert TO (it was the
+    // previously-good slot) so it can't immediately re-trip a rollback during
+    // a prolonged outage, then force the bootloader-side revert.
+    hf::otaResetForRollback(st);
+    p.putUChar("unproven", st.unproven ? 1 : 0);
+    p.putUInt("pv_boots", st.pvBoots);
+    p.putUInt("nc_boots", st.ncBoots);
+    p.end();
     delay(200);  // flush serial before reboot
-    // App-initiated rollback works regardless of bootloader's
-    // CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE setting. Returns ESP_FAIL
-    // if there is no previous valid slot to roll back to — in that
-    // case we fall through and continue setup as usual (we have no
-    // better option; the slot will keep retrying until an operator
-    // intervenes via USB).
+    // App-initiated rollback works regardless of the bootloader's
+    // CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE setting. Returns ESP_FAIL if there
+    // is no previous valid slot (factory) — then we fall through and continue
+    // setup; the slot keeps retrying until an operator intervenes via USB.
     esp_ota_mark_app_invalid_rollback_and_reboot();
+    return;
   }
+
+  // Persist only when a counter could have changed: a faulty reset bumped
+  // pv_boots, or an unproven slot counted this boot in nc_boots. A clean boot
+  // of a proven slot changes nothing, so skip the NVS write entirely — this
+  // restores the old `if (!faulty) return;` fast-path explicitly rather than
+  // leaning on NVS's identical-write dedup.
+  if (faulty || st.unproven) {
+    p.putUInt("pv_boots", st.pvBoots);
+    p.putUInt("nc_boots", st.ncBoots);
+    logf("[OTA] boot gate pv=%u/%u nc=%u/%u unproven=%d (reset_reason=%d)",
+         (unsigned)st.pvBoots, (unsigned)HF_OTA_MAX_PENDING_BOOTS,
+         (unsigned)st.ncBoots, (unsigned)HF_OTA_MAX_NOCONTACT_BOOTS,
+         (int)st.unproven, (int)rr);
+  }
+  p.end();
+}
+
+// First-good-contact handler (#148 Phase 3). Called on every successful server
+// contact (2xx heartbeat or upload). For a freshly-OTA'd ("unproven") slot the
+// FIRST contact is the proof of health the no-contact rollback path waits for —
+// so it clears `unproven` and zeroes the counters in NVS, which both satisfies
+// the no-contact gate and lets the end-of-setup() block mark the slot valid.
+//
+// CRUCIALLY this does NOT itself call esp_ota_mark_app_valid_cancel_rollback().
+// That IDF call is permanent — once a slot is ESP_OTA_IMG_VALID it can no
+// longer be reverted by esp_ota_mark_app_invalid_rollback_and_reboot() — so it
+// must stay at end-of-setup(), AFTER every stage that can panic (camera init).
+// Calling it here, before camera init, would brick a slot that gets one good
+// boot heartbeat and then panic-loops in initEspCamera (ADR-008's "every stage
+// that can panic has succeeded" mark-valid placement; senior-review P0 on this
+// PR). Clearing `unproven`
+// here is safe: a camera-init panic before end-of-setup means mark-valid never
+// fires, so the faulty-boot counter (pv_boots) still rolls the slot back.
+//
+// A static latch makes this an O(1) no-op once the slot is no longer unproven
+// (or for a proven/factory slot), so it's cheap to call from the hot
+// heartbeat/upload paths.
+static void noteServerContactForOtaGate() {
+  static bool settledThisBoot = false;
+  if (settledThisBoot) return;
+  hf::OtaGateState st;
+  Preferences p;
+  p.begin("ota", false);
+  st.unproven = p.getUChar("unproven", 0) != 0;
+  if (!st.unproven) {  // proven/factory — nothing to clear, latch and leave
+    p.end();
+    settledThisBoot = true;
+    return;
+  }
+  st.pvBoots = p.getUInt("pv_boots", 0);
+  st.ncBoots = p.getUInt("nc_boots", 0);
+  if (hf::otaOnFirstContact(st)) {  // transitions unproven→false, zeroes counters
+    p.putUChar("unproven", 0);
+    p.putUInt("pv_boots", st.pvBoots);
+    p.putUInt("nc_boots", st.ncBoots);
+    logf("[OTA] first server contact — slot proven; mark-valid deferred to end of setup()");
+  }
+  p.end();
+  settledThisBoot = true;
+}
+
+// A successful server contact feeds both loop()-health watchdogs: the liveness
+// no-contact timer (#148 item 2) and the OTA mark-valid gate (#148 item 3).
+static void onServerContact(uint32_t nowMs) {
+  livenessMon.noteContact(nowMs);
+  noteServerContactForOtaGate();
 }
 
 
@@ -439,13 +505,13 @@ void setup() {
   stageStartMs = millis();
   const bool bootHbOk = (sendHeartbeat(&esp_config) == 0);
   hbScheduler.recordResult(millis(), bootHbOk);
-  // #148 Phase 3: a 2xx boot heartbeat already proved live server contact, so
-  // seed the liveness watchdog with it. Without this the watchdog's first
-  // knowledge is the loop-entry anchor, not the contact that actually
-  // happened — harmless today (loop entry re-anchors with a full 2 h window)
-  // but an honest anchor if kNoContactRebootMs is ever shortened.
+  // #148 Phase 3: a 2xx boot heartbeat is the earliest proof of live server
+  // contact — it both seeds the liveness watchdog (item 2) and, on a freshly-
+  // OTA'd slot, validates the slot + cancels rollback (item 3) before camera
+  // init. So a good OTA image that can reach the server is confirmed within
+  // seconds of boot, not deferred to the loop.
   if (bootHbOk) {
-    livenessMon.noteContact(millis());
+    onServerContact(millis());
   }
   logf("[STAGE] sendHeartbeat:boot took=%lums", millis() - stageStartMs);
   /*
@@ -513,30 +579,36 @@ void setup() {
     bootPrefs.end();
   }
 
-  // OTA rollback gate (#26). If this boot is the first boot after an
-  // OTA flash, the new slot is "pending verify" — the bootloader will
-  // revert to the previous slot on the next reset unless we mark this
-  // boot good. Placed at the very end of setup() — after WiFi,
-  // registration, camera init, AND the warm-up loop — so a binary
-  // that hard-faults in any setup stage auto-rolls back without
-  // manual intervention. (An earlier draft of this gate fired before
-  // camera init on the argument that recoverCamera() handles soft
-  // NULL-frame stalls; senior-review caught that recoverCamera does
-  // NOT recover from a driver-level panic or null-deref in
-  // initEspCamera/configure_camera_sensor, so a regression there
-  // would brick the slot permanently if mark-valid had already
-  // fired. The right threshold is "every stage that can panic has
-  // succeeded".) On a non-OTA boot the call is a no-op
-  // (mark_valid_cancel_rollback is idempotent for ESP_OTA_IMG_VALID).
+  // OTA rollback gate (#26, narrowed by #148 Phase 3). Surviving setup() —
+  // WiFi, registration, camera init, AND the warm-up loop — clears the
+  // faulty-boot crash-loop counter for a proven/factory slot and (idempotently)
+  // marks it valid. (This stage placement was earned: an earlier draft fired
+  // before camera init, but senior-review caught that recoverCamera() does NOT
+  // recover from a driver-level panic in initEspCamera/configure_camera_sensor,
+  // so the right threshold is "every stage that can panic has succeeded".)
+  //
+  // For a freshly-OTA'd ("unproven") slot, surviving setup() is NO LONGER
+  // proof of health: a boots-clean-but-can't-reach-the-server image used to
+  // validate itself here and never roll back. otaOnSetupComplete() returns
+  // false for such a slot, so mark-valid is DEFERRED to the first real server
+  // contact (noteServerContactForOtaGate, fed by the boot heartbeat / loop
+  // heartbeat / upload). A slot that never phones home is reverted by the
+  // no-contact path in forceRollbackIfPendingTooLong(). See lib/ota_rollback
+  // and ADR-008's #148 addendum.
   hf::breadcrumbSet("setup:ota_mark_valid");
-  esp_ota_mark_app_valid_cancel_rollback();
-  // Slot confirmed good — clear the pending-verify boot counter so the
-  // next OTA's first boot starts at 0. Paired with the check at the top
-  // of setup() (see `forceRollbackIfPendingTooLong()`).
   {
+    hf::OtaGateState st;
     Preferences p;
     p.begin("ota", false);
-    p.putUInt("pv_boots", 0);
+    st.unproven = p.getUChar("unproven", 0) != 0;
+    st.pvBoots  = p.getUInt("pv_boots", 0);
+    st.ncBoots  = p.getUInt("nc_boots", 0);
+    if (hf::otaOnSetupComplete(st)) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      p.putUInt("pv_boots", st.pvBoots);  // reset to 0 — survived setup
+    } else {
+      logf("[OTA] setup complete but slot unproven — mark-valid deferred to first contact");
+    }
     p.end();
   }
 
@@ -801,10 +873,11 @@ void loop() {
     const int hbRc = sendHeartbeat(&esp_config);
     hbScheduler.recordResult(millis(), hbRc == 0);
     // #148 Phase 3: a 2xx heartbeat is the cheapest proof of live server
-    // contact — feed the liveness watchdog so a healthy hourly cadence keeps
-    // the no-contact timer perpetually fresh.
+    // contact — keeps the liveness no-contact timer fresh (item 2) and
+    // validates a freshly-OTA'd slot if the boot heartbeat hadn't already
+    // (item 3).
     if (hbRc == 0) {
-      livenessMon.noteContact(millis());
+      onServerContact(millis());
     }
   }
 
@@ -818,7 +891,7 @@ void loop() {
     hf::breadcrumbSet("loop:captureAndUpload:first");
     if (captureAndUpload()) {
       firstCaptureDone = true;
-      livenessMon.noteContact(millis());  // #148 Phase 3: 2xx upload == live contact
+      onServerContact(millis());  // #148 Phase 3: 2xx upload == live contact (items 2+3)
     }
   }
 
@@ -841,7 +914,7 @@ void loop() {
         hf::breadcrumbSet("loop:captureAndUpload:noon");
         if (captureAndUpload()) {
           lastCaptureDay = timeinfo.tm_yday;
-          livenessMon.noteContact(millis());  // #148 Phase 3: 2xx upload == live contact
+          onServerContact(millis());  // #148 Phase 3: 2xx upload == live contact (items 2+3)
         }
       }
     }

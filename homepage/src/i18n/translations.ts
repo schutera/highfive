@@ -96,6 +96,10 @@ const translations = {
       nest: 'Nest {index}',
       moduleNotFound: 'Module not found',
       failedToLoad: 'Failed to load module details',
+      latestCapture: 'Latest capture',
+      latestCaptureAlt: 'Latest capture from {name}',
+      latestCaptureOpen: 'Open full-size image',
+      lightboxClose: 'Close',
     },
 
     // ---- Activity vs weather chart ----
@@ -545,6 +549,10 @@ const translations = {
       nest: 'Nest {index}',
       moduleNotFound: 'Modul nicht gefunden',
       failedToLoad: 'Moduldetails konnten nicht geladen werden',
+      latestCapture: 'Neueste Aufnahme',
+      latestCaptureAlt: 'Neueste Aufnahme von {name}',
+      latestCaptureOpen: 'Bild in voller Größe öffnen',
+      lightboxClose: 'Schließen',
     },
 
     // ---- Activity vs weather chart ----

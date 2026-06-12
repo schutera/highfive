@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import type { ModuleDetail } from '@highfive/contracts';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import type { ImageUploadsPage, ModuleDetail } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
 import { LanguageProvider } from '../i18n/LanguageContext';
@@ -22,6 +22,12 @@ import { LanguageProvider } from '../i18n/LanguageContext';
 // Per-test mutable mock — set before each render() call.
 let nextModuleDetail: ModuleDetail | null = null;
 
+// Per-test mutable page for the latest-capture fetch (#154 phase 1).
+// Defaults to an empty page so the pre-existing suites render a panel
+// without a capture card; the latest-capture suite below overrides it.
+// `null` makes the mock reject, for the silent-degradation test.
+let nextImagesPage: ImageUploadsPage | null = { images: [], total: 0 };
+
 // Note: `isAdminMode` is NOT exported from `../services/api` — it's a
 // file-local helper inside `ModulePanel.tsx`. It defaults to false in jsdom
 // (no `?admin=1` URL param), so the admin-mode effect early-returns and
@@ -39,6 +45,14 @@ let nextModuleDetail: ModuleDetail | null = null;
 vi.mock('../services/api', () => ({
   api: {
     getModuleById: vi.fn(() => Promise.resolve(nextModuleDetail)),
+    getImages: vi.fn(() =>
+      nextImagesPage
+        ? Promise.resolve(nextImagesPage)
+        : Promise.reject(new Error('images unavailable')),
+    ),
+    getImageUrl: vi.fn(
+      (filename: string) => `http://localhost:3002/api/images/${encodeURIComponent(filename)}`,
+    ),
     getModuleLogs: vi.fn().mockResolvedValue([]),
     checkSession: vi.fn().mockResolvedValue(false),
     login: vi.fn().mockResolvedValue(true),
@@ -327,5 +341,101 @@ describe('ModulePanel location-pending pill', () => {
     await waitFor(() => {
       expect(screen.getByText('Location pending')).toBeInTheDocument();
     });
+  });
+});
+
+// "Latest capture" card (#154 phase 1). The fixture mirrors the exact
+// wire shape `GET /api/images?module_id=…&limit=1` emits (ImageUploadsPage
+// from contracts): `uploaded_at` is "YYYY-MM-DD HH:MM:SS" in UTC — not
+// ISO-8601 — and the filename is whatever the ESP sent (epoch-ms shape
+// from tools/mock_esp.py). CLAUDE.md "component tests must mount with a
+// realistic fixture" rule applies: this shape IS the contract under test.
+describe('ModulePanel latest capture', () => {
+  const wireFixture: ImageUploadsPage = {
+    images: [
+      {
+        module_id: 'e89fa9f23a08',
+        filename: 'esp_capture_1781234567890.jpg',
+        uploaded_at: '2026-06-11 10:30:00',
+      },
+    ],
+    total: 12,
+  };
+
+  beforeEach(() => {
+    nextModuleDetail = { ...baseModule };
+    nextImagesPage = { images: [], total: 0 };
+  });
+
+  it('renders the card with the image and a UTC-correct timestamp', async () => {
+    nextImagesPage = wireFixture;
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText('Latest capture')).toBeInTheDocument();
+    });
+    const img = screen.getByAltText(/Latest capture from/);
+    // jsdom never loads images — attribute assertions only. The real
+    // "does it render pixels" proof lives in the Playwright spec.
+    expect(img).toHaveAttribute(
+      'src',
+      'http://localhost:3002/api/images/esp_capture_1781234567890.jpg',
+    );
+    // "2026-06-11 10:30:00" is UTC. Build the expectation through the
+    // same UTC-pinned parse the component must use; a component that
+    // parses the bare string as *local* time renders a shifted value
+    // and fails this in any non-UTC test environment.
+    const expected = new Date('2026-06-11T10:30:00Z').toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    expect(screen.getByText(expected)).toBeInTheDocument();
+  });
+
+  it('renders no card when the module has no uploads', async () => {
+    nextImagesPage = { images: [], total: 0 };
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText(baseModule.name)).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Latest capture')).not.toBeInTheDocument();
+  });
+
+  it('degrades silently when the images fetch fails (panel intact, onError NOT called)', async () => {
+    nextImagesPage = null; // mock rejects
+    const onError = vi.fn();
+    render(
+      <LanguageProvider>
+        <ModulePanel
+          module={{ id: baseModule.id, name: baseModule.name, status: baseModule.status }}
+          onClose={() => undefined}
+          onError={onError}
+        />
+      </LanguageProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(baseModule.name)).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Latest capture')).not.toBeInTheDocument();
+    // The image fetch must never route through onError — DashboardPage
+    // reacts to it by closing the panel and surfacing a global error.
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('opens the lightbox on click and closes it on Escape', async () => {
+    nextImagesPage = wireFixture;
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText('Latest capture')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open full-size image' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // Public lightbox must carry no destructive affordance — Delete is
+    // an admin-gallery caption concern (ADR-019 separation).
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

@@ -27,6 +27,12 @@ the upload pipeline (edge → server) and the dashboard read flow.
    serves them.
 5. Frontend renders the map, module list, status, battery and nest
    progress.
+6. Opening a module's detail panel additionally fetches
+   `GET /api/images?module_id=<id>&limit=1` (public read, proxied to
+   `image-service /images`) and renders the newest upload as the
+   "Latest capture" card (#154 phase 1); the bytes come from
+   `GET /api/images/:filename`. A failed image fetch degrades to "no
+   card" — it never tears down the panel.
 
 No caching layer; each browser poll re-fetches. Partial failures
 degrade gracefully (some fields empty) rather than 500ing.

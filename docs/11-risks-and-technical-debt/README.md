@@ -86,6 +86,32 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Seeded "JPEGs" are undecodable random bytes — a pixels-rendered assertion can never pass against default fixtures (#154 phase 1)
+
+**What happened.** The new `module-latest-capture.spec.ts` asserted the
+ModulePanel "Latest capture" `<img>` actually decodes
+(`complete && naturalWidth > 0` — the one thing jsdom structurally cannot
+prove). It timed out on every run: the card rendered, the `src` was
+right, the bytes came back `200` — and `naturalWidth` stayed `0` forever.
+
+**Why it happened.** `tools/mock_esp.py::_make_fake_image` uploads
+pseudo-random bytes wrapped in JPEG SOI/EOI markers. The upload pipeline
+never decodes images, so every server-side layer is happy — but a browser
+cannot decode them, ever. The failure mode was already known implicitly:
+`admin-image-pagination.spec.ts` counts grid cells instead of `<img>`
+elements "because thumbnails may fail to load" — the institutional
+knowledge existed but lived in one spec's comment, not in the fixture
+docs, so the next spec author (this one) re-paid for it.
+
+**How to avoid it next time.** If a spec must prove pixels decode, seed a
+real JPEG for that fixture — `seed_ui_fixtures.py::seed_admin_gallery_images`
+now uploads `dev-tools/mock_fully_filled.jpg` as the gallery module's
+newest capture for exactly this. Never assert image _loading_ against
+default mock-ESP uploads. Rules + the re-seed-pollution gotcha (re-running
+the seed on a reused stack accumulates uploads and breaks exact-count
+specs) are documented where spec authors will look:
+`tests/ui/README.md` → "Seeded image bytes are NOT decodable".
+
 ### Surviving `setup()` is not proof of a healthy OTA image — mark-valid gated on first server contact (#148 Phase 3)
 
 **What happened.** The #26 OTA rollback gate validated a freshly-flashed slot

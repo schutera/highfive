@@ -22,7 +22,7 @@ vi.mock('../services/api', () => ({
   },
 }));
 
-import LatestCaptures from '../components/LatestCaptures';
+import LatestCaptures, { mergeUniqueByFilename } from '../components/LatestCaptures';
 
 const img = (filename: string, uploaded_at: string) => ({
   module_id: 'e89fa9f23a08',
@@ -40,6 +40,26 @@ function renderCaptures() {
 
 beforeEach(() => {
   nextPage = { images: [], total: 0 };
+});
+
+// Offset paging over a newest-first feed re-returns a row when an upload
+// lands at the head between page fetches. mergeUniqueByFilename is what keeps
+// the carousel from rendering (and React-key-colliding on) that duplicate.
+describe('mergeUniqueByFilename', () => {
+  it('drops next-page rows whose filename is already present, preserving order', () => {
+    const prev = [img('c.jpg', '2026-06-11 12:00:00'), img('b.jpg', '2026-06-11 11:00:00')];
+    // Head-growth drift: the next page re-includes b.jpg (now shifted) plus
+    // the genuinely-older a.jpg.
+    const next = [img('b.jpg', '2026-06-11 11:00:00'), img('a.jpg', '2026-06-11 10:00:00')];
+    const merged = mergeUniqueByFilename(prev, next);
+    expect(merged.map((i) => i.filename)).toEqual(['c.jpg', 'b.jpg', 'a.jpg']);
+  });
+
+  it('is a plain concat when there is no overlap', () => {
+    const prev = [img('b.jpg', '2026-06-11 11:00:00')];
+    const next = [img('a.jpg', '2026-06-11 10:00:00')];
+    expect(mergeUniqueByFilename(prev, next).map((i) => i.filename)).toEqual(['b.jpg', 'a.jpg']);
+  });
 });
 
 describe('LatestCaptures', () => {

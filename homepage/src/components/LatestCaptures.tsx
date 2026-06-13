@@ -17,6 +17,18 @@ interface LatestCapturesProps {
 }
 
 /**
+ * Append `next` onto `prev`, dropping any image whose filename is already
+ * present. Offset paging over a newest-first feed (`uploaded_at DESC,
+ * id DESC`) re-returns a row when an upload lands at the head between page
+ * fetches; deduping by filename keeps the carousel from rendering — and
+ * React-key-colliding on — that duplicate. Exported for unit testing.
+ */
+export function mergeUniqueByFilename(prev: ImageUpload[], next: ImageUpload[]): ImageUpload[] {
+  const seen = new Set(prev.map((i) => i.filename));
+  return [...prev, ...next.filter((i) => !seen.has(i.filename))];
+}
+
+/**
  * Horizontal gallery of a module's uploads, newest first — two 4:3 cards
  * visible at once, chevron arrows to scroll through the rest, click for a
  * full-size lightbox. Public, read-only (#154). Progressive enhancement:
@@ -56,15 +68,17 @@ export default function LatestCaptures({ moduleId, moduleName, locale }: LatestC
     };
   }, [moduleId]);
 
-  // Append the next page (older images). Guarded so concurrent scroll +
-  // arrow taps don't double-fetch the same window.
+  // Append the next page (older images). A cursor (`before_id`) would make
+  // offset drift structurally impossible; until then mergeUniqueByFilename
+  // mitigates the head-growth duplicate. Guarded by a ref so overlapping
+  // triggers don't double-fetch.
   const loadingMore = useRef(false);
   const loadMore = async () => {
     if (loadingMore.current || images.length >= total) return;
     loadingMore.current = true;
     try {
       const page = await api.getImages(moduleId, { limit: PAGE, offset: images.length });
-      setImages((prev) => [...prev, ...page.images]);
+      setImages((prev) => mergeUniqueByFilename(prev, page.images));
       setTotal(page.total);
     } catch (err) {
       console.error('Error loading more captures:', err);
@@ -76,11 +90,13 @@ export default function LatestCaptures({ moduleId, moduleName, locale }: LatestC
   const scrollByPage = (dir: 1 | -1) => {
     const el = scrollRef.current;
     if (!el) return;
-    if (dir === 1) loadMore(); // prefetch older images as we move right
+    // Smooth-scroll fires `onScroll`, which handles the near-edge prefetch —
+    // the single fetch trigger, so the arrow needs no separate loadMore.
     el.scrollBy({ left: dir * el.clientWidth * 0.9, behavior: 'smooth' });
   };
 
-  // Lazy-fetch the next page as the strip nears its right edge.
+  // Lazy-fetch the next page as the strip nears its right edge (covers both
+  // arrow scrolls and manual swipes).
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -102,7 +118,8 @@ export default function LatestCaptures({ moduleId, moduleName, locale }: LatestC
         <span className="font-semibold text-hf-sm text-hf-fg">
           {t('modulePanel.latestCaptures')}
         </span>
-        {total > 0 && <span className="text-hf-xs text-hf-fg-mute tabular-nums">{total}</span>}
+        {/* total >= images.length >= 1 here (past the empty early-return) */}
+        <span className="text-hf-xs text-hf-fg-mute tabular-nums">{total}</span>
       </div>
 
       <div className="relative">

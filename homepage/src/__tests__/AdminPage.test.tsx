@@ -105,6 +105,39 @@ describe('AdminPage login gate', () => {
   });
 });
 
+describe('AdminPage image gallery timestamp (uploaded_at UTC parse)', () => {
+  it('renders the gallery card timestamp UTC-correct, not local-shifted', async () => {
+    // dc9422c routed AdminPage's `uploaded_at` sites through the shared
+    // formatUploadedAt helper, fixing a latent bug where the old
+    // `formatDate` parsed the space-separated UTC string as *local* time
+    // (and was Invalid Date on Safari). Pin it: the rendered glyphs must
+    // match a UTC-anchored parse. Built from the same Date + options the
+    // helper uses, so the assertion is timezone-independent — a regression
+    // back to a local parse diverges from this in any non-UTC environment.
+    mockApi.checkSession.mockResolvedValue(true);
+    mockApi.getImages.mockResolvedValue({
+      images: [
+        {
+          module_id: 'aabbccddeeff',
+          filename: 'esp_capture_20260611_103000.jpg',
+          uploaded_at: '2026-06-11 10:30:00',
+        },
+      ],
+      total: 1,
+    });
+    renderAdmin();
+
+    const expected = new Date('2026-06-11T10:30:00Z').toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+  });
+});
+
 describe('AdminPage coordinate display (issue #145, ADR-020)', () => {
   it('renders module coordinates at 2 dp, never finer', async () => {
     // NOTE: the privacy boundary is server-side (the wire is already

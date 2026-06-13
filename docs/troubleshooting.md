@@ -139,7 +139,46 @@ Status `204` confirms private-IP short-circuit; status `503` confirms the upstre
 
 ### Do I need an FTDI adapter to flash?
 
-Only if you have a **bare ESP32-CAM board** (no USB port). The **ESP32-CAM-MB** variant has a built-in CH340 USB-serial chip and a micro-USB port — plug it directly into your PC. You can identify it by the "ESP32-CAM-MB" label on the board and the micro-USB connector.
+Only if you have a **bare ESP32-CAM board** (no USB port). The **ESP32-CAM-MB** variant has a built-in USB-serial chip and a micro-USB port — plug it directly into your PC. You can identify it by the "ESP32-CAM-MB" label on the board and the micro-USB connector. The built-in chip is usually a CH340, but some units ship a CP210x or an FTDI FT232R — which one matters for the **Windows driver**, see the next two entries and the [chip→driver table in esp-flashing.md](07-deployment-view/esp-flashing.md).
+
+### New board enumerates but no COM port appears (FTDI FT232R)
+
+**Symptom.** You plug in a new board and no `COMx` shows up. Device Manager (or `Get-PnpDevice -PresentOnly | ? { $_.InstanceId -match 'VID_0403' }`) lists an **`FT232R USB UART`** with a warning triangle / `Error` status, and `esptool ... flash-id` fails with "could not open port / port doesn't exist".
+
+**Root cause.** The board's USB-serial chip is an **FTDI FT232R** (`VID_0403&PID_6001`), and the FTDI VCP driver is **not shipped with Windows** (unlike CH340/CP210x, which are inbox or auto-pulled). With no driver bound, Windows assigns no COM port. The previous board "just worked" because it was a CH340, whose driver was already installed.
+
+**Fix (needs admin).** Get the FTDI driver bound so the COM-port child device is created:
+
+```powershell
+# From an ADMIN PowerShell. Re-scan + force a driver (re)bind for the device.
+pnputil /scan-devices
+$inst = (Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'VID_0403&PID_6001' }).InstanceId
+Disable-PnpDevice -InstanceId $inst -Confirm:$false; Start-Sleep 2; Enable-PnpDevice -InstanceId $inst -Confirm:$false
+```
+
+Then confirm a COM port now exists (any shell):
+
+```powershell
+Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'VID_0403' } | Select-Object Status, Class, FriendlyName
+# Expect a second row: Class=Ports, FriendlyName='USB Serial Port (COMxx)'
+```
+
+If `pnputil`/disable-enable doesn't pull it (offline, or WU driver search disabled), open **Device Manager → the FT232R device → Update driver → Search automatically** (needs internet; Windows Update hosts the FTDI driver), or install the FTDI VCP driver from <https://ftdichip.com/drivers/vcp-drivers/>. There is no `winget` package for it.
+
+### `flash read err` / endless boot loop / esptool `MD5 ... does not match` (flash at 1.8 V — SD card on GPIO12)
+
+**Symptom.** A board boot-loops with ROM messages like `flash read err, 1000` / `ets_main.c 371`, or repeated `***ERROR*** A stack overflow in task` / `TG1WDT_SYS_RESET` **before any firmware banner prints**. `esptool erase-flash` claims success in "0.0 seconds" (a real erase takes ~14 s for 4 MB), and `pio run -t upload` fails verification with **`A fatal error occurred: MD5 of file does not match data in flash!`**.
+
+**Root cause.** The ESP32 reads **GPIO12 at reset** to set the flash regulator (low/floating → 3.3 V, high → 1.8 V). The micro-SD slot shares GPIO12, so **an inserted SD card pulls it high**, running the 3.3 V flash chip at 1.8 V. Flash reads/writes are then unreliable — hence the ROM read errors, fake erases, and MD5 mismatches.
+
+**Fix.** Eject the micro-SD card (and disconnect anything wired to GPIO12), then confirm the strap with a read-only probe:
+
+```powershell
+py -3.12 -m esptool --port COM13 --baud 115200 flash-id
+# Must report: Flash voltage set by a strapping pin: 3.3V   (not 1.8V)
+```
+
+Once it reads **3.3 V**, erase + flash succeed normally (the erase now takes real seconds, and the upload's `Hash of data verified.`). Hardware background: [hardware-notes.md → "Flash voltage strap"](08-crosscutting-concepts/hardware-notes.md).
 
 ### Flash mode — upload hangs at "Connecting…"
 

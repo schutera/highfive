@@ -112,6 +112,34 @@ the seed on a reused stack accumulates uploads and breaks exact-count
 specs) are documented where spec authors will look:
 `tests/ui/README.md` → "Seeded image bytes are NOT decodable".
 
+### A documented "this is unaffected" claim cost a debug session — Docker Desktop's Windows forwarder stalls ESP **uploads** too (#154 bench session)
+
+**What happened.** A freshly flashed module booted healthy, joined Wi-Fi,
+and registered, but **never uploaded an image** (`imageCount` stuck at 0).
+Serial showed the capture succeeding (real ~40 KB JPEG) then
+`[HTTP] body write failed at 28937/40104 bytes`. The
+"Bench OTA download stalls on Windows" troubleshooting entry explicitly
+said image **uploads** were _unaffected_ by the Docker Desktop Windows
+port-forwarder — so that entry was initially dismissed as unrelated, and
+time was spent chasing the camera/firmware instead.
+
+**Why it happened.** The forwarder stalls **any** bulk TCP stream to/from a
+slow remote Wi-Fi client after ~one receive-window — in _both_ directions.
+The original entry's "uploads unaffected" line was an untested assumption
+(the OTA bench only exercised the download direction). Reproduction from the
+host can't catch it: host→own-LAN-IP short-circuits via loopback and never
+hits the forwarder's slow-remote-client path, so a host `curl` of a 164 KB
+image succeeds while the ESP's 40 KB upload stalls.
+
+**How to avoid it next time.** (1) Don't write "X is unaffected" in a
+troubleshooting entry unless X was actually tested — an untested negative
+claim actively misleads. (2) On Windows, the fix for **all** ESP↔stack bulk
+transfers is **WSL2 mirrored networking** (`networkingMode=mirrored` in
+`~/.wslconfig`), not per-path native proxies — and after switching modes you
+**must** `docker compose down && up` (resumed containers keep stale port
+proxies that break `localhost:8000`/`:8002` entirely). Full symptom + fix:
+[troubleshooting.md → "Bulk ESP↔stack transfers stall on Windows + Docker Desktop"](../troubleshooting.md).
+
 ### Surviving `setup()` is not proof of a healthy OTA image — mark-valid gated on first server contact (#148 Phase 3)
 
 **What happened.** The #26 OTA rollback gate validated a freshly-flashed slot

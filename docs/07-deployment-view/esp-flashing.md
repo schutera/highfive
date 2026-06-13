@@ -38,9 +38,60 @@ Skip this section if the module already runs HiveHive firmware (it will open the
 
 ### Hardware variants
 
-**ESP32-CAM-MB (motherboard)** — identified by a micro-USB port and "ESP32-CAM-MB" printed on the board. Has a built-in CH340 USB-serial chip. **No FTDI adapter needed.**
+Two dimensions vary between boards: the **form factor** (how you connect
+it) and the **USB-serial chip** (which Windows driver it needs). Identify
+both before flashing — a "completely new board" that won't enumerate is
+almost always one of the chip rows below, not a firmware problem.
 
-**Bare ESP32-CAM** — no USB port. Requires a separate USB-to-TTL adapter (FTDI FT232 or CH340, 3.3 V logic) wired to GND, 5 V, U0T→RX, U0R→TX, plus IO0→GND for flash mode.
+**Form factor**
+
+| Board                          | How to connect                                                                                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ESP32-CAM-MB** (motherboard) | Micro-USB port, plug straight into the PC. Identified by the "ESP32-CAM-MB" label + micro-USB connector. No external adapter.                           |
+| **Bare ESP32-CAM**             | No USB port. Needs a separate USB-to-TTL adapter (FTDI FT232 or CH340, **3.3 V logic**) wired to GND, 5 V, U0T→RX, U0R→TX, plus IO0→GND for flash mode. |
+
+**USB-serial chip → Windows driver** (check Device Manager → Ports, or
+`Get-PnpDevice` — the chip name shows in the device description)
+
+| Chip on the board / adapter        | Windows driver                                       | If it doesn't enumerate                                                                                                                                                                                       |
+| ---------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CH340 / CH341**                  | Usually already installed (most MB boards ship this) | Install the WCH CH340 VCP driver.                                                                                                                                                                             |
+| **CP2102 / CP210x** (Silicon Labs) | Inbox on Win11; else Silicon Labs CP210x VCP         | Windows Update driver search.                                                                                                                                                                                 |
+| **FTDI FT232R** (and clones)       | **Not inbox** — FTDI VCP driver, from Windows Update | Device shows as `FT232R USB UART` with a **warning/Error** and **no COM port**. See the fix in [troubleshooting.md → "New board enumerates but no COM port appears"](../troubleshooting.md). Needs **admin**. |
+
+> Different units of the _same_ board model can carry different chips —
+> don't assume "MB board = CH340". The FT232R case is the one that bites
+> on a fresh Windows machine, because its driver is the only one not
+> shipped with Windows.
+
+### Verify flash voltage before flashing (GPIO12 / SD-card trap)
+
+The ESP32 reads **GPIO12 (MTDI) at reset** to set the internal flash
+regulator: **low/floating → 3.3 V** (correct for the AI-Thinker board's
+flash chip), **high → 1.8 V**. The board's **micro-SD slot shares
+GPIO12** (HS2_DATA2), so **an inserted SD card can pull GPIO12 high at
+reset**, browning out the flash at 1.8 V. Symptoms: ROM `flash read err`,
+endless boot loops before any firmware banner, `esptool` erases that
+claim success in "0.0 seconds", and **`MD5 of file does not match data in
+flash`** on upload.
+
+Check the strap with a read-only `esptool` probe before flashing:
+
+```powershell
+$PORT = "COM13"   # set to your board's port (Device Manager -> Ports)
+# Use whichever Python has esptool — find it with: py -3.12 -m esptool version
+py -3.12 -m esptool --port $PORT --baud 115200 flash-id
+```
+
+> esptool v4+ accepts both `flash-id` (hyphen) and the legacy `flash_id`
+> (underscore); other docs here use the underscore form via `esptool.py
+<cmd>` — they're equivalent, not typos.
+
+The output line **`Flash voltage set by a strapping pin: 3.3V`** is what
+you want. If it says **`1.8V`**, eject any micro-SD card (and disconnect
+anything wired to GPIO12) and re-probe — it must read 3.3 V before you
+erase or flash. Full symptom/fix:
+[troubleshooting.md → "flash read err / boot loop / MD5 mismatch"](../troubleshooting.md).
 
 ### Install PlatformIO
 
@@ -192,7 +243,7 @@ cd ESP32-CAM
 pio run -e esp32cam --target upload --upload-port <port>
 ```
 
-Find the port: **Device Manager → Ports → USB-SERIAL CH340 (COMx)** on Windows; `/dev/ttyUSB0` or `/dev/cu.usbserial-*` on Linux/Mac.
+Find the port: **Device Manager → Ports** on Windows — the entry names the chip (`USB-SERIAL CH340`, `Silicon Labs CP210x`, or `USB Serial Port` for FTDI), with its `COMx` in parentheses; `/dev/ttyUSB0` or `/dev/cu.usbserial-*` on Linux/Mac. If no `COMx` appears at all, the USB-serial driver isn't bound — see the "Hardware variants" driver table above.
 
 ### Boot normally after flashing
 

@@ -7,6 +7,7 @@ import AdminKeyForm from './AdminKeyForm';
 import ImageLightbox from './ImageLightbox';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
+import { formatUploadedAt } from '../lib/formatUploadedAt';
 // TODO(perf/data): Re-enable once these panels are backed by real data.
 // Both were disabled because the series are not real telemetry — the ESP
 // has no battery-voltage sensing, so `carpenter`+ firmware OMITS battery from
@@ -643,23 +644,6 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       )}
     </div>
   );
-}
-
-// `uploaded_at` arrives as "YYYY-MM-DD HH:MM:SS" in UTC — NOT ISO-8601
-// (see the ImageUpload contract note "parse defensively"). Appending the
-// explicit Z keeps the rendered time UTC-correct in every viewer timezone;
-// a bare `new Date(str)` would parse as *local* time (and is Invalid Date
-// on Safari). Same approach as ActivityWeatherChart's bucket parsing.
-function formatUploadedAt(uploadedAt: string, locale: string): string {
-  const date = new Date(uploadedAt.replace(' ', 'T') + 'Z');
-  if (Number.isNaN(date.getTime())) return uploadedAt;
-  return date.toLocaleString(locale, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 // Renders one telemetry sidecar entry. The wire shape is the envelope

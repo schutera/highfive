@@ -7,6 +7,7 @@ import RenameModuleModal from '../components/RenameModuleModal';
 import ImageLightbox from '../components/ImageLightbox';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
+import { formatUploadedAt } from '../lib/formatUploadedAt';
 
 // Admin image gallery loads newest-first in pages of this size; the rest
 // come in via the "Load more" button. Keeps the initial render fast on a
@@ -214,6 +215,10 @@ export default function AdminPage() {
     }
   };
 
+  // For genuinely ISO fields (lastApiCall) only. `uploaded_at` is a
+  // space-separated UTC string that a bare `new Date()` parses as LOCAL
+  // time (and Safari rejects) — those sites use the shared
+  // formatUploadedAt helper instead.
   const formatDate = (dateStr: string) => {
     try {
       return new Date(dateStr).toLocaleString();
@@ -578,7 +583,9 @@ export default function AdminPage() {
                   <p className="text-xs font-medium text-amber-700 truncate">
                     {getModuleLabel(img.module_id)}
                   </p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{formatDate(img.uploaded_at)}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {formatUploadedAt(img.uploaded_at)}
+                  </p>
                 </div>
               </button>
             ))}
@@ -616,7 +623,7 @@ export default function AdminPage() {
                 <span className="text-white/80">{lightboxImage.module_id}</span>
               </div>
               <div className="flex items-center gap-4">
-                <span className="text-white/60">{formatDate(lightboxImage.uploaded_at)}</span>
+                <span className="text-white/60">{formatUploadedAt(lightboxImage.uploaded_at)}</span>
                 <button
                   onClick={() => handleDelete(lightboxImage)}
                   className="px-3 py-1 bg-red-500/80 hover:bg-red-500 text-white text-xs font-medium rounded transition-colors"

@@ -109,9 +109,11 @@ Operational refs (outside arc42 chapters):
 
 ## Updating documentation (mandatory)
 
-Every PR that changes behaviour, adds a feature, or fixes a non-obvious bug must leave the docs better than found. After completing your change, run through this lookup and update the named target(s):
+Every PR that changes behaviour, adds a feature, or fixes a non-obvious bug must leave the docs better than found. **And every working session that teaches you a lesson — even one that produces no PR and no repo code at all (a debugging dead-end, a hardware / driver / Wi-Fi / firewall quirk, an environment or ops gotcha, a wrong assumption you had to correct mid-task) — owes that lesson to the docs before the task is done.** After completing your work, run through this lookup and update the named target(s):
 
 > **The arc42 docs are the only durable home for a lesson or gotcha — not a commit message, a scratch file, or an assistant's private/agent memory.** If you learn something the next contributor (human or AI) would want — a setup gotcha, a hardware / Wi-Fi / firewall quirk, an incident post-mortem — the change is **not done** until it lands in the doc named in the table below (most often [`docs/troubleshooting.md`](docs/troubleshooting.md), [`docs/08-crosscutting-concepts/hardware-notes.md`](docs/08-crosscutting-concepts/hardware-notes.md), or [chapter 11](docs/11-risks-and-technical-debt/README.md)). Recording it **only** in assistant/agent memory does not count and is never a substitute: that store is private, invisible to the team, and drifts out of sync. Check the docs first, too — if the gotcha is already documented, link it; don't duplicate it.
+>
+> **This holds when you wrote zero lines of repo code.** If the only artifact of an hour's work is something you now know and the next person doesn't — which driver an FTDI board needs, why a Docker upload stalled, that a "this is unaffected" claim was actually false — then writing that down *is* the deliverable, not a nicety on top of it. **Do not wait to be asked.** Capturing the lesson is part of finishing the task; a session that ends with the lesson living only in the chat transcript is an unfinished session.
 
 | Change type                                                  | Update target                                                                                                                                                                                                                 |
 | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -171,6 +173,8 @@ How to run it:
 - **Run `make check-citations` first** and inspect the report. The script flags any `path:line` citation in `docs/` or `CLAUDE.md` that points at a missing file, past-EOF line, or blank line. Humans inspect the OK rows for "drifted but still in valid territory" cases (e.g. citation now lands on a closing brace). Also fires automatically on `git push` via `.husky/pre-push`.
 - Address every P0 before pushing for review. P1s should be fixed or have an explicit "out of scope, tracked in issue #N" justification. P2s are nits and may be deferred.
 - Treat its findings as input, not as a verdict. If it claims something is wrong, verify against the code yourself — but do not dismiss without checking.
+
+**Lessons-captured check (same gate, every time).** Before you call the task done, ask: *did this session teach a lesson the next contributor would want?* If yes — a gotcha, a corrected assumption, a hardware/driver/env quirk, an incident — it MUST already be in the arc42 doc named in the "Updating documentation" table above, **even if the session produced no code change**. This is not optional and not a follow-up: an uncaptured lesson means the task is not finished. (This session's own history is the cautionary tale — the FTDI-driver, flash-voltage, and Docker-upload-stall lessons each needed a human reminder to land; that reminder is exactly the failure this gate exists to prevent.)
 
 ## Shell environment
 

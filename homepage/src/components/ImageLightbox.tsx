@@ -34,7 +34,10 @@ export default function ImageLightbox({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      // z-[2000] sits above the Leaflet map (panes/controls reach ~1000)
+      // and the dashboard's own panels (z-[1000]); at z-50 the map tiles
+      // painted over the open lightbox — the bug this value fixes.
+      className="fixed inset-0 z-[2000] bg-black/80 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-label={alt}

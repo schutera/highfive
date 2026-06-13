@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
-import { api, type TelemetryEntry, type ImageUpload } from '../services/api';
+import { api, type TelemetryEntry } from '../services/api';
 import type { HeartbeatSnapshot, Module, ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
-import ImageLightbox from './ImageLightbox';
+import LatestCaptures from './LatestCaptures';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
-import { formatUploadedAt } from '../lib/formatUploadedAt';
 // TODO(perf/data): Re-enable once these panels are backed by real data.
 // Both were disabled because the series are not real telemetry — the ESP
 // has no battery-voltage sensing, so `carpenter`+ firmware OMITS battery from
@@ -60,13 +59,6 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   const [hasKey, setHasKey] = useState<boolean>(false);
   const adminMode = isAdminMode();
 
-  // Newest upload for the "Latest capture" card (#154 phase 1). Progressive
-  // enhancement: a fetch failure renders nothing — it must never route
-  // through onError, which would close the whole panel.
-  const [latestImage, setLatestImage] = useState<ImageUpload | null>(null);
-  const [latestImageLoading, setLatestImageLoading] = useState(true);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-
   useEffect(() => {
     loadModuleDetail();
     setLogs(null);
@@ -89,27 +81,6 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       cancelled = true;
     };
   }, [adminMode]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLatestImage(null);
-    setLightboxOpen(false);
-    setLatestImageLoading(true);
-    api
-      .getImages(module.id, { limit: 1, offset: 0 })
-      .then((page) => {
-        if (!cancelled) setLatestImage(page.images[0] ?? null);
-      })
-      .catch((err) => {
-        console.error('Error loading latest capture:', err);
-      })
-      .finally(() => {
-        if (!cancelled) setLatestImageLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [module.id]);
 
   const loadModuleDetail = async () => {
     try {
@@ -515,36 +486,15 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           </div>
         )}
 
-        {/* Latest capture (#154 phase 1) — newest upload, click for full
-            size. Renders nothing for modules without uploads (the header's
-            image-count badge already says "0 images") and degrades silently
-            on fetch errors. */}
-        {latestImageLoading && <div className="hf-skeleton h-32 rounded-hf-lg mb-4 md:shrink-0" />}
-        {!latestImageLoading && latestImage && (
-          <div className="mb-4 hf-card overflow-hidden md:shrink-0">
-            <div className="px-4 py-3">
-              <span className="font-semibold text-hf-sm text-hf-fg">
-                {t('modulePanel.latestCapture')}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setLightboxOpen(true)}
-              aria-label={t('modulePanel.latestCaptureOpen')}
-              className="block w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-hf-honey-500"
-            >
-              <img
-                src={api.getImageUrl(latestImage.filename)}
-                alt={t('modulePanel.latestCaptureAlt', { name: displayLabel(moduleDetail) })}
-                loading="lazy"
-                className="w-full max-h-48 object-cover"
-              />
-            </button>
-            <div className="px-4 py-2 text-hf-xs text-hf-fg-mute">
-              {formatUploadedAt(latestImage.uploaded_at, locale)}
-            </div>
-          </div>
-        )}
+        {/* Latest captures (#154) — newest-first gallery, two 4:3 cards
+            visible, arrows to scroll older, click for a full-size lightbox.
+            Self-contained: renders nothing for modules without uploads and
+            degrades silently on fetch errors (never via onError). */}
+        <LatestCaptures
+          moduleId={moduleDetail.id}
+          moduleName={displayLabel(moduleDetail)}
+          locale={locale}
+        />
 
         {/* Species cards. The auto-fit grid flows to 2 columns once the panel is
             wide enough (xl aside ≈ 560px). On desktop the grid grows to fill the
@@ -625,23 +575,6 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
         <ActivityWeatherChart moduleId={moduleDetail.id} location={moduleDetail.location} />
         <BatteryHistoryChart moduleId={moduleDetail.id} /> */}
       </div>
-
-      {lightboxOpen && latestImage && (
-        <ImageLightbox
-          src={api.getImageUrl(latestImage.filename)}
-          alt={t('modulePanel.latestCaptureAlt', { name: displayLabel(moduleDetail) })}
-          closeLabel={t('modulePanel.lightboxClose')}
-          onClose={() => setLightboxOpen(false)}
-          caption={
-            <>
-              <span className="font-medium">{t('modulePanel.latestCapture')}</span>
-              <span className="text-white/60">
-                {formatUploadedAt(latestImage.uploaded_at, locale)}
-              </span>
-            </>
-          }
-        />
-      )}
     </div>
   );
 }

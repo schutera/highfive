@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import type { ModuleDetail } from '@highfive/contracts';
+import type { ImageUploadsPage, ModuleDetail } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
 import { LanguageProvider } from '../i18n/LanguageContext';
@@ -22,6 +22,12 @@ import { LanguageProvider } from '../i18n/LanguageContext';
 // Per-test mutable mock — set before each render() call.
 let nextModuleDetail: ModuleDetail | null = null;
 
+// Per-test mutable page for the latest-capture fetch (#154 phase 1).
+// Defaults to an empty page so the pre-existing suites render a panel
+// without a capture card; the latest-capture suite below overrides it.
+// `null` makes the mock reject, for the silent-degradation test.
+let nextImagesPage: ImageUploadsPage | null = { images: [], total: 0 };
+
 // Note: `isAdminMode` is NOT exported from `../services/api` — it's a
 // file-local helper inside `ModulePanel.tsx`. It defaults to false in jsdom
 // (no `?admin=1` URL param), so the admin-mode effect early-returns and
@@ -39,6 +45,14 @@ let nextModuleDetail: ModuleDetail | null = null;
 vi.mock('../services/api', () => ({
   api: {
     getModuleById: vi.fn(() => Promise.resolve(nextModuleDetail)),
+    getImages: vi.fn(() =>
+      nextImagesPage
+        ? Promise.resolve(nextImagesPage)
+        : Promise.reject(new Error('images unavailable')),
+    ),
+    getImageUrl: vi.fn(
+      (filename: string) => `http://localhost:3002/api/images/${encodeURIComponent(filename)}`,
+    ),
     getModuleLogs: vi.fn().mockResolvedValue([]),
     checkSession: vi.fn().mockResolvedValue(false),
     login: vi.fn().mockResolvedValue(true),
@@ -329,3 +343,8 @@ describe('ModulePanel location-pending pill', () => {
     });
   });
 });
+
+// The latest-captures gallery moved to its own component
+// (LatestCaptures.tsx) and is covered by LatestCaptures.test.tsx. Here we
+// only keep the api mock wired (getImages defaults to an empty page) so the
+// child renders nothing and the panel-level tests above stay isolated.

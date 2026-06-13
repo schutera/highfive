@@ -85,7 +85,7 @@ py -3.12 -m esptool --port $PORT --baud 115200 flash-id
 
 > esptool v4+ accepts both `flash-id` (hyphen) and the legacy `flash_id`
 > (underscore); other docs here use the underscore form via `esptool.py
-> <cmd>` — they're equivalent, not typos.
+<cmd>` — they're equivalent, not typos.
 
 The output line **`Flash voltage set by a strapping pin: 3.3V`** is what
 you want. If it says **`1.8V`**, eject any micro-SD card (and disconnect

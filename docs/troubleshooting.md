@@ -593,13 +593,13 @@ issue-#42 breadcrumb) before OTA-ing the fleet. Do not roll back to `mining`
 
 In both cases small request/response flows (manifest fetch, `/new_module`
 registration, `/heartbeat`) work, and the same transfer from the **host**
-(`curl` to `localhost` *or* to the host's own LAN IP) is instant — which is
+(`curl` to `localhost` _or_ to the host's own LAN IP) is instant — which is
 why the stack looks healthy.
 
 > **Correction (#154 bench session):** an earlier version of this entry
 > claimed "client→host bulk (uploads) are unaffected." That is **wrong** —
 > a ~40 KB image upload from a real Wi-Fi-connected ESP stalls at ~one
-> window exactly like the OTA download. Only *small* POSTs survive; anything
+> window exactly like the OTA download. Only _small_ POSTs survive; anything
 > over ~one receive-window stalls in **either** direction. The host can't
 > reproduce it because host→own-LAN-IP short-circuits via loopback and never
 > exercises the forwarder's slow-remote-client path.

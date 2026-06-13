@@ -4,8 +4,10 @@ import { api } from '../services/api';
 import type { ImageUpload } from '../services/api';
 import type { Module } from '@highfive/contracts';
 import RenameModuleModal from '../components/RenameModuleModal';
+import ImageLightbox from '../components/ImageLightbox';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
+import { formatUploadedAt } from '../lib/formatUploadedAt';
 
 // Admin image gallery loads newest-first in pages of this size; the rest
 // come in via the "Load more" button. Keeps the initial render fast on a
@@ -95,15 +97,6 @@ export default function AdminPage() {
   useEffect(() => {
     if (authed) loadModules();
   }, [authed]);
-
-  // Close lightbox on Escape
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setLightboxImage(null);
-    };
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, []);
 
   useEffect(() => {
     if (authed) loadImages();
@@ -222,6 +215,10 @@ export default function AdminPage() {
     }
   };
 
+  // For genuinely ISO fields (lastApiCall) only. `uploaded_at` is a
+  // space-separated UTC string that a bare `new Date()` parses as LOCAL
+  // time (and Safari rejects) — those sites use the shared
+  // formatUploadedAt helper instead.
   const formatDate = (dateStr: string) => {
     try {
       return new Date(dateStr).toLocaleString();
@@ -586,7 +583,9 @@ export default function AdminPage() {
                   <p className="text-xs font-medium text-amber-700 truncate">
                     {getModuleLabel(img.module_id)}
                   </p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{formatDate(img.uploaded_at)}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {formatUploadedAt(img.uploaded_at)}
+                  </p>
                 </div>
               </button>
             ))}
@@ -608,42 +607,23 @@ export default function AdminPage() {
         )}
       </main>
 
-      {/* Lightbox */}
+      {/* Lightbox — shared component; the admin-only Delete action rides
+          in via the caption slot, so the component itself stays free of
+          destructive affordances (the public module panel reuses it). */}
       {lightboxImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-          onClick={() => setLightboxImage(null)}
-        >
-          <div
-            className="relative max-w-5xl max-h-[90vh] w-full flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Close button */}
-            <button
-              onClick={() => setLightboxImage(null)}
-              className="absolute -top-10 right-0 text-white/80 hover:text-white text-sm font-medium"
-            >
-              Close (Esc)
-            </button>
-
-            {/* Image */}
-            <div className="flex-1 flex items-center justify-center min-h-0">
-              <img
-                src={api.getImageUrl(lightboxImage.filename)}
-                alt={lightboxImage.filename}
-                className="max-w-full max-h-[80vh] object-contain rounded-lg"
-              />
-            </div>
-
-            {/* Info bar */}
-            <div className="mt-4 bg-white/10 backdrop-blur rounded-lg p-3 flex items-center justify-between text-sm text-white">
+        <ImageLightbox
+          src={api.getImageUrl(lightboxImage.filename)}
+          alt={lightboxImage.filename}
+          onClose={() => setLightboxImage(null)}
+          caption={
+            <>
               <div>
                 <span className="font-medium">{getModuleLabel(lightboxImage.module_id)}</span>
                 <span className="text-white/60 mx-2">|</span>
                 <span className="text-white/80">{lightboxImage.module_id}</span>
               </div>
               <div className="flex items-center gap-4">
-                <span className="text-white/60">{formatDate(lightboxImage.uploaded_at)}</span>
+                <span className="text-white/60">{formatUploadedAt(lightboxImage.uploaded_at)}</span>
                 <button
                   onClick={() => handleDelete(lightboxImage)}
                   className="px-3 py-1 bg-red-500/80 hover:bg-red-500 text-white text-xs font-medium rounded transition-colors"
@@ -651,9 +631,9 @@ export default function AdminPage() {
                   Delete
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
       )}
 
       {/* Rename modal — opens when a row's pencil icon is clicked. The

@@ -572,49 +572,95 @@ issue-#42 breadcrumb) before OTA-ing the fleet. Do not roll back to `mining`
 
 ---
 
-## Bench OTA download stalls on Windows: `[OTA] binary read deadline exceeded at N/…`
+## Bulk ESP↔stack transfers stall on Windows + Docker Desktop (OTA download **and** image upload)
 
-**Symptom.** While bench-testing the HTTP boot-pull OTA
-([manual-tests-ota.md T2](10-quality-requirements/manual-tests-ota.md)) on a
-**Windows + Docker Desktop** dev stack, the module finds the update but the
-binary download dies: serial shows `[OTA] update available: … -> … seq=N`
-followed ~120 s later by `[OTA] binary read deadline exceeded at 7001/1155744`
-(the byte count varies, always ≈ one initial TCP window, 7–13 KB). Manifest
-fetches, heartbeats, registration, and image **uploads** all work; downloading
-the same `firmware.app.bin` from the host with `curl`/`Invoke-WebRequest` is
-instant.
+**Symptom — two faces of one bug.**
 
-**Cause.** Docker Desktop's Windows port-forwarder does not sustain bulk
-host→Wi-Fi-client streams to a slow LAN receiver: the first receive-window's
-worth of data arrives, then the stream stalls (window updates from the ESP
-appear to be lost in the forwarder). Small request/response flows and
-client→host bulk (uploads) are unaffected, which is why everything else
-looks healthy. Host-side downloads short-circuit via loopback and never
-traverse the forwarder, so they can't reproduce it.
+- **OTA download:** while bench-testing the HTTP boot-pull OTA
+  ([manual-tests-ota.md T2](10-quality-requirements/manual-tests-ota.md)),
+  serial shows `[OTA] update available: … -> … seq=N` then ~120 s later
+  `[OTA] binary read deadline exceeded at 7001/1155744` (byte count varies,
+  always ≈ one TCP window).
+- **Image upload:** the module registers and heartbeats fine, captures a
+  real frame, but the upload dies mid-body — serial shows
+  `[HTTP] body write failed at 28937/40104 bytes` /
+  `Data error. Could not send the complete image` /
+  `upload failure streak: 1/5`, and the module's `imageCount` stays 0. The
+  failure offset varies run-to-run (~29–32 KB of a ~40 KB JPEG) but always
+  lands after roughly one TCP window.
 
-**Fix (bench workaround).** Take Docker out of the OTA download path: serve
-`homepage/public/` from a **native** process and point a stepping-stone build
-at it. Port `55555` already has an any-program inbound allow rule ("HiveHive
-ArduinoOTA"), so no elevation is needed:
+In both cases small request/response flows (manifest fetch, `/new_module`
+registration, `/heartbeat`) work, and the same transfer from the **host**
+(`curl` to `localhost` *or* to the host's own LAN IP) is instant — which is
+why the stack looks healthy.
+
+> **Correction (#154 bench session):** an earlier version of this entry
+> claimed "client→host bulk (uploads) are unaffected." That is **wrong** —
+> a ~40 KB image upload from a real Wi-Fi-connected ESP stalls at ~one
+> window exactly like the OTA download. Only *small* POSTs survive; anything
+> over ~one receive-window stalls in **either** direction. The host can't
+> reproduce it because host→own-LAN-IP short-circuits via loopback and never
+> exercises the forwarder's slow-remote-client path.
+
+**Cause.** Docker Desktop's default Windows **NAT networking** (gvisor/vpnkit
+port-forwarder) does not sustain a bulk TCP stream to/from a **slow remote
+Wi-Fi client**: one receive-window of data moves, then the window updates to
+the slow client are not relayed and the stream stalls. Linux/macOS dev stacks
+don't show it; production doesn't (host-nginx serves/terminates directly, no
+forwarder in the path).
+
+**Fix (recommended) — WSL2 mirrored networking.** Removes the forwarder
+entirely; containers share the host's interfaces, so a remote Wi-Fi client
+talks to them as it would to any host service. Fixes **both** the upload and
+the OTA download in one shot (needs Windows 11 + WSL ≥ 2.0):
 
 ```powershell
-# 1) native server: GET /firmware.json + /firmware.app.bin from homepage/public,
-#    POST /new_module + /heartbeat forwarded to localhost:8002 (see the script
-#    used in PR #161's bench validation; any static server + proxy works)
+# 1) Write %USERPROFILE%\.wslconfig (ASCII, no BOM) — create or append [wsl2]:
+"[wsl2]`nnetworkingMode=mirrored" | Out-File -Encoding ascii $env:USERPROFILE\.wslconfig
+
+# 2) Quit Docker Desktop, cycle WSL, relaunch Docker Desktop:
+Get-Process "Docker Desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
+wsl --shutdown
+Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+
+# 3) Confirm the mode once the engine is back:
+wsl wslinfo --networking-mode    # must print: mirrored
+```
+
+> **Mandatory after switching modes: fully recreate the containers.**
+> Resumed containers keep **stale port proxies** under the new networking
+> mode — symptom: `localhost:8000`/`localhost:8002` (and the ESP) get
+> connection-refused even though `docker compose ps` shows them healthy.
+> `docker compose restart` is **not** enough; you must:
+>
+> ```bash
+> docker compose down && docker compose up -d
+> ```
+>
+> Then verify all four answer: `curl localhost:3002/api/health`,
+> `localhost:8000/health`, `localhost:8002/health`, `localhost:5173`.
+
+Reverting is symmetric: delete `~/.wslconfig` (or the `networkingMode` line),
+`wsl --shutdown`, restart Docker Desktop, `docker compose down && up -d`.
+
+**Fix (alternative, no WSL/Docker restart) — native stepping-stone for OTA
+only.** Take Docker out of just the OTA download path by serving
+`homepage/public/` from a native process on port `55555` (already has the
+"HiveHive ArduinoOTA" inbound allow rule):
+
+```powershell
 python c:\tmp\hf_bench_ota_server.py   # listens on 0.0.0.0:55555
 ```
 
 ```bash
-# 2) stepping-stone build whose INIT_URL points at the native server
 cd ESP32-CAM
 PLATFORMIO_BUILD_FLAGS='-DHF_INIT_URL_DEFAULT=\"http://<LAN-IP>:55555/new_module\" -DHF_UPLOAD_URL_DEFAULT=\"http://<LAN-IP>:8000/upload\"' \
   pio run -e esp32cam -t upload --upload-port COM9
 ```
 
-Through the native server the same 1.1 MB binary downloads and flashes in
-seconds. Production is unaffected (host-nginx serves the artifacts directly;
-no Docker forwarder in the path). Linux/macOS dev stacks have not shown the
-stall.
+This only rescues the OTA download (the `<LAN-IP>:8000` upload still goes
+through Docker, so it does **not** fix the image-upload stall — use mirrored
+networking for that).
 
 ---
 

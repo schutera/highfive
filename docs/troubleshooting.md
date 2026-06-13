@@ -174,8 +174,10 @@ If `pnputil`/disable-enable doesn't pull it (offline, or WU driver search disabl
 **Fix.** Eject the micro-SD card (and disconnect anything wired to GPIO12), then confirm the strap with a read-only probe:
 
 ```powershell
-py -3.12 -m esptool --port COM13 --baud 115200 flash-id
+$PORT = "COM13"   # your board's port
+py -3.12 -m esptool --port $PORT --baud 115200 flash-id
 # Must report: Flash voltage set by a strapping pin: 3.3V   (not 1.8V)
+# (esptool v4+ also accepts the legacy `flash_id` spelling.)
 ```
 
 Once it reads **3.3 V**, erase + flash succeed normally (the erase now takes real seconds, and the upload's `Hash of data verified.`). Hardware background: [hardware-notes.md → "Flash voltage strap"](08-crosscutting-concepts/hardware-notes.md).
@@ -615,8 +617,16 @@ talks to them as it would to any host service. Fixes **both** the upload and
 the OTA download in one shot (needs Windows 11 + WSL ≥ 2.0):
 
 ```powershell
-# 1) Write %USERPROFILE%\.wslconfig (ASCII, no BOM) — create or append [wsl2]:
-"[wsl2]`nnetworkingMode=mirrored" | Out-File -Encoding ascii $env:USERPROFILE\.wslconfig
+# 1) Add networkingMode=mirrored to %USERPROFILE%\.wslconfig. DO NOT blindly
+#    overwrite — an existing .wslconfig often holds [wsl2] memory/processor/
+#    swap limits. Create it only if absent; otherwise edit by hand.
+$cfg = "$env:USERPROFILE\.wslconfig"
+if (Test-Path $cfg) {
+  Write-Host "Existing .wslconfig found — add 'networkingMode=mirrored' under its [wsl2] section by hand:"
+  notepad $cfg
+} else {
+  "[wsl2]`nnetworkingMode=mirrored" | Out-File -Encoding ascii $cfg   # ASCII = no BOM
+}
 
 # 2) Quit Docker Desktop, cycle WSL, relaunch Docker Desktop:
 Get-Process "Docker Desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -649,10 +659,15 @@ only.** Take Docker out of just the OTA download path by serving
 "HiveHive ArduinoOTA" inbound allow rule):
 
 ```powershell
+# Native server: serves GET /firmware.json + /firmware.app.bin from
+# homepage/public, and proxies POST /new_module + /heartbeat to
+# localhost:8002 (any static server + proxy works; this is the script
+# used in PR #161's bench validation — not in the repo, an ad-hoc artifact).
 python c:\tmp\hf_bench_ota_server.py   # listens on 0.0.0.0:55555
 ```
 
 ```bash
+# Stepping-stone build whose INIT_URL points at the native server.
 cd ESP32-CAM
 PLATFORMIO_BUILD_FLAGS='-DHF_INIT_URL_DEFAULT=\"http://<LAN-IP>:55555/new_module\" -DHF_UPLOAD_URL_DEFAULT=\"http://<LAN-IP>:8000/upload\"' \
   pio run -e esp32cam -t upload --upload-port COM9

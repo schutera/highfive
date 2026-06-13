@@ -78,9 +78,14 @@ flash`** on upload.
 Check the strap with a read-only `esptool` probe before flashing:
 
 ```powershell
+$PORT = "COM13"   # set to your board's port (Device Manager -> Ports)
 # Use whichever Python has esptool — find it with: py -3.12 -m esptool version
-py -3.12 -m esptool --port COM13 --baud 115200 flash-id
+py -3.12 -m esptool --port $PORT --baud 115200 flash-id
 ```
+
+> esptool v4+ accepts both `flash-id` (hyphen) and the legacy `flash_id`
+> (underscore); other docs here use the underscore form via `esptool.py
+> <cmd>` — they're equivalent, not typos.
 
 The output line **`Flash voltage set by a strapping pin: 3.3V`** is what
 you want. If it says **`1.8V`**, eject any micro-SD card (and disconnect

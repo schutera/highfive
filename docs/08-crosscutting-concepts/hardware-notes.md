@@ -36,6 +36,36 @@ preserved (it now marks the start of upload, just after the dark
 capture). Earlier firmware set the pulse on `captureAndUpload` entry,
 which lit the LED while the camera grabbed the frame.
 
+## USB-serial chip varies per board (Windows driver)
+
+The USB-serial chip is **not the same on every board**, and that decides
+which Windows driver is needed:
+
+| Chip          | Driver on Windows                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CH340 / CH341 | Usually already installed (most MB boards)                                                                                                                    |
+| CP2102/CP210x | Inbox on Win11, else Silicon Labs VCP                                                                                                                         |
+| FTDI FT232R   | **Not inbox** — pulled from Windows Update; needs **admin** to install. Until bound, the device shows as `FT232R USB UART` with an error and **no COM port**. |
+
+Don't assume "ESP32-CAM-MB ⇒ CH340" — different units of the same model
+ship different chips. The full chip→driver matrix and the fix for the
+no-COM-port FTDI case live in
+[../07-deployment-view/esp-flashing.md](../07-deployment-view/esp-flashing.md)
+and [../troubleshooting.md](../troubleshooting.md).
+
+## Flash voltage strap (GPIO12) — keep the SD slot empty when flashing
+
+GPIO12 (MTDI) is read **at reset** to set the flash regulator: low/floating
+→ 3.3 V (correct for this board's flash chip), high → 1.8 V. The on-board
+**micro-SD slot shares GPIO12**, so **an inserted SD card pulls it high**
+and browns the flash out at 1.8 V — producing ROM `flash read err`, boot
+loops before any firmware banner, `esptool` erases that "succeed" in 0.0 s,
+and `MD5 ... does not match` on upload. Confirm with a read-only probe
+before flashing — `esptool ... flash-id` prints `Flash voltage set by a
+strapping pin: 3.3V` (must not be `1.8V`). Eject the SD card and re-probe
+if it reads 1.8 V. Symptom/fix:
+[../troubleshooting.md](../troubleshooting.md).
+
 ## Wi-Fi constraints
 
 - **2.4 GHz only.** The ESP32 does not support 5 GHz Wi-Fi. If your

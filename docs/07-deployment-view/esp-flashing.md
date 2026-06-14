@@ -236,6 +236,85 @@ so the LAN URLs stay `http://` while production stays `https://`. The
 rationale for moving URLs off the form and into the build is
 [ADR-018](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md).
 
+### Clean dev flash that never touches production (`make flash-dev`)
+
+A plain web-installer flash or `bash ESP32-CAM/build.sh` with no
+`DEV_SERVER_HOST` set **silently bakes the production URLs**, so the
+module registers itself to `https://highfive.schutera.com` on first boot
+— leaving a stray "dead body" module in the production admin that
+reappears on every boot until reflashed (this happened during the #145
+verification). To flash a dev module that registers to your LAN stack
+**from its first boot**, use `make flash-dev` from the repo root:
+
+```powershell
+# Windows / PowerShell — from repo root. PORT is your USB serial port.
+$env:DEV_SERVER_HOST = "192.168.1.50"   # your PC's LAN IP, reachable from the ESP
+make flash-dev PORT=COM9
+```
+
+```bash
+# Linux / macOS — from repo root
+DEV_SERVER_HOST=192.168.1.50 make flash-dev PORT=/dev/ttyUSB0
+```
+
+`make flash-dev` sets `HF_DEV_BUILD=1`, which makes the build **hard-fail
+if `DEV_SERVER_HOST` is unset** — so a dev flash can never silently bake
+production URLs. It uses `pio run -t upload`, which (unlike the
+full-erase web installer) does **not** wipe NVS/SPIFFS, so the module's
+Wi-Fi credentials survive — no re-onboarding between dev firmware
+iterations. Omit `PORT=` to let PlatformIO auto-detect the port.
+
+### Retarget a flashed module without rebuilding (USB serial)
+
+To point an _already-flashed_ module at a different server without a
+rebuild — including correcting a module that already registered to the
+wrong server — use the developer USB serial console (issue #156,
+[ADR-018 amendment](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md#amendment-issue-156-developer-usb-serial-server-override)).
+Open **one** interactive serial monitor (it stays open across resets and,
+unlike `scripts/esp_monitor.py`, lets you type; it respects the
+`monitor_rts=0` / `monitor_dtr=0` in `platformio.ini` so opening it does
+not hold the board in reset):
+
+```powershell
+# Windows / PowerShell — from ESP32-CAM/. $PORT is your USB serial port.
+$PORT = "COM9"
+pio device monitor -e esp32cam -p $PORT
+```
+
+The commands (type one, press Enter):
+
+```text
+set-server 192.168.1.50                         -> http://192.168.1.50:8002/new_module + :8000/upload
+set-server https://my.box/new_module https://my.box/upload   (verbatim; for https / custom ports)
+clear-server                                    revert to the baked default
+show-config                                     print SSID + on-disk/in-RAM URLs + fw version
+reopen-portal                                   reopen Wi-Fi setup AP (Wi-Fi creds preserved)
+```
+
+Two ways to apply it, both on the one open monitor:
+
+- **First-boot clean (recommended):** with the monitor open, press the
+  board **RST** button; when `[serial] dev console ready` appears, type
+  `set-server 192.168.1.50`. It runs after `loadConfig` and **before
+  registration**, so the module's _first_ registration this boot goes to
+  the new target. (CLI alternative to the RST button: close the monitor
+  with `Ctrl-]`, run `python scripts/esp_reset.py COM9`, reopen the
+  monitor — but the RST button keeps it to one port and one process.)
+- **Anytime:** type `set-server 192.168.1.50` during normal running (the
+  steady-state loop also reads commands); it writes `/config.json` but
+  applies on the **next** reboot. Press **RST** to reboot and re-register
+  against the new target, or type `reopen-portal` to reboot into the
+  Wi-Fi setup AP **without erasing Wi-Fi** (it reappears prefilled).
+
+The captive portal itself stays Wi-Fi-only — this is a USB-only
+developer side channel, not a form field.
+
+> **Cleaning up a stray prod module:** if a module _did_ register to
+> production by mistake, retarget it (above) **first**, confirm it is
+> running against the dev stack, and only **then** delete the stray
+> module from the production `/admin`. Deleting before the retargeted
+> firmware is running just lets the next registration recreate it.
+
 ### Flash
 
 ```bash

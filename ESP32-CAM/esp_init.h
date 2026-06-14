@@ -97,6 +97,18 @@ void setWifiFailCount(uint8_t value);
 #endif
 String generateModuleName();
 bool loadConfig(esp_config_t *esp_config);
+
+/* issue #156 — developer serial-console server retargeting writers.
+   Read-modify-write `path` (/config.json) preserving all other keys (Wi-Fi
+   creds, module name). The new JSON is computed before the file is opened for
+   writing, so a serialize overflow or a corrupt existing file leaves the file
+   untouched (no #19 truncate-then-fail). Return true on a successful persist.
+   loadConfig already reads NETWORK.INIT_URL/UPLOAD_URL, so the override takes
+   effect on the next loadConfig (the serial console re-runs it in the boot
+   window so it applies before registration). */
+bool writeServerUrlsToConfig(const char *path, const char *initUrl,
+                             const char *uploadUrl);
+bool clearServerUrlsFromConfig(const char *path);
 void initEspPinout();
 // abortOnFailure=true (boot path): abort() on esp_camera_init failure so the
 // OTA rollback counter reverts a bad slot (#26). abortOnFailure=false: return

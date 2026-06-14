@@ -492,16 +492,46 @@ The ESP32 must be able to reach the server's IP. A common mistake is configuring
 
 ### Module registered to production instead of my local dev stack
 
-The server URL is **baked at build time, not set in the captive portal** — the `192.168.4.1` page only takes Wi-Fi SSID + password (ADR-018), so there is no "localhost/server" field. A firmware built **without** `DEV_SERVER_HOST` bakes the production URLs, so the module registers to `https://highfive.schutera.com` no matter which Wi-Fi you give it. To target a dev stack you must **rebuild + re-flash** with the host's LAN IP (see [Point a dev module at a local stack](07-deployment-view/esp-flashing.md#point-a-dev-module-at-a-local-stack-dev_server_host)):
+The server URL is **baked at build time, not set in the captive portal** — the `192.168.4.1` page only takes Wi-Fi SSID + password (ADR-018), so there is no "localhost/server" field. A firmware built **without** `DEV_SERVER_HOST` bakes the production URLs, so the module registers to `https://highfive.schutera.com` no matter which Wi-Fi you give it.
+
+**Prevent it (clean dev flash):** flash with `make flash-dev`, which sets `HF_DEV_BUILD=1` and **hard-fails if `DEV_SERVER_HOST` is unset** — so a dev flash can never silently bake production URLs. It registers the module to your dev stack from first boot, and `pio run -t upload` preserves Wi-Fi between iterations (see [Clean dev flash](07-deployment-view/esp-flashing.md#clean-dev-flash-that-never-touches-production-make-flash-dev)):
 
 ```powershell
 $env:DEV_SERVER_HOST = "192.168.1.50"   # your PC's LAN IP, reachable from the ESP (not localhost)
-bash ESP32-CAM/build.sh                   # bakes init :8002 / upload :8000 at that IP
+make flash-dev PORT=COM9
 ```
 
-Then re-flash and re-onboard Wi-Fi (a full flash wipes NVS, so credentials must be re-entered). **A module already registered to the wrong server keeps reappearing there on its next boot/heartbeat until it is re-flashed** — so delete the stray module from that server's `/admin` **after** the retargeted firmware is running, never before, or the next registration just recreates it.
+**Fix an already-flashed (or already-strayed) module without rebuilding:** retarget it over USB serial (issue #156). Open an interactive monitor, press **RST**, and type `set-server 192.168.1.50` when `[serial] dev console ready` appears — it rewrites `/config.json` and re-runs `loadConfig` so **this** boot's registration goes to the dev stack (see [Retarget without rebuilding](07-deployment-view/esp-flashing.md#retarget-a-flashed-module-without-rebuilding-usb-serial)):
+
+```powershell
+pio device monitor -e esp32cam -p COM9   # press RST, then type: set-server 192.168.1.50
+```
+
+**A module already registered to the wrong server keeps reappearing there on its next boot/heartbeat until it is retargeted or re-flashed** — so delete the stray module from that server's `/admin` **after** the retargeted firmware is confirmed running against the dev stack, never before, or the next registration just recreates it.
 
 Find your LAN IP: `ipconfig` (Windows, look at WLAN/Ethernet adapter), `ip addr` (Linux/Mac).
+
+### `make flash-dev` fails with `'HF_DEV_BUILD' is not recognized` / `Der Befehl "HF_DEV_BUILD" ... konnte nicht gefunden werden`
+
+On Windows, GNU `make` runs recipe lines through **cmd.exe**, not `sh`. A recipe written as `VAR=1 some-command` (a bash inline env-var prefix) makes cmd.exe try to run a program literally named `HF_DEV_BUILD=1`, which fails. The `flash-dev` target sets the variable as a target-specific **exported make variable** (`flash-dev: export HF_DEV_BUILD := 1`) precisely so it works under both shells; if you hit this error you are on an older Makefile — `git pull`.
+
+Make-free fallback (sets the env var the PowerShell way, then calls `pio` directly):
+
+```powershell
+$PORT = "COM13"
+$env:HF_DEV_BUILD = "1"
+cd ESP32-CAM ; pio run -e esp32cam -t upload --upload-port $PORT ; cd ..
+Remove-Item Env:\HF_DEV_BUILD
+```
+
+`DEV_SERVER_HOST` must still be set (env var or `ESP32-CAM/DEV_SERVER_HOST` file) or the build hard-fails by design. **Lesson** (general): never use a bash `VAR=val cmd` prefix in a Makefile recipe that must run on Windows — use a target-specific `export`.
+
+### Verifying the dev stack reachability during ESP testing (don't trust a host-side LAN-IP probe)
+
+Two traps when checking whether the ESP can reach your `docker compose` stack, both observed during #156 hardware testing:
+
+- **`curl http://localhost:8002/health` works but `curl http://<your-LAN-IP>:8002/health` times out _from the same PC_ — yet the ESP reaches `<LAN-IP>:8002` fine.** This is Docker Desktop (WSL2 backend) port-publishing: the host loopback-to-own-LAN-IP hairpin isn't wired up, but inbound traffic from a real LAN device (the ESP) is forwarded normally. So a failing host-side LAN-IP probe does **not** mean the stack is unreachable — confirm with the ESP's own serial log (`heartbeat HTTP/1.1 200 OK`, `upload responded with status: 200`) or `curl localhost`. The authoritative check is server-side: `curl -s http://localhost:8002/modules` and look for your module's `last_seen_at` advancing.
+- **Use `curl.exe`, not PowerShell `Invoke-WebRequest`/`Invoke-RestMethod`, for these probes.** `Invoke-*` honour the WinINET system proxy and will time out against `localhost`/LAN hosts if a proxy is configured; `curl.exe -s --noproxy "*"` bypasses it. (If you must use `Invoke-*`, pass `-Proxy ''` / `-NoProxy` on PS 6+.)
 
 ### Windows Firewall blocking inbound connections
 

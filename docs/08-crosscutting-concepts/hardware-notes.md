@@ -116,6 +116,31 @@ The ESP32 and the server must be on the **same LAN**. A common
 mistake is configuring the module to join a phone hotspot while the
 server runs on the home router.
 
+For the clean dev-flash path (`make flash-dev`, which refuses to bake
+production by accident) and the no-rebuild USB-serial retarget
+(`set-server`), see
+[esp-flashing.md](../07-deployment-view/esp-flashing.md) and the
+[ADR-018 amendment](../09-architecture-decisions/adr-018-captive-portal-wifi-only.md#amendment-issue-156-developer-usb-serial-server-override).
+
+## Developer USB-serial console (issue #156)
+
+A developer-only command console runs over the USB serial line — `set-server`,
+`clear-server`, `show-config`, `reopen-portal` (see
+[esp-flashing.md → Retarget without rebuilding](../07-deployment-view/esp-flashing.md#retarget-a-flashed-module-without-rebuilding-usb-serial)).
+It is **not** on the captive portal; it needs the cable.
+
+Two hardware gotchas when driving it:
+
+- **The boot window is brief.** Commands typed by hand may miss the
+  pre-registration window. Use `scripts/esp_reset.py` / `scripts/esp_capture.py`
+  to reset the board and have the command **already buffered** in the UART, or
+  paste it the instant the `[serial] dev console ready` hint appears.
+- **DTR/RTS must stay deasserted** or opening the monitor pulls `EN` low and
+  holds the ESP in reset (an apparently-silent serial line). `platformio.ini`
+  sets `monitor_rts = 0` / `monitor_dtr = 0`; the `scripts/esp_*.py` helpers do
+  the same. A raw `pyserial` session that asserts them will keep the board
+  reset.
+
 ## Windows Firewall
 
 On a Windows host, ports **8000** (image-service) and **8002**
@@ -139,7 +164,11 @@ wizard (Step 2) or the standalone web installer.
 
 If you only need to move the module to a different network you can skip
 the re-flash: cause three consecutive failed WiFi joins and the
-firmware auto-falls back to AP mode on its own.
+firmware auto-falls back to AP mode on its own. With a USB cable
+attached, `reopen-portal` on the developer serial console does the same
+**immediately and without erasing Wi-Fi** (it flips the NVS `configured`
+flag and restarts; Wi-Fi creds live in SPIFFS, so the portal reopens
+prefilled) — handy for retargeting a module's server without a full wipe.
 
 > The IO0-hold procedure listed in older revisions was unreachable on
 > AI Thinker ESP32-CAM-MB — GPIO0 is a strap pin, holding it LOW at

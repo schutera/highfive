@@ -112,6 +112,17 @@ dev_host = (
     _strip_all_whitespace(os.environ.get("DEV_SERVER_HOST") or "")
     or (_strip_all_whitespace(dev_host_file.read_text(encoding="utf-8")) if dev_host_file.exists() else "")
 )
+# HF_DEV_BUILD guard (#156): mirror build.sh. A dev build (HF_DEV_BUILD=1, set by
+# `make flash-dev`) must target a LAN dev stack, never silently bake production
+# URLs — otherwise the flashed module registers to highfive.schutera.com and
+# leaves a stray "dead body" module in prod admin (the #145 incident).
+if _strip_all_whitespace(os.environ.get("HF_DEV_BUILD") or "") == "1" and not dev_host:
+    raise SystemExit(
+        "ERROR: HF_DEV_BUILD=1 but DEV_SERVER_HOST is unset. A dev build must "
+        "target a LAN dev stack, never bake the production URLs. Fix: export "
+        "DEV_SERVER_HOST=<LAN ip> or write ESP32-CAM/DEV_SERVER_HOST. "
+        "See docs/07-deployment-view/esp-flashing.md."
+    )
 url_defines = []
 if dev_host:
     url_defines = [

@@ -1,6 +1,7 @@
 #include "esp_camera.h"
 #include "esp_init.h"
 #include "host.h"
+#include "serial_console.h" // developer serial retargeting console — issue #156
 #include "client.h"
 #include "led.h"
 #include "logbuf.h"
@@ -376,6 +377,41 @@ void setup() {
     Serial.println("-- Failed to configure ESP");
   }
   logf("[STAGE] loadConfig took=%lums", millis() - stageStartMs);
+
+  // ---- Developer serial retargeting window (issue #156) ----
+  // A paste/scripted `set-server <host>` here rewrites /config.json AND re-runs
+  // loadConfig so THIS boot's registration goes to the dev stack — so a dev
+  // module never has to register to production first and be cleaned up
+  // afterwards (the "dead body in admin" problem). It runs BEFORE Wi-Fi/OTA/
+  // geolocation/registration so the override is in effect by the time the
+  // module calls initNewModuleOnServer.
+  //
+  // Cost in the field is a fixed ~300 ms per boot: we wait the grace for the
+  // FIRST byte, and a module with no USB host attached has Serial.available()
+  // == 0 the whole time, so it falls through after the grace (negligible on a
+  // device that then runs for the day, but it is NOT zero). A developer using
+  // scripts/esp_reset.py + a monitor sends the command at reset, so the UART
+  // has buffered bytes by the time we reach here. WDT is fed throughout.
+  hf::breadcrumbSet("setup:serialBootWindow");
+  serialConsolePrintHint();
+  {
+    const unsigned long kGraceMs  = 300;   // wait this long for the first byte
+    const unsigned long kWindowMs = 4000;  // then process commands for this long
+    unsigned long t0 = millis();
+    while (millis() - t0 < kGraceMs && Serial.available() == 0) {
+      esp_task_wdt_reset();
+      delay(10);
+    }
+    if (Serial.available() > 0) {
+      Serial.println("[serial] input detected — command window open (4s)");
+      unsigned long w0 = millis();
+      while (millis() - w0 < kWindowMs) {
+        esp_task_wdt_reset();
+        serialConsolePoll(&esp_config, /*inBootWindow=*/true);
+        delay(10);
+      }
+    }
+  }
 
   /*
     WiFi + network operations BEFORE camera init.
@@ -792,6 +828,12 @@ void loop() {
   // the watchdog fires and reboots the device.
   esp_task_wdt_reset();
   ledTick();
+
+  // Developer serial console (issue #156), steady-state. `set-server`/
+  // `clear-server` here take effect on the next reboot; `reopen-portal`
+  // restarts immediately into the Wi-Fi setup AP (creds preserved);
+  // `show-config` prints the current target. Non-blocking.
+  serialConsolePoll(&esp_config, /*inBootWindow=*/false);
 
   // ArduinoOTA poll (#26 phase 1). Non-blocking; the 30 s `delay` at
   // the bottom of this loop caps the LAN-push responsiveness at 30 s,

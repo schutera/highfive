@@ -131,3 +131,60 @@ apply when those keys are absent (or after a re-flash erases them). No
 forced re-onboard is triggered by shipping this firmware via OTA — the
 saved URLs continue to work — but the next USB/web-installer flash of
 any module erases its config and reopens the Wi-Fi-only setup page.
+
+## Amendment (issue #156): developer USB-serial server override
+
+The "Forecloses" cost above — _there is no in-field way to change a
+module's server URLs without a re-flash_ — bit the on-hardware
+verification of #145: a default build silently baked the production URLs,
+the module registered itself to `highfive.schutera.com`, and there was no
+way to redirect it to the dev stack without a rebuild + reflash. Worse,
+the stray module left a "dead body" in the production admin that
+reappeared on every boot until reflashed. This amendment restores a
+developer retargeting path **without reopening the operator-facing form
+decision this ADR made.**
+
+**The captive-portal FORM stays Wi-Fi-only.** The decision above is
+unchanged: a field operator still types exactly SSID + password. The
+override is an **out-of-band developer side channel over the USB cable a
+developer already has attached** — never a form field, so the "advanced
+knobs do not belong on the operator-facing form" lesson still holds.
+
+- **Serial console** (`ESP32-CAM/serial_console.cpp`, parser in
+  `ESP32-CAM/lib/serial_cmd/`). Over USB serial a developer can type
+  `set-server <host>` (composes the same `http://<host>:8002/new_module`
+  - `:8000/upload` URLs `build.sh` bakes — convention pinned by
+    `test_native_serial_cmd`), `set-server <init> <upload>` (verbatim, for
+    https / custom ports), `clear-server` (revert to baked default),
+    `show-config`, and `reopen-portal`. The writes go to
+    `NETWORK.INIT_URL` / `NETWORK.UPLOAD_URL` in `/config.json`, which
+    `loadConfig` has always read — only the writer was removed by this ADR,
+    now restored out-of-band.
+- **Boot window before registration.** `ESP32-CAM/ESP32-CAM.ino`'s
+  `setup()` opens a short serial window after `loadConfig` and **before**
+  `initNewModuleOnServer`, so a `set-server` re-runs `loadConfig` and the
+  module's _first_ registration this boot goes to the dev stack — it never
+  has to register to production first. The window costs a field boot
+  nothing (it is gated on `Serial.available()`; no USB host → fall
+  straight through).
+- **Wi-Fi-preserving re-entry.** `reopen-portal` flips the NVS
+  `configured` flag and restarts — the same mechanism as the 3-Wi-Fi-fail
+  auto-fallback. Because Wi-Fi creds live in SPIFFS `/config.json` (not
+  NVS), the portal reopens **prefilled, without erasing Wi-Fi**, so a
+  stray configured module can be retargeted without a full chip erase.
+- **`saveConfig` is now read-modify-write.** `ESP32-CAM/host.cpp`'s
+  `saveConfig` previously rebuilt `/config.json` from scratch, which would
+  silently drop an out-of-band `INIT_URL`/`UPLOAD_URL` on the next Wi-Fi
+  save. It now preserves all keys it does not own (pure mutation in
+  `ESP32-CAM/lib/config_json/`, regression-pinned by
+  `test_native_config_json`). This is on-disk key preservation, **not** a
+  re-introduction of operator-editable URL fields.
+
+**Clean dev flash (the primary path).** For a developer iterating on
+firmware, the serial override is the _correction_ path; the _clean_ path
+is `make flash-dev`, which builds with `HF_DEV_BUILD=1`. That flag makes
+`build.sh` / `extra_scripts.py` hard-fail when `DEV_SERVER_HOST` is unset,
+so a dev flash can never silently bake production URLs (the #145 trap).
+`pio run -t upload` does not erase NVS/SPIFFS, so Wi-Fi survives between
+dev firmware iterations. See
+[`docs/07-deployment-view/esp-flashing.md`](../07-deployment-view/esp-flashing.md).

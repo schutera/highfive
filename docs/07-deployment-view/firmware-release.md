@@ -75,6 +75,42 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    tag in step 5. `build.sh` warns on stderr if `SEQUENCE` is **lower**
    than the previously-published manifest (an accidental downgrade).
 
+   **Bench-verify PSRAM before publishing (#163).** `build.sh` is the
+   release path, and a build-config regression (a wrong `memory_type`, or a
+   dropped `-DBOARD_HAS_PSRAM`) makes the binary boot with PSRAM off and
+   upload degraded VGA/DRAM images with nothing failing loudly. `build.sh`
+   now greps its verbose `build/compile.log` and aborts unless **both**
+   `-DBOARD_HAS_PSRAM` reached g++ **and** the `dio_qspi` libs were linked —
+   but those guards are necessary, not sufficient: only flashing the release
+   binary and reading `-- PSRAM: found=1` over serial proves it (restoring
+   the define alone did **not** fix `found=0` in #163). So flash the
+   just-built merged image to **one** bench module and confirm. In
+   PowerShell, with the board on `COM9`:
+
+   ```powershell
+   python -m esptool --chip esp32 --port COM9 write_flash 0x0 ESP32-CAM/build/ESP32-CAM.ino.merged.bin
+   ```
+
+   > If `python -m esptool` errors with `module 'esptool' has no attribute
+'_main'` (a mismatched pip `esptool` shadowing the vendored one — the
+   > same trap `build.sh` guards against), flash with the bundled binary
+   > instead: `& "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esptool_py\*\esptool.exe" --chip esp32 --port COM9 write_flash 0x0 ESP32-CAM/build/ESP32-CAM.ino.merged.bin`.
+
+   The `-- PSRAM:` line is printed by `initEspCamera`, which runs **only
+   after the module is configured and joined to Wi-Fi** — and flashing the
+   full merged image at `0x0` wipes the NVS `configured` flag, so a
+   freshly-flashed module boots into AP mode (`ESP32-Access-Point`,
+   http://192.168.4.1) and never reaches camera init. **Onboard it via the
+   AP first** (see [esp-flashing.md](esp-flashing.md)), then capture:
+
+   ```powershell
+   python scripts/esp_capture.py COM9 60          # after onboarding; expect "-- PSRAM: found=1"
+   python scripts/esp_reset.py COM9; python scripts/esp_capture.py COM9 60   # repeat a couple of boots
+   ```
+
+   If any boot reports `found=0`, **do not publish** — rebuild and re-verify
+   (see [risks ch. 11 → "`build.sh` release binaries ran without PSRAM"](../11-risks-and-technical-debt/README.md#lessons-learned)).
+
 3. **Publish the artifacts to prod.** The three files are **gitignored
    build outputs** (the `*.bin` glob and the explicit
    `homepage/public/firmware.json` line in [.gitignore](../../.gitignore)),

@@ -135,6 +135,36 @@ Status `204` confirms private-IP short-circuit; status `503` confirms the upstre
 
 ---
 
+### Bulk-deleting a module's images (cleanup after a capture-loop flood) — and the Windows parallel-`curl` trap
+
+**Symptom / task.** A module sent thousands of images (e.g. a stuck capture loop) and you need to delete all but a known-good handful, for **one** module only. There is **no bulk-delete endpoint** — you loop the per-file admin route `DELETE /api/images/<filename>` (it removes the DuckDB row _and_ the on-disk file; idempotent — an already-gone file returns `404`, which is success).
+
+**Two gotchas this earns:**
+
+1. **Matching gallery screenshots to server rows: filename is LOCAL time, `uploaded_at` is UTC.** The firmware names files in device-local time (`createFileName` in `ESP32-CAM/client.cpp`, TZ `CET-1CEST` set in `ESP32-CAM/esp_init.cpp`), so `esp_capture_20260613_120013.jpg` (12:00:13 CEST) is the same image the admin gallery shows as `uploaded_at` `10:00:14` UTC — a 1–2 h offset. Match on **date + filename**, not on the displayed clock. (Older rows may also carry a `<mac>_` filename prefix; the convention changed mid-history — never strip/assume it, read the real `filename` from `GET /api/images`.)
+2. **On Windows, do NOT fan out parallel `curl.exe` processes** (e.g. `xargs -P 8`). They return HTTP `000` (connection-level failure) and delete **nothing** — silent no-op. Use a **single** `curl` process with connection keep-alive, reading a `-K` config file of `url = "…"` lines. One process, reused TLS connection, reliable, ~10–20 req/s. (The duckdb writer serialises on a lock anyway, so parallelism buys nothing.)
+
+**Recipe (PowerShell).** Build the keep-list, derive the delete-list from the public listing, then drive one keep-alive `curl`:
+
+```powershell
+$mac = "b0696ef23a08"
+$key = "<HIGHFIVE_API_KEY>"   # prod admin key; sent as X-Admin-Key, never logged
+$base = "https://highfive.schutera.com"
+# 1. Pull the full row list (public read; omit limit = all rows)
+curl.exe -s "$base/api/images?module_id=$mac" -o images.json
+# 2. In a scratch .py: load images.json, subtract your keep-set of filenames,
+#    write one `url = "https://.../api/images/<filename>"` line per delete
+#    into cfg.txt, prefixed by:  request = "DELETE"  /  header = "X-Admin-Key: <key>"
+# 3. One process, connection reuse, capture status per request:
+curl.exe -s -K cfg.txt -o $null -w "%{http_code}`n" --retry 2 | Sort-Object | Group-Object
+# 4. Verify: total must equal your keep count
+curl.exe -s "$base/api/images?module_id=$mac&limit=1"
+```
+
+Expect only `200` (deleted) and `404` (already gone) — any `000`/`5xx` means the run isn't reaching the server, stop and investigate. **The UI count self-corrects:** the dashboard/admin "IMAGES" value is the live `real_image_count` ([`backend/src/database.ts`](../backend/src/database.ts)'s `fetchAndAssemble`), not the increment-only `module_configs.image_count`, so it drops as you delete — no separate counter fix needed.
+
+---
+
 ## ESP32-CAM hardware
 
 ### Do I need an FTDI adapter to flash?
@@ -208,6 +238,34 @@ cd ESP32-CAM
 build step, step 2 of the wizard 404s on the OTA URL. If you've never
 flashed firmware on this checkout, run `build.sh` first; on shared
 checkouts, regenerate after every firmware change.
+
+### Serial shows `-- PSRAM: found=0` on a `build.sh` / OTA binary (but `pio` builds report `found=1`)
+
+The board has working PSRAM, but a `build.sh`-built binary boots with it off
+and `initEspCamera` falls back to `FRAMESIZE_VGA` + `CAMERA_FB_IN_DRAM` +
+`jpeg_quality 15` (degraded ~10–13 KB frames). `pio run -e esp32cam` on the same
+board is fine (`found=1`, ~22–37 KB frames). Root cause: the `build.sh` FQBN
+omitted `FlashMode=dio`, so arduino-cli took the core default `build.boot=qio`
+and linked the `qio_qspi` precompiled libs + bootloader — but `build.sh` flashes
+in **dio** mode (`FLASH_MODE=dio`). That `qio` libs / `dio` flash mismatch makes
+`esp_psram_init()` fail at boot. pio pins `flash_mode=dio` → `dio_qspi`, so it
+always worked. Fix (already in `build.sh`): FQBN
+`esp32:esp32:esp32cam:FlashMode=dio`, which sets both `build.flash_mode=dio` and
+`build.boot=dio` → `dio_qspi` libs matching the dio flash. Confirm the build
+linked the right memory_type:
+
+```powershell
+Select-String -Path ESP32-CAM/build/compile.log -Pattern '/dio_qspi' | Select-Object -First 1   # expect a hit
+Select-String -Path ESP32-CAM/build/compile.log -Pattern '/qio_qspi' | Select-Object -First 1   # expect NOTHING
+```
+
+`build.sh` now aborts the build unless `dio_qspi` was linked (and `-DBOARD_HAS_PSRAM`
+reached g++ — a separate, also-required guard). Note: a clean compile-flag audit is
+**not** sufficient proof — restoring `-DBOARD_HAS_PSRAM` alone did not fix `found=0`;
+only flashing the release binary and reading `-- PSRAM: found=1` over serial does.
+Full background:
+[risks ch. 11 → "`build.sh` release binaries ran without PSRAM"](11-risks-and-technical-debt/README.md#lessons-learned)
+(#163).
 
 ### ArduinoOTA LAN push fails on Windows ("No response from the ESP")
 

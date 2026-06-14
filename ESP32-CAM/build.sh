@@ -3,7 +3,16 @@ set -euo pipefail
 
 SKETCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${SKETCH_DIR}/build"
-FQBN="esp32:esp32:esp32cam"
+# FlashMode=dio is load-bearing for PSRAM (#163). The bare FQBN takes the core's
+# global default build.boot=qio, which links the qio_qspi precompiled libs +
+# a qio bootloader — but we flash in dio mode (FLASH_MODE=dio below), and that
+# lib/flash-mode mismatch makes esp_psram_init() fail at boot (PSRAM: found=0,
+# degraded VGA capture). The boards.txt FlashMode.dio menu sets BOTH
+# build.flash_mode=dio AND build.boot=dio, so the dio_qspi libs + dio bootloader
+# match the dio flash — exactly what the pio build (board JSON flash_mode=dio)
+# does, which is why pio always reported found=1. Verified on bench (COM13,
+# AI-Thinker, ESP32-D0WD-V3): qio_qspi -> found=0, dio_qspi -> found=1.
+FQBN="esp32:esp32:esp32cam:FlashMode=dio"
 
 # VERSION is the single writer for the firmware version macro. Same value
 # is injected into the firmware binary as -DFIRMWARE_VERSION and written
@@ -61,9 +70,12 @@ fi
 # Set HF_ALLOW_NO_GEO_KEY=1 to build keyless on purpose (a compile check
 # that is never flashed). The local `pio run -e esp32cam` smoke env does
 # not require the key (CI may still pass GEO_API_KEY to it as a secret on
-# main; that's the pipeline's choice, not build.sh's). We never
-# print the value — only its length — so this script can run in CI without
-# leaking the secret into build logs.
+# main; that's the pipeline's choice, not build.sh's). We never print the
+# value directly — only its length. The one place it could leak is the
+# `arduino-cli compile --verbose` output (the resolved g++ lines embed
+# -DGEO_API_KEY="<key>"), so that pipeline pipes through a sed redactor
+# before stdout/tee — see the compile invocation below. Net: this script
+# runs in CI and writes build/compile.log without leaking the secret.
 # Strip ALL whitespace from both sources (not just outer) so the env-var
 # and file paths cannot diverge on a stray trailing newline (the common
 # shape of a CI secret written via `echo "$KEY" > file`) OR an embedded
@@ -154,13 +166,40 @@ echo ""
 # so both build paths emit byte-identical partitions.bin. arduino-cli
 # takes the preset name without .csv; platformio.ini needs the .csv suffix
 # because PIO resolves the framework's built-in from tools/partitions/.
+# App macros go into compiler.{c,cpp}.extra_flags, NOT build.extra_flags (#163).
+# In the ESP32 core, boards.txt carries the PSRAM defines in build.defines
+# (-DBOARD_HAS_PSRAM -mfix-esp32-psram-cache-issue
+# -mfix-esp32-psram-cache-strategy=memw), but the compile recipe never references
+# {build.defines} directly — it reaches the compiler only because platform.txt
+# threads it *through* the default build.extra_flags (... {build.defines} ...).
+# Overriding build.extra_flags to inject our macros therefore silently dropped
+# BOARD_HAS_PSRAM (and -DESP32, CORE_DEBUG_LEVEL, ARDUINO_USB_CDC_ON_BOOT).
+# compiler.{c,cpp}.extra_flags are empty by default and appended by the recipe
+# alongside build.extra_flags, so they add our macros without clobbering the
+# board's build.defines. Set both c and cpp so .c lib files and the .ino/.cpp
+# sketch units all see the macros. (NB: restoring BOARD_HAS_PSRAM was necessary
+# but did NOT by itself fix PSRAM: found=0 — the FlashMode=dio FQBN above is the
+# actual found=0 fix. See the #163 lesson in chapter 11.)
+# --verbose dumps the resolved g++ command lines; the post-compile guards below
+# grep compile.log to prove BOARD_HAS_PSRAM reached g++ and the dio_qspi libs
+# were linked.
+#
+# mkdir the output dir first: `tee` opens compile.log at pipeline startup,
+# concurrently with arduino-cli — on a fresh clone (or after `rm -rf build/`)
+# the dir doesn't exist yet and `tee` aborts the whole build under pipefail
+# before arduino-cli's --output-dir would have created it.
+mkdir -p "${BUILD_DIR}"
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --output-dir "${BUILD_DIR}" \
   --libraries "${SKETCH_DIR}/lib" \
-  --build-property "build.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\" -DFIRMWARE_SEQUENCE=${SEQUENCE}${DEV_URL_FLAGS}" \
+  --verbose \
+  --build-property "compiler.c.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\" -DFIRMWARE_SEQUENCE=${SEQUENCE}${DEV_URL_FLAGS}" \
+  --build-property "compiler.cpp.extra_flags=-DFIRMWARE_VERSION=\"${VERSION}\" -DGEO_API_KEY=\"${GEO_API_KEY}\" -DFIRMWARE_SEQUENCE=${SEQUENCE}${DEV_URL_FLAGS}" \
   --build-property "build.partitions=min_spiffs" \
-  "${SKETCH_DIR}"
+  "${SKETCH_DIR}" 2>&1 \
+  | sed -E 's/(GEO_API_KEY=)[^[:space:]]*/\1<redacted>/g' \
+  | tee "${BUILD_DIR}/compile.log"
 
 # Post-compile guard. The contract: FIRMWARE_VERSION must land in the
 # binary as a plain C string of the bee name (e.g. the bytes "carpenter"),
@@ -185,6 +224,32 @@ if ! grep -aFq "${VERSION}" "${BUILD_DIR}/ESP32-CAM.ino.bin"; then
   exit 1
 fi
 echo "Verified: FIRMWARE_VERSION=${VERSION} is in the binary as a plain string."
+
+# PSRAM guard 1/2 — the compile-time define (#163). build.extra_flags carries
+# {build.defines} (-DBOARD_HAS_PSRAM + the two psram cache-fix flags) from
+# boards.txt; if a future refactor overrides build.extra_flags again it silently
+# drops them. Necessary but NOT sufficient (see guard 2). Assert it reached g++.
+if ! grep -q -- '-DBOARD_HAS_PSRAM' "${BUILD_DIR}/compile.log"; then
+  echo "ERROR: -DBOARD_HAS_PSRAM never reached the compiler — release binary would run without PSRAM (issue #163)" >&2
+  exit 1
+fi
+echo "Verified: -DBOARD_HAS_PSRAM reached the compiler."
+
+# PSRAM guard 2/2 — the memory_type must match the flash mode (#163). This is the
+# guard that actually catches the bug that shipped: -DBOARD_HAS_PSRAM alone is not
+# enough. The ESP32 core links precompiled libs + a bootloader from
+# {compiler.sdk.path}/{build.memory_type}, where build.memory_type={build.boot}_qspi.
+# The bare FQBN defaults to build.boot=qio -> qio_qspi libs, but we flash in dio
+# mode (FLASH_MODE=dio) — that lib/flash-mode mismatch makes esp_psram_init() fail
+# at boot (found=0, degraded VGA). The FlashMode=dio FQBN above pins build.boot=dio
+# -> dio_qspi, matching the flash mode (and matching pio, which always reported
+# found=1). Bench-proven on COM13 (AI-Thinker, ESP32-D0WD-V3): qio_qspi -> found=0,
+# dio_qspi -> found=1. Assert the dio_qspi libs were linked and qio_qspi was not.
+if ! grep -aq -- '/dio_qspi' "${BUILD_DIR}/compile.log" || grep -aq -- '/qio_qspi' "${BUILD_DIR}/compile.log"; then
+  echo "ERROR: build did not link the dio_qspi memory_type (expected dio_qspi to match the dio flash mode; a qio_qspi link makes PSRAM init fail at boot — issue #163)" >&2
+  exit 1
+fi
+echo "Verified: linked dio_qspi memory_type (matches dio flash mode)."
 
 # Build the single merged binary for web flashing. arduino-cli (unlike the
 # old Arduino IDE flow) does NOT produce ESP32-CAM.ino.merged.bin on its
@@ -263,6 +328,17 @@ fi
 FLASH_MODE="${FLASH_MODE:-dio}"
 FLASH_FREQ="${FLASH_FREQ:-80m}"
 FLASH_SIZE="${FLASH_SIZE:-4MB}"
+
+# FLASH_MODE must stay dio (#163). The FQBN pins FlashMode=dio, which compiles
+# the bootloader + links the dio_qspi libs; merging the image with a non-dio
+# flash header would re-create the exact qio/dio mismatch that broke PSRAM
+# (the dio_qspi guard above can't catch a divergence here — it only sees the
+# link, not the merge header). FLASH_FREQ/FLASH_SIZE are safe to override
+# (frequency/size don't touch memory_type); flash MODE is not.
+if [ "${FLASH_MODE}" != "dio" ]; then
+  echo "ERROR: FLASH_MODE=${FLASH_MODE} but the FQBN pins FlashMode=dio — a non-dio merge header re-creates the PSRAM-breaking qio/dio mismatch (issue #163). Leave FLASH_MODE=dio." >&2
+  exit 1
+fi
 
 # Resolve a working interpreter. On Linux/macOS this is python3. On
 # Windows-from-python.org it is `python`. We MUST validate each

@@ -86,6 +86,64 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### `build.sh` release binaries ran without PSRAM — the FQBN's missing `FlashMode=dio` linked `qio_qspi` libs against a `dio`-flashed image (#163)
+
+**What happened.** A `build.sh`-built (release-path) firmware booted reporting
+`-- PSRAM: found=0 size=0 bytes` and `initEspCamera` fell back to `FRAMESIZE_VGA` +
+`CAMERA_FB_IN_DRAM` + `jpeg_quality 15` (warm-up frames ~10–13 KB). Every
+`pio run -e esp32cam` binary on the **same** board reported
+`found=1 size=4192123 bytes` (frames ~22–37 KB). Because `build.sh` is the OTA
+release path, every field module would silently upload degraded images after the
+next OTA, with nothing failing loudly.
+
+**The false lead (a real bug, but not this symptom's cause).** First diagnosis:
+`build.sh`'s `--build-property "build.extra_flags=…app macros…"` wholesale-replaced
+the ESP32 core's default `build.extra_flags`, which is the only thing that threads
+`{build.defines}` — i.e. `-DBOARD_HAS_PSRAM` + the two psram cache-fix flags — into
+the compile recipe (`platform.txt`'s `recipe.cpp.o.pattern` references
+`{build.extra_flags}`, never `{build.defines}` directly). That genuinely dropped
+`BOARD_HAS_PSRAM` (and `-DESP32`, `CORE_DEBUG_LEVEL`, `ARDUINO_USB_CDC_ON_BOOT`), so
+it was fixed by moving app macros to the empty-by-default `compiler.c.extra_flags` /
+`compiler.cpp.extra_flags` slots. **But flashing the define-fixed binary still gave
+`found=0`.** A compile-flag audit passed; the symptom didn't move. This is the
+lesson's core: _the define reaching the compiler was necessary but not sufficient,
+and only a bench flash + serial check exposed that._
+
+**The real cause (bench-isolated).** With the defines now identical between the two
+builds, the only remaining difference was `build.memory_type`: **pio linked
+`dio_qspi`, `build.sh` linked `qio_qspi`.** The core's link/compile recipe pulls
+precompiled libraries _and the bootloader_ from
+`{compiler.sdk.path}/{build.memory_type}`, where
+`build.memory_type={build.boot}_qspi` (`platform.txt`, core 2.0.17). A bare FQBN
+(`esp32:esp32:esp32cam`) takes the global default `build.boot=qio` → `qio_qspi`. But
+`build.sh` flashes in **dio** mode (`FLASH_MODE=dio`), and pio's board JSON pins
+`flash_mode=dio` → `dio_qspi`. So `build.sh` ran a `qio`-compiled bootloader + libs
+against a `dio`-flashed chip; that flash-mode/lib mismatch makes `esp_psram_init()`
+fail at boot. The `boards.txt` `FlashMode.dio` menu (`esp32cam.menu.FlashMode.dio`, core 2.0.17) sets **both**
+`build.flash_mode=dio` _and_ `build.boot=dio`, so selecting it via the FQBN makes the
+libs, bootloader, and flash mode all agree — matching pio, which is why pio always
+reported `found=1`. Bench-proven on COM13 (AI-Thinker, ESP32-D0WD-V3):
+`qio_qspi → found=0`, `dio_qspi → found=1`.
+
+**How to avoid it next time.**
+
+1. **A passing compile-flag/define audit does not prove runtime behaviour.** Only a
+   bench flash of the _release_ binary + a serial check (`-- PSRAM: found=1`) proves
+   PSRAM (or any boot-time hardware bring-up) actually works. Infer-from-the-binary
+   was wrong here once already this session.
+2. `build.sh` now pins `FQBN=esp32:esp32:esp32cam:FlashMode=dio` and grows **two**
+   permanent guards over its `--verbose` `build/compile.log`: (a) `-DBOARD_HAS_PSRAM`
+   reached g++, and (b) the linked memory_type is `dio_qspi` (not `qio_qspi`) so it
+   matches the dio flash mode. Guard (b) is the one that catches this class of bug.
+3. When a sketch's `arduino-cli` FQBN omits the IDE menu selections (FlashMode,
+   PSRAM, PartitionScheme…), it silently inherits core defaults that may not match
+   the board's intent or the flash parameters you pass to `esptool merge_bin`. Make
+   the menu selections explicit in the FQBN and keep them consistent with `FLASH_MODE`.
+4. Inject app macros via `compiler.{c,cpp}.extra_flags`, never by overriding
+   `build.extra_flags` (which clobbers `{build.defines}`).
+5. The release runbook (`docs/07-deployment-view/firmware-release.md`) now flashes one
+   bench module and confirms `found=1` before publishing.
+
 ### Seeded "JPEGs" are undecodable random bytes — a pixels-rendered assertion can never pass against default fixtures (#154 phase 1)
 
 **What happened.** The new `module-latest-capture.spec.ts` asserted the

@@ -103,6 +103,22 @@ DEV_SERVER_HOST="$(printf '%s' "${DEV_SERVER_HOST:-}" | tr -d '[:space:]')"
 if [ -z "${DEV_SERVER_HOST}" ] && [ -f "${SKETCH_DIR}/DEV_SERVER_HOST" ]; then
   DEV_SERVER_HOST="$(tr -d '[:space:]' < "${SKETCH_DIR}/DEV_SERVER_HOST")"
 fi
+# HF_DEV_BUILD guard (#156): a "dev" build MUST target a dev stack, never bake
+# production URLs. `make flash-dev` sets HF_DEV_BUILD=1; if DEV_SERVER_HOST is
+# then unset, a default build would silently bake production and the flashed
+# module would register to highfive.schutera.com — the #145 "dead body on prod"
+# incident. Make that a hard error, mirroring the GEO_API_KEY FATAL gate below.
+# extra_scripts.py carries the identical guard so both build paths agree.
+if [ "${HF_DEV_BUILD:-}" = "1" ] && [ -z "${DEV_SERVER_HOST}" ]; then
+  echo "" >&2
+  echo "ERROR: HF_DEV_BUILD=1 but DEV_SERVER_HOST is unset. A dev build must" >&2
+  echo "       target a LAN dev stack, never bake the production URLs (a dev" >&2
+  echo "       module would otherwise register to highfive.schutera.com)." >&2
+  echo "       Fix: export DEV_SERVER_HOST=<LAN ip> or write" >&2
+  echo "       ESP32-CAM/DEV_SERVER_HOST. See docs/07-deployment-view/esp-flashing.md." >&2
+  echo "" >&2
+  exit 1
+fi
 DEV_URL_FLAGS=""
 if [ -n "${DEV_SERVER_HOST}" ]; then
   DEV_URL_FLAGS=" -DHF_INIT_URL_DEFAULT=\"http://${DEV_SERVER_HOST}:8002/new_module\" -DHF_UPLOAD_URL_DEFAULT=\"http://${DEV_SERVER_HOST}:8000/upload\""

@@ -1,6 +1,7 @@
 #include "esp_camera.h"
 #include "esp_wifi.h"
 #include "esp_init.h"
+#include "config_json.h"       // hf::setServerUrlsInConfigJson etc. — issue #156
 #include "firmware_defaults.h" // hf::defaults::k*ProductionFallback (issue #66)
 #include "form_query.h"        // hf::rewriteLegacyHighfiveUrl — issue #79
 #include "geolocation.h"       // hf::isPlausibleFix — issue #89
@@ -576,6 +577,14 @@ bool loadConfig(esp_config_t *esp_config) {
     Serial.println("------ loadConfig: migrating saved URLs to https:// (issue #79)");
     esp_config_doc["NETWORK"]["UPLOAD_URL"] = uploadMigrated;
     esp_config_doc["NETWORK"]["INIT_URL"]   = initMigrated;
+    // NOTE: this migration re-save still uses the older truncate-first pattern
+    // (open "w" then serializeJson), so it carries the #19 window the #156
+    // writers below (writeServerUrlsToConfig) deliberately avoid by computing
+    // the JSON before opening the file. It is left as-is here because it already
+    // handles a 0-byte write explicitly (clearing the configured flag so the
+    // portal reopens), and because it only fires once, on the first post-#79
+    // boot of a legacy config. If this is ever generalised, switch it to the
+    // compute-before-open shape too.
     File out = SPIFFS.open(esp_config->CONFIG_FILE, "w");
     if (out) {
       const size_t bytesWritten = serializeJson(esp_config_doc, out);
@@ -600,6 +609,76 @@ bool loadConfig(esp_config_t *esp_config) {
       Serial.println("------ loadConfig: failed to open config.json for migration re-save");
     }
   }
+  return true;
+}
+
+/* ---- issue #156: developer serial-console server retargeting writers ----
+   Read-modify-write /config.json so an out-of-band URL override persists
+   without disturbing the Wi-Fi credentials the captive portal owns. The pure
+   JSON mutation lives in lib/config_json (host-tested); these wrappers do the
+   SPIFFS I/O. Unlike the pre-#156 saveConfig, the new JSON is computed BEFORE
+   the file is opened "w", so the truncate-then-fail trap (#19) cannot strand an
+   empty file — on any failure the existing config is left byte-for-byte intact.
+   loadConfig already READS NETWORK.INIT_URL/UPLOAD_URL (see above), so a
+   successful write here retargets the module on the next loadConfig. */
+namespace {
+bool readConfigToString(const char* path, std::string& out) {
+  out.clear();
+  if (!SPIFFS.begin(true)) {
+    Serial.println("------ retarget: SPIFFS mount failed");
+    return false;
+  }
+  if (!SPIFFS.exists(path)) return true;  // missing file => empty (fresh)
+  File f = SPIFFS.open(path, "r");
+  if (!f) {
+    Serial.println("------ retarget: failed to open config for reading");
+    return false;
+  }
+  while (f.available()) out += static_cast<char>(f.read());
+  f.close();
+  return true;
+}
+
+bool writeStringToConfig(const char* path, const std::string& data) {
+  // `data` is already validated non-empty by the caller — opening "w" (which
+  // truncates) only happens once we KNOW we have good bytes.
+  File f = SPIFFS.open(path, "w");
+  if (!f) {
+    Serial.println("------ retarget: failed to open config for writing");
+    return false;
+  }
+  const size_t n = f.print(data.c_str());
+  f.close();
+  return n > 0;
+}
+}  // namespace
+
+bool writeServerUrlsToConfig(const char* path, const char* initUrl,
+                             const char* uploadUrl) {
+  std::string existing;
+  if (!readConfigToString(path, existing)) return false;
+  const std::string updated = hf::setServerUrlsInConfigJson(
+      existing, initUrl ? initUrl : "", uploadUrl ? uploadUrl : "");
+  if (updated.empty()) {
+    Serial.println("------ retarget: serialize produced 0 bytes or corrupt config — left untouched");
+    return false;
+  }
+  if (!writeStringToConfig(path, updated)) return false;
+  Serial.printf("------ retarget: saved INIT_URL=%s UPLOAD_URL=%s\n",
+                initUrl ? initUrl : "", uploadUrl ? uploadUrl : "");
+  return true;
+}
+
+bool clearServerUrlsFromConfig(const char* path) {
+  std::string existing;
+  if (!readConfigToString(path, existing)) return false;
+  const std::string updated = hf::clearServerUrlsInConfigJson(existing);
+  if (updated.empty()) {
+    Serial.println("------ retarget: serialize produced 0 bytes or corrupt config — left untouched");
+    return false;
+  }
+  if (!writeStringToConfig(path, updated)) return false;
+  Serial.println("------ retarget: cleared INIT_URL/UPLOAD_URL — baked defaults resume next loadConfig");
   return true;
 }
 

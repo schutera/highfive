@@ -3,9 +3,11 @@
 #include <FS.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
+#include "config_json.h"   // hf::setWifiCredsInConfigJson — issue #156 (R1)
 #include "esp_init.h"   // setESPConfigured
 #include "form_query.h" // hf::urlDecode, hf::getParam, hf::resolveKeepCurrentField (host-testable)
 #include "led.h"        // ledTick during the AP server loop
+#include "serial_console.h" // serialConsolePoll during the AP server loop — issue #156
 #include <string>
 
 const char *HOST_SSID = "ESP32-Access-Point";
@@ -115,50 +117,52 @@ void loadConfig() {
   ----------------------------------
 */
 void saveConfig() {
-  StaticJsonDocument<1024> doc;
+  // Read-modify-write (issue #156, R1). The captive portal owns only the Wi-Fi
+  // credentials, but it must NOT clobber an out-of-band server-URL override an
+  // operator/developer set via the serial console (esp_init.cpp's
+  // writeServerUrlsToConfig writes NETWORK.INIT_URL/UPLOAD_URL into the same
+  // file). The pre-#156 version rebuilt the document from scratch, which
+  // silently dropped those keys on the next Wi-Fi save. We now load the
+  // existing config and overwrite ONLY SSID/PASSWORD via the host-tested pure
+  // helper (lib/config_json), which preserves every other key. This is not a
+  // re-introduction of operator-editable URL fields — the FORM stays
+  // Wi-Fi-only (ADR-018); only on-disk key preservation changed.
+  std::string existing;
+  if (SPIFFS.exists("/config.json")) {
+    File rf = SPIFFS.open("/config.json", "r");
+    if (rf) {
+      while (rf.available()) existing += static_cast<char>(rf.read());
+      rf.close();
+    }
+  }
 
-  JsonObject net  = doc.createNestedObject("NETWORK");
+  const std::string updated = hf::setWifiCredsInConfigJson(
+      existing, std::string(cfg_ssid.c_str()), std::string(cfg_password.c_str()));
 
-  // Only Wi-Fi credentials are persisted. Module name, server URLs and
-  // camera settings are intentionally absent from /config.json: esp_init.cpp's
-  // loadConfig derives them under the hood (MAC-derived name, compile-time
-  // URL defaults from firmware_defaults.h, production camera fallbacks) when
-  // the keys are missing, so a Wi-Fi-only config is complete.
-  net["SSID"]        = cfg_ssid;
-  net["PASSWORD"]    = cfg_password;
+  // Truncation/overflow gate (issue #19). The pure helper returns "" if the
+  // document overflowed the StaticJsonDocument pool. Because we compute the new
+  // JSON BEFORE opening the file for writing, an overflow now leaves the
+  // existing config byte-for-byte intact (the pre-#156 code truncated first,
+  // then discovered the overflow). We still skip setESPConfigured(true) so a
+  // first-time setup re-enters the captive portal on the next boot.
+  if (updated.empty()) {
+    Serial.println("[saveConfig] serialize produced 0 bytes — leaving config.json "
+                   "untouched, skipping setESPConfigured so the next boot lands "
+                   "back in the captive portal (first-time or via WiFi-fail "
+                   "auto-fallback on re-config)");
+    return;
+  }
 
   File f = SPIFFS.open("/config.json", "w");
   if (!f) {
     Serial.println("Failed to open config.json for writing");
     return;
   }
-  // Truncation gate (issue #19). If `serializeJson` returns 0 the document
-  // overflowed the StaticJsonDocument pool. The on-disk `/config.json` has
-  // already been opened "w" (truncated to zero bytes) by `SPIFFS.open`
-  // above, so a previously-good file is now empty regardless of what we
-  // do next — but we can still skip `setESPConfigured(true)`. On first-time
-  // setup that keeps the NVS `configured` flag false, so next boot re-enters
-  // the captive portal; the captive-portal reader (`host.cpp`'s own
-  // `loadConfig`) will trip over the empty file once, log "Failed to parse
-  // config.json", and leave `cfg_ssid`/`cfg_password` at their initial empty
-  // strings — the form simply renders as first-time setup. On
-  // re-configuration the flag persists `true` from an earlier successful
-  // save; next boot calls `esp_init.cpp`'s `loadConfig`, `deserializeJson`
-  // returns a parse error on the empty file, `loadConfig` logs "JSON parse
-  // error" and returns false without touching `esp_config->wifi_config`,
-  // so the SSID/PASSWORD fields keep their BSS-zero defaults.
-  // `setupWifiConnection` then times out trying to join an empty SSID, the
-  // WiFi-fail counter advances, and after `WIFI_FAIL_AP_FALLBACK_THRESH`
-  // consecutive failures the setup path in `ESP32-CAM/ESP32-CAM.ino`
-  // re-enters the captive portal. Either way the device does not run with
-  // truncated credentials in the field.
-  size_t bytes_written = serializeJson(doc, f);
+  const size_t bytes_written = f.print(updated.c_str());
   f.close();
   if (bytes_written == 0) {
-    Serial.println("[saveConfig] serializeJson wrote 0 bytes — config.json "
-                   "is now empty, skipping setESPConfigured so the next boot "
-                   "lands back in the captive portal (first-time or via "
-                   "WiFi-fail auto-fallback on re-config)");
+    Serial.println("[saveConfig] wrote 0 bytes to config.json — skipping "
+                   "setESPConfigured so the next boot re-enters the captive portal");
     return;
   }
 
@@ -384,6 +388,15 @@ void runAccessPoint() {
   while (server_running) {
     esp_task_wdt_reset();
     ledTick();
+    // issue #156: developer serial console during onboarding. A `set-server
+    // <host>` here writes the dev URLs into /config.json BEFORE the operator
+    // submits Wi-Fi, so the same boot's loadConfig (esp_init.cpp, run right
+    // after this AP exits) picks them up and the module's FIRST registration
+    // goes to the dev stack — never to production. No esp_config struct exists
+    // yet, so pass null (the path defaults to /config.json) and inBootWindow
+    // false (the override is read by the upcoming loadConfig, not re-applied
+    // here).
+    serialConsolePoll(nullptr, /*inBootWindow=*/false);
     WiFiClient client = server.available();
     if (client) {
       Serial.println("\n------ CLIENT CONNECTED ------");

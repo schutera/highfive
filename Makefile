@@ -4,12 +4,14 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys
+.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys
 
 help:
 	@echo "HiveHive — available make targets"
 	@echo ""
 	@echo "  make firmware           Build ESP32-CAM firmware and stage homepage/public/firmware.bin"
+	@echo "  make flash-dev          Build+flash dev firmware over USB (DEV_SERVER_HOST baked, Wi-Fi preserved)"
+	@echo "                          e.g. DEV_SERVER_HOST=192.168.1.50 make flash-dev PORT=COM9"
 	@echo "  make test               Run every test suite that can run on this host"
 	@echo "  make test-esp           Run ESP32-CAM unit tests on host (no hardware)"
 	@echo "  make test-esp-native    Alias for test-esp"
@@ -42,6 +44,24 @@ help:
 firmware:
 	@echo ">>> ESP32-CAM/build.sh"
 	cd ESP32-CAM && ./build.sh
+
+# Dev flash (#156). Builds with the LAN dev stack baked in and uploads over USB
+# serial. HF_DEV_BUILD=1 makes extra_scripts.py hard-fail if DEV_SERVER_HOST is
+# unset, so a dev flash can never silently bake production URLs (the #145 "dead
+# body on prod" incident). `pio run -t upload` does NOT erase NVS/SPIFFS, so the
+# module's Wi-Fi credentials survive the swap — no re-onboarding between dev
+# firmware iterations. Set PORT=COMx (Windows) or PORT=/dev/ttyUSBx to choose a
+# port; omit to let PlatformIO auto-detect. DEV_SERVER_HOST must be set via env
+# var or the gitignored ESP32-CAM/DEV_SERVER_HOST file.
+# HF_DEV_BUILD is set as a target-specific EXPORTED make variable rather than a
+# shell-inline `VAR=1 cmd` prefix: make exports it into the recipe's process
+# environment directly, so it works whether make runs recipes through sh
+# (Linux/macOS/Git-Bash) or cmd.exe (Windows GNU make), where `VAR=1 cmd` is a
+# parse error. extra_scripts.py reads it from os.environ.
+flash-dev: export HF_DEV_BUILD := 1
+flash-dev:
+	@echo ">>> HF_DEV_BUILD=1 pio run -e esp32cam -t upload (DEV_SERVER_HOST baked, Wi-Fi preserved)"
+	cd ESP32-CAM && pio run -e esp32cam -t upload $(if $(PORT),--upload-port $(PORT),)
 
 test: test-esp-native test-e2e
 

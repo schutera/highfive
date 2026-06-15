@@ -118,7 +118,14 @@ export interface HeartbeatSnapshot {
   // 2xx, `lastHbFailCode` the most recent failure's return value (negative
   // sentinel like -2 = connect/WiFi-down, or the raw non-2xx HTTP code). A
   // non-zero count on an otherwise-online module is the #170 reboot-loop
-  // signature made remotely visible. Null when the firmware predates #172.
+  // signature made remotely visible.
+  // Three-valued: a positive count is a live/just-ended streak; `0` is a
+  // healthy module that actively reported "no failures"; `null` is firmware
+  // predating #172. The firmware emits these on EVERY heartbeat (0 when
+  // healthy), not just when a streak exists, so the backend's
+  // `ARG_MAX(last_hb_fail_count, received_at)` fold — which ignores NULL rows —
+  // reflects the latest heartbeat instead of latching a stale streak after
+  // recovery. So `0` (cleared) and `null` (legacy) are genuinely distinct here.
   lastHbFailCode: number | null;
   lastHbFailCount: number | null;
 }

@@ -29,10 +29,28 @@ void setUp() {
 
 void tearDown() {}
 
-// After a clear the streak reads {0, 0}. This is also the cold-boot
-// fail-closed property (a clear leaves the magic valid with a zero count,
-// and a fresh process with invalid magic returns the same {0, 0}).
-static void test_clear_reads_zero(void) {
+// After a clear the streak reads {0, 0}. `hbFailureClear` INVALIDATES the
+// magic guard (it does not leave a valid zero-count slot), so this peek goes
+// through the exact same fail-closed branch as cold-boot RTC garbage — i.e.
+// this case pins the magic-guard fail-closed property, the one safety net that
+// keeps indeterminate RTC contents on a cold boot from masquerading as a
+// real reboot-loop streak. setUp() leaves us in precisely that invalid-magic
+// state before every case.
+static void test_clear_reads_zero_via_failclosed_path(void) {
+    HbFailure f = hbFailurePeek();
+    TEST_ASSERT_EQUAL_INT(0, f.code);
+    TEST_ASSERT_EQUAL_UINT32(0, f.count);
+}
+
+// Explicit fail-closed pin: arm a real streak (valid magic), then clear, then
+// peek. If clear ever regressed to leaving the magic valid, a future cold boot
+// with stale RTC contents would surface a phantom streak; this asserts the
+// post-clear slot is genuinely the {0, 0} fail-closed state.
+static void test_clear_invalidates_into_failclosed_state(void) {
+    hbFailureNote(503);
+    hbFailureNote(503);
+    TEST_ASSERT_EQUAL_UINT32(2, hbFailurePeek().count);
+    hbFailureClear();
     HbFailure f = hbFailurePeek();
     TEST_ASSERT_EQUAL_INT(0, f.code);
     TEST_ASSERT_EQUAL_UINT32(0, f.count);
@@ -95,7 +113,8 @@ static void test_note_after_clear_starts_fresh(void) {
 
 int main(int, char**) {
     UNITY_BEGIN();
-    RUN_TEST(test_clear_reads_zero);
+    RUN_TEST(test_clear_reads_zero_via_failclosed_path);
+    RUN_TEST(test_clear_invalidates_into_failclosed_state);
     RUN_TEST(test_single_note);
     RUN_TEST(test_streak_accumulates_latest_code_wins);
     RUN_TEST(test_peek_is_non_mutating);

@@ -88,9 +88,22 @@ as the `lib/breadcrumb` stage marker) and attaches it to the next 2xx
 heartbeat — typically the boot heartbeat after a `livenessReboot`, which then
 clears it. A non-zero `lastHbFailCount` on an otherwise-online module is the
 reboot-loop / flaky-contact signature; `HeartbeatDiagnostics` renders it as a
-**possible reboot loop** banner. `null` on pre-#172 firmware (mixed fleet is
-type-safe). Note `lastHbFailCount: 0` (cleared after a healthy 2xx) and `null`
-(firmware can't report it) are deliberately distinct.
+**possible reboot loop** banner.
+
+The field is **three-valued and deliberately dense**: a positive count is a
+streak, `0` is a healthy module that actively reported "no failures", and
+`null` is pre-#172 firmware. The firmware emits the fields on **every**
+heartbeat (`0` when healthy), not just when a streak exists — because the
+backend folds them via `ARG_MAX(last_hb_fail_count, received_at)` in
+`/heartbeats_summary`, and DuckDB's `ARG_MAX` **ignores NULL rows**. A sparse
+field (omitted when healthy → NULL) would make the summary skip the recovery
+heartbeats and latch the last non-zero streak forever, so the banner would
+never clear after a module recovered. Emitting `0` keeps the column dense like
+`rssi`/`reset_reason`/`boot_count` so the latest heartbeat always wins. This
+is why `0` (cleared) and `null` (legacy) are genuinely distinct on the wire —
+the regression is pinned by
+`duckdb-service/tests/test_heartbeats_endpoint.py`'s
+`test_heartbeats_summary_clears_streak_after_recovery_not_latching`.
 
 `Module` gained `displayName`, `email`, `updatedAt`, `lastSeenAt`, and
 `latestHeartbeat`. `displayName` is the admin-settable label override

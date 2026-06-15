@@ -36,7 +36,8 @@ void hbFailureNote(int code);
 
 // Clear the streak. Called after a heartbeat round-trips a 2xx — the server
 // has now seen (or no longer needs) the streak, so the next heartbeat starts
-// fresh.
+// fresh. Invalidates the magic guard, so a cleared slot is indistinguishable
+// from cold-boot memory (both peek as {0, 0}); `hbFailureNote` re-arms it.
 void hbFailureClear();
 
 // Read the current streak without mutating it. Returns {0, 0} when no valid

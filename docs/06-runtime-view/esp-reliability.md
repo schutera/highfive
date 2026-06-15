@@ -163,11 +163,11 @@ reaches the server (no 2xx response). In #170 the boot heartbeat returned
 the liveness watchdog (§3a), so the reason the steady-state contact path was
 broken was invisible remotely without a physical serial capture
 ([`scripts/esp_capture.py`](../../scripts/esp_capture.py)). `sendHeartbeat`
-now carries two more fields when a prior streak exists: `last_hb_fail_code`
+now carries two more fields on **every** heartbeat: `last_hb_fail_code`
 (the most recent failed heartbeat's return value — `-2` connect/WiFi-down,
 `-4` unparseable status line, otherwise the raw non-2xx HTTP code) and
-`last_hb_fail_count` (consecutive failures since the last 2xx). The streak is
-persisted across software resets in RTC memory
+`last_hb_fail_count` (consecutive failures since the last 2xx; `0` when
+healthy). The streak is persisted across software resets in RTC memory
 ([`ESP32-CAM/lib/hb_failure`](../../ESP32-CAM/lib/hb_failure/hb_failure.h),
 the same `RTC_NOINIT` storage class as the §4 breadcrumb), peeked to build
 each heartbeat body, then **cleared on a 2xx / extended on a failure** —
@@ -176,10 +176,17 @@ outage on the reporting heartbeat keeps the streak queued rather than dropping
 it. The reboot loop ends with a `livenessReboot` → the next boot heartbeat
 round-trips `200` and carries the streak to the server, which clears it. The
 fields thread through the same path as the #148 fields and render as a
-**possible reboot loop** banner in `HeartbeatDiagnostics`. `last_hb_fail_count:
-0` (cleared after a healthy 2xx) and `NULL` (pre-#172 firmware) are distinct.
-This is the remote-diagnostics piece of #172; note it only takes effect once
-shipped as a higher-`SEQUENCE` OTA (the #170 roll-forward) — see
+**possible reboot loop** banner in `HeartbeatDiagnostics`.
+
+Unlike the geolocation-recovery fields (attached only when a fix is pending),
+these are sent **densely** — `0` when there is no streak, not omitted. The
+backend folds them via `ARG_MAX(last_hb_fail_count, received_at)` in
+`/heartbeats_summary`, and DuckDB's `ARG_MAX` ignores NULL rows: a sparse field
+would let the summary skip a recovered module's heartbeats and latch the last
+non-zero streak forever, so the banner would never clear. So `0` (cleared) and
+`NULL` (pre-#172 firmware) are genuinely distinct on the wire. This is the
+remote-diagnostics piece of #172; note it only takes effect once shipped as a
+higher-`SEQUENCE` OTA (the #170 roll-forward) — see
 [firmware-release.md](../07-deployment-view/firmware-release.md).
 
 ### 3a. Liveness self-heal watchdog (#148 Phase 3)

@@ -112,7 +112,7 @@ const baseModule: ModuleDetail = {
     resetReason: 'POWERON',
     minFreeHeap: 180000,
     bootCount: 1,
-    lastHbFailCode: null,
+    lastHbFailCode: 0,
     lastHbFailCount: 0,
   },
   nests: [],

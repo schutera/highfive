@@ -40,14 +40,22 @@ void hbFailureNote(int code) {
 }
 
 void hbFailureClear() {
-    s_magic = kMagic;
+    // Invalidate the magic (do NOT set kMagic) so a cleared slot reads through
+    // the exact same fail-closed path as cold-boot RTC garbage — both mean "no
+    // streak". This mirrors lib/breadcrumb's clear and keeps the invariant
+    // `magic == kMagic` iff `count >= 1`, so the magic guard is the single
+    // gate on "is there a streak". `hbFailureNote` re-arms the magic.
+    s_magic = 0;
     s_code = 0;
     s_count = 0;
 }
 
 HbFailure hbFailurePeek() {
     if (s_magic != kMagic) {
-        return HbFailure{};  // {0, 0} — fail-closed on indeterminate memory
+        // Fail-closed on indeterminate memory (cold boot) OR a cleared slot —
+        // both report {0, 0} so cold-boot garbage can never masquerade as a
+        // streak and a healthy module reports a dense 0.
+        return HbFailure{};
     }
     HbFailure out;
     out.code = s_code;

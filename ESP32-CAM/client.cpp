@@ -373,18 +373,29 @@ int sendHeartbeat(esp_config_t *esp_config) {
          fix.latitude, fix.longitude, fix.accuracy);
   }
 
-  // #172: carry the previous heartbeat-failure streak so the server can see
-  // WHY the hourly (between-boot) heartbeats failed. Those failures never
-  // round-trip a 2xx, so they're invisible remotely; this is typically read
-  // off the BOOT heartbeat after a `livenessReboot` (the #170 case: boot
-  // heartbeat 200, every hourly one before it failed). PEEK here to build the
-  // body — the streak is cleared on 2xx / extended on failure below, mirroring
-  // the geolocation peek/commit split, so a server outage on this heartbeat
-  // keeps the streak queued for the next one rather than dropping it.
+  // #172: carry the heartbeat-failure streak so the server can see WHY the
+  // hourly (between-boot) heartbeats failed. Those failures never round-trip a
+  // 2xx, so they're invisible remotely; this is typically read off the BOOT
+  // heartbeat after a `livenessReboot` (the #170 case: boot heartbeat 200,
+  // every hourly one before it failed). PEEK here to build the body — the
+  // streak is cleared on 2xx / extended on failure below, mirroring the
+  // geolocation peek/commit split, so a server outage on this heartbeat keeps
+  // the streak queued for the next one rather than dropping it.
+  //
+  // Sent UNCONDITIONALLY (count 0 when healthy), unlike the conditional
+  // geolocation fields above. The geolocation fields drive a one-shot UPDATE
+  // side effect; these are folded into `/heartbeats_summary` via
+  // `ARG_MAX(last_hb_fail_count, received_at)`, which IGNORES NULL rows — so a
+  // SPARSE field would make the summary latch the last non-zero streak forever
+  // and the dashboard's reboot-loop banner would never clear after recovery.
+  // Emitting 0 keeps the field dense like rssi/reset_reason/boot_count, so the
+  // summary always reflects the latest heartbeat. ~30 bytes on a body that is
+  // already a few hundred. Pre-#172 firmware omits both → NULL (legacy),
+  // distinct on the wire from a live 0.
   const hf::HbFailure prevHbFail = hf::hbFailurePeek();
+  body += String("&last_hb_fail_code=")  + String(prevHbFail.code);
+  body += String("&last_hb_fail_count=") + String((unsigned long)prevHbFail.count);
   if (prevHbFail.count > 0) {
-    body += String("&last_hb_fail_code=")  + String(prevHbFail.code);
-    body += String("&last_hb_fail_count=") + String((unsigned long)prevHbFail.count);
     logf("[heartbeat] carrying prior heartbeat-failure streak code=%d count=%lu",
          prevHbFail.code, (unsigned long)prevHbFail.count);
   }

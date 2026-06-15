@@ -25,8 +25,10 @@ const healthy: HeartbeatSnapshot = {
   resetReason: 'POWERON',
   minFreeHeap: 69_916,
   bootCount: 12,
-  lastHbFailCode: null,
-  lastHbFailCount: 0, // no failures preceding the last contact
+  // #172 fields are dense (sent on every heartbeat): a healthy module reports
+  // 0/0, distinct on the wire from pre-#172 firmware's null/null.
+  lastHbFailCode: 0,
+  lastHbFailCount: 0,
 };
 
 describe('HeartbeatDiagnostics', () => {

@@ -549,11 +549,18 @@ def test_heartbeats_get_returns_failure_streak_fields(client, fresh_db):
     assert hb["last_hb_fail_count"] == 4
 
 
-def test_heartbeats_summary_returns_latest_failure_streak_fields(client, fresh_db):
-    # Two heartbeats: the summary must reflect the MOST RECENT one's streak
-    # (ARG_MAX over received_at). The reboot-loop session ends with a 2xx boot
-    # heartbeat carrying the streak; the very next (now-healthy) heartbeat
-    # clears it to 0 — the summary must show the cleared value, not the spike.
+def test_heartbeats_summary_clears_streak_after_recovery_not_latching(client, fresh_db):
+    # REGRESSION (the reason the firmware sends the streak fields DENSELY, with
+    # a literal 0 on a healthy heartbeat rather than omitting them): the summary
+    # folds the latest value via `ARG_MAX(last_hb_fail_count, received_at)`, and
+    # DuckDB's ARG_MAX *ignores rows where the arg is NULL*. So if a recovered
+    # module sent NULL (omitted fields) after a reboot-loop session that wrote
+    # last_hb_fail_count=3, ARG_MAX would skip the NULL recovery rows and latch
+    # the stale 3 forever — the dashboard's "possible reboot loop" banner would
+    # never clear. Sending 0 keeps the column dense so the latest heartbeat wins.
+    #
+    # Sequence: reboot-loop boot heartbeat carries the streak, then the now-
+    # healthy heartbeat reports 0/0. The summary MUST show the cleared 0, not 3.
     client.post(
         "/heartbeat",
         data={
@@ -573,8 +580,11 @@ def test_heartbeats_summary_returns_latest_failure_streak_fields(client, fresh_d
     resp = client.get("/heartbeats_summary")
     assert resp.status_code == 200
     entry = resp.get_json()["summary"][CANONICAL_MAC]
+    assert entry["last_hb_fail_count"] == 0, (
+        "summary latched a stale streak — ARG_MAX skipped the cleared row; "
+        "the recovery banner would never clear"
+    )
     assert entry["last_hb_fail_code"] == 0
-    assert entry["last_hb_fail_count"] == 0
 
 
 def test_heartbeat_omitting_failure_streak_stores_null(client, fresh_db):

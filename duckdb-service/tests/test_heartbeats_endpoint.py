@@ -561,6 +561,8 @@ def test_heartbeats_summary_clears_streak_after_recovery_not_latching(client, fr
     #
     # Sequence: reboot-loop boot heartbeat carries the streak, then the now-
     # healthy heartbeat reports 0/0. The summary MUST show the cleared 0, not 3.
+    import time
+
     client.post(
         "/heartbeat",
         data={
@@ -569,6 +571,11 @@ def test_heartbeats_summary_clears_streak_after_recovery_not_latching(client, fr
             "last_hb_fail_count": 3,
         },
     )
+    # Make the recovery strictly later: received_at is stamped server-side at
+    # now() with microsecond precision, and ARG_MAX picks the max-received_at
+    # row — so a same-microsecond tie between the two posts could otherwise let
+    # ARG_MAX pick the streak row and mask the regression this test guards.
+    time.sleep(0.01)
     client.post(
         "/heartbeat",
         data={

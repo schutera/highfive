@@ -115,10 +115,11 @@ export interface HeartbeatSnapshot {
   // BOOT call. These two carry the previous failure streak forward on the
   // next 2xx heartbeat (typically the boot heartbeat after a `livenessReboot`):
   // `lastHbFailCount` is how many consecutive heartbeats failed before that
-  // 2xx, `lastHbFailCode` the most recent failure's return value (negative
-  // sentinel like -2 = connect/WiFi-down, or the raw non-2xx HTTP code). A
-  // non-zero count on an otherwise-online module is the #170 reboot-loop
-  // signature made remotely visible.
+  // 2xx, `lastHbFailCode` the most recent failure's return value: `-2` =
+  // connect/WiFi-down, `-4` = unparseable status line (`kInvalidStatus` in
+  // ESP32-CAM/lib/http_status), otherwise the raw non-2xx HTTP code; `0` when
+  // there is no current streak. A non-zero count on an otherwise-online module
+  // is the #170 reboot-loop signature made remotely visible.
   // Three-valued: a positive count is a live/just-ended streak; `0` is a
   // healthy module that actively reported "no failures"; `null` is firmware
   // predating #172. The firmware emits these on EVERY heartbeat (0 when

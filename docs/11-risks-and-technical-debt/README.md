@@ -86,6 +86,58 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### A sparse wire field broke an `ARG_MAX` summary fold — the dashboard signal would have latched forever (#172, review-caught)
+
+**What happened.** #172 added `last_hb_fail_code` / `last_hb_fail_count`
+to the heartbeat so a reboot-looping module reports _why_ its hourly
+heartbeats fail. The first cut attached the fields **only when a streak
+existed** (`if (prevHbFail.count > 0)` in
+`ESP32-CAM/client.cpp`'s `sendHeartbeat`), mirroring the conditional
+geolocation-recovery fields right above it. Every unit test passed and
+the field round-tripped correctly. But the backend folds the latest value
+into the dashboard via `ARG_MAX(last_hb_fail_count, received_at)` in
+`duckdb-service/routes/heartbeats.py`'s `get_heartbeats_summary`, and a
+recovered module — sending nothing → NULL — would have made the
+**"possible reboot loop" banner stick forever**: once a module had logged
+a non-zero streak, it could never visibly recover. Caught in senior-review,
+before merge, not in the field.
+
+**Why it happened.** DuckDB's `ARG_MAX(value, ordering)` **ignores rows
+where `value` IS NULL** — it does not return "the `value` at the max
+`ordering`", it returns "the max-`ordering` row _among rows with a
+non-null value_". So a sparse column (present only on the exceptional
+path, NULL otherwise) makes `ARG_MAX` skip every recovery row and latch
+the last non-null reading. The `#148` diagnostic fields next to it didn't
+hit this only because they're sent on _every_ heartbeat (always non-null
+for that firmware). The conditional-attach instinct — copied verbatim
+from the geolocation fields a few lines up — was wrong here because those
+fields drive a one-shot `UPDATE` side effect, never an `ARG_MAX` fold.
+Verified empirically: `ARG_MAX(cnt, ts)` over `(ts=10:00, cnt=3)`,
+`(ts=11:00, cnt=NULL)` returns `3`, not NULL.
+
+**How to avoid it next time.** A wire field that a summary endpoint folds
+with `ARG_MAX` / `LAST` / any "latest non-null wins" group-by **must be
+sent densely** — emit an explicit `0`/sentinel on the normal path, never
+omit-it-to-NULL — so the latest row always wins and a transient state can
+clear. Sparse-when-absent is only safe for fields read row-by-row (the
+`/heartbeats` list endpoint) or fields that drive a side effect rather
+than a fold (the geolocation `latitude`/`longitude` recovery). Beware the
+**dense-vs-sparse juxtaposition trap** now living a few lines apart in
+`sendHeartbeat`: `battery` is deliberately **omitted** (sparse — the
+`measurements` dual-write treats `0` as a real sample, so a missing
+reading must be an absent row), while the fail-streak is deliberately
+**dense** (the summary `ARG_MAX` treats NULL as skip, so a healthy state
+must be a real `0`). They are opposite **on purpose**; a "consistency"
+cleanup that aligns one to the other reintroduces a shipped-and-fixed bug
+in whichever direction it moves. Regression pin:
+`duckdb-service/tests/test_heartbeats_endpoint.py`'s
+`test_heartbeats_summary_clears_streak_after_recovery_not_latching` seeds
+a `count=3` streak then a `count=0` recovery and asserts the summary
+returns `0`. This is the same "envelope right, behaviour wrong" family as
+the `date_trunc` all-zeros bug below — and the same CLAUDE.md rule #5
+fix: aggregation tests must seed real data and assert it lands in the
+expected bucket.
+
 ### `build.sh` release binaries ran without PSRAM — the FQBN's missing `FlashMode=dio` linked `qio_qspi` libs against a `dio`-flashed image (#163)
 
 **What happened.** A `build.sh`-built (release-path) firmware booted reporting

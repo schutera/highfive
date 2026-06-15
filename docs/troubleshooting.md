@@ -705,7 +705,9 @@ $mac = "000000000002"
 > [`ESP32-CAM/lib/loop_health/loop_health.h`](../ESP32-CAM/lib/loop_health/loop_health.h)
 > to ~`60UL * 1000UL` and flash. Then `docker compose stop duckdb-service`: the
 > board can't reach the server, so the liveness watchdog reboots it every
-> ~90 s — a clean `ESP.restart()` (`reset_reason=3` in the boot banner, **not**
+> ~90 s (the 60 s `kNoContactRebootMs` window + boot/WiFi-join time, observed —
+> not a derived constant) — a clean `ESP.restart()` (`reset_reason=3` in the
+> boot banner, **not**
 > `rst:0x1 POWERON_RESET`), so the streak climbs across reboots. After a few,
 > `docker compose start duckdb-service`; the next boot heartbeat carries the
 > accumulated `last_hb_fail_count` (e.g. `4`) and the server clears it on the

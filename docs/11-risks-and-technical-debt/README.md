@@ -148,8 +148,9 @@ demonstrably failed and called `hbFailureNote`. It looked like the
 the streak is fine in the field, the **bench reset tooling** just can't
 produce the reset _type_ the feature needs.
 
-**Why it happened.** `RTC_NOINIT_ATTR` data (the §4 breadcrumb and the
-`lib/hb_failure` streak both use it) lives in RTC slow memory, which is
+**Why it happened.** `RTC_NOINIT_ATTR` data (the issue-#42 cross-reboot
+breadcrumb in [`ESP32-CAM/lib/breadcrumb`](../../ESP32-CAM/lib/breadcrumb/) and
+the `lib/hb_failure` streak both use it) lives in RTC slow memory, which is
 retained across a **software** reset (`ESP.restart()` → `ESP_RST_SW`) and
 wiped on a **power-on / EN-pin** reset (`POWERON_RESET`, `rst:0x1` in the
 boot banner). [`scripts/esp_reset.py`](../../scripts/esp_reset.py) and
@@ -159,7 +160,7 @@ pulsing the CH340's RTS line, which pulls **EN** low — a `POWERON_RESET` that
 power cycle: the magic guard correctly reports "no streak" and the count
 starts fresh every boot. Every _field_ reboot path, by contrast, is a clean
 `ESP.restart()` — `livenessReboot`, `wifiHealthReboot`, the daily reboot, OTA
-post-flash, and the capture circuit-breaker — so the #170 reboot-loop case
+post-flash, and the upload circuit breaker — so the #170 reboot-loop case
 (a `livenessReboot`) preserves the streak and the next boot heartbeat carries
 it. The dense-`0` emission, store, summary fold and dashboard banner were all
 verified end-to-end by injecting heartbeats directly; only the on-silicon

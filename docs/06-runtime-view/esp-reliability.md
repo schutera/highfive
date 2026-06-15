@@ -188,7 +188,7 @@ exactly like the #148 reset/uptime diagnostics it sits beside.
 **Only software resets preserve the streak — bench-reset tooling cannot
 exercise it.** `RTC_NOINIT` survives an `ESP.restart()` (`ESP_RST_SW`), which
 is every field reboot path — `livenessReboot`, `wifiHealthReboot`, the daily
-reboot, OTA post-flash, and the capture circuit-breaker — and therefore the
+reboot, OTA post-flash, and the upload circuit breaker — and therefore the
 #170 reboot-loop case the feature targets. It does **not** survive an EN-pin
 reset (`POWERON_RESET`), and the RTS-line reset that
 [`scripts/esp_reset.py`](../../scripts/esp_reset.py) /

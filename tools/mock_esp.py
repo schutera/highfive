@@ -137,6 +137,8 @@ class MockEsp:
         boot_count: Optional[int] = None,
         uptime_ms: Optional[int] = None,
         rssi: Optional[int] = None,
+        last_hb_fail_code: Optional[int] = None,
+        last_hb_fail_count: Optional[int] = None,
     ) -> requests.Response:
         """POST /heartbeat on duckdb-service, mirrors sendHeartbeat in client.cpp.
 
@@ -147,6 +149,15 @@ class MockEsp:
         `init_url`: the firmware reuses INIT_URL's host+port and swaps the
         path to `/heartbeat`, so we derive it the same way rather than
         taking a separate URL.
+
+        The failure-streak fields (#172) — `last_hb_fail_code`,
+        `last_hb_fail_count` — are omitted unless explicitly passed. NOTE this
+        is a *test-ergonomics* default (so existing callers keep producing a
+        legacy-firmware → NULL heartbeat), NOT what the firmware does: real
+        #172 firmware emits both **densely** on every heartbeat (`0` when
+        healthy, never omitted) so the `/heartbeats_summary` `ARG_MAX` fold
+        can't latch a stale streak. Pass `last_hb_fail_count=0` to mimic a
+        healthy #172 module; omit for a pre-#172 module.
         """
         if not self.init_url:
             raise ValueError("init_url not configured")
@@ -175,6 +186,10 @@ class MockEsp:
         }
         if boot_count is not None:
             data["boot_count"] = str(boot_count)
+        if last_hb_fail_code is not None:
+            data["last_hb_fail_code"] = str(last_hb_fail_code)
+        if last_hb_fail_count is not None:
+            data["last_hb_fail_count"] = str(last_hb_fail_count)
         return requests.post(hb_url, data=data, timeout=self.timeout_s)
 
     def upload_loop(self, cycles: int, interval_s: float) -> List[int]:

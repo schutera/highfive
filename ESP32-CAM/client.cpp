@@ -7,6 +7,7 @@
 #include "url.h"
 #include "http_status.h"
 #include "breadcrumb.h"
+#include "hb_failure.h" // #172 — carry hourly-heartbeat failures across reboots
 #include <esp_system.h> // esp_reset_reason() — #148 heartbeat diagnostics
 #include <string>
 #include <time.h>
@@ -286,6 +287,7 @@ int postImage(esp_config_t *esp_config) {
 int sendHeartbeat(esp_config_t *esp_config) {
   if (WiFi.status() != WL_CONNECTED) {
     logf("[heartbeat] WiFi not connected — skipping");
+    hf::hbFailureNote(-2);  // #172: count the silent (no-2xx) failure
     return -2;
   }
 
@@ -316,6 +318,7 @@ int sendHeartbeat(esp_config_t *esp_config) {
     logf("[heartbeat] connect failed to %s:%u",
          url.host.c_str(), (unsigned)url.port);
     logbufNoteHttpCode(-2);
+    hf::hbFailureNote(-2);  // #172: count the silent (no-2xx) failure
     return -2;
   }
 
@@ -370,6 +373,33 @@ int sendHeartbeat(esp_config_t *esp_config) {
          fix.latitude, fix.longitude, fix.accuracy);
   }
 
+  // #172: carry the heartbeat-failure streak so the server can see WHY the
+  // hourly (between-boot) heartbeats failed. Those failures never round-trip a
+  // 2xx, so they're invisible remotely; this is typically read off the BOOT
+  // heartbeat after a `livenessReboot` (the #170 case: boot heartbeat 200,
+  // every hourly one before it failed). PEEK here to build the body — the
+  // streak is cleared on 2xx / extended on failure below, mirroring the
+  // geolocation peek/commit split, so a server outage on this heartbeat keeps
+  // the streak queued for the next one rather than dropping it.
+  //
+  // Sent UNCONDITIONALLY (count 0 when healthy), unlike the conditional
+  // geolocation fields above. The geolocation fields drive a one-shot UPDATE
+  // side effect; these are folded into `/heartbeats_summary` via
+  // `ARG_MAX(last_hb_fail_count, received_at)`, which IGNORES NULL rows — so a
+  // SPARSE field would make the summary latch the last non-zero streak forever
+  // and the dashboard's reboot-loop banner would never clear after recovery.
+  // Emitting 0 keeps the field dense like rssi/reset_reason/boot_count, so the
+  // summary always reflects the latest heartbeat. ~30 bytes on a body that is
+  // already a few hundred. Pre-#172 firmware omits both → NULL (legacy),
+  // distinct on the wire from a live 0.
+  const hf::HbFailure prevHbFail = hf::hbFailurePeek();
+  body += String("&last_hb_fail_code=")  + String(prevHbFail.code);
+  body += String("&last_hb_fail_count=") + String((unsigned long)prevHbFail.count);
+  if (prevHbFail.count > 0) {
+    logf("[heartbeat] carrying prior heartbeat-failure streak code=%d count=%lu",
+         prevHbFail.code, (unsigned long)prevHbFail.count);
+  }
+
   hf::breadcrumbSet("sendHeartbeat:write");
   hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
                + "Host: " + String(url.host.c_str()) + ":" + String((unsigned)url.port) + "\r\n"
@@ -412,6 +442,18 @@ int sendHeartbeat(esp_config_t *esp_config) {
   // and never reach this line, so the flag survives those too.
   if (sendingPendingFix && returnValue == 0) {
     commitPendingGeolocationFixReported();
+  }
+
+  // #172: commit-on-2xx for the failure streak. A 2xx means the server has now
+  // seen the streak we attached above (or there was none), so reset it; any
+  // non-2xx — including a parse failure (httpCode == kInvalidStatus) — extends
+  // the streak with the most recent code so the NEXT 2xx heartbeat reports the
+  // larger count. The early WiFi-down / connect-fail returns above already
+  // noted their own -2 and never reach this line.
+  if (returnValue == 0) {
+    hf::hbFailureClear();
+  } else {
+    hf::hbFailureNote(httpCode);
   }
 
   // Return shape: 0 for 2xx, otherwise the raw HTTP code or negative

@@ -1,0 +1,10 @@
+{
+  "name": "hf_hb_failure",
+  "version": "0.1.0",
+  "description": "RTC_NOINIT heartbeat-failure streak that survives ESP32 software resets. Diagnostic mechanism for issue #172 (reboot-loop visibility, spun out of #170) — accumulate the count + last code of failing heartbeats so the next 2xx heartbeat reports why the prior session's heartbeats failed. Pure C++17, host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

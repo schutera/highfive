@@ -134,9 +134,9 @@ NVS-backed monotonic reboot counter). These values already existed on the
 device, but were only reported on the **telemetry sidecar attached to image
 uploads** — which happen ~daily at noon. A crash-looping or hung module
 **never reaches that upload**, so the reason it keeps dying was invisible.
-Boot heartbeats fire on *every* reboot, so moving these onto the heartbeat
+Boot heartbeats fire on _every_ reboot, so moving these onto the heartbeat
 is the highest-leverage fully-remote diagnostic: the very next heartbeat
-after a reset reports *why*. The fields thread through
+after a reset reports _why_. The fields thread through
 `duckdb-service/routes/heartbeats.py` → `module_heartbeats` →
 `/heartbeats_summary` → `backend/src/database.ts` → `HeartbeatSnapshot`
 ([`contracts/src/index.ts`](../../contracts/src/index.ts)) → the
@@ -156,6 +156,62 @@ all three fields → stored `NULL` → type-safe on a mixed fleet mid-OTA. This
 is Phase 1 of #148; the firmware self-heal / liveness-watchdog work
 (Phases 3–4) is tracked there.
 
+**Heartbeat-failure streak fields (#172).** The #148 fields above describe
+only the **boot** heartbeat — because a _failed_ hourly heartbeat never
+reaches the server (no 2xx response). In #170 the boot heartbeat returned
+`200` while every hourly heartbeat in the following 2 h failed and tripped
+the liveness watchdog (§3a), so the reason the steady-state contact path was
+broken was invisible remotely without a physical serial capture
+([`scripts/esp_capture.py`](../../scripts/esp_capture.py)). `sendHeartbeat`
+now carries two more fields on **every** heartbeat: `last_hb_fail_code`
+(the most recent failed heartbeat's return value — `-2` connect/WiFi-down,
+`-4` unparseable status line, otherwise the raw non-2xx HTTP code) and
+`last_hb_fail_count` (consecutive failures since the last 2xx; `0` when
+healthy). The streak is persisted across software resets in RTC memory
+([`ESP32-CAM/lib/hb_failure`](../../ESP32-CAM/lib/hb_failure/hb_failure.h),
+the same `RTC_NOINIT` storage class as the §4 breadcrumb), peeked to build
+each heartbeat body, then **cleared on a 2xx / extended on a failure** —
+mirroring the geolocation peek/commit split in the same function, so a server
+outage on the reporting heartbeat keeps the streak queued rather than dropping
+it. The reboot loop ends with a `livenessReboot` → the next boot heartbeat
+round-trips `200` and carries the streak to the server, which clears it. The
+fields thread through the same path as the #148 fields and render as a
+**possible reboot loop** banner in `HeartbeatDiagnostics`, inside the module
+panel's **admin-gated Telemetry section**
+([`homepage/src/components/ModulePanel.tsx`](../../homepage/src/components/ModulePanel.tsx)'s
+`isAdminMode` / `adminMode &&` guard). It is an operator surface, **not shown
+on the public dashboard** — open the dashboard with `?admin=1` (which sets the
+`hf_admin` session flag) to see it. The heartbeat fields themselves need no
+admin key once that section is expanded; the section as a whole is admin-only,
+exactly like the #148 reset/uptime diagnostics it sits beside.
+
+**Only software resets preserve the streak — bench-reset tooling cannot
+exercise it.** `RTC_NOINIT` survives an `ESP.restart()` (`ESP_RST_SW`), which
+is every field reboot path — `livenessReboot`, `wifiHealthReboot`, the daily
+reboot, OTA post-flash, and the upload circuit breaker — and therefore the
+#170 reboot-loop case the feature targets. It does **not** survive an EN-pin
+reset (`POWERON_RESET`), and the RTS-line reset that
+[`scripts/esp_reset.py`](../../scripts/esp_reset.py) /
+[`scripts/esp_capture.py`](../../scripts/esp_capture.py) drive is an EN-pin
+reset — so the streak resets to `0` on every bench reset and cannot be
+_accumulated_ across reboots from the bench. To see a non-zero count carried
+on real hardware you must trigger a software reboot (wait for / induce a
+watchdog `ESP.restart()`); the note/peek/clear/magic-guard logic itself is
+native-tested in
+[`test_native_hb_failure`](../../ESP32-CAM/test/test_native_hb_failure/test_hb_failure.cpp).
+See [chapter 11](../11-risks-and-technical-debt/README.md) for the lesson.
+
+Unlike the geolocation-recovery fields (attached only when a fix is pending),
+these are sent **densely** — `0` when there is no streak, not omitted. The
+backend folds them via `ARG_MAX(last_hb_fail_count, received_at)` in
+`/heartbeats_summary`, and DuckDB's `ARG_MAX` ignores NULL rows: a sparse field
+would let the summary skip a recovered module's heartbeats and latch the last
+non-zero streak forever, so the banner would never clear. So `0` (cleared) and
+`NULL` (pre-#172 firmware) are genuinely distinct on the wire. This is the
+remote-diagnostics piece of #172; note it only takes effect once shipped as a
+higher-`SEQUENCE` OTA (the #170 roll-forward) — see
+[firmware-release.md](../07-deployment-view/firmware-release.md).
+
 ### 3a. Liveness self-heal watchdog (#148 Phase 3)
 
 [`hf::LivenessMonitor`](../../ESP32-CAM/lib/loop_health/loop_health.h), ticked
@@ -174,7 +230,7 @@ freshly-booted module gets a full 2 h to make first contact and `nowMs == 0`
 on the first tick does not instantly trip. The reboot is a clean `ESP_RST_SW`
 (breadcrumb `loop:livenessReboot`), **not** a panic — a transient server-side
 outage must not feed the OTA faulty-boot rollback counter; a bad firmware
-*image* is handled by the mark-valid gate, not by this watchdog. Decision
+_image_ is handled by the mark-valid gate, not by this watchdog. Decision
 logic is pure and native-tested in
 [`test_native_loop_health`](../../ESP32-CAM/test/test_native_loop_health/test_loop_health.cpp).
 
@@ -255,21 +311,21 @@ starts clean.
 The instrumented call sites (canonical list — keep in sync with the
 firmware grep `breadcrumbSet`):
 
-| Site                                                                                                     | Where set                                                          |
-| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `setup:spiffs_mount`                                                                                     | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `SPIFFS.begin(true)`    |
-| `setup:loadConfig`                                                                                       | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `loadConfig`            |
-| `setup:setupWifiConnection`                                                                              | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `setupWifiConnection`   |
-| `setup:getGeolocation`                                                                                   | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `getGeolocation`        |
-| `setup:initNewModuleOnServer`                                                                            | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `initNewModuleOnServer` |
-| `setup:initEspCamera`                                                                                    | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `initEspCamera`         |
-| `setupTime:ntp_poll`                                                                                     | `ESP32-CAM/esp_init.cpp`'s `setupTime` before the NTP poll loop    |
-| `getGeolocation:wifi_scan` / `:http_post` / `:get_string`                                                | `ESP32-CAM/esp_init.cpp`'s `getGeolocation` per section            |
-| `initNewModuleOnServer:http_post` / `:get_string`                                                        | `ESP32-CAM/esp_init.cpp`'s `initNewModuleOnServer` per section     |
-| `loop:sendHeartbeat` / `:captureAndUpload:first` / `:captureAndUpload:noon` / `:sleep`                   | `ESP32-CAM/ESP32-CAM.ino`'s `loop`                                 |
+| Site                                                                                                     | Where set                                                                           |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `setup:spiffs_mount`                                                                                     | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `SPIFFS.begin(true)`                     |
+| `setup:loadConfig`                                                                                       | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `loadConfig`                             |
+| `setup:setupWifiConnection`                                                                              | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `setupWifiConnection`                    |
+| `setup:getGeolocation`                                                                                   | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `getGeolocation`                         |
+| `setup:initNewModuleOnServer`                                                                            | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `initNewModuleOnServer`                  |
+| `setup:initEspCamera`                                                                                    | `ESP32-CAM/ESP32-CAM.ino`'s `setup` before `initEspCamera`                          |
+| `setupTime:ntp_poll`                                                                                     | `ESP32-CAM/esp_init.cpp`'s `setupTime` before the NTP poll loop                     |
+| `getGeolocation:wifi_scan` / `:http_post` / `:get_string`                                                | `ESP32-CAM/esp_init.cpp`'s `getGeolocation` per section                             |
+| `initNewModuleOnServer:http_post` / `:get_string`                                                        | `ESP32-CAM/esp_init.cpp`'s `initNewModuleOnServer` per section                      |
+| `loop:sendHeartbeat` / `:captureAndUpload:first` / `:captureAndUpload:noon` / `:sleep`                   | `ESP32-CAM/ESP32-CAM.ino`'s `loop`                                                  |
 | `loop:wifiHealthReboot` / `loop:livenessReboot`                                                          | `ESP32-CAM/ESP32-CAM.ino`'s `loop` reboot guards (§1 WiFi-down, §3 no-contact #148) |
-| `postImage:connect` / `:write_headers` / `:write_body` / `:read_status` / `:read_headers` / `:read_body` | `ESP32-CAM/client.cpp`'s `postImage` per section                   |
-| `sendHeartbeat:connect` / `:write` / `:read_status`                                                      | `ESP32-CAM/client.cpp`'s `sendHeartbeat` per section               |
+| `postImage:connect` / `:write_headers` / `:write_body` / `:read_status` / `:read_headers` / `:read_body` | `ESP32-CAM/client.cpp`'s `postImage` per section                                    |
+| `sendHeartbeat:connect` / `:write` / `:read_status`                                                      | `ESP32-CAM/client.cpp`'s `sendHeartbeat` per section                                |
 
 There is one RTC slot — last writer wins — so the breadcrumb always
 names the most-recently-entered section. On clean exit from `setup()`
@@ -364,18 +420,18 @@ The ESP piggybacks a JSON telemetry payload onto every image upload as an additi
 }
 ```
 
-| Field                      | Source                                                                                                                                     | Meaning                                                                                                                                                                                                                                                                                        |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fw`                       | `FIRMWARE_VERSION` macro, injected from `ESP32-CAM/VERSION` by both build paths (`build.sh` → arduino-cli; `pio run` → `extra_scripts.py`) | Firmware version string. Same value lands here, in the heartbeat body's `fw_version` field, in the boot log line, and in `homepage/public/firmware.json`. `ESP32-CAM/VERSION` is the single writer. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md).       |
-| `uptime_s`                 | `millis()/1000`                                                                                                                            | Seconds since last boot                                                                                                                                                                                                                                                                        |
-| `last_reset_reason`        | `esp_reset_reason()`                                                                                                                       | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc.                                                                                                                                                                                                                                               |
-| `last_stage_before_reboot` | RTC_NOINIT breadcrumb recovered at boot                                                                                                    | **Optional.** Names the section of code that was active when the previous boot's reboot fired (e.g. `setup:getGeolocation`, `postImage:read_body`). Field is **omitted** when no breadcrumb survived (clean boot or first boot after power-on); see safety net 8 above for the full mechanism. |
-| `free_heap`                | `ESP.getFreeHeap()`                                                                                                                        | Current free heap in bytes                                                                                                                                                                                                                                                                     |
-| `min_free_heap`            | `ESP.getMinFreeHeap()`                                                                                                                     | Low-water mark over this boot session                                                                                                                                                                                                                                                          |
-| `rssi`                     | `WiFi.RSSI()`                                                                                                                              | WiFi signal strength in dBm                                                                                                                                                                                                                                                                    |
-| `wifi_reconnects`          | logbuf counter (`logbufNoteWifiReconnect` → `s_reconnects`)                                                                                 | Count of `STA_DISCONNECTED` events since boot (drops and failed re-association attempts — link instability, not clean reconnect successes), incremented in `onWifiEvent` ([`ESP32-CAM/esp_init.cpp`](../../ESP32-CAM/esp_init.cpp)). Wired in #149 (#148 umbrella) — it had no caller before, so it read 0 in the field.                |
-| `last_http_codes`          | logbuf ring                                                                                                                                | Last 8 HTTP status codes from `postImage()`                                                                                                                                                                                                                                                    |
-| `log`                      | logbuf ring                                                                                                                                | Last ~2 KB of `logf()` output, oldest→newest                                                                                                                                                                                                                                                   |
+| Field                      | Source                                                                                                                                     | Meaning                                                                                                                                                                                                                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `fw`                       | `FIRMWARE_VERSION` macro, injected from `ESP32-CAM/VERSION` by both build paths (`build.sh` → arduino-cli; `pio run` → `extra_scripts.py`) | Firmware version string. Same value lands here, in the heartbeat body's `fw_version` field, in the boot log line, and in `homepage/public/firmware.json`. `ESP32-CAM/VERSION` is the single writer. See [ADR-006](../09-architecture-decisions/adr-006-bee-name-firmware-versioning.md).                                 |
+| `uptime_s`                 | `millis()/1000`                                                                                                                            | Seconds since last boot                                                                                                                                                                                                                                                                                                  |
+| `last_reset_reason`        | `esp_reset_reason()`                                                                                                                       | `POWERON`, `BROWNOUT`, `TASK_WDT`, `PANIC`, etc.                                                                                                                                                                                                                                                                         |
+| `last_stage_before_reboot` | RTC_NOINIT breadcrumb recovered at boot                                                                                                    | **Optional.** Names the section of code that was active when the previous boot's reboot fired (e.g. `setup:getGeolocation`, `postImage:read_body`). Field is **omitted** when no breadcrumb survived (clean boot or first boot after power-on); see safety net 8 above for the full mechanism.                           |
+| `free_heap`                | `ESP.getFreeHeap()`                                                                                                                        | Current free heap in bytes                                                                                                                                                                                                                                                                                               |
+| `min_free_heap`            | `ESP.getMinFreeHeap()`                                                                                                                     | Low-water mark over this boot session                                                                                                                                                                                                                                                                                    |
+| `rssi`                     | `WiFi.RSSI()`                                                                                                                              | WiFi signal strength in dBm                                                                                                                                                                                                                                                                                              |
+| `wifi_reconnects`          | logbuf counter (`logbufNoteWifiReconnect` → `s_reconnects`)                                                                                | Count of `STA_DISCONNECTED` events since boot (drops and failed re-association attempts — link instability, not clean reconnect successes), incremented in `onWifiEvent` ([`ESP32-CAM/esp_init.cpp`](../../ESP32-CAM/esp_init.cpp)). Wired in #149 (#148 umbrella) — it had no caller before, so it read 0 in the field. |
+| `last_http_codes`          | logbuf ring                                                                                                                                | Last 8 HTTP status codes from `postImage()`                                                                                                                                                                                                                                                                              |
+| `log`                      | logbuf ring                                                                                                                                | Last ~2 KB of `logf()` output, oldest→newest                                                                                                                                                                                                                                                                             |
 
 ### Circular log buffer
 

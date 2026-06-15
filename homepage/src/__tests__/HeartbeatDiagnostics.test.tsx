@@ -25,6 +25,10 @@ const healthy: HeartbeatSnapshot = {
   resetReason: 'POWERON',
   minFreeHeap: 69_916,
   bootCount: 12,
+  // #172 fields are dense (sent on every heartbeat): a healthy module reports
+  // 0/0, distinct on the wire from pre-#172 firmware's null/null.
+  lastHbFailCode: 0,
+  lastHbFailCount: 0,
 };
 
 describe('HeartbeatDiagnostics', () => {
@@ -103,5 +107,58 @@ describe('HeartbeatDiagnostics', () => {
     };
     render(<HeartbeatDiagnostics heartbeat={freshBoot} />);
     expect(screen.queryByText(/fault reset/)).not.toBeInTheDocument();
+  });
+
+  // ---- #172: prior heartbeat-failure streak ----
+  // The reboot-loop signature from #170: the BOOT heartbeat round-trips a 200
+  // (so the binary dashboard stays green), but it carries the count of hourly
+  // heartbeats that failed in the preceding session. A single snapshot can
+  // honestly assert "N heartbeats failed before this contact" — the remote
+  // visibility #172 exists to provide.
+  it('flags a prior heartbeat-failure streak (reboot-loop signature)', () => {
+    const rebootLoop: HeartbeatSnapshot = {
+      ...healthy,
+      // Boot heartbeat: 200 OK, ~16 s uptime, climbing boot count.
+      uptimeMs: 16_000,
+      bootCount: 9,
+      resetReason: 'SW', // livenessReboot uses ESP.restart() → SW
+      lastHbFailCode: -2, // connect/WiFi-down sentinel
+      lastHbFailCount: 2, // both hourly heartbeats in the 2 h window failed
+    };
+    render(<HeartbeatDiagnostics heartbeat={rebootLoop} />);
+    expect(
+      screen.getByText(/2 heartbeats failed before last contact \(connect\/WiFi\)/),
+    ).toBeInTheDocument();
+    // The streak count also surfaces in the diagnostics grid.
+    expect(screen.getByText('hb fails')).toBeInTheDocument();
+  });
+
+  it('labels a non-2xx HTTP failure code distinctly from the connect sentinel', () => {
+    const httpFail: HeartbeatSnapshot = {
+      ...healthy,
+      uptimeMs: 16_000,
+      lastHbFailCode: 500, // server-side 5xx, not a connect failure
+      lastHbFailCount: 1,
+    };
+    render(<HeartbeatDiagnostics heartbeat={httpFail} />);
+    expect(
+      screen.getByText(/1 heartbeat failed before last contact \(HTTP 500\)/),
+    ).toBeInTheDocument();
+  });
+
+  it('does NOT flag a module with a clean failure streak (count 0)', () => {
+    // healthy fixture has lastHbFailCount: 0 — the steady state.
+    render(<HeartbeatDiagnostics heartbeat={healthy} />);
+    expect(screen.queryByText(/failed before last contact/)).not.toBeInTheDocument();
+  });
+
+  it('stays quiet when the firmware predates #172 (fields null)', () => {
+    const legacy: HeartbeatSnapshot = {
+      ...healthy,
+      lastHbFailCode: null,
+      lastHbFailCount: null,
+    };
+    render(<HeartbeatDiagnostics heartbeat={legacy} />);
+    expect(screen.queryByText(/failed before last contact/)).not.toBeInTheDocument();
   });
 });

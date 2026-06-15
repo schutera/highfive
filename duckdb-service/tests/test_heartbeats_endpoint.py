@@ -491,3 +491,120 @@ def test_heartbeat_omitting_diagnostic_fields_stores_null(client, fresh_db):
     assert hb["reset_reason"] is None
     assert hb["min_free_heap"] is None
     assert hb["boot_count"] is None
+
+
+# ---------- steady-state heartbeat-failure streak: last_hb_fail_* (#172) ----------
+#
+# The hourly heartbeats fail *between* boots and never reach the server (no
+# 2xx), so reset_reason/boot_count above only describe the boot call. The
+# firmware accumulates a failure streak across a session and attaches it to
+# the next 2xx heartbeat — typically the boot heartbeat after a
+# `livenessReboot`. These tests assert the streak actually round-trips into
+# the persisted row and back out of BOTH read endpoints (not merely that the
+# envelope has the keys — CLAUDE.md rule 5, "envelope right, behaviour wrong").
+
+
+def test_heartbeat_persists_failure_streak_fields(client, fresh_db):
+    # The #170 reboot-loop shape: the boot heartbeat round-trips 200 while
+    # carrying the count of hourly heartbeats that failed in the prior 2 h
+    # window (here 2, last code -2 = connect/WiFi-down sentinel).
+    resp = client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "uptime_ms": 16000,
+            "reset_reason": "SW",
+            "boot_count": 9,
+            "last_hb_fail_code": -2,
+            "last_hb_fail_count": 2,
+        },
+    )
+    assert resp.status_code == 200, resp.get_json()
+
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT last_hb_fail_code, last_hb_fail_count "
+            "FROM module_heartbeats WHERE module_id = ?",
+            (CANONICAL_MAC,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert row == (-2, 2)
+
+
+def test_heartbeats_get_returns_failure_streak_fields(client, fresh_db):
+    client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "last_hb_fail_code": 500,
+            "last_hb_fail_count": 4,
+        },
+    )
+    resp = client.get(f"/heartbeats/{CANONICAL_MAC}")
+    assert resp.status_code == 200
+    hb = resp.get_json()["heartbeats"][0]
+    assert hb["last_hb_fail_code"] == 500
+    assert hb["last_hb_fail_count"] == 4
+
+
+def test_heartbeats_summary_clears_streak_after_recovery_not_latching(client, fresh_db):
+    # REGRESSION (the reason the firmware sends the streak fields DENSELY, with
+    # a literal 0 on a healthy heartbeat rather than omitting them): the summary
+    # folds the latest value via `ARG_MAX(last_hb_fail_count, received_at)`, and
+    # DuckDB's ARG_MAX *ignores rows where the arg is NULL*. So if a recovered
+    # module sent NULL (omitted fields) after a reboot-loop session that wrote
+    # last_hb_fail_count=3, ARG_MAX would skip the NULL recovery rows and latch
+    # the stale 3 forever — the dashboard's "possible reboot loop" banner would
+    # never clear. Sending 0 keeps the column dense so the latest heartbeat wins.
+    #
+    # Sequence: reboot-loop boot heartbeat carries the streak, then the now-
+    # healthy heartbeat reports 0/0. The summary MUST show the cleared 0, not 3.
+    import time
+
+    client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "last_hb_fail_code": -2,
+            "last_hb_fail_count": 3,
+        },
+    )
+    # Make the recovery strictly later: received_at is stamped server-side at
+    # now() with microsecond precision, and ARG_MAX picks the max-received_at
+    # row — so a same-microsecond tie between the two posts could otherwise let
+    # ARG_MAX pick the streak row and mask the regression this test guards.
+    time.sleep(0.01)
+    client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "last_hb_fail_code": 0,
+            "last_hb_fail_count": 0,
+        },
+    )
+    resp = client.get("/heartbeats_summary")
+    assert resp.status_code == 200
+    entry = resp.get_json()["summary"][CANONICAL_MAC]
+    assert entry["last_hb_fail_count"] == 0, (
+        "summary latched a stale streak — ARG_MAX skipped the cleared row; "
+        "the recovery banner would never clear"
+    )
+    assert entry["last_hb_fail_code"] == 0
+
+
+def test_heartbeat_omitting_failure_streak_stores_null(client, fresh_db):
+    # Pre-#172 firmware omits both fields. A mixed fleet during the OTA rollout
+    # must not 500 and must store NULL, not 0 — a real 0-count streak (the
+    # healthy steady state) and "this firmware can't report a streak" are
+    # different facts the dashboard renders differently.
+    resp = client.post(
+        "/heartbeat",
+        data={"mac": CANONICAL_MAC, "rssi": -80, "fw_version": "blueberry"},
+    )
+    assert resp.status_code == 200
+    resp = client.get(f"/heartbeats/{CANONICAL_MAC}")
+    hb = resp.get_json()["heartbeats"][0]
+    assert hb["last_hb_fail_code"] is None
+    assert hb["last_hb_fail_count"] is None

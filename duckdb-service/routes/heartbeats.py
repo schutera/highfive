@@ -108,6 +108,16 @@ def post_heartbeat():
     min_free_heap = _to_int(data.get("min_free_heap"))
     boot_count = _to_int(data.get("boot_count"))
 
+    # Steady-state heartbeat-failure diagnostics (issue #172). The hourly
+    # heartbeats fail *between* boots and never reach us (no 2xx), so the
+    # fields above only ever describe the boot call. The firmware accumulates a
+    # failure streak across a session and attaches it to the next 2xx heartbeat
+    # — typically the boot heartbeat after a `livenessReboot`. A non-zero count
+    # on an otherwise-online module is the #170 reboot-loop signature made
+    # remotely visible. Older firmware omits both → None → stored NULL.
+    last_hb_fail_code = _to_int(data.get("last_hb_fail_code"))
+    last_hb_fail_count = _to_int(data.get("last_hb_fail_count"))
+
     # Optional geolocation-recovery fields. Absent → None → not
     # written. Present-but-implausible → silently dropped (logged
     # below for observability).
@@ -119,7 +129,9 @@ def post_heartbeat():
         f"[heartbeat] mac={mac} battery={battery} rssi={rssi} "
         f"uptime_ms={uptime_ms} free_heap={free_heap} fw={fw_version} "
         f"reset_reason={reset_reason} min_free_heap={min_free_heap} "
-        f"boot_count={boot_count}"
+        f"boot_count={boot_count} "
+        f"last_hb_fail_code={last_hb_fail_code} "
+        f"last_hb_fail_count={last_hb_fail_count}"
         + (
             f" lat={lat} lng={lng} acc={acc}"
             if (lat is not None or lng is not None)
@@ -151,11 +163,24 @@ def post_heartbeat():
             """
             INSERT INTO module_heartbeats
               (module_id, received_at, battery, rssi, uptime_ms, free_heap,
-               fw_version, reset_reason, min_free_heap, boot_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               fw_version, reset_reason, min_free_heap, boot_count,
+               last_hb_fail_code, last_hb_fail_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [mac, received_at, battery, rssi, uptime_ms, free_heap,
-             fw_version, reset_reason, min_free_heap, boot_count],
+            [
+                mac,
+                received_at,
+                battery,
+                rssi,
+                uptime_ms,
+                free_heap,
+                fw_version,
+                reset_reason,
+                min_free_heap,
+                boot_count,
+                last_hb_fail_code,
+                last_hb_fail_count,
+            ],
         )
 
         # Dual-write into the per-module measurements store (issue
@@ -244,7 +269,8 @@ def get_heartbeats(module_id):
         rows = con.execute(
             """
             SELECT received_at, battery, rssi, uptime_ms, free_heap, fw_version,
-                   reset_reason, min_free_heap, boot_count
+                   reset_reason, min_free_heap, boot_count,
+                   last_hb_fail_code, last_hb_fail_count
               FROM module_heartbeats
              WHERE module_id = ?
              ORDER BY received_at DESC
@@ -266,6 +292,8 @@ def get_heartbeats(module_id):
                     "reset_reason": r[6],
                     "min_free_heap": r[7],
                     "boot_count": r[8],
+                    "last_hb_fail_code": r[9],
+                    "last_hb_fail_count": r[10],
                 }
                 for r in rows
             ]
@@ -290,7 +318,9 @@ def get_heartbeats_summary():
                    ARG_MAX(fw_version, received_at) AS fw_version,
                    ARG_MAX(reset_reason, received_at) AS reset_reason,
                    ARG_MAX(min_free_heap, received_at) AS min_free_heap,
-                   ARG_MAX(boot_count, received_at) AS boot_count
+                   ARG_MAX(boot_count, received_at) AS boot_count,
+                   ARG_MAX(last_hb_fail_code, received_at) AS last_hb_fail_code,
+                   ARG_MAX(last_hb_fail_count, received_at) AS last_hb_fail_count
               FROM module_heartbeats
           GROUP BY module_id
             """
@@ -309,6 +339,8 @@ def get_heartbeats_summary():
                     "reset_reason": r[7],
                     "min_free_heap": r[8],
                     "boot_count": r[9],
+                    "last_hb_fail_code": r[10],
+                    "last_hb_fail_count": r[11],
                 }
                 for r in rows
             }

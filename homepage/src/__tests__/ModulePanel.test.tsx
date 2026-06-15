@@ -112,6 +112,8 @@ const baseModule: ModuleDetail = {
     resetReason: 'POWERON',
     minFreeHeap: 180000,
     bootCount: 1,
+    lastHbFailCode: 0,
+    lastHbFailCount: 0,
   },
   nests: [],
 };

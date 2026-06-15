@@ -86,6 +86,99 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### A sparse wire field broke an `ARG_MAX` summary fold — the dashboard signal would have latched forever (#172, review-caught)
+
+**What happened.** #172 added `last_hb_fail_code` / `last_hb_fail_count`
+to the heartbeat so a reboot-looping module reports _why_ its hourly
+heartbeats fail. The first cut attached the fields **only when a streak
+existed** (`if (prevHbFail.count > 0)` in
+`ESP32-CAM/client.cpp`'s `sendHeartbeat`), mirroring the conditional
+geolocation-recovery fields right above it. Every unit test passed and
+the field round-tripped correctly. But the backend folds the latest value
+into the dashboard via `ARG_MAX(last_hb_fail_count, received_at)` in
+`duckdb-service/routes/heartbeats.py`'s `get_heartbeats_summary`, and a
+recovered module — sending nothing → NULL — would have made the
+**"possible reboot loop" banner stick forever**: once a module had logged
+a non-zero streak, it could never visibly recover. Caught in senior-review,
+before merge, not in the field.
+
+**Why it happened.** DuckDB's `ARG_MAX(value, ordering)` **ignores rows
+where `value` IS NULL** — it does not return "the `value` at the max
+`ordering`", it returns "the max-`ordering` row _among rows with a
+non-null value_". So a sparse column (present only on the exceptional
+path, NULL otherwise) makes `ARG_MAX` skip every recovery row and latch
+the last non-null reading. The `#148` diagnostic fields next to it didn't
+hit this only because they're sent on _every_ heartbeat (always non-null
+for that firmware). The conditional-attach instinct — copied verbatim
+from the geolocation fields a few lines up — was wrong here because those
+fields drive a one-shot `UPDATE` side effect, never an `ARG_MAX` fold.
+Verified empirically: `ARG_MAX(cnt, ts)` over `(ts=10:00, cnt=3)`,
+`(ts=11:00, cnt=NULL)` returns `3`, not NULL.
+
+**How to avoid it next time.** A wire field that a summary endpoint folds
+with `ARG_MAX` / `LAST` / any "latest non-null wins" group-by **must be
+sent densely** — emit an explicit `0`/sentinel on the normal path, never
+omit-it-to-NULL — so the latest row always wins and a transient state can
+clear. Sparse-when-absent is only safe for fields read row-by-row (the
+`/heartbeats` list endpoint) or fields that drive a side effect rather
+than a fold (the geolocation `latitude`/`longitude` recovery). Beware the
+**dense-vs-sparse juxtaposition trap** now living a few lines apart in
+`sendHeartbeat`: `battery` is deliberately **omitted** (sparse — the
+`measurements` dual-write treats `0` as a real sample, so a missing
+reading must be an absent row), while the fail-streak is deliberately
+**dense** (the summary `ARG_MAX` treats NULL as skip, so a healthy state
+must be a real `0`). They are opposite **on purpose**; a "consistency"
+cleanup that aligns one to the other reintroduces a shipped-and-fixed bug
+in whichever direction it moves. Regression pin:
+`duckdb-service/tests/test_heartbeats_endpoint.py`'s
+`test_heartbeats_summary_clears_streak_after_recovery_not_latching` seeds
+a `count=3` streak then a `count=0` recovery and asserts the summary
+returns `0`. This is the same "envelope right, behaviour wrong" family as
+the `date_trunc` all-zeros bug below — and the same CLAUDE.md rule #5
+fix: aggregation tests must seed real data and assert it lands in the
+expected bucket.
+
+### `RTC_NOINIT` survives `ESP.restart()` but **not** the bench RTS/EN reset — `esp_reset.py` cannot exercise any cross-reboot RTC feature (#172, found while QA-ing the PR)
+
+**What happened.** Verifying the #172 heartbeat-failure streak on real
+hardware, the streak (`last_hb_fail_count`) reset to `0` on every reset and
+never accumulated across reboots, even though each boot's heartbeat
+demonstrably failed and called `hbFailureNote`. It looked like the
+`RTC_NOINIT` slot wasn't persisting at all — i.e. a feature bug. It is not:
+the streak is fine in the field, the **bench reset tooling** just can't
+produce the reset _type_ the feature needs.
+
+**Why it happened.** `RTC_NOINIT_ATTR` data (the issue-#42 cross-reboot
+breadcrumb in [`ESP32-CAM/lib/breadcrumb`](../../ESP32-CAM/lib/breadcrumb/) and
+the `lib/hb_failure` streak both use it) lives in RTC slow memory, which is
+retained across a **software** reset (`ESP.restart()` → `ESP_RST_SW`) and
+wiped on a **power-on / EN-pin** reset (`POWERON_RESET`, `rst:0x1` in the
+boot banner). [`scripts/esp_reset.py`](../../scripts/esp_reset.py) and
+[`scripts/esp_capture.py`](../../scripts/esp_capture.py) reset the board by
+pulsing the CH340's RTS line, which pulls **EN** low — a `POWERON_RESET` that
+**clears RTC memory**. So a bench reset is indistinguishable, to RTC, from a
+power cycle: the magic guard correctly reports "no streak" and the count
+starts fresh every boot. Every _field_ reboot path, by contrast, is a clean
+`ESP.restart()` — `livenessReboot`, `wifiHealthReboot`, the daily reboot, OTA
+post-flash, and the upload circuit breaker — so the #170 reboot-loop case
+(a `livenessReboot`) preserves the streak and the next boot heartbeat carries
+it. The dense-`0` emission, store, summary fold and dashboard banner were all
+verified end-to-end by injecting heartbeats directly; only the on-silicon
+_cross-reboot accumulation_ is what the bench reset cannot show.
+
+**How to avoid it next time.** When QA-ing **any** `RTC_NOINIT` feature
+(breadcrumb, heartbeat-failure streak, future RTC counters), do not expect
+state to survive an `esp_reset.py` / `esp_capture.py` reset or a physical RST
+button press — those are EN/`POWERON_RESET` and wipe RTC. Trigger a
+**software** reboot instead (induce a watchdog `ESP.restart()`, or wait for
+the real `livenessReboot`), and confirm the boot banner reads a software
+reset reason, not `rst:0x1 (POWERON_RESET)`. The pure note/peek/clear logic is
+better asserted in the native suite
+([`test_native_hb_failure`](../../ESP32-CAM/test/test_native_hb_failure/test_hb_failure.cpp),
+[`test_native_breadcrumb`](../../ESP32-CAM/test/test_native_breadcrumb/test_breadcrumb.cpp))
+than on hardware; reserve the board for the dense-emission-on-the-wire check,
+which a single boot proves.
+
 ### `build.sh` release binaries ran without PSRAM — the FQBN's missing `FlashMode=dio` linked `qio_qspi` libs against a `dio`-flashed image (#163)
 
 **What happened.** A `build.sh`-built (release-path) firmware booted reporting

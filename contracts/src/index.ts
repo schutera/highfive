@@ -109,6 +109,26 @@ export interface HeartbeatSnapshot {
   resetReason: string | null;
   minFreeHeap: number | null;
   bootCount: number | null;
+  // Steady-state heartbeat-failure diagnostics (#172). The hourly (between-
+  // boot) heartbeats fail invisibly — a failed heartbeat never reaches the
+  // server, so the reset_reason/bootCount fields above only ever describe the
+  // BOOT call. These two carry the previous failure streak forward on the
+  // next 2xx heartbeat (typically the boot heartbeat after a `livenessReboot`):
+  // `lastHbFailCount` is how many consecutive heartbeats failed before that
+  // 2xx, `lastHbFailCode` the most recent failure's return value: `-2` =
+  // connect/WiFi-down, `-4` = unparseable status line (`kInvalidStatus` in
+  // ESP32-CAM/lib/http_status), otherwise the raw non-2xx HTTP code; `0` when
+  // there is no current streak. A non-zero count on an otherwise-online module
+  // is the #170 reboot-loop signature made remotely visible.
+  // Three-valued: a positive count is a live/just-ended streak; `0` is a
+  // healthy module that actively reported "no failures"; `null` is firmware
+  // predating #172. The firmware emits these on EVERY heartbeat (0 when
+  // healthy), not just when a streak exists, so the backend's
+  // `ARG_MAX(last_hb_fail_count, received_at)` fold — which ignores NULL rows —
+  // reflects the latest heartbeat instead of latching a stale streak after
+  // recovery. So `0` (cleared) and `null` (legacy) are genuinely distinct here.
+  lastHbFailCode: number | null;
+  lastHbFailCount: number | null;
 }
 
 export interface Module {

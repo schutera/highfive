@@ -15,24 +15,28 @@ import type { ModuleDetail } from '@highfive/contracts';
 const HEARTBEAT_MAC = 'ff4444444444';
 const RESET_REASON = 'TASK_WDT';
 const BOOT_COUNT = 4242;
+// #172 failure-streak fields seeded alongside the #148 ones.
+const LAST_FAIL_CODE = -2;
+const LAST_FAIL_COUNT = 2;
 
-test.describe('module heartbeat diagnostics (#148)', () => {
-  test('HeartbeatDiagnostics renders the seeded reset_reason / boot_count', async ({
+test.describe('module heartbeat diagnostics (#148, #172)', () => {
+  test('HeartbeatDiagnostics renders the seeded reset_reason / boot_count / hb-fail streak', async ({
     page,
   }) => {
     // 1) Wire-shape round-trip: fetch the module detail the UI consumes and
     //    assert the diagnostic fields survived duckdb -> /heartbeats_summary
     //    -> backend HeartbeatSnapshot. If a rename drifts the boundary this
     //    fails before we touch the DOM.
-    const response = await page.request.get(
-      `http://localhost:4002/api/modules/${HEARTBEAT_MAC}`,
-    );
+    const response = await page.request.get(`http://localhost:4002/api/modules/${HEARTBEAT_MAC}`);
     expect(response.ok()).toBeTruthy();
     const detail = (await response.json()) as ModuleDetail;
     expect(detail.latestHeartbeat).not.toBeNull();
     expect(detail.latestHeartbeat?.resetReason).toBe(RESET_REASON);
     expect(detail.latestHeartbeat?.bootCount).toBe(BOOT_COUNT);
     expect(detail.latestHeartbeat?.minFreeHeap).toBe(51234);
+    // #172: the failure streak survived the same boundary.
+    expect(detail.latestHeartbeat?.lastHbFailCode).toBe(LAST_FAIL_CODE);
+    expect(detail.latestHeartbeat?.lastHbFailCount).toBe(LAST_FAIL_COUNT);
 
     // 2) Drive the browser: the card lives in the admin telemetry section
     //    (?admin=1 reveals the toggle). The card itself reads the already-
@@ -59,5 +63,12 @@ test.describe('module heartbeat diagnostics (#148)', () => {
     // "recent fault reset" flag must fire (the state the binary
     // online/offline badge keeps misleadingly green).
     await expect(telemetryBody).toContainText(/recent fault reset \(TASK_WDT\)/);
+    // #172: the prior heartbeat-failure streak surfaces both as the grid
+    // count and the "possible reboot loop" banner — the remote-visibility
+    // signal that, in #170, needed a physical serial capture to see.
+    await expect(telemetryBody).toContainText('hb fails');
+    await expect(telemetryBody).toContainText(
+      /2 heartbeats failed before last contact \(connect\/WiFi\)/,
+    );
   });
 });

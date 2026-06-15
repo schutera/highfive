@@ -56,6 +56,8 @@ export interface HeartbeatSnapshot {
   resetReason: string | null; // #148 — "POWERON"/"BROWNOUT"/"TASK_WDT"/… ; null on pre-#148 firmware
   minFreeHeap: number | null; // #148 — heap low-water mark since boot (bytes)
   bootCount: number | null; // #148 — NVS-backed monotonic reboot counter
+  lastHbFailCode: number | null; // #172 — last failed heartbeat's return value (-2 connect/WiFi, -4 bad response, else HTTP code); null pre-#172
+  lastHbFailCount: number | null; // #172 — consecutive heartbeat failures before the last 2xx
 }
 ```
 
@@ -73,6 +75,35 @@ watchdog/panic/brownout and `uptimeMs` has not recovered) from the single
 snapshot. Confirming an actual boot _loop_ — `bootCount` rising while
 `uptimeMs` stays flat **across** heartbeats — needs the queryable history
 and is deferred to #148 Phase 4 (server-side).
+
+`lastHbFailCode` / `lastHbFailCount` were added in #172 and close a
+related blind spot: the diagnostic fields above describe only the **boot**
+heartbeat, because a _failed_ hourly heartbeat never reaches the server (no
+2xx response). In #170 the boot heartbeat returned `200` while every hourly
+heartbeat in the following 2 h failed and tripped the liveness watchdog —
+invisible remotely without a physical serial capture. The firmware now
+accumulates the failure streak across a session in RTC memory
+(`ESP32-CAM/lib/hb_failure`, the same software-reset-surviving storage class
+as the `lib/breadcrumb` stage marker) and attaches it to the next 2xx
+heartbeat — typically the boot heartbeat after a `livenessReboot`, which then
+clears it. A non-zero `lastHbFailCount` on an otherwise-online module is the
+reboot-loop / flaky-contact signature; `HeartbeatDiagnostics` renders it as a
+**possible reboot loop** banner.
+
+The field is **three-valued and deliberately dense**: a positive count is a
+streak, `0` is a healthy module that actively reported "no failures", and
+`null` is pre-#172 firmware. The firmware emits the fields on **every**
+heartbeat (`0` when healthy), not just when a streak exists — because the
+backend folds them via `ARG_MAX(last_hb_fail_count, received_at)` in
+`/heartbeats_summary`, and DuckDB's `ARG_MAX` **ignores NULL rows**. A sparse
+field (omitted when healthy → NULL) would make the summary skip the recovery
+heartbeats and latch the last non-zero streak forever, so the banner would
+never clear after a module recovered. Emitting `0` keeps the column dense like
+`rssi`/`reset_reason`/`boot_count` so the latest heartbeat always wins. This
+is why `0` (cleared) and `null` (legacy) are genuinely distinct on the wire —
+the regression is pinned by
+`duckdb-service/tests/test_heartbeats_endpoint.py`'s
+`test_heartbeats_summary_clears_streak_after_recovery_not_latching`.
 
 `Module` gained `displayName`, `email`, `updatedAt`, `lastSeenAt`, and
 `latestHeartbeat`. `displayName` is the admin-settable label override

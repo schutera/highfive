@@ -24,6 +24,11 @@ interface ApiHeartbeatSummaryEntry {
   reset_reason: string | null;
   min_free_heap: number | null;
   boot_count: number | null;
+  // Steady-state heartbeat-failure diagnostics (#172). snake_case mirrors the
+  // duckdb-service /heartbeats_summary wire shape; camelCased into
+  // HeartbeatSnapshot below.
+  last_hb_fail_code: number | null;
+  last_hb_fail_count: number | null;
 }
 
 interface ApiHeartbeatSummaryResponse {
@@ -309,6 +314,8 @@ export class ModuleReadModel {
             resetReason: hbEntry.reset_reason ?? null,
             minFreeHeap: hbEntry.min_free_heap ?? null,
             bootCount: hbEntry.boot_count ?? null,
+            lastHbFailCode: hbEntry.last_hb_fail_code ?? null,
+            lastHbFailCount: hbEntry.last_hb_fail_count ?? null,
           }
         : null;
 

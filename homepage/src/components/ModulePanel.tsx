@@ -667,8 +667,18 @@ const FAULT_RESET_REASONS = new Set(['PANIC', 'TASK_WDT', 'INT_WDT', 'WDT', 'BRO
 // surface, deliberately not routed through i18n (see TelemetryRow note).
 export function HeartbeatDiagnostics({ heartbeat }: { heartbeat: HeartbeatSnapshot | null }) {
   if (!heartbeat) return null;
-  const { receivedAt, fwVersion, uptimeMs, resetReason, minFreeHeap, freeHeap, rssi, bootCount } =
-    heartbeat;
+  const {
+    receivedAt,
+    fwVersion,
+    uptimeMs,
+    resetReason,
+    minFreeHeap,
+    freeHeap,
+    rssi,
+    bootCount,
+    lastHbFailCode,
+    lastHbFailCount,
+  } = heartbeat;
 
   const uptime = typeof uptimeMs === 'number' ? formatUptime(Math.floor(uptimeMs / 1000)) : '—';
   const heap = typeof freeHeap === 'number' ? `${Math.round(freeHeap / 1024)} KB` : '—';
@@ -689,6 +699,23 @@ export function HeartbeatDiagnostics({ heartbeat }: { heartbeat: HeartbeatSnapsh
     FAULT_RESET_REASONS.has(resetReason) &&
     typeof uptimeMs === 'number' &&
     uptimeMs < 5 * 60 * 1000;
+
+  // #172: the hourly heartbeats fail *between* boots and never reach the
+  // server, so a module mid-reboot-loop (the #170 case) stays "online" on the
+  // binary dashboard. The firmware carries the prior failure streak forward on
+  // the next 2xx heartbeat — so a non-zero count here is the reboot-loop /
+  // flaky-contact signature that the reset/uptime fields above cannot show.
+  // -2 is the firmware's connect/WiFi-down sentinel; anything else is a raw
+  // non-2xx HTTP code (or -4 = unparseable status line).
+  const priorHbFailures = typeof lastHbFailCount === 'number' && lastHbFailCount > 0;
+  const hbFailCodeLabel =
+    typeof lastHbFailCode === 'number'
+      ? lastHbFailCode === -2
+        ? 'connect/WiFi'
+        : lastHbFailCode === -4
+          ? 'bad response'
+          : `HTTP ${lastHbFailCode}`
+      : '—';
 
   return (
     <div className="hf-card p-2.5 text-hf-xs">
@@ -716,6 +743,10 @@ export function HeartbeatDiagnostics({ heartbeat }: { heartbeat: HeartbeatSnapsh
         <div>
           <span className="text-hf-fg-mute">min heap</span> {minHeap}
         </div>
+        <div>
+          <span className="text-hf-fg-mute">hb fails</span>{' '}
+          {typeof lastHbFailCount === 'number' ? lastHbFailCount : '—'}
+        </div>
         {fwVersion && (
           <div className="col-span-2">
             <span className="text-hf-fg-mute">fw</span> {fwVersion}
@@ -725,6 +756,12 @@ export function HeartbeatDiagnostics({ heartbeat }: { heartbeat: HeartbeatSnapsh
       {recentFaultReset && (
         <div className="mt-1.5 font-semibold" style={{ color: 'var(--hf-danger)' }}>
           ⚠ recent fault reset ({resetReason}) — uptime {uptime}, not yet recovered
+        </div>
+      )}
+      {priorHbFailures && (
+        <div className="mt-1.5 font-semibold" style={{ color: 'var(--hf-danger)' }}>
+          ⚠ {lastHbFailCount} heartbeat{lastHbFailCount === 1 ? '' : 's'} failed before last contact
+          ({hbFailCodeLabel}) — possible reboot loop
         </div>
       )}
     </div>

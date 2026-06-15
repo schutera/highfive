@@ -620,26 +620,37 @@ def test_migration_adds_heartbeat_diagnostic_columns(fresh_db):
         cols = {
             c[1] for c in con.execute("PRAGMA table_info(module_heartbeats)").fetchall()
         }
-        assert {"reset_reason", "min_free_heap", "boot_count"} <= cols
+        # #148 columns AND the #172 failure-streak columns are both added by
+        # the additive ALTER block on an old-shape table.
+        assert {
+            "reset_reason",
+            "min_free_heap",
+            "boot_count",
+            "last_hb_fail_code",
+            "last_hb_fail_count",
+        } <= cols
 
         # The legacy row survived and reads NULL for the new columns.
         row = con.execute(
-            "SELECT fw_version, reset_reason, min_free_heap, boot_count "
+            "SELECT fw_version, reset_reason, min_free_heap, boot_count, "
+            "last_hb_fail_code, last_hb_fail_count "
             "FROM module_heartbeats WHERE module_id = ?",
             ("aabbccddeeff",),
         ).fetchone()
-        assert row == ("mason", None, None, None)
+        assert row == ("mason", None, None, None, None, None)
 
         # A new-shape insert lands in the migrated table.
         con.execute(
             "INSERT INTO module_heartbeats "
-            "(module_id, reset_reason, min_free_heap, boot_count) VALUES (?, ?, ?, ?)",
-            ("aabbccddeeff", "TASK_WDT", 51234, 9),
+            "(module_id, reset_reason, min_free_heap, boot_count, "
+            " last_hb_fail_code, last_hb_fail_count) VALUES (?, ?, ?, ?, ?, ?)",
+            ("aabbccddeeff", "TASK_WDT", 51234, 9, -2, 3),
         )
         new_row = con.execute(
-            "SELECT reset_reason, min_free_heap, boot_count "
+            "SELECT reset_reason, min_free_heap, boot_count, "
+            "last_hb_fail_code, last_hb_fail_count "
             "FROM module_heartbeats WHERE reset_reason = 'TASK_WDT'"
         ).fetchone()
-        assert new_row == ("TASK_WDT", 51234, 9)
+        assert new_row == ("TASK_WDT", 51234, 9, -2, 3)
     finally:
         con.close()

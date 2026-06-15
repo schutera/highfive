@@ -109,6 +109,18 @@ export interface HeartbeatSnapshot {
   resetReason: string | null;
   minFreeHeap: number | null;
   bootCount: number | null;
+  // Steady-state heartbeat-failure diagnostics (#172). The hourly (between-
+  // boot) heartbeats fail invisibly — a failed heartbeat never reaches the
+  // server, so the reset_reason/bootCount fields above only ever describe the
+  // BOOT call. These two carry the previous failure streak forward on the
+  // next 2xx heartbeat (typically the boot heartbeat after a `livenessReboot`):
+  // `lastHbFailCount` is how many consecutive heartbeats failed before that
+  // 2xx, `lastHbFailCode` the most recent failure's return value (negative
+  // sentinel like -2 = connect/WiFi-down, or the raw non-2xx HTTP code). A
+  // non-zero count on an otherwise-online module is the #170 reboot-loop
+  // signature made remotely visible. Null when the firmware predates #172.
+  lastHbFailCode: number | null;
+  lastHbFailCount: number | null;
 }
 
 export interface Module {

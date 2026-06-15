@@ -79,6 +79,11 @@ HEARTBEAT_MAC = "ff4444444444"
 HEARTBEAT_RESET_REASON = "TASK_WDT"
 HEARTBEAT_MIN_FREE_HEAP = 51234  # round(51234/1024) = 50 KB
 HEARTBEAT_BOOT_COUNT = 4242
+# Failure-streak fields (#172): the boot heartbeat carries the count of hourly
+# heartbeats that failed in the prior session. -2 is the connect/WiFi-down
+# sentinel; a non-zero count is the #170 reboot-loop signature.
+HEARTBEAT_LAST_FAIL_CODE = -2
+HEARTBEAT_LAST_FAIL_COUNT = 2
 
 
 def wait_for_stack(timeout_s: int = 180) -> None:
@@ -260,11 +265,16 @@ def seed_heartbeat_diagnostics() -> None:
         boot_count=HEARTBEAT_BOOT_COUNT,
         uptime_ms=16_000,  # seconds-low uptime at high boot_count → boot-loop flag
         rssi=-58,
+        # #172: a prior heartbeat-failure streak so the "possible reboot loop"
+        # banner renders — the remote-visibility signal #172 adds.
+        last_hb_fail_code=HEARTBEAT_LAST_FAIL_CODE,
+        last_hb_fail_count=HEARTBEAT_LAST_FAIL_COUNT,
     )
     r.raise_for_status()
     print(
         f"[ui-seed] sent diagnostic heartbeat for {HEARTBEAT_MAC} "
-        f"(reset={HEARTBEAT_RESET_REASON} boots={HEARTBEAT_BOOT_COUNT})",
+        f"(reset={HEARTBEAT_RESET_REASON} boots={HEARTBEAT_BOOT_COUNT} "
+        f"hb_fail={HEARTBEAT_LAST_FAIL_CODE}x{HEARTBEAT_LAST_FAIL_COUNT})",
         flush=True,
     )
 

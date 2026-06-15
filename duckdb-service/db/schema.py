@@ -152,7 +152,9 @@ def init_db():
                 fw_version VARCHAR(40),
                 reset_reason VARCHAR(16),
                 min_free_heap INTEGER,
-                boot_count BIGINT
+                boot_count BIGINT,
+                last_hb_fail_code INTEGER,
+                last_hb_fail_count INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_heartbeat_module ON module_heartbeats(module_id);
             CREATE INDEX IF NOT EXISTS idx_heartbeat_received ON module_heartbeats(received_at);
@@ -271,6 +273,24 @@ def init_db():
             )
         if "boot_count" not in heartbeat_cols:
             con.execute("ALTER TABLE module_heartbeats ADD COLUMN boot_count BIGINT")
+
+        # Steady-state heartbeat-failure diagnostics (issue #172). The hourly
+        # heartbeats fail *between* boots and never reach the server (no 2xx),
+        # so the reset_reason/boot_count columns above only describe the boot
+        # call. `last_hb_fail_count` (consecutive heartbeat failures preceding
+        # this 2xx) and `last_hb_fail_code` (the most recent failure's return
+        # value) are carried forward by the firmware on the next 2xx heartbeat
+        # — a non-zero count on an otherwise-online module is the #170 reboot-
+        # loop signature. Additive ALTER, same as the #148 block above; older
+        # firmware omits both → NULL.
+        if "last_hb_fail_code" not in heartbeat_cols:
+            con.execute(
+                "ALTER TABLE module_heartbeats ADD COLUMN last_hb_fail_code INTEGER"
+            )
+        if "last_hb_fail_count" not in heartbeat_cols:
+            con.execute(
+                "ALTER TABLE module_heartbeats ADD COLUMN last_hb_fail_count INTEGER"
+            )
 
         # Migration: drop the dead-weight `status` column from existing DBs
         # (issue #69). DuckDB v1.4 rejects every ALTER on `module_configs`

@@ -660,6 +660,58 @@ issue-#42 breadcrumb) before OTA-ing the fleet. Do not roll back to `mining`
 > the `/upload` endpoint requires). Either way it is **not** a real charge
 > level — don't diagnose power problems from it.
 
+### The "possible reboot loop" banner / heartbeat diagnostics don't appear on the dashboard (#172)
+
+**Symptom.** A module is reboot-looping (per the server-side check above) but
+opening it on the dashboard shows only the hatch panels — no `latest
+heartbeat` / `hb fails` block and no red **"possible reboot loop"** banner,
+even after the module has reported a non-zero `last_hb_fail_count`.
+
+**Cause.** The whole **Telemetry** section that hosts `HeartbeatDiagnostics`
+is **admin-gated** (`adminMode &&` in
+`homepage/src/components/ModulePanel.tsx`). It is an operator surface, not part
+of the public dashboard, so it is hidden until admin mode is on.
+
+**Fix.** Open the dashboard with `?admin=1`:
+
+```powershell
+Start-Process chrome -ArgumentList '--incognito','http://localhost:5173/dashboard?admin=1'
+```
+
+`isAdminMode()` sets a `hf_admin` sessionStorage flag, so the flag persists for
+the rest of that browser session (and resets when an incognito window closes).
+Then open the module, expand **Telemetry**, and the `hb fails` row + banner
+render. No admin key is needed for the heartbeat fields themselves; the
+per-upload logs below them still prompt for it. CLI equivalent to confirm the
+underlying data without the UI:
+
+```powershell
+$mac = "000000000002"
+(curl.exe -s http://localhost:8002/heartbeats_summary | ConvertFrom-Json).summary.$mac |
+  Select-Object last_hb_fail_code,last_hb_fail_count
+```
+
+> **Bench-testing note.** You cannot make a real board _accumulate_ a streak by
+> resetting it with `scripts/esp_reset.py` / `scripts/esp_capture.py` or the RST
+> button — those are EN-pin (`POWERON_RESET`) resets that wipe `RTC_NOINIT`. The
+> streak only survives software reboots (`ESP.restart()`). To exercise the
+> banner from real hardware, inject the fields via the duckdb-service
+> `/heartbeat` endpoint, or trigger a watchdog reboot. See
+> [chapter 11](11-risks-and-technical-debt/README.md) → "`RTC_NOINIT` survives
+> `ESP.restart()` but **not** the bench RTS/EN reset".
+>
+> **Reproducing the cross-reboot carry on hardware (validated).** Temporarily
+> set `kNoContactRebootMs` in
+> [`ESP32-CAM/lib/loop_health/loop_health.h`](../ESP32-CAM/lib/loop_health/loop_health.h)
+> to ~`60UL * 1000UL` and flash. Then `docker compose stop duckdb-service`: the
+> board can't reach the server, so the liveness watchdog reboots it every
+> ~90 s — a clean `ESP.restart()` (`reset_reason=3` in the boot banner, **not**
+> `rst:0x1 POWERON_RESET`), so the streak climbs across reboots. After a few,
+> `docker compose start duckdb-service`; the next boot heartbeat carries the
+> accumulated `last_hb_fail_count` (e.g. `4`) and the server clears it on the
+> `200`. **Revert the constant and reflash afterwards.** Do not drive the
+> reboots with `esp_reset.py`/RST — those are EN resets that wipe the streak.
+
 ---
 
 ## Bulk ESP↔stack transfers stall on Windows + Docker Desktop (OTA download **and** image upload)

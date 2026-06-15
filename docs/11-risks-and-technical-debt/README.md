@@ -138,6 +138,46 @@ the `date_trunc` all-zeros bug below — and the same CLAUDE.md rule #5
 fix: aggregation tests must seed real data and assert it lands in the
 expected bucket.
 
+### `RTC_NOINIT` survives `ESP.restart()` but **not** the bench RTS/EN reset — `esp_reset.py` cannot exercise any cross-reboot RTC feature (#172, found while QA-ing the PR)
+
+**What happened.** Verifying the #172 heartbeat-failure streak on real
+hardware, the streak (`last_hb_fail_count`) reset to `0` on every reset and
+never accumulated across reboots, even though each boot's heartbeat
+demonstrably failed and called `hbFailureNote`. It looked like the
+`RTC_NOINIT` slot wasn't persisting at all — i.e. a feature bug. It is not:
+the streak is fine in the field, the **bench reset tooling** just can't
+produce the reset _type_ the feature needs.
+
+**Why it happened.** `RTC_NOINIT_ATTR` data (the §4 breadcrumb and the
+`lib/hb_failure` streak both use it) lives in RTC slow memory, which is
+retained across a **software** reset (`ESP.restart()` → `ESP_RST_SW`) and
+wiped on a **power-on / EN-pin** reset (`POWERON_RESET`, `rst:0x1` in the
+boot banner). [`scripts/esp_reset.py`](../../scripts/esp_reset.py) and
+[`scripts/esp_capture.py`](../../scripts/esp_capture.py) reset the board by
+pulsing the CH340's RTS line, which pulls **EN** low — a `POWERON_RESET` that
+**clears RTC memory**. So a bench reset is indistinguishable, to RTC, from a
+power cycle: the magic guard correctly reports "no streak" and the count
+starts fresh every boot. Every _field_ reboot path, by contrast, is a clean
+`ESP.restart()` — `livenessReboot`, `wifiHealthReboot`, the daily reboot, OTA
+post-flash, and the capture circuit-breaker — so the #170 reboot-loop case
+(a `livenessReboot`) preserves the streak and the next boot heartbeat carries
+it. The dense-`0` emission, store, summary fold and dashboard banner were all
+verified end-to-end by injecting heartbeats directly; only the on-silicon
+_cross-reboot accumulation_ is what the bench reset cannot show.
+
+**How to avoid it next time.** When QA-ing **any** `RTC_NOINIT` feature
+(breadcrumb, heartbeat-failure streak, future RTC counters), do not expect
+state to survive an `esp_reset.py` / `esp_capture.py` reset or a physical RST
+button press — those are EN/`POWERON_RESET` and wipe RTC. Trigger a
+**software** reboot instead (induce a watchdog `ESP.restart()`, or wait for
+the real `livenessReboot`), and confirm the boot banner reads a software
+reset reason, not `rst:0x1 (POWERON_RESET)`. The pure note/peek/clear logic is
+better asserted in the native suite
+([`test_native_hb_failure`](../../ESP32-CAM/test/test_native_hb_failure/test_hb_failure.cpp),
+[`test_native_breadcrumb`](../../ESP32-CAM/test/test_native_breadcrumb/test_breadcrumb.cpp))
+than on hardware; reserve the board for the dense-emission-on-the-wire check,
+which a single boot proves.
+
 ### `build.sh` release binaries ran without PSRAM — the FQBN's missing `FlashMode=dio` linked `qio_qspi` libs against a `dio`-flashed image (#163)
 
 **What happened.** A `build.sh`-built (release-path) firmware booted reporting

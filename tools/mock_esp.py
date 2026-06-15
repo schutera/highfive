@@ -151,8 +151,13 @@ class MockEsp:
         taking a separate URL.
 
         The failure-streak fields (#172) — `last_hb_fail_code`,
-        `last_hb_fail_count` — are omitted unless explicitly passed, mirroring
-        the firmware, which only attaches them when a prior streak exists.
+        `last_hb_fail_count` — are omitted unless explicitly passed. NOTE this
+        is a *test-ergonomics* default (so existing callers keep producing a
+        legacy-firmware → NULL heartbeat), NOT what the firmware does: real
+        #172 firmware emits both **densely** on every heartbeat (`0` when
+        healthy, never omitted) so the `/heartbeats_summary` `ARG_MAX` fold
+        can't latch a stale streak. Pass `last_hb_fail_count=0` to mimic a
+        healthy #172 module; omit for a pre-#172 module.
         """
         if not self.init_url:
             raise ValueError("init_url not configured")

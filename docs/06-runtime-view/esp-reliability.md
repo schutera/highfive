@@ -176,7 +176,30 @@ outage on the reporting heartbeat keeps the streak queued rather than dropping
 it. The reboot loop ends with a `livenessReboot` → the next boot heartbeat
 round-trips `200` and carries the streak to the server, which clears it. The
 fields thread through the same path as the #148 fields and render as a
-**possible reboot loop** banner in `HeartbeatDiagnostics`.
+**possible reboot loop** banner in `HeartbeatDiagnostics`, inside the module
+panel's **admin-gated Telemetry section**
+([`homepage/src/components/ModulePanel.tsx`](../../homepage/src/components/ModulePanel.tsx)'s
+`isAdminMode` / `adminMode &&` guard). It is an operator surface, **not shown
+on the public dashboard** — open the dashboard with `?admin=1` (which sets the
+`hf_admin` session flag) to see it. The heartbeat fields themselves need no
+admin key once that section is expanded; the section as a whole is admin-only,
+exactly like the #148 reset/uptime diagnostics it sits beside.
+
+**Only software resets preserve the streak — bench-reset tooling cannot
+exercise it.** `RTC_NOINIT` survives an `ESP.restart()` (`ESP_RST_SW`), which
+is every field reboot path — `livenessReboot`, `wifiHealthReboot`, the daily
+reboot, OTA post-flash, and the capture circuit-breaker — and therefore the
+#170 reboot-loop case the feature targets. It does **not** survive an EN-pin
+reset (`POWERON_RESET`), and the RTS-line reset that
+[`scripts/esp_reset.py`](../../scripts/esp_reset.py) /
+[`scripts/esp_capture.py`](../../scripts/esp_capture.py) drive is an EN-pin
+reset — so the streak resets to `0` on every bench reset and cannot be
+_accumulated_ across reboots from the bench. To see a non-zero count carried
+on real hardware you must trigger a software reboot (wait for / induce a
+watchdog `ESP.restart()`); the note/peek/clear/magic-guard logic itself is
+native-tested in
+[`test_native_hb_failure`](../../ESP32-CAM/test/test_native_hb_failure/test_hb_failure.cpp).
+See [chapter 11](../11-risks-and-technical-debt/README.md) for the lesson.
 
 Unlike the geolocation-recovery fields (attached only when a fix is pending),
 these are sent **densely** — `0` when there is no streak, not omitted. The

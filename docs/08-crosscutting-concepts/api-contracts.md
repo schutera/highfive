@@ -330,6 +330,30 @@ wire JSON are deliberately close enough that the proxy is one
 `.map((b) => ({ timestamp, value, sampleCount }))` and not a
 field-by-field transform.
 
+## `ServerLogsResponse` — admin server-log tail (#171)
+
+Served by `GET /api/admin/logs?service=…&lines=N` (backend). Distinct from the
+per-module ESP telemetry (`TelemetryEntry`): this is a service's **own**
+stdout/stderr. The backend reads its own in-memory ring directly and proxies to
+`duckdb-service` / `image-service` internal `/logs` (forwarding `X-Admin-Key`).
+The type lives in `contracts/src/index.ts`:
+
+```ts
+export type ServerLogService = 'backend' | 'duckdb-service' | 'image-service';
+
+export interface ServerLogsResponse {
+  service: ServerLogService;
+  lines: string[]; // raw stdout/stderr lines, chronological (oldest→newest)
+  truncated: boolean; // ring held more than were returned
+}
+```
+
+Unlike the other wire shapes here there is **no snake → camel mapping**: the
+Flask `/logs` routes emit exactly these keys (`service`/`lines`/`truncated`), so
+the backend proxies the JSON through verbatim and only the `backend` branch
+constructs it locally. `nginx` is intentionally not a `ServerLogService` (no app
+ring). Design + caveats: [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.md).
+
 ## `ImageUploadsPage` — admin gallery pagination
 
 Served by `GET /api/images` (backend), which proxies

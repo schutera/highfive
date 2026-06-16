@@ -4,12 +4,15 @@ import type {
   MeasurementTimeSeries,
   Module,
   ModuleDetail,
+  ServerLogService,
+  ServerLogsResponse,
   TelemetryEntry,
   UserLocation,
 } from '@highfive/contracts';
 import { parseModuleId } from '@highfive/contracts';
 
 export type { TelemetryEntry } from '@highfive/contracts';
+export type { ServerLogService, ServerLogsResponse } from '@highfive/contracts';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 
@@ -201,6 +204,25 @@ class ApiService {
     }
     if (!response.ok) {
       throw new Error(`Failed to fetch logs for module ${id}`);
+    }
+    return response.json();
+  }
+
+  /**
+   * Admin-only: tail of a server process's own recent stdout/stderr (#171).
+   * Maps to `GET /api/admin/logs?service=…&lines=N`, gated by the admin
+   * session cookie (`credentials: 'include'`). Throws `'unauthorized'` on
+   * 401/403 so the caller can prompt for login. `lines` is clamped
+   * server-side (cap 1000). See ADR-021.
+   */
+  async getServerLogs(service: ServerLogService, lines: number = 200): Promise<ServerLogsResponse> {
+    const url = `${this.baseUrl}/admin/logs?service=${encodeURIComponent(service)}&lines=${lines}`;
+    const response = await fetch(url, { headers: this.getHeaders(), credentials: 'include' });
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('unauthorized');
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${service} logs`);
     }
     return response.json();
   }

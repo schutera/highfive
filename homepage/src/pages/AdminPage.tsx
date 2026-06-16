@@ -5,6 +5,7 @@ import type { ImageUpload } from '../services/api';
 import type { Module } from '@highfive/contracts';
 import RenameModuleModal from '../components/RenameModuleModal';
 import ImageLightbox from '../components/ImageLightbox';
+import ServerLogsPanel from '../components/ServerLogsPanel';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
 import { formatUploadedAt } from '../lib/formatUploadedAt';
@@ -270,7 +271,7 @@ export default function AdminPage() {
               <span>HighFive</span>
             </Link>
             <span className="text-gray-300">|</span>
-            <h1 className="text-xl font-semibold text-gray-800">Admin &mdash; Image Inspector</h1>
+            <h1 className="text-xl font-semibold text-gray-800">Admin Console</h1>
           </div>
           <div className="flex items-center gap-4">
             <Link
@@ -464,12 +465,17 @@ export default function AdminPage() {
           )}
         </div>
 
+        {/* Server process logs (#171) — admin-only tail of each service's
+            own stdout/stderr ring. */}
+        <ServerLogsPanel />
+
         {/* Image Filter & Stats */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
               <label className="text-sm font-medium text-gray-700">Filter by module:</label>
               <select
+                data-testid="module-filter-select"
                 value={selectedModule}
                 onChange={(e) => setSelectedModule(e.target.value)}
                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none min-w-[200px]"

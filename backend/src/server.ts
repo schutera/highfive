@@ -3,7 +3,14 @@ import { app } from './app';
 import { getApiKey } from './auth';
 import { duckdbHealth } from './duckdbClient';
 import { isProduction } from './env';
+import { installLogRing } from './logRing';
 import { DEFAULT_PORT, resolvePort } from './port';
+
+// Tee stdout/stderr into the in-memory ring so the admin server-logs endpoint
+// (#171) can tail the backend's own output. Imports above have no log output;
+// all real logging is runtime (below + request handlers), so installing here
+// captures it. Idempotent. See logRing.ts / ADR-021.
+installLogRing();
 
 const { port: PORT, warned: portUnsetWarning } = resolvePort(process.env.PORT);
 if (portUnsetWarning) {

@@ -17,15 +17,16 @@ auth-gated JSON API. Stateless read-through projection on top of
 Auth (since #142 / ADR-019): **public** = no credential; **admin** =
 `requireAdmin` (session cookie from `POST /api/admin/login`, or `X-Admin-Key`).
 
-| Endpoint                        | Auth   | Purpose                                                                                                                                                                |
-| ------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`               | public | Liveness check (`{"status":"ok"}`)                                                                                                                                     |
-| `POST /api/admin/login`         | public | Validates the admin password, sets the `hf_admin_session` cookie                                                                                                       |
-| `GET /api/modules`              | public | List all modules + their nests + latest progress                                                                                                                       |
-| `GET /api/modules/:id`          | public | One module + its detail                                                                                                                                                |
-| `PATCH /api/modules/:id/name`   | admin  | Sets or clears the operator-settable `display_name` override. Proxies to `duckdb-service /modules/<id>/display_name`. 409 on collision                                 |
-| `GET /api/modules/:id/logs`     | admin  | Proxies to `image-service /modules/<mac>/logs` for admin telemetry inspection                                                                                          |
-| `GET /api/modules/:id/activity` | public | Bucketed image-upload counts for the dashboard weather-correlation chart. Proxies `duckdb-service /modules/<id>/activity_timeseries` and maps `module_id` → `moduleId` |
+| Endpoint                        | Auth   | Purpose                                                                                                                                                                                                                          |
+| ------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`               | public | Liveness check (`{"status":"ok"}`)                                                                                                                                                                                               |
+| `POST /api/admin/login`         | public | Validates the admin password, sets the `hf_admin_session` cookie                                                                                                                                                                 |
+| `GET /api/modules`              | public | List all modules + their nests + latest progress                                                                                                                                                                                 |
+| `GET /api/modules/:id`          | public | One module + its detail                                                                                                                                                                                                          |
+| `PATCH /api/modules/:id/name`   | admin  | Sets or clears the operator-settable `display_name` override. Proxies to `duckdb-service /modules/<id>/display_name`. 409 on collision                                                                                           |
+| `GET /api/modules/:id/logs`     | admin  | Proxies to `image-service /modules/<mac>/logs` for admin telemetry inspection                                                                                                                                                    |
+| `GET /api/admin/logs`           | admin  | Tail of a service's own stdout/stderr (#171). Serves the backend's in-process ring; proxies to `duckdb-service` / `image-service` internal `/logs`. See [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.md) |
+| `GET /api/modules/:id/activity` | public | Bucketed image-upload counts for the dashboard weather-correlation chart. Proxies `duckdb-service /modules/<id>/activity_timeseries` and maps `module_id` → `moduleId`                                                           |
 
 Full request/response shapes in [docs/api-reference.md](../api-reference.md).
 

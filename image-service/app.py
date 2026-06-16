@@ -1,4 +1,5 @@
 import glob
+import hmac
 import json
 import os
 import random
@@ -10,9 +11,17 @@ from pydantic import ValidationError
 
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
+from services.log_ring import get_recent as _get_recent_logs
+from services.log_ring import install as install_log_ring
 from services.module_id import ModuleId
 from services.sidecar import LogSidecarEnvelope
 from services.upload_pipeline import UploadPipeline, UploadRequest
+
+# Tee stdout/stderr into the in-memory ring (#171) so the admin server-logs
+# endpoint can tail this service's output. Runs before the app serves traffic;
+# print() re-resolves sys.stdout per call and Flask/werkzeug log handlers are
+# constructed lazily at app.run, so capture is complete. See services/log_ring.py.
+install_log_ring()
 
 app = Flask(__name__)
 
@@ -69,6 +78,40 @@ def health():
     duckdb-service's /health for that check.
     """
     return jsonify({"ok": True, "service": "image-service"}), 200
+
+
+# Internal admin-gated server-log tail (#171). Returns this service's own
+# recent stdout/stderr (the log_ring tee). The backend's
+# GET /api/admin/logs?service=image-service proxies here, forwarding the
+# X-Admin-Key machine credential. Auth-gated because this port is published on
+# the dev host (:8000) and logs can leak request metadata. See ADR-021.
+_LOGS_DEV_FALLBACK_KEY = "hf_dev_key_2026"
+_LOGS_LINES_CAP = 1000
+_LOGS_LINES_DEFAULT = 200
+
+
+def _logs_resolve_key() -> str:
+    # Mirror backend/src/auth.ts: env HIGHFIVE_API_KEY (trimmed) or the public
+    # dev fallback, so the backend's forwarded X-Admin-Key matches.
+    return (os.getenv("HIGHFIVE_API_KEY") or "").strip() or _LOGS_DEV_FALLBACK_KEY
+
+
+@app.get("/logs")
+def get_logs():
+    provided = request.headers.get("X-Admin-Key", "")
+    if not hmac.compare_digest(provided, _logs_resolve_key()):
+        return jsonify({"error": "unauthorized"}), 401
+
+    try:
+        n = int(request.args.get("lines", _LOGS_LINES_DEFAULT))
+    except (TypeError, ValueError):
+        n = _LOGS_LINES_DEFAULT
+    n = max(1, min(n, _LOGS_LINES_CAP))
+
+    lines, truncated = _get_recent_logs(n)
+    return jsonify(
+        {"service": "image-service", "lines": lines, "truncated": truncated}
+    ), 200
 
 
 @app.post("/upload")

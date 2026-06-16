@@ -365,3 +365,22 @@ export interface MeasurementTimeSeries {
   end: string; // ISO 8601 (UTC), exclusive
   buckets: MeasurementBucket[];
 }
+
+// Admin-gated server process logs (#171). Each service keeps a bounded
+// in-memory ring of its own recent stdout/stderr lines (a stdout tee, same
+// idea as the ESP `logbuf`), exposed for `GET /api/admin/logs?service=…&lines=N`.
+// `nginx` is deliberately absent — it has no app process to host a ring, so
+// its logs stay a host/file concern (out of scope for v1). See ADR-021.
+export type ServerLogService = 'backend' | 'duckdb-service' | 'image-service';
+
+export interface ServerLogsResponse {
+  service: ServerLogService;
+  // Raw captured stdout/stderr lines, chronological (oldest→newest), like
+  // `tail`. In-memory only: resets on process restart, so this is "since the
+  // process started", not a full history.
+  lines: string[];
+  // True when the ring held more lines than were returned (clipped to the
+  // requested `lines`, itself capped server-side). Lets the UI show a
+  // "showing last N" hint without a separate count.
+  truncated: boolean;
+}

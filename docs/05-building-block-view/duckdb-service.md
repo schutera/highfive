@@ -140,13 +140,13 @@ Per-module time-series store (issue #110). Append-only event table; see
 [ADR-016](../09-architecture-decisions/adr-016-per-module-measurements-store.md)
 for the schema rationale (no PK, no FK, `value DOUBLE`).
 
-| Attribute  | Data Type   | Required | Description                                         |
-| ---------- | ----------- | -------- | --------------------------------------------------- |
-| module_mac | VARCHAR(20) | Yes      | Canonical module id (no FK; out-of-order safe)      |
-| ts         | TIMESTAMP   | Yes      | UTC; producers stamp explicitly                     |
-| metric     | VARCHAR(40) | Yes      | `battery_pct`, future: `temperature_c`, …           |
-| value      | DOUBLE      | Yes      | Numeric reading; `AVG(value)` aggregates on read    |
-| source     | VARCHAR(40) | Yes      | `esp-heartbeat`, `esp-heartbeat-backfill`, …        |
+| Attribute  | Data Type   | Required | Description                                      |
+| ---------- | ----------- | -------- | ------------------------------------------------ |
+| module_mac | VARCHAR(20) | Yes      | Canonical module id (no FK; out-of-order safe)   |
+| ts         | TIMESTAMP   | Yes      | UTC; producers stamp explicitly                  |
+| metric     | VARCHAR(40) | Yes      | `battery_pct`, future: `temperature_c`, …        |
+| value      | DOUBLE      | Yes      | Numeric reading; `AVG(value)` aggregates on read |
+| source     | VARCHAR(40) | Yes      | `esp-heartbeat`, `esp-heartbeat-backfill`, …     |
 
 Indices:
 
@@ -172,6 +172,13 @@ aggregate, shares window helpers with `activity_timeseries` via
 ### GET /health
 
 Checks whether the service and the database are accessible.
+
+### GET /logs
+
+Internal admin-gated tail of this service's own recent stdout/stderr (#171) — an
+in-memory ring fed by a stdout tee (`services/log_ring.py`), not the DB. Requires
+`X-Admin-Key`; the backend's `GET /api/admin/logs?service=duckdb-service` proxies
+here. See [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.md).
 
 ### POST /new_module
 

@@ -59,7 +59,10 @@ test.describe('admin image gallery pagination', () => {
     // 2) Drive the browser. Filter to the gallery module so the counts
     //    are deterministic regardless of other seeded modules' uploads.
     await page.goto('/admin');
-    await page.getByRole('combobox').selectOption(GALLERY_MAC);
+    // Scope to the module-filter select by test-id: the admin page now also
+    // renders the #171 Server Logs service dropdown, so a bare
+    // getByRole('combobox') matches two elements (strict-mode violation).
+    await page.getByTestId('module-filter-select').selectOption(GALLERY_MAC);
 
     // Count the image CELLS (one button per loaded row), not the <img>
     // itself: AdminPage's onError handler replaces a failed thumbnail's

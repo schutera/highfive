@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Admin & observability
+
+- **Admin server-log endpoint + viewer (#171).** New `GET /api/admin/logs?service=backend|duckdb-service|image-service&lines=N` (admin-gated) tails a service's own recent stdout/stderr, and a **Server Logs** card on `/admin` renders it with a service switcher. Each service keeps an in-memory ring fed by a stdout/stderr tee (mirrors the ESP `logbuf`); the backend serves its own ring and proxies to the Flask services' internal `/logs`, forwarding `X-Admin-Key` (now set on all three services in the UI/prod compose). Chosen over mounting the Docker socket (host-root exposure) — see [ADR-021](docs/09-architecture-decisions/adr-021-admin-server-log-ring.md). Caveats: in-memory (resets on restart), per-process, nginx not covered.
+
 ### ESP32-CAM firmware
 
 - **Remote visibility into hourly-heartbeat failures (#172).** A _failed_ heartbeat never reaches the server (no 2xx), so the #148 diagnostic fields only ever described the boot heartbeat — in #170 the boot heartbeat returned `200` while every hourly heartbeat reboot-looped the fleet, invisible without a serial capture. `sendHeartbeat` now carries `last_hb_fail_code` / `last_hb_fail_count`: a failure streak accumulated across a session in RTC memory (new `ESP32-CAM/lib/hb_failure/`, native-tested), peeked onto each heartbeat body and cleared on the next 2xx — so the boot heartbeat after a `livenessReboot` reports _why_ the prior session's heartbeats failed. Threads through duckdb-service → backend `HeartbeatSnapshot` → a **possible reboot loop** banner in the dashboard's `HeartbeatDiagnostics` card. Older firmware omits both → `NULL` (type-safe mixed fleet). Takes effect once shipped as the #170 roll-forward (higher `SEQUENCE`).

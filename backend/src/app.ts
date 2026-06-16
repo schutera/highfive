@@ -2,8 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { tryParseModuleId } from '@highfive/contracts';
+import type { ServerLogsResponse } from '@highfive/contracts';
 import { db } from './database';
-import { verifyApiKey } from './auth';
+import { verifyApiKey, getApiKey } from './auth';
+import { getRecentLogLines } from './logRing';
 import {
   SESSION_COOKIE,
   issueSessionToken,
@@ -572,5 +574,65 @@ app.get('/api/modules/:id/logs', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('[GET /api/modules/:id/logs]', { id, error: String(error) });
     res.status(502).json({ error: 'image-service unreachable' });
+  }
+});
+
+// Admin-only: tail of a server process's own recent stdout/stderr (#171).
+// Gated by `requireAdmin` (session cookie OR X-Admin-Key — like
+// /api/admin/weather/backfill). The backend serves its own in-memory ring
+// directly (logRing.ts); the two Flask services expose an internal `/logs`
+// we proxy to, forwarding the machine credential so their published dev ports
+// (duckdb :8002, image :8000) can't leak logs. `nginx` is not a valid service
+// here — it has no app ring (host/file concern, out of scope). See ADR-021.
+const LOG_SERVICES = ['backend', 'duckdb-service', 'image-service'] as const;
+const LOG_LINES_CAP = 1000;
+const LOG_LINES_DEFAULT = 200;
+
+app.get('/api/admin/logs', requireAdmin, async (req, res) => {
+  const service = String(req.query.service ?? '');
+  if (!(LOG_SERVICES as readonly string[]).includes(service)) {
+    res.status(400).json({
+      error: `invalid service; expected one of: ${LOG_SERVICES.join(', ')}`,
+    });
+    return;
+  }
+
+  // Clamp lines to [1, cap]; a missing/non-numeric value takes the default.
+  const rawLines = Number(req.query.lines);
+  const lines = Number.isFinite(rawLines)
+    ? Math.max(1, Math.min(Math.floor(rawLines), LOG_LINES_CAP))
+    : LOG_LINES_DEFAULT;
+
+  if (service === 'backend') {
+    const { lines: out, truncated } = getRecentLogLines(lines);
+    const payload: ServerLogsResponse = { service: 'backend', lines: out, truncated };
+    res.json(payload);
+    return;
+  }
+
+  // Proxy to the named Flask service's internal /logs, forwarding the machine
+  // credential. DUCKDB_URL / IMAGE_SERVICE_URL are the same internal bases the
+  // other proxy routes use.
+  const base = service === 'duckdb-service' ? DUCKDB_URL : IMAGE_SERVICE_URL;
+  try {
+    const upstream = await fetch(`${base}/logs?lines=${lines}`, {
+      headers: { 'X-Admin-Key': getApiKey() },
+    });
+    if (!upstream.ok) {
+      res.status(502).json({ error: `Failed to fetch ${service} logs` });
+      return;
+    }
+    const payload = (await upstream.json()) as ServerLogsResponse;
+    // Don't forward a drifted wire shape typed as valid: a service that
+    // changed its /logs envelope should surface as a clear 502, not as
+    // `undefined` fields reaching the UI.
+    if (!payload || typeof payload.service !== 'string' || !Array.isArray(payload.lines)) {
+      res.status(502).json({ error: `malformed logs response from ${service}` });
+      return;
+    }
+    res.json(payload);
+  } catch (error) {
+    console.error('[GET /api/admin/logs]', { service, error: String(error) });
+    res.status(502).json({ error: `${service} unreachable` });
   }
 });

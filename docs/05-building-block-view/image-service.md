@@ -49,6 +49,13 @@ image-service/
 
 # 3. API Endpoint
 
+## GET /logs
+
+Internal admin-gated tail of this service's own recent stdout/stderr (#171) — an
+in-memory ring fed by a stdout tee (`services/log_ring.py`). Requires
+`X-Admin-Key`; the backend's `GET /api/admin/logs?service=image-service` proxies
+here. See [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.md).
+
 ## POST /upload
 
 The central entry point. Called by Hive modules whenever a new image is captured.

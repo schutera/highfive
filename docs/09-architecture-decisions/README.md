@@ -29,6 +29,7 @@ and link backwards.
 | [018](adr-018-captive-portal-wifi-only.md)                  | Captive portal is Wi-Fi-only; identity / URLs / camera defaulted in firmware    | Accepted |
 | [019](adr-019-admin-session-no-bundle-secret.md)            | Admin auth is a server-side session cookie; no secret in the homepage bundle    | Accepted |
 | [020](adr-020-coordinate-generalization.md)                 | Module coordinates are generalized to ~1 km (2 dp) for every caller             | Accepted |
+| [021](adr-021-admin-server-log-ring.md)                     | Admin server logs via an in-process stdout/stderr ring, not the Docker socket   | Accepted |
 
 ## When to create an ADR
 

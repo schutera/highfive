@@ -35,6 +35,10 @@ services:
       - '0.0.0.0:9002:8000'
     environment:
       DEBUG: 'false'
+      # Must match the backend's key so the #171 server-logs proxy (backend
+      # forwards X-Admin-Key) authenticates against this service's internal
+      # /logs gate.
+      HIGHFIVE_API_KEY: hf_test_key
       # UI tests want the seeded modules (Garten 12 with leafcutter nests
       # etc.) as a deterministic backdrop for module-panel rendering and
       # side-list ordering. seed_ui_fixtures.py adds the Null-Island
@@ -67,6 +71,8 @@ services:
       DEBUG: 'false'
       DUCKDB_PATH: /data/app.duckdb
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
+      # Must match the backend's key for the #171 server-logs proxy.
+      HIGHFIVE_API_KEY: hf_test_key
     volumes:
       - duckdb_ui_data:/data
     depends_on:

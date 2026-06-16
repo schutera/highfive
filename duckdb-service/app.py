@@ -5,17 +5,26 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from db.schema import init_db
 from routes.admin_weather import admin_weather_bp
 from routes.health import health_bp
+from routes.logs import logs_bp
 from routes.measurements import measurements_bp
 from routes.modules import modules_bp
 from routes.nests import nests_bp
 from routes.progress import progress_bp
 from routes.heartbeats import heartbeats_bp
 from services.backup import run_backup
+from services.log_ring import install as install_log_ring
 from services.silence_watcher import check_silence
 from services.weather_worker import run_weather_fetch
 
+# Tee stdout/stderr into the in-memory ring (#171) so the admin server-logs
+# endpoint can tail this service's output. Runs before the app serves traffic;
+# print() re-resolves sys.stdout per call and Flask/werkzeug log handlers are
+# constructed lazily at app.run, so capture is complete. See services/log_ring.py.
+install_log_ring()
+
 app = Flask(__name__)
 app.register_blueprint(health_bp)
+app.register_blueprint(logs_bp)
 app.register_blueprint(modules_bp)
 app.register_blueprint(nests_bp)
 app.register_blueprint(progress_bp)

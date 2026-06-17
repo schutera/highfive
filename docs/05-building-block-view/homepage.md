@@ -164,14 +164,14 @@ All under `${API_BASE_URL}` (`http://localhost:3002/api` in dev,
 the prod hostname in deployed builds via the build-time
 `VITE_API_URL` env var):
 
-| Method | Path                    | Purpose                                                                                                                                                                                 |
-| ------ | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/modules`              | list all registered modules                                                                                                                                                             |
-| `GET`  | `/modules/:id`          | single module + nests                                                                                                                                                                   |
-| `GET`  | `/modules/:id/logs`     | admin telemetry sidecars (X-Admin-Key)                                                                                                                                                  |
-| `GET`  | `/modules/:id/activity` | bucketed image-upload counts for the `ActivityWeatherChart` in `ModulePanel.tsx`                                                                                                        |
-| `GET`  | `/images`               | newest-first upload metadata pages: the "Latest captures" carousel in `LatestCaptures.tsx` (paged, two 4:3 cards visible + arrows) and the admin gallery in `AdminPage.tsx` (paginated) |
-| `GET`  | `/images/:filename`     | raw image bytes for both surfaces above (public read, ADR-019)                                                                                                                          |
+| Method | Path                    | Purpose                                                                                 |
+| ------ | ----------------------- | --------------------------------------------------------------------------------------- |
+| `GET`  | `/modules`              | list all registered modules                                                             |
+| `GET`  | `/modules/:id`          | single module + nests                                                                   |
+| `GET`  | `/modules/:id/logs`     | admin telemetry sidecars (X-Admin-Key)                                                  |
+| `GET`  | `/modules/:id/activity` | bucketed image-upload counts for the `ActivityWeatherChart` in `ModulePanel.tsx`        |
+| `GET`  | `/images`               | newest-first upload metadata pages for the admin gallery in `AdminPage.tsx` (paginated) |
+| `GET`  | `/images/:filename`     | raw image bytes for the admin gallery (public read, ADR-019)                            |
 
 The dashboard's `ActivityWeatherChart` also calls Open-Meteo
 directly from the browser (no API key, CORS open) at

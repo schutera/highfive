@@ -214,6 +214,7 @@ ESP32-CAM/DEV_SERVER_HOST
 .env.local
 .env.production
 *.env.production
+.deploy.env
 ecosystem.config.js
 
 # Build outputs

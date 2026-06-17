@@ -1,0 +1,21 @@
+# HiveHive auto-deploy — oneshot, triggered by highfive-deploy.timer.
+# Install: sudo cp scripts/systemd/highfive-deploy.* /etc/systemd/system/
+#          sudo systemctl daemon-reload
+#          sudo systemctl enable --now highfive-deploy.timer
+# Watch:   journalctl -u highfive-deploy.service -f
+[Unit]
+Description=HiveHive auto-deploy (pull main, rebuild changed services, health-check, rollback, test-gated firmware OTA)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/var/www/highfive
+Environment=HOME=/root
+Environment=PM2_HOME=/root/.pm2
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/var/www/highfive/.deploy.env
+ExecStart=/usr/bin/bash /var/www/highfive/scripts/deploy.sh
+# Firmware native-test + cross-compile can take a few minutes; cap generously.
+TimeoutStartSec=1800

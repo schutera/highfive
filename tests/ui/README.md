@@ -102,30 +102,34 @@ project. The e2e stack uses `highfive-e2e`; the two can coexist.
 `scripts/seed_ui_fixtures.py` runs after the stack is healthy and adds
 what the specs need on top of `SEED_DATA=true`'s five baseline modules:
 
-| MAC            | Module name            | Lat,Lng     | Why it exists                                                                            |
-| -------------- | ---------------------- | ----------- | ---------------------------------------------------------------------------------------- |
-| `ff0000000001` | UI Test Null Island    | (0, 0)      | Pins the side-list "Location pending" pill regression.                                   |
-| `ff1111111111` | UI Test Telemetry      | (47.8, 9.6) | Pins the TelemetryRow envelope-drift regression with one upload + sidecar.               |
-| `ff2222222222` | UI Test Gallery        | (47.8, 9.6) | 6 uploads (> one admin page) for `admin-image-pagination.spec.ts`.                       |
-| `ff3333333333` | UI Test Precise Coords | precise 6dp | Proves server-side ~1 km coarsening end-to-end (ADR-020).                                |
-| `ff4444444444` | UI Test Heartbeat      | (47.8, 9.6) | Carries the #148 diagnostic heartbeat fields for `module-heartbeat-diagnostics.spec.ts`. |
+| MAC            | Module name            | Lat,Lng     | Why it exists                                                                                              |
+| -------------- | ---------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `ff0000000001` | UI Test Null Island    | (0, 0)      | Pins the side-list "Location pending" pill regression.                                                     |
+| `ff1111111111` | UI Test Telemetry      | (47.8, 9.6) | Pins the TelemetryRow envelope-drift regression with one upload + sidecar.                                 |
+| `ff2222222222` | UI Test Gallery        | (47.8, 9.6) | 6 uploads (> one admin page) for `admin-image-pagination.spec.ts` and the ModulePanel latest-capture card. |
+| `ff3333333333` | UI Test Precise Coords | precise 6dp | Proves server-side ~1 km coarsening end-to-end (ADR-020).                                                  |
+| `ff4444444444` | UI Test Heartbeat      | (47.8, 9.6) | Carries the #148 diagnostic heartbeat fields for `module-heartbeat-diagnostics.spec.ts`.                   |
 
 The seed values asserted by `dashboard-telemetry.spec.ts` live in
 `seed_ui_fixtures.py::seed_telemetry_upload` — keep the two in sync.
 
-### Seeded image bytes are NOT decodable
+### Seeded image bytes are NOT decodable (except where a spec needs them)
 
 `tools/mock_esp.py`'s default upload body is pseudo-random bytes wrapped
 in JPEG SOI/EOI markers — valid enough for the upload pipeline (which
 never decodes), **impossible for a browser to render**: `<img>` fires
-`error`, `naturalWidth` stays `0`, forever. Consequence for spec authors:
+`error`, `naturalWidth` stays `0`, forever. Two consequences for spec
+authors:
 
 - Never assert thumbnail/image _loading_ against default seeds —
   `admin-image-pagination.spec.ts` counts grid cells, not `<img>`
   elements, for exactly this reason.
-- If a future spec must prove pixels actually decode end-to-end (e.g. a
-  `naturalWidth > 0` poll), seed a _real_ JPEG for that fixture rather
-  than the default mock-ESP bytes.
+- If your spec must prove pixels actually decode end-to-end (the whole
+  point of `module-latest-capture.spec.ts`'s `naturalWidth > 0` poll),
+  the seed must upload a _real_ JPEG for that fixture —
+  `seed_ui_fixtures.py::seed_admin_gallery_images` uploads
+  `dev-tools/mock_fully_filled.jpg` as the gallery module's newest
+  capture for this purpose.
 
 ## File layout
 
@@ -141,6 +145,7 @@ tests/ui/
     dashboard-telemetry.spec.ts         # pins envelope-drift regression
     dashboard-side-list.spec.ts         # pins side-list filter regression
     module-panel-rendering.spec.ts      # nest grid + header against real backend
+    module-latest-capture.spec.ts       # latest-capture card renders real pixels (#154)
     module-heartbeat-diagnostics.spec.ts # #148 diagnostic fields end-to-end
     module-battery-history.spec.ts      # battery chart (currently skipped, chart shelved)
     admin-image-pagination.spec.ts      # admin gallery page cap + Load more

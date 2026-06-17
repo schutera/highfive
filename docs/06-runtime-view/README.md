@@ -27,10 +27,18 @@ the upload pipeline (edge → server) and the dashboard read flow.
    serves them.
 5. Frontend renders the map, module list, status, battery and nest
    progress.
-6. Opening a module's detail panel renders nests, status and telemetry.
-   The public panel does not fetch images; the `GET /api/images` /
-   `GET /api/images/:filename` reads are used only by the admin gallery
-   (`AdminPage.tsx`, behind the admin session).
+6. Opening a module's detail panel — **only when the build-time feature flag
+   `VITE_ENABLE_DASHBOARD_IMAGES` is `true`** (default off in prod; see
+   [ADR-022](../09-architecture-decisions/adr-022-build-time-feature-flags.md))
+   — additionally fetches
+   `GET /api/images?module_id=<id>&limit=6&offset=0` (public read, proxied
+   to `image-service /images`) and renders a newest-first "Latest captures"
+   carousel (#154) — two 4:3 cards visible, chevron arrows paging older
+   images (further `offset` pages fetched on demand), click for a full-size
+   lightbox; bytes come from `GET /api/images/:filename`. A failed image
+   fetch degrades to "no gallery" — it never tears down the panel. With the
+   flag off, the panel shows nests / status / telemetry only and makes no
+   image fetch.
 
 No caching layer; each browser poll re-fetches. Partial failures
 degrade gracefully (some fields empty) rather than 500ing.

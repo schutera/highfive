@@ -20,5 +20,8 @@ export default defineConfig({
     'import.meta.env.VITE_STRIPE_LINK': JSON.stringify('#'),
     'import.meta.env.VITE_INIT_BASE_URL': JSON.stringify('http://localhost:8002'),
     'import.meta.env.VITE_UPLOAD_BASE_URL': JSON.stringify('http://localhost:8000'),
+    // Feature flags on in tests so the flag-gated dashboard latest-captures
+    // gallery (#154 / ADR-022) is exercised by ModulePanel.test.tsx.
+    'import.meta.env.VITE_ENABLE_DASHBOARD_IMAGES': JSON.stringify('true'),
   },
 });

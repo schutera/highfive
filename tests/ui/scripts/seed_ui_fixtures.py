@@ -201,18 +201,11 @@ def seed_admin_gallery_images() -> None:
         module_name="UI Test Gallery",
     )
     esp.register().raise_for_status()
-    # The LAST (= newest) upload is a real, decodable JPEG — mock_esp's
-    # default `_make_fake_image()` bytes carry JPEG markers but random
-    # payload, which a browser cannot decode (naturalWidth stays 0).
-    # module-latest-capture.spec.ts asserts the ModulePanel "Latest
-    # capture" card actually renders pixels end-to-end, so the newest
-    # gallery image must decode for real. The five older uploads stay
-    # fake on purpose: admin-image-pagination.spec.ts counts cells, not
-    # loaded thumbnails, exactly because fake bytes may fail to render.
-    real_jpeg = (REPO_ROOT / "dev-tools" / "mock_fully_filled.jpg").read_bytes()
-    for i in range(GALLERY_IMAGE_COUNT):
-        is_last = i == GALLERY_IMAGE_COUNT - 1
-        esp.upload(image_bytes=real_jpeg if is_last else None).raise_for_status()
+    # admin-image-pagination.spec.ts counts grid cells, not loaded
+    # thumbnails, so the default mock_esp fake-JPEG bytes are fine here
+    # (a browser can't decode them, but the spec never asserts on pixels).
+    for _ in range(GALLERY_IMAGE_COUNT):
+        esp.upload().raise_for_status()
         time.sleep(2)  # headroom over the 1s uploaded_at truncation boundary
     print(
         f"[ui-seed] uploaded {GALLERY_IMAGE_COUNT} images for gallery "

@@ -255,13 +255,14 @@ knowledge existed but lived in one spec's comment, not in the fixture
 docs, so the next spec author (this one) re-paid for it.
 
 **How to avoid it next time.** If a spec must prove pixels decode, seed a
-real JPEG for that fixture — `seed_ui_fixtures.py::seed_admin_gallery_images`
-now uploads `dev-tools/mock_fully_filled.jpg` as the gallery module's
-newest capture for exactly this. Never assert image _loading_ against
-default mock-ESP uploads. Rules + the re-seed-pollution gotcha (re-running
-the seed on a reused stack accumulates uploads and breaks exact-count
-specs) are documented where spec authors will look:
-`tests/ui/README.md` → "Seeded image bytes are NOT decodable".
+real JPEG for that fixture rather than the default mock-ESP bytes. Never
+assert image _loading_ against default mock-ESP uploads. Rules + the
+re-seed-pollution gotcha (re-running the seed on a reused stack accumulates
+uploads and breaks exact-count specs) are documented where spec authors
+will look: `tests/ui/README.md` → "Seeded image bytes are NOT decodable".
+(The `module-latest-capture.spec.ts` that triggered this lesson, and the
+real-JPEG seed it relied on, were removed when the ModulePanel latest-capture
+gallery was reverted — but the fixture rule it surfaced still stands.)
 
 ### A documented "this is unaffected" claim cost a debug session — Docker Desktop's Windows forwarder stalls ESP **uploads** too (#154 bench session)
 

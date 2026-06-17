@@ -22,10 +22,10 @@ import { LanguageProvider } from '../i18n/LanguageContext';
 // Per-test mutable mock — set before each render() call.
 let nextModuleDetail: ModuleDetail | null = null;
 
-// Per-test mutable page for the latest-capture fetch (#154 phase 1).
-// Defaults to an empty page so the pre-existing suites render a panel
-// without a capture card; the latest-capture suite below overrides it.
-// `null` makes the mock reject, for the silent-degradation test.
+// Inert scaffolding for the api mock's getImages stub. The ModulePanel
+// latest-captures gallery was removed, so the panel no longer fetches
+// images and nothing reads this — it is kept only so the mock shape stays
+// complete (like the shelved-chart stubs below).
 let nextImagesPage: ImageUploadsPage | null = { images: [], total: 0 };
 
 // Note: `isAdminMode` is NOT exported from `../services/api` — it's a
@@ -346,7 +346,7 @@ describe('ModulePanel location-pending pill', () => {
   });
 });
 
-// The latest-captures gallery moved to its own component
-// (LatestCaptures.tsx) and is covered by LatestCaptures.test.tsx. Here we
-// only keep the api mock wired (getImages defaults to an empty page) so the
-// child renders nothing and the panel-level tests above stay isolated.
+// The ModulePanel latest-captures gallery was removed; the panel no longer
+// fetches images. The getImages / getImageUrl stubs in the api mock above
+// are now inert scaffolding (kept, like the shelved-chart stubs, only so the
+// mock shape stays complete and the panel-level tests stay isolated).

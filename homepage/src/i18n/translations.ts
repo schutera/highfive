@@ -96,6 +96,12 @@ const translations = {
       nest: 'Nest {index}',
       moduleNotFound: 'Module not found',
       failedToLoad: 'Failed to load module details',
+      latestCaptures: 'Latest captures',
+      captureAlt: 'Capture from {name}',
+      latestCaptureOpen: 'Open full-size image',
+      galleryPrev: 'Previous images',
+      galleryNext: 'More images',
+      lightboxClose: 'Close',
     },
 
     // ---- Activity vs weather chart ----
@@ -545,6 +551,12 @@ const translations = {
       nest: 'Nest {index}',
       moduleNotFound: 'Modul nicht gefunden',
       failedToLoad: 'Moduldetails konnten nicht geladen werden',
+      latestCaptures: 'Neueste Aufnahmen',
+      captureAlt: 'Aufnahme von {name}',
+      latestCaptureOpen: 'Bild in voller Größe öffnen',
+      galleryPrev: 'Vorherige Bilder',
+      galleryNext: 'Weitere Bilder',
+      lightboxClose: 'Schließen',
     },
 
     // ---- Activity vs weather chart ----

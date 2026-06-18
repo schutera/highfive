@@ -789,8 +789,26 @@ wsl wslinfo --networking-mode    # must print: mirrored
 > docker compose down && docker compose up -d
 > ```
 >
-> Then verify all four answer: `curl localhost:3002/api/health`,
-> `localhost:8000/health`, `localhost:8002/health`, `localhost:5173`.
+> Then verify all four answer — but use **`127.0.0.1`, not `localhost`**:
+> `curl 127.0.0.1:3002/api/health`, `127.0.0.1:8000/health`,
+> `127.0.0.1:8002/health`, `127.0.0.1:5173`.
+>
+> **Gotcha (observed in the #177 bench session): under mirrored mode
+> `localhost` times out while `127.0.0.1` works.** This is a **distinct**
+> failure from the stale-proxy _connection-refused_ above — here the stack is
+> healthy and recreated, but the probe _hangs_. `localhost` resolves to IPv6
+> `::1` first, and under mirrored mode the `::1` loopback path to the
+> Docker-published ports doesn't answer, so the probe waits out its timeout.
+> (One container is bound IPv4-only outright — `docker compose ps` shows
+> duckdb-service as `0.0.0.0:8002->…` with no `[::]:8002`; the others list a
+> `[::]` binding yet the `::1` path still fails in practice.) This is **not** a
+> broken stack — `curl 127.0.0.1:8002/health` returns `200` instantly. It is
+> also **not** the WinINET-proxy trap above: that would fail `127.0.0.1` too;
+> `localhost` failing while `127.0.0.1` succeeds is the IPv4/IPv6 split, full
+> stop. Note `curl.exe` _eventually_ falls through to IPv4 — but only after the
+> IPv6 attempt times out (`--connect-timeout`), so it can stall tens of seconds
+> first; pass `127.0.0.1` to skip the dead `::1` hop. PowerShell
+> `Invoke-WebRequest http://localhost:…` does not fall through at all, and hangs.
 
 Reverting is symmetric: delete `~/.wslconfig` (or the `networkingMode` line),
 `wsl --shutdown`, restart Docker Desktop, `docker compose down && up -d`.

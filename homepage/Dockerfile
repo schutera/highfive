@@ -25,6 +25,12 @@ COPY homepage ./homepage
 ARG VITE_API_URL=https://api.highfive.schutera.com
 ENV VITE_API_URL=$VITE_API_URL
 
+# Build-time feature flags (ADR-022). Default empty = OFF, so a plain prod
+# build ships the dashboard latest-captures gallery (#154) disabled. Pass
+# --build-arg VITE_ENABLE_DASHBOARD_IMAGES=true to enable it.
+ARG VITE_ENABLE_DASHBOARD_IMAGES=
+ENV VITE_ENABLE_DASHBOARD_IMAGES=$VITE_ENABLE_DASHBOARD_IMAGES
+
 WORKDIR /app/homepage
 RUN npm run build
 

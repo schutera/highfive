@@ -12,7 +12,7 @@ import type {
 import { parseModuleId } from '@highfive/contracts';
 
 export type { TelemetryEntry } from '@highfive/contracts';
-export type { ServerLogService, ServerLogsResponse } from '@highfive/contracts';
+export type { LogEntry, LogLevel, ServerLogService, ServerLogsResponse } from '@highfive/contracts';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 

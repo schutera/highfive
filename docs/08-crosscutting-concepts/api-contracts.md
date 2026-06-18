@@ -330,28 +330,38 @@ wire JSON are deliberately close enough that the proxy is one
 `.map((b) => ({ timestamp, value, sampleCount }))` and not a
 field-by-field transform.
 
-## `ServerLogsResponse` — admin server-log tail (#171)
+## `ServerLogsResponse` — admin server-log tail (#171, #178)
 
 Served by `GET /api/admin/logs?service=…&lines=N` (backend). Distinct from the
-per-module ESP telemetry (`TelemetryEntry`): this is a service's **own**
-stdout/stderr. The backend reads its own in-memory ring directly and proxies to
-`duckdb-service` / `image-service` internal `/logs` (forwarding `X-Admin-Key`).
-The type lives in `contracts/src/index.ts`:
+per-module ESP telemetry (`TelemetryEntry`): this is a service's **own** log
+output. The backend reads its own ring directly and proxies to `duckdb-service`
+/ `image-service` internal `/logs` (forwarding `X-Admin-Key`). The types live in
+`contracts/src/index.ts`:
 
 ```ts
 export type ServerLogService = 'backend' | 'duckdb-service' | 'image-service';
 
+export type LogLevel = 'info' | 'warn' | 'error';
+
+export interface LogEntry {
+  ts: string; // ISO 8601 (UTC)
+  level: LogLevel;
+  msg: string;
+}
+
 export interface ServerLogsResponse {
   service: ServerLogService;
-  lines: string[]; // raw stdout/stderr lines, chronological (oldest→newest)
+  entries: LogEntry[]; // structured entries, chronological (oldest→newest)
   truncated: boolean; // ring held more than were returned
 }
 ```
 
 Unlike the other wire shapes here there is **no snake → camel mapping**: the
-Flask `/logs` routes emit exactly these keys (`service`/`lines`/`truncated`), so
-the backend proxies the JSON through verbatim and only the `backend` branch
-constructs it locally. `nginx` is intentionally not a `ServerLogService` (no app
+Flask `/logs` routes emit exactly these keys (`service`/`entries`/`truncated`,
+each entry `ts`/`level`/`msg`), so the backend proxies the JSON through verbatim
+and only the `backend` branch constructs it locally. The proxy branch rejects a
+drifted envelope (no `entries` array) with `502` rather than letting `undefined`
+fields reach the UI. `nginx` is intentionally not a `ServerLogService` (no app
 ring). Design + caveats: [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.md).
 
 ## `ImageUploadsPage` — admin gallery pagination

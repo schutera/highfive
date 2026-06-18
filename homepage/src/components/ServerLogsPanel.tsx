@@ -1,19 +1,27 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
-import type { ServerLogService } from '../services/api';
+import type { LogEntry, LogLevel, ServerLogService } from '../services/api';
 
-// Admin-only server-log viewer (#171). Tails a service's own recent
-// stdout/stderr via GET /api/admin/logs (the app-level ring in each service).
-// English-only, like the rest of AdminPage (operator-facing, no i18n consumer
-// in this page — see AdminPage's existing note). See ADR-021.
+// Admin-only server-log viewer (#171, #178). Tails a service's own recent
+// structured log entries via GET /api/admin/logs (the app-level ring in each
+// service). English-only, like the rest of AdminPage (operator-facing, no i18n
+// consumer in this page — see AdminPage's existing note). See ADR-021/ADR-022.
 const SERVICES: ServerLogService[] = ['backend', 'duckdb-service', 'image-service'];
 const DEFAULT_LINES = 200;
 const MAX_LINES = 1000;
 
+// Tailwind classes per level. Info is muted; warn amber; error red — matches
+// the access-log middleware's status→level mapping.
+const LEVEL_STYLES: Record<LogLevel, { badge: string; text: string }> = {
+  info: { badge: 'bg-gray-700 text-gray-200', text: 'text-gray-100' },
+  warn: { badge: 'bg-amber-500 text-gray-900', text: 'text-amber-300' },
+  error: { badge: 'bg-red-600 text-white', text: 'text-red-300' },
+};
+
 export default function ServerLogsPanel() {
   const [service, setService] = useState<ServerLogService>('backend');
   const [lines, setLines] = useState(DEFAULT_LINES);
-  const [log, setLog] = useState<string[]>([]);
+  const [entries, setEntries] = useState<LogEntry[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +31,7 @@ export default function ServerLogsPanel() {
     setError(null);
     try {
       const res = await api.getServerLogs(service, lines);
-      setLog(res.lines);
+      setEntries(res.entries);
       setTruncated(res.truncated);
     } catch (err) {
       setError(
@@ -31,7 +39,7 @@ export default function ServerLogsPanel() {
           ? 'Session expired — reload and log in again.'
           : `Failed to fetch ${service} logs. Is the service running?`,
       );
-      setLog([]);
+      setEntries([]);
     } finally {
       setLoading(false);
     }
@@ -87,19 +95,37 @@ export default function ServerLogsPanel() {
       <div className="p-4">
         {error && <p className="text-red-600 text-sm mb-2">{error}</p>}
         {truncated && !error && (
-          <p className="text-xs text-gray-400 mb-2">Showing the most recent {log.length} lines.</p>
-        )}
-        {!error && log.length === 0 && !loading ? (
-          <p className="text-sm text-gray-400">
-            No log lines captured yet (rings reset on restart).
+          <p className="text-xs text-gray-400 mb-2">
+            Showing the most recent {entries.length} entries.
           </p>
+        )}
+        {!error && entries.length === 0 && !loading ? (
+          <p className="text-sm text-gray-400">No log entries captured yet.</p>
         ) : (
-          <pre
+          <div
             data-testid="server-logs-output"
-            className="bg-gray-900 text-gray-100 text-xs font-mono rounded-lg p-3 overflow-auto max-h-[28rem] whitespace-pre-wrap break-words"
+            className="bg-gray-900 text-xs font-mono rounded-lg p-3 overflow-auto max-h-[28rem]"
           >
-            {log.join('\n')}
-          </pre>
+            {entries.map((entry, i) => {
+              const style = LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.info;
+              return (
+                <div
+                  key={`${entry.ts}-${i}`}
+                  data-testid="server-log-entry"
+                  data-level={entry.level}
+                  className="flex items-start gap-2 py-0.5 whitespace-pre-wrap break-words"
+                >
+                  <span className="text-gray-500 shrink-0">{entry.ts}</span>
+                  <span
+                    className={`shrink-0 px-1.5 rounded uppercase font-semibold ${style.badge}`}
+                  >
+                    {entry.level}
+                  </span>
+                  <span className={style.text}>{entry.msg}</span>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

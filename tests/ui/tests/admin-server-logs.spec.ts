@@ -31,7 +31,13 @@ test.describe('admin server logs (#171)', () => {
       expect(resp.ok()).toBeTruthy();
       const body = (await resp.json()) as ServerLogsResponse;
       expect(body.service).toBe(service);
-      expect(Array.isArray(body.lines)).toBeTruthy();
+      expect(Array.isArray(body.entries)).toBeTruthy();
+      // Structured wire shape (#178): when present, each entry is { ts, level, msg }.
+      for (const entry of body.entries) {
+        expect(typeof entry.ts).toBe('string');
+        expect(['info', 'warn', 'error']).toContain(entry.level);
+        expect(typeof entry.msg).toBe('string');
+      }
       expect(typeof body.truncated).toBe('boolean');
     }
 

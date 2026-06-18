@@ -108,9 +108,9 @@ def get_logs():
         n = _LOGS_LINES_DEFAULT
     n = max(1, min(n, _LOGS_LINES_CAP))
 
-    lines, truncated = _get_recent_logs(n)
+    entries, truncated = _get_recent_logs(n)
     return jsonify(
-        {"service": "image-service", "lines": lines, "truncated": truncated}
+        {"service": "image-service", "entries": entries, "truncated": truncated}
     ), 200
 
 

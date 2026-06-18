@@ -366,20 +366,38 @@ export interface MeasurementTimeSeries {
   buckets: MeasurementBucket[];
 }
 
-// Admin-gated server process logs (#171). Each service keeps a bounded
-// in-memory ring of its own recent stdout/stderr lines (a stdout tee, same
-// idea as the ESP `logbuf`), exposed for `GET /api/admin/logs?service=…&lines=N`.
+// Admin-gated server process logs (#171, #178). Each service keeps a bounded
+// ring of its own recent log entries (a stdout/stderr tee plus a structured
+// logger, same idea as the ESP `logbuf`), exposed for
+// `GET /api/admin/logs?service=…&lines=N` and streamed live via
+// `GET /api/admin/logs/stream?service=…`.
 // `nginx` is deliberately absent — it has no app process to host a ring, so
-// its logs stay a host/file concern (out of scope for v1). See ADR-021.
+// its logs stay a host/file concern (out of scope). See ADR-021/ADR-022.
 export type ServerLogService = 'backend' | 'duckdb-service' | 'image-service';
+
+// Severity of a single log entry. Drives the panel's color coding and the
+// access-log middleware's status→level mapping (>=500 error, >=400 warn, else
+// info). Kept deliberately small — this is operational logging, not a
+// general-purpose level taxonomy.
+export type LogLevel = 'info' | 'warn' | 'error';
+
+// One structured log line. Replaces the former raw `string[]`: every line now
+// carries a timestamp and level so the panel can render `ts · level · msg`,
+// color-code, filter, and export. The SSE stream emits one `LogEntry` per
+// `data:` event; the REST backfill returns an array of them.
+export interface LogEntry {
+  ts: string; // ISO 8601 (UTC), e.g. '2026-06-18T20:42:55.123Z'
+  level: LogLevel;
+  msg: string;
+}
 
 export interface ServerLogsResponse {
   service: ServerLogService;
-  // Raw captured stdout/stderr lines, chronological (oldest→newest), like
-  // `tail`. In-memory only: resets on process restart, so this is "since the
-  // process started", not a full history.
-  lines: string[];
-  // True when the ring held more lines than were returned (clipped to the
+  // Captured log entries, chronological (oldest→newest), like `tail`. Backed
+  // by an in-memory ring with on-disk persistence (ADR-022), so this survives
+  // process restart up to the retention bound (30 days / 100 MB).
+  entries: LogEntry[];
+  // True when the ring held more entries than were returned (clipped to the
   // requested `lines`, itself capped server-side). Lets the UI show a
   // "showing last N" hint without a separate count.
   truncated: boolean;

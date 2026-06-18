@@ -3,6 +3,7 @@ import { app } from './app';
 import { getApiKey } from './auth';
 import { duckdbHealth } from './duckdbClient';
 import { isProduction } from './env';
+import { log } from './log';
 import { installLogRing } from './logRing';
 import { DEFAULT_PORT, resolvePort } from './port';
 
@@ -14,7 +15,7 @@ installLogRing();
 
 const { port: PORT, warned: portUnsetWarning } = resolvePort(process.env.PORT);
 if (portUnsetWarning) {
-  console.warn(
+  log.warn(
     `[startup] PORT env var unset or non-numeric — defaulting to ${DEFAULT_PORT}. ` +
       `Set PORT explicitly in production. See docker-compose.yml for the dev convention.`,
   );
@@ -23,22 +24,25 @@ if (portUnsetWarning) {
 async function bootstrap() {
   try {
     const health = await duckdbHealth();
-    console.log('🗄 DuckDB service reachable:', health);
+    log.info(`🗄 DuckDB service reachable: ${JSON.stringify(health)}`);
   } catch (err) {
-    console.warn('⚠ DuckDB service not reachable:', err);
+    log.warn(`⚠ DuckDB service not reachable: ${String(err)}`);
   }
 
   app.listen(PORT, () => {
-    console.log(`🐝 HighFive Backend API running on http://localhost:${PORT}`);
+    // Don't say "http://localhost" — the process binds all interfaces and on
+    // prod is reached via nginx, so the localhost prefix is misleading in the
+    // admin log panel (#178). State the port instead.
+    log.info(`🐝 HighFive Backend API listening on port ${PORT} (all interfaces)`);
     // Never print the configured API key in production - it would land
-    // in Docker logs and any aggregator collecting them. Dev/test only.
-    // `isProduction()` normalises NODE_ENV across casing/whitespace typos
-    // so `"Production"` or `"production "` don't accidentally re-enable
+    // in Docker logs, the admin log panel, and (ADR-022) on disk. Dev/test
+    // only. `isProduction()` normalises NODE_ENV across casing/whitespace
+    // typos so `"Production"` or `"production "` don't accidentally re-enable
     // the print on prod (PR #84 senior-review finding).
     if (!isProduction()) {
-      console.log(`🔑 Dev admin key: ${getApiKey()}`);
-      console.log(`   Admin login: POST /api/admin/login {"password":"<key>"}`);
-      console.log(`   Or machine credential: X-Admin-Key: ${getApiKey()}`);
+      log.info(`🔑 Dev admin key: ${getApiKey()}`);
+      log.info(`   Admin login: POST /api/admin/login {"password":"<key>"}`);
+      log.info(`   Or machine credential: X-Admin-Key: ${getApiKey()}`);
     }
   });
 }

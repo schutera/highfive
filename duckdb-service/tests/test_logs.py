@@ -1,4 +1,4 @@
-"""Tests for the internal admin-gated GET /logs server-log tail (#171)."""
+"""Tests for the internal admin-gated GET /logs server-log tail (#171, #178)."""
 
 import io
 
@@ -7,40 +7,71 @@ from services import log_ring
 VALID_KEY = "hf_dev_key_2026"  # dev fallback resolved when HIGHFIVE_API_KEY unset
 
 
-def test_tee_captures_complete_lines_and_passes_through():
+def _msgs(entries):
+    return [e["msg"] for e in entries]
+
+
+def test_tee_captures_complete_lines_as_entries_and_passes_through():
     log_ring._reset_for_test()
     sink = io.StringIO()
-    tee = log_ring._TeeStream(sink)
+    tee = log_ring._TeeStream(sink, "info")
     tee.write("alpha\n")
     tee.write("partial")  # no newline yet — buffered, not a line
-    lines, _ = log_ring.get_recent(10)
-    assert "alpha" in lines
-    assert "partial" not in lines
+    entries, _ = log_ring.get_recent(10)
+    assert "alpha" in _msgs(entries)
+    assert "partial" not in _msgs(entries)
     tee.write(" done\n")
-    lines, _ = log_ring.get_recent(10)
-    assert "partial done" in lines
+    entries, _ = log_ring.get_recent(10)
+    assert "partial done" in _msgs(entries)
+    # Captured lines carry the tee's level and a timestamp.
+    alpha = next(e for e in entries if e["msg"] == "alpha")
+    assert alpha["level"] == "info"
+    assert alpha["ts"].endswith("Z")
     # The real stream still saw every byte (tee, not intercept).
     assert sink.getvalue() == "alpha\npartial done\n"
+
+
+def test_stderr_tee_records_error_level():
+    log_ring._reset_for_test()
+    tee = log_ring._TeeStream(io.StringIO(), "error")
+    tee.write("boom\n")
+    entries, _ = log_ring.get_recent(10)
+    assert entries[-1] == {"ts": entries[-1]["ts"], "level": "error", "msg": "boom"}
+
+
+def test_log_event_appends_entry_and_writes_through(monkeypatch):
+    log_ring._reset_for_test()
+    sink = io.StringIO()
+    # log_event writes to the saved real stream; point it at a sink.
+    monkeypatch.setattr(log_ring, "_real_stdout", sink)
+    log_ring.log_event("warn", "GET /modules 200 5ms")
+    entries, _ = log_ring.get_recent(10)
+    assert entries[-1]["level"] == "warn"
+    assert entries[-1]["msg"] == "GET /modules 200 5ms"
+    # Human line reached the real stream exactly once...
+    assert sink.getvalue().count("GET /modules 200 5ms") == 1
+    # ...and was not re-captured as a duplicate entry.
+    assert _msgs(entries).count("GET /modules 200 5ms") == 1
 
 
 def test_get_recent_clamps_and_flags_truncation():
     log_ring._reset_for_test()
     for i in range(5):
-        log_ring._ring.append(f"line {i}")
-    lines, truncated = log_ring.get_recent(2)
-    assert lines == ["line 3", "line 4"]
+        log_ring._push("info", f"line {i}")
+    entries, truncated = log_ring.get_recent(2)
+    assert _msgs(entries) == ["line 3", "line 4"]
     assert truncated is True
 
 
 def test_ring_caps_at_max_and_evicts_oldest():
     log_ring._reset_for_test()
-    total = log_ring._MAX_RING_LINES + 10
+    total = log_ring._MAX_RING_ENTRIES + 10
     for i in range(total):
-        log_ring._ring.append(f"L{i}")
-    lines, truncated = log_ring.get_recent(total)
-    assert len(lines) == log_ring._MAX_RING_LINES  # bounded
-    assert lines[0] == "L10"  # first 10 evicted
-    assert lines[-1] == f"L{total - 1}"  # newest kept
+        log_ring._push("info", f"L{i}")
+    entries, truncated = log_ring.get_recent(total)
+    assert len(entries) == log_ring._MAX_RING_ENTRIES  # bounded
+    assert entries[0]["msg"] == "L10"  # first 10 evicted
+    assert entries[-1]["msg"] == f"L{total - 1}"  # newest kept
     assert truncated is False  # asked for >= ring size
 
 
@@ -52,20 +83,23 @@ def test_logs_requires_admin_key(client):
 
 def test_logs_returns_ring_with_valid_key(client):
     log_ring._reset_for_test()
-    log_ring._ring.append("duckdb marker line")
+    log_ring._push("info", "duckdb marker line")
     resp = client.get("/logs?lines=50", headers={"X-Admin-Key": VALID_KEY})
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["service"] == "duckdb-service"
-    assert "duckdb marker line" in body["lines"]
+    assert "duckdb marker line" in _msgs(body["entries"])
+    # Each entry carries the structured wire shape.
+    entry = body["entries"][-1]
+    assert set(entry.keys()) == {"ts", "level", "msg"}
     assert body["truncated"] is False
 
 
 def test_logs_route_honours_lines_and_reports_truncation(client):
     log_ring._reset_for_test()
     for i in range(5):
-        log_ring._ring.append(f"row {i}")
+        log_ring._push("info", f"row {i}")
     resp = client.get("/logs?lines=2", headers={"X-Admin-Key": VALID_KEY})
     body = resp.get_json()
-    assert body["lines"] == ["row 3", "row 4"]
+    assert _msgs(body["entries"]) == ["row 3", "row 4"]
     assert body["truncated"] is True

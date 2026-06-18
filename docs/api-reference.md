@@ -255,29 +255,31 @@ GET /api/admin/logs?service=backend|duckdb-service|image-service&lines=N
 Headers: Cookie: hf_admin_session=…   # or  X-Admin-Key: <HIGHFIVE_API_KEY>
 ```
 
-Tails a service's **own** recent stdout/stderr — distinct from §1.5 (per-module
-ESP telemetry). Each service keeps an in-memory ring of its log lines (a stdout
-tee); the backend serves its own ring and proxies to the two Flask services'
-internal `/logs`, forwarding the machine credential. `service` must be one of
-the three names (others, incl. `nginx`, return `400`). `lines` defaults to
-`200` and is clamped to `[1, 1000]`. Returns `401` without a valid admin
-credential, `502` if a proxied service is unreachable. Design + caveats
-(in-memory, per-process, nginx not covered): [ADR-021](09-architecture-decisions/adr-021-admin-server-log-ring.md).
+Tails a service's **own** recent log entries — distinct from §1.5 (per-module
+ESP telemetry). Each service keeps a ring of structured `{ ts, level, msg }`
+entries (a stdout/stderr tee plus a structured logger); the backend serves its
+own ring and proxies to the two Flask services' internal `/logs`, forwarding the
+machine credential. `service` must be one of the three names (others, incl.
+`nginx`, return `400`). `lines` defaults to `200` and is clamped to `[1, 1000]`.
+Returns `401` without a valid admin credential, `502` if a proxied service is
+unreachable or returns a drifted envelope. Design + caveats:
+[ADR-021](09-architecture-decisions/adr-021-admin-server-log-ring.md).
 
 ```json
 {
   "service": "duckdb-service",
-  "lines": [
-    "[heartbeat] mac=aabbccddeeff battery=None rssi=-67 …",
-    "127.0.0.1 - - [16/Jun/2026 00:04:42] \"POST /heartbeat HTTP/1.1\" 200 -"
+  "entries": [
+    { "ts": "2026-06-18T20:42:55.123Z", "level": "info", "msg": "[heartbeat] mac=aabbccddeeff battery=None rssi=-67 …" },
+    { "ts": "2026-06-18T20:42:56.004Z", "level": "info", "msg": "POST /heartbeat 200 3ms" }
   ],
   "truncated": false
 }
 ```
 
-`lines` is chronological (oldest→newest, like `tail`); `truncated` is `true`
+`entries` is chronological (oldest→newest, like `tail`); each carries an ISO 8601
+`ts`, a `level` (`info` | `warn` | `error`), and the `msg`. `truncated` is `true`
 when the ring held more than were returned. The TypeScript contract is
-`ServerLogsResponse` in [`contracts/src/index.ts`](../contracts/src/index.ts).
+`LogEntry` / `ServerLogsResponse` in [`contracts/src/index.ts`](../contracts/src/index.ts).
 
 ## 1.5 User location hint (dashboard map)
 

@@ -10,16 +10,20 @@ vi.mock('../src/database', () => ({
 }));
 
 // Control the backend's own ring without touching real stdout.
+const BACKEND_ENTRIES = [
+  { ts: '2026-06-18T20:42:55.000Z', level: 'info', msg: 'backend line 1' },
+  { ts: '2026-06-18T20:42:56.000Z', level: 'error', msg: 'backend line 2' },
+];
 vi.mock('../src/logRing', () => ({
   installLogRing: vi.fn(),
-  getRecentLogLines: vi.fn(() => ({
-    lines: ['backend line 1', 'backend line 2'],
+  getRecentEntries: vi.fn(() => ({
+    entries: BACKEND_ENTRIES,
     truncated: false,
   })),
 }));
 
 import { app } from '../src/app';
-import { getRecentLogLines } from '../src/logRing';
+import { getRecentEntries } from '../src/logRing';
 
 const KEY = 'hf_dev_key_2026';
 
@@ -57,14 +61,18 @@ describe('GET /api/admin/logs (#171)', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       service: 'backend',
-      lines: ['backend line 1', 'backend line 2'],
+      entries: BACKEND_ENTRIES,
       truncated: false,
     });
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it('proxies duckdb-service logs, forwarding X-Admin-Key and the lines param', async () => {
-    const payload = { service: 'duckdb-service', lines: ['db line'], truncated: false };
+    const payload = {
+      service: 'duckdb-service',
+      entries: [{ ts: '2026-06-18T20:42:55.000Z', level: 'info', msg: 'db line' }],
+      truncated: false,
+    };
     (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,
@@ -86,7 +94,7 @@ describe('GET /api/admin/logs (#171)', () => {
     (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ service: 'image-service', lines: [], truncated: false }),
+      json: async () => ({ service: 'image-service', entries: [], truncated: false }),
     });
 
     await request(app)
@@ -123,6 +131,20 @@ describe('GET /api/admin/logs (#171)', () => {
       .set('X-Admin-Key', KEY);
     expect(res.status).toBe(502);
     // The backend ring mock should not have been consulted for a proxied service.
-    expect(getRecentLogLines).not.toHaveBeenCalled();
+    expect(getRecentEntries).not.toHaveBeenCalled();
+  });
+
+  it('returns 502 when the upstream envelope is drifted (no entries array)', async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      // Old shape with `lines` instead of `entries` → must not reach the UI.
+      json: async () => ({ service: 'duckdb-service', lines: ['x'], truncated: false }),
+    });
+    const res = await request(app)
+      .get('/api/admin/logs?service=duckdb-service')
+      .set('X-Admin-Key', KEY);
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/malformed/i);
   });
 });

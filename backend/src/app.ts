@@ -5,7 +5,7 @@ import { tryParseModuleId } from '@highfive/contracts';
 import type { ServerLogsResponse } from '@highfive/contracts';
 import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
-import { getRecentLogLines } from './logRing';
+import { getRecentEntries } from './logRing';
 import {
   SESSION_COOKIE,
   issueSessionToken,
@@ -604,8 +604,8 @@ app.get('/api/admin/logs', requireAdmin, async (req, res) => {
     : LOG_LINES_DEFAULT;
 
   if (service === 'backend') {
-    const { lines: out, truncated } = getRecentLogLines(lines);
-    const payload: ServerLogsResponse = { service: 'backend', lines: out, truncated };
+    const { entries, truncated } = getRecentEntries(lines);
+    const payload: ServerLogsResponse = { service: 'backend', entries, truncated };
     res.json(payload);
     return;
   }
@@ -626,7 +626,7 @@ app.get('/api/admin/logs', requireAdmin, async (req, res) => {
     // Don't forward a drifted wire shape typed as valid: a service that
     // changed its /logs envelope should surface as a clear 502, not as
     // `undefined` fields reaching the UI.
-    if (!payload || typeof payload.service !== 'string' || !Array.isArray(payload.lines)) {
+    if (!payload || typeof payload.service !== 'string' || !Array.isArray(payload.entries)) {
       res.status(502).json({ error: `malformed logs response from ${service}` });
       return;
     }

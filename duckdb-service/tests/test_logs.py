@@ -41,12 +41,15 @@ def test_stderr_tee_records_error_level():
 
 
 def test_log_event_no_double_capture_in_installed_state(monkeypatch):
-    # Simulate the *installed* state: sys.stdout is the tee. If log_event wrote
-    # to sys.stdout instead of the saved real stream, the tee would re-capture
-    # it and the message would land in the ring twice. The real stream behind
-    # the tee is the sink, which is also log_event's bypass target — so a
-    # correct implementation writes the human line once (to the sink) and
-    # pushes the entry once (directly), never through the tee.
+    # Simulate the *installed* state: sys.stdout is the tee. A correct log_event
+    # writes the human line to the saved real stream (the sink) — bypassing the
+    # tee — and pushes exactly one structured entry directly. A buggy log_event
+    # that wrote to sys.stdout would route the formatted human line through the
+    # tee, producing a SECOND ring entry (an info-level line of formatted text).
+    # The exact-size assertion below is the load-bearing discriminator: it is 1
+    # only if the tee never saw the logger's own output. (A substring count on
+    # the raw msg would NOT catch the bug — the re-captured entry holds the
+    # formatted line, a different string — so don't rely on that.)
     log_ring._reset_for_test()
     sink = io.StringIO()
     tee = log_ring._TeeStream(sink, "info")
@@ -56,11 +59,9 @@ def test_log_event_no_double_capture_in_installed_state(monkeypatch):
     log_ring.log_event("warn", "GET /modules 200 5ms")
 
     entries, _ = log_ring.get_recent(10)
-    assert entries[-1]["level"] == "warn"
-    assert entries[-1]["msg"] == "GET /modules 200 5ms"
-    # Exactly once in the ring (not re-captured via the tee on sys.stdout)...
-    assert _msgs(entries).count("GET /modules 200 5ms") == 1
-    # ...and the human line reached the real stream exactly once.
+    assert len(entries) == 1  # exactly one entry — not re-captured via the tee
+    assert entries[0] == {"ts": entries[0]["ts"], "level": "warn", "msg": "GET /modules 200 5ms"}
+    # The human line reached the real stream exactly once.
     assert sink.getvalue().count("GET /modules 200 5ms") == 1
 
 

@@ -147,4 +147,19 @@ describe('GET /api/admin/logs (#171)', () => {
     expect(res.status).toBe(502);
     expect(res.body.error).toMatch(/malformed/i);
   });
+
+  it('returns 502 when the upstream omits a boolean truncated flag', async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      // Valid service + entries, but truncated is not a boolean → must 502
+      // rather than let `undefined` reach the panel.
+      json: async () => ({ service: 'image-service', entries: [], truncated: null }),
+    });
+    const res = await request(app)
+      .get('/api/admin/logs?service=image-service')
+      .set('X-Admin-Key', KEY);
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/malformed/i);
+  });
 });

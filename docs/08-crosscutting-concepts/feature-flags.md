@@ -80,11 +80,14 @@ bundle.
 ## Backend runtime gates
 
 Server-side features gate on a plain env var read at runtime. The canonical
-example is the weather worker: `duckdb-service/services/weather_worker.py`'s
-`is_weather_worker_enabled` reads `os.getenv("WEATHER_WORKER_ENABLED", "true")`,
-and `duckdb-service/app.py` skips scheduling the weather-worker tick (an
-APScheduler `add_job` on the shared `BackgroundScheduler`) when it is false. The
-scheduler itself always starts — only that one recurring job is gated.
+example is the weather worker. `duckdb-service/app.py`'s startup gate reads
+`os.getenv("WEATHER_WORKER_ENABLED", "true").lower() == "true"` and only then
+registers the recurring fetch (an APScheduler `add_job` on the shared
+`BackgroundScheduler`); the scheduler itself always starts, so only that one job
+is gated. The worker's own `run_weather_fetch` then independently re-checks the
+same var through the private `_enabled()` helper in
+`duckdb-service/services/weather_worker.py` before doing any work — note the var
+is read in two separate inline places, not via one shared helper.
 
 Conventions differ from the homepage flavour on purpose:
 

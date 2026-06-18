@@ -789,8 +789,20 @@ wsl wslinfo --networking-mode    # must print: mirrored
 > docker compose down && docker compose up -d
 > ```
 >
-> Then verify all four answer: `curl localhost:3002/api/health`,
-> `localhost:8000/health`, `localhost:8002/health`, `localhost:5173`.
+> Then verify all four answer — but use **`127.0.0.1`, not `localhost`**:
+> `curl 127.0.0.1:3002/api/health`, `127.0.0.1:8000/health`,
+> `127.0.0.1:8002/health`, `127.0.0.1:5173`.
+>
+> **Gotcha (observed in the #177 bench session): under mirrored mode
+> `localhost` times out while `127.0.0.1` works.** `localhost` resolves to
+> IPv6 `::1` first, but the containers publish IPv4-only (`docker compose ps`
+> shows `0.0.0.0:8002->…` with no `[::]:8002` for duckdb/image-service), so
+> `::1` has no listener and the probe hangs ~∞. This is **not** a broken stack
+> — `curl 127.0.0.1:8002/health` returns `200` instantly. (It also is **not**
+> the WinINET-proxy trap above: that would fail `127.0.0.1` too. `localhost`
+> failing while `127.0.0.1` succeeds is the IPv4/IPv6 split, full stop.)
+> Note `curl.exe` retries the next address on timeout so it eventually hits
+> IPv4; PowerShell `Invoke-WebRequest http://localhost:…` does not, and hangs.
 
 Reverting is symmetric: delete `~/.wslconfig` (or the `networkingMode` line),
 `wsl --shutdown`, restart Docker Desktop, `docker compose down && up -d`.

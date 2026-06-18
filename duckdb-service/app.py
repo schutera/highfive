@@ -14,6 +14,7 @@ from routes.nests import nests_bp
 from routes.progress import progress_bp
 from routes.heartbeats import heartbeats_bp
 from services.backup import run_backup
+from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
 from services.log_ring import log_event
 from services.silence_watcher import check_silence
@@ -24,6 +25,10 @@ from services.weather_worker import run_weather_fetch
 # print() re-resolves sys.stdout per call and Flask/werkzeug log handlers are
 # constructed lazily at app.run, so capture is complete. See services/log_ring.py.
 install_log_ring()
+# Enable on-disk persistence + backfill the ring from prior history when LOG_DIR
+# is set (compose sets it; unset = in-memory only). Before the banner so it is
+# persisted too. See ADR-022.
+init_log_persistence()
 
 # Structured boot banner through the logger (#178) — the analogue to the
 # backend's server.ts banner. Runs at import under flask run / gunicorn and

@@ -22,10 +22,15 @@ block, before the app serves traffic), so the Flask/werkzeug log handlers —
 constructed lazily at ``app.run`` / first request — bind to the tee.
 """
 
+import glob
+import json
+import logging
+import os
 import sys
 import threading
 from collections import deque
 from datetime import UTC, datetime
+from logging.handlers import TimedRotatingFileHandler
 
 _MAX_RING_ENTRIES = 2000
 _ring: "deque[dict]" = deque(maxlen=_MAX_RING_ENTRIES)
@@ -37,6 +42,14 @@ _tees: "list[_TeeStream]" = []  # installed tee instances (for test carry reset)
 _real_stdout = None
 _real_stderr = None
 
+# On-disk persistence (#178 / ADR-022). Gated on LOG_DIR: when set, each entry is
+# also appended as one JSON object per line (JSONL) to a rotating file, and the
+# ring is backfilled from that file at startup so history survives a restart.
+# Rotation: daily, retain ≤30 files AND ≤100 MB total (prune oldest past either).
+_LOG_FILENAME = "service.log"  # each service has its OWN LOG_DIR (no collision)
+_MAX_TOTAL_BYTES = 100 * 1024 * 1024
+_disk_logger: "logging.Logger | None" = None
+
 
 def _now_iso() -> str:
     # Millisecond precision, 'Z' suffix — matches the LogEntry contract.
@@ -44,8 +57,83 @@ def _now_iso() -> str:
 
 
 def _push(level: str, msg: str) -> None:
+    entry = {"ts": _now_iso(), "level": level, "msg": msg}
     with _lock:
-        _ring.append({"ts": _now_iso(), "level": level, "msg": msg})
+        _ring.append(entry)
+    if _disk_logger is not None:
+        try:
+            _disk_logger.info(json.dumps(entry, ensure_ascii=False))
+        except Exception:
+            # Persistence must never break in-memory logging.
+            pass
+
+
+def _prune_by_size(log_path: str) -> None:
+    """Delete oldest rotated files until the total of <log>* is ≤ 100 MB.
+    Never deletes the active file."""
+    files = sorted(glob.glob(log_path + "*"), key=lambda p: os.path.getmtime(p))
+    total = sum(os.path.getsize(p) for p in files if os.path.exists(p))
+    for p in files:
+        if total <= _MAX_TOTAL_BYTES:
+            break
+        if p == log_path:
+            continue  # keep the active file
+        try:
+            total -= os.path.getsize(p)
+            os.remove(p)
+        except OSError:
+            pass
+
+
+class _PruningTimedHandler(TimedRotatingFileHandler):
+    """Daily rotation + backupCount, with a 100 MB total-size sweep after each
+    rollover so both retention bounds hold."""
+
+    def doRollover(self):  # noqa: N802 (stdlib name)
+        super().doRollover()
+        _prune_by_size(self.baseFilename)
+
+
+def _backfill_from_disk(log_path: str) -> None:
+    """Load the tail of the active file into the ring so a restart shows
+    pre-restart history. Skips malformed/partial lines."""
+    try:
+        with open(log_path, encoding="utf-8") as fh:
+            lines = [ln for ln in fh.read().split("\n") if ln]
+    except OSError:
+        return
+    for ln in lines[-_MAX_RING_ENTRIES:]:
+        try:
+            entry = json.loads(ln)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(entry, dict) and "ts" in entry and "msg" in entry:
+            with _lock:
+                _ring.append(entry)
+
+
+def init_persistence(log_dir: "str | None" = None) -> None:
+    """Enable on-disk persistence + startup backfill. Idempotent. Reads LOG_DIR
+    when no dir is passed; a falsy value is a no-op (ring stays in-memory)."""
+    global _disk_logger
+    if _disk_logger is not None:
+        return
+    log_dir = log_dir if log_dir is not None else os.getenv("LOG_DIR")
+    if not log_dir:
+        return
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, _LOG_FILENAME)
+    _backfill_from_disk(log_path)  # before opening the handler
+    logger = logging.getLogger("hf_log_persistence")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False  # don't reach root/stdout → no double-capture via the tee
+    handler = _PruningTimedHandler(
+        log_path, when="midnight", backupCount=30, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(message)s"))  # raw JSON line, no prefix
+    logger.addHandler(handler)
+    _disk_logger = logger
+    _prune_by_size(log_path)
 
 
 class _TeeStream:
@@ -131,9 +219,16 @@ def get_recent(n):
 
 
 def _reset_for_test():
+    global _disk_logger
     with _lock:
         _ring.clear()
     # Also clear any installed tee's partial-line carry so a half-line from a
     # previous test can't bleed into the next.
     for tee in _tees:
         tee._carry = ""
+    # Tear down disk persistence so a later test can re-init against a fresh dir.
+    if _disk_logger is not None:
+        for h in list(_disk_logger.handlers):
+            h.close()
+            _disk_logger.removeHandler(h)
+        _disk_logger = None

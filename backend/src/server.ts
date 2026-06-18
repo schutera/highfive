@@ -4,7 +4,7 @@ import { getApiKey } from './auth';
 import { duckdbHealth } from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
-import { installLogRing, writeStdout } from './logRing';
+import { installLogRing, initLogPersistence, writeStdout } from './logRing';
 import { DEFAULT_PORT, resolvePort } from './port';
 
 // Tee stdout/stderr into the in-memory ring so the admin server-logs endpoint
@@ -12,6 +12,10 @@ import { DEFAULT_PORT, resolvePort } from './port';
 // all real logging is runtime (below + request handlers), so installing here
 // captures it. Idempotent. See logRing.ts / ADR-021.
 installLogRing();
+// Enable on-disk persistence + backfill the ring from prior history when
+// LOG_DIR is set (compose sets it; unset = in-memory only). Must run before
+// the boot banners below so they are persisted too. See ADR-022.
+initLogPersistence();
 
 const { port: PORT, warned: portUnsetWarning } = resolvePort(process.env.PORT);
 if (portUnsetWarning) {

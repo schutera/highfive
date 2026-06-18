@@ -1,6 +1,7 @@
 """Tests for the internal admin-gated GET /logs server-log tail (#171, #178)."""
 
 import io
+import json
 import sys
 
 from services import log_ring
@@ -140,3 +141,37 @@ def test_access_log_redacts_query_and_credentials(client):
     assert "X-Admin-Key" not in blob
     # The path itself is still logged (without the query).
     assert any(e["msg"].startswith("GET /logs 200 ") for e in log_ring.get_recent(50)[0])
+
+
+def test_persistence_writes_jsonl(tmp_path):
+    log_ring._reset_for_test()
+    log_ring.init_persistence(str(tmp_path))
+    log_ring._push("info", "persist alpha")
+    log_ring._push("warn", "persist bravo")
+    log_ring._reset_for_test()  # closes the handler, flushing to disk
+
+    lines = (tmp_path / "service.log").read_text(encoding="utf-8").splitlines()
+    parsed = [json.loads(ln) for ln in lines if ln]
+    assert [p["msg"] for p in parsed] == ["persist alpha", "persist bravo"]
+    assert parsed[0]["level"] == "info" and parsed[1]["level"] == "warn"
+    assert set(parsed[0].keys()) == {"ts", "level", "msg"}
+
+
+def test_persistence_backfills_ring_on_restart(tmp_path):
+    log_ring._reset_for_test()
+    log_ring.init_persistence(str(tmp_path))
+    log_ring._push("info", "prior 1")
+    log_ring._push("info", "prior 2")
+    log_ring._reset_for_test()  # ring cleared + handler closed == "process exit"
+    assert log_ring.get_recent(10)[0] == []
+
+    log_ring.init_persistence(str(tmp_path))  # "restart"
+    assert _msgs(log_ring.get_recent(10)[0]) == ["prior 1", "prior 2"]
+
+
+def test_persistence_is_noop_without_dir(tmp_path):
+    log_ring._reset_for_test()
+    log_ring.init_persistence(None)  # no LOG_DIR → in-memory only
+    log_ring._push("info", "in-memory only")
+    assert "in-memory only" in _msgs(log_ring.get_recent(10)[0])
+    assert list(tmp_path.iterdir()) == []

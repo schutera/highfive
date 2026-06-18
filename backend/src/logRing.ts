@@ -21,12 +21,23 @@
 // would have one ring per worker). On-disk persistence + startup backfill
 // (ADR-022) is layered on separately.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { createStream, type RotatingFileStream } from 'rotating-file-stream';
 import type { LogEntry, LogLevel } from '@highfive/contracts';
 
 const MAX_RING_ENTRIES = 2000;
 
 const ring: LogEntry[] = [];
 let installed = false;
+
+// On-disk persistence (#178 Phase 2 / ADR-022). Gated on LOG_DIR: when set, each
+// entry is also appended as one JSON object per line (JSONL) to a rotating file,
+// and the ring is backfilled from that file at startup so history survives a
+// restart. When unset (e.g. unit tests), the ring is in-memory only — the
+// pre-ADR-022 behaviour. Rotation: daily + 50 MB, retain ≤30 files AND ≤100 MB
+// total (rfs prunes oldest past either bound).
+let diskStream: RotatingFileStream | null = null;
 
 // The real stream writers, captured before the tee replaces them. The
 // structured logger writes through these so its output reaches the terminal /
@@ -38,11 +49,61 @@ let originalStderrWrite: ((...a: unknown[]) => boolean) | null = null;
 // until the next write completes the line.
 const carry: Record<'out' | 'err', string> = { out: '', err: '' };
 
+const LOG_FILENAME = 'backend.log';
+
 function pushEntryInternal(entry: LogEntry): void {
   ring.push(entry);
   if (ring.length > MAX_RING_ENTRIES) {
     ring.splice(0, ring.length - MAX_RING_ENTRIES);
   }
+  if (diskStream) {
+    try {
+      diskStream.write(`${JSON.stringify(entry)}\n`);
+    } catch {
+      // Persistence must never break in-memory logging.
+    }
+  }
+}
+
+/**
+ * Enable on-disk persistence + startup backfill. Idempotent. Pass the log
+ * directory (typically `process.env.LOG_DIR`); a falsy value is a no-op so the
+ * ring stays in-memory. Call once, early, before serving traffic.
+ */
+export function initLogPersistence(dir: string | undefined = process.env.LOG_DIR): void {
+  if (!dir || diskStream) return;
+  fs.mkdirSync(dir, { recursive: true });
+  // Backfill the ring from the active file's tail BEFORE opening the write
+  // stream, so a restart shows pre-restart history immediately.
+  backfillFromDisk(path.join(dir, LOG_FILENAME));
+  diskStream = createStream(LOG_FILENAME, {
+    path: dir,
+    interval: '1d', // rotate daily
+    size: '50M', // …and when a file reaches 50 MB
+    maxFiles: 30, // retain ≤30 rotated files
+    maxSize: '100M', // …AND ≤100 MB total (prune oldest past either bound)
+  });
+}
+
+function backfillFromDisk(file: string): void {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return; // no prior file → nothing to backfill
+  }
+  const lines = raw.split('\n').filter(Boolean);
+  for (const line of lines.slice(-MAX_RING_ENTRIES)) {
+    try {
+      const e = JSON.parse(line) as LogEntry;
+      if (e && typeof e.ts === 'string' && typeof e.msg === 'string') {
+        ring.push(e);
+      }
+    } catch {
+      // Skip malformed/partial trailing lines.
+    }
+  }
+  if (ring.length > MAX_RING_ENTRIES) ring.splice(0, ring.length - MAX_RING_ENTRIES);
 }
 
 /**
@@ -114,9 +175,26 @@ export function getRecentEntries(n: number): { entries: LogEntry[]; truncated: b
   return { entries, truncated: ring.length > entries.length };
 }
 
-/** Test-only: clear the ring and partial-line carry. */
+/** Test-only: clear the ring and partial-line carry (does not touch disk). */
 export function __resetLogRingForTest(): void {
   ring.length = 0;
   carry.out = '';
   carry.err = '';
+}
+
+/**
+ * Test-only: flush + close the disk stream and resolve once buffered writes
+ * have hit the file, so a test can read the file or re-init backfill
+ * deterministically. (rfs buffers writes; in production a real restart flushes.)
+ */
+export function __flushDiskForTest(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!diskStream) {
+      resolve();
+      return;
+    }
+    const s = diskStream;
+    diskStream = null;
+    s.end(() => resolve());
+  });
 }

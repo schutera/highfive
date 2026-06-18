@@ -270,6 +270,26 @@ is being staged):
    map view are unaffected (the saved geolocation from first boot
    persists in module config).
 
+## Server logs: secrets must never be logged (ADR-022)
+
+The admin **Server Logs** panel tails each service's own log ring
+(`GET /api/admin/logs`, `requireAdmin`). As of [ADR-022](../09-architecture-decisions/adr-022-persistent-structured-server-logs.md)
+that ring is **persisted to disk** (JSONL, 30 days / 100 MB, gated on `LOG_DIR`) and
+backfilled on restart — so anything printed to stdout no longer just flashes past in
+`docker logs`, it lands on disk for up to a month. That makes "never print secrets"
+load-bearing, not advisory. Three controls keep credentials out of the ring:
+
+- **Access logs are path-only.** The per-request access entry is `method path status ms`
+  using the request **path only** — never headers, body, or query string — so the
+  `X-Admin-Key` header, the `POST /api/admin/login` body password, and any `?token=`/`?key=`
+  query value cannot reach the ring. (`accessLog.ts`; Flask `@app.after_request`.)
+- **The dev admin-key banner bypasses the ring.** `server.ts` prints the dev key via the
+  ring-bypassing `writeStdout`, so it reaches the terminal as a developer convenience but is
+  not captured into the ring/disk — and the whole block is suppressed in production by
+  `auth.ts`'s boot guards (see [The secret](#the-secret)).
+- **The endpoint stays admin-only.** The ring may still capture whatever other code prints,
+  so the gate is the backstop — and the reason not to `console.log`/`print` secrets anywhere.
+
 ## Why one secret, two header names
 
 See [ADR-003](../09-architecture-decisions/adr-003-shared-api-key-for-admin.md).

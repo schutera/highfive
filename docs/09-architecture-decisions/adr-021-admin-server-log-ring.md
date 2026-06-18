@@ -7,6 +7,14 @@ Accepted ([#171](https://github.com/schutera/highfive/issues/171)). Spun out of 
 server-side visibility the per-module telemetry sidecars (`GET /api/modules/:id/logs`)
 do not provide.
 
+**Superseded in part by [ADR-022](adr-022-persistent-structured-server-logs.md)
+([#178](https://github.com/schutera/highfive/issues/178)):** the ring is no longer
+in-memory-only and the wire shape is no longer raw `string[]`. ADR-022 makes entries
+structured (`{ ts, level, msg }`), persists them to disk (30 days / 100 MB, surviving
+restart), and adds SSE streaming. The endpoint design, the admin gate, the per-service
+ring + backend-proxy topology, and the "never `print`/`console.log` secrets" rule below
+all carry forward unchanged.
+
 ## Context
 
 There was no way to read the services' **own** process logs (backend,

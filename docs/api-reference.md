@@ -259,7 +259,10 @@ Tails a service's **own** recent log entries — distinct from §1.5 (per-module
 ESP telemetry). Each service keeps a ring of structured `{ ts, level, msg }`
 entries (a stdout/stderr tee plus a structured logger); the backend serves its
 own ring and proxies to the two Flask services' internal `/logs`, forwarding the
-machine credential. `service` must be one of the three names (others, incl.
+machine credential. Every handled request adds one **access entry**
+(`method path status ms`, level by status: `≥500` error, `≥400` warn, else info)
+— logged **path-only**, never headers, body, or query string, so no secret
+reaches the ring. `service` must be one of the three names (others, incl.
 `nginx`, return `400`). `lines` defaults to `200` and is clamped to `[1, 1000]`.
 Returns `401` without a valid admin credential, `502` if a proxied service is
 unreachable or returns a drifted envelope. Design + caveats:

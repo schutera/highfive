@@ -20,6 +20,11 @@ vi.mock('../src/logRing', () => ({
     entries: BACKEND_ENTRIES,
     truncated: false,
   })),
+  // The access-log middleware (#178) runs on every request and routes through
+  // log.ts → these ring writers. Stub them so the mocked module is complete.
+  pushEntry: vi.fn(),
+  writeStdout: vi.fn(),
+  writeStderr: vi.fn(),
 }));
 
 import { app } from '../src/app';

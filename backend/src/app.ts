@@ -5,6 +5,7 @@ import { tryParseModuleId } from '@highfive/contracts';
 import type { ServerLogsResponse } from '@highfive/contracts';
 import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
+import { accessLog } from './accessLog';
 import { getRecentEntries } from './logRing';
 import {
   SESSION_COOKIE,
@@ -56,6 +57,12 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
+
+// Access logging (#178): one structured entry per request into the admin log
+// ring. Mounted here so it wraps every route below (health + public + admin).
+// Logs method+path+status+duration only — never headers/body/query — so no
+// secret can reach the ring. See accessLog.ts.
+app.use(accessLog);
 
 // Health check (public, no auth required)
 app.get('/api/health', (req, res) => {

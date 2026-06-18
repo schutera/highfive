@@ -6,7 +6,7 @@ import random
 import time
 
 import requests as http_requests
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 from pydantic import ValidationError
 
 from services.discord import send_discord_message
@@ -31,6 +31,37 @@ install_log_ring()
 log_event("info", "📷 image-service starting")
 
 app = Flask(__name__)
+
+
+def _status_level(code: int) -> str:
+    if code >= 500:
+        return "error"
+    if code >= 400:
+        return "warn"
+    return "info"
+
+
+@app.before_request
+def _access_log_start():
+    g._access_start = time.perf_counter()
+
+
+@app.after_request
+def _access_log_finish(resp):
+    # One structured access entry per request (#178): "method path status ms".
+    # path ONLY — never query string, headers, or body — so the X-Admin-Key
+    # header and any ?token=/?key= value can't reach the admin-readable /
+    # disk-persisted ring. werkzeug's own request line is still tee-captured;
+    # this is the canonical, level-tagged entry.
+    start = g.pop("_access_start", None)
+    if start is not None:
+        ms = (time.perf_counter() - start) * 1000.0
+        log_event(
+            _status_level(resp.status_code),
+            f"{request.method} {request.path} {resp.status_code} {ms:.1f}ms",
+        )
+    return resp
+
 
 UPLOAD_FOLDER = os.getenv("IMAGE_STORE_PATH", "/data/images")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)

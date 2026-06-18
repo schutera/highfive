@@ -114,3 +114,31 @@ def test_logs_route_honours_lines_and_reports_truncation(client):
     body = resp.get_json()
     assert _msgs(body["entries"]) == ["row 3", "row 4"]
     assert body["truncated"] is True
+
+
+def test_access_log_emits_entry_per_request(client):
+    # The @app.after_request hook (#178) emits one structured access entry per
+    # handled request. A real request must land as an entry (CLAUDE.md rule #5).
+    log_ring._reset_for_test()
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    entries, _ = log_ring.get_recent(50)
+    access = [e for e in entries if e["msg"].startswith("GET /health 200 ")]
+    assert len(access) == 1
+    assert access[0]["level"] == "info"
+    assert access[0]["msg"].endswith("ms")
+
+
+def test_access_log_redacts_query_and_credentials(client):
+    # path ONLY: the token-ish query param and the admin key must never appear
+    # in any entry, and no entry may carry a query string.
+    log_ring._reset_for_test()
+    resp = client.get("/logs?lines=5&token=secret123", headers={"X-Admin-Key": VALID_KEY})
+    assert resp.status_code == 200
+    blob = "\n".join(_msgs(log_ring.get_recent(50)[0]))
+    assert "secret123" not in blob
+    assert "?" not in blob
+    assert VALID_KEY not in blob
+    assert "X-Admin-Key" not in blob
+    # The path itself is still logged (without the query).
+    assert any(e["msg"].startswith("GET /logs 200 ") for e in log_ring.get_recent(50)[0])

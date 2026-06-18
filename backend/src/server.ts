@@ -4,7 +4,7 @@ import { getApiKey } from './auth';
 import { duckdbHealth } from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
-import { installLogRing } from './logRing';
+import { installLogRing, writeStdout } from './logRing';
 import { DEFAULT_PORT, resolvePort } from './port';
 
 // Tee stdout/stderr into the in-memory ring so the admin server-logs endpoint
@@ -40,9 +40,13 @@ async function bootstrap() {
     // typos so `"Production"` or `"production "` don't accidentally re-enable
     // the print on prod (PR #84 senior-review finding).
     if (!isProduction()) {
-      log.info(`🔑 Dev admin key: ${getApiKey()}`);
-      log.info(`   Admin login: POST /api/admin/login {"password":"<key>"}`);
-      log.info(`   Or machine credential: X-Admin-Key: ${getApiKey()}`);
+      // Write via the saved original stream (bypassing the ring tee) so the
+      // dev key reaches the terminal as a developer convenience but is NEVER
+      // captured into the admin-readable / (ADR-022) disk-persisted ring —
+      // the ring must not hold secrets even in dev. See log.ts SECURITY note.
+      writeStdout(`🔑 Dev admin key: ${getApiKey()}\n`);
+      writeStdout(`   Admin login: POST /api/admin/login {"password":"<key>"}\n`);
+      writeStdout(`   Or machine credential: X-Admin-Key: ${getApiKey()}\n`);
     }
   });
 }

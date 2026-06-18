@@ -1,6 +1,7 @@
 """Tests for the internal admin-gated GET /logs server-log tail (#171, #178)."""
 
 import io
+import sys
 
 from services import log_ring
 
@@ -39,19 +40,28 @@ def test_stderr_tee_records_error_level():
     assert entries[-1] == {"ts": entries[-1]["ts"], "level": "error", "msg": "boom"}
 
 
-def test_log_event_appends_entry_and_writes_through(monkeypatch):
+def test_log_event_no_double_capture_in_installed_state(monkeypatch):
+    # Simulate the *installed* state: sys.stdout is the tee. If log_event wrote
+    # to sys.stdout instead of the saved real stream, the tee would re-capture
+    # it and the message would land in the ring twice. The real stream behind
+    # the tee is the sink, which is also log_event's bypass target — so a
+    # correct implementation writes the human line once (to the sink) and
+    # pushes the entry once (directly), never through the tee.
     log_ring._reset_for_test()
     sink = io.StringIO()
-    # log_event writes to the saved real stream; point it at a sink.
+    tee = log_ring._TeeStream(sink, "info")
+    monkeypatch.setattr(sys, "stdout", tee)
     monkeypatch.setattr(log_ring, "_real_stdout", sink)
+
     log_ring.log_event("warn", "GET /modules 200 5ms")
+
     entries, _ = log_ring.get_recent(10)
     assert entries[-1]["level"] == "warn"
     assert entries[-1]["msg"] == "GET /modules 200 5ms"
-    # Human line reached the real stream exactly once...
-    assert sink.getvalue().count("GET /modules 200 5ms") == 1
-    # ...and was not re-captured as a duplicate entry.
+    # Exactly once in the ring (not re-captured via the tee on sys.stdout)...
     assert _msgs(entries).count("GET /modules 200 5ms") == 1
+    # ...and the human line reached the real stream exactly once.
+    assert sink.getvalue().count("GET /modules 200 5ms") == 1
 
 
 def test_get_recent_clamps_and_flags_truncation():

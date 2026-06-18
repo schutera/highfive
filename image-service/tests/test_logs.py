@@ -1,6 +1,7 @@
 """Tests for the internal admin-gated GET /logs server-log tail (#171, #178)."""
 
 import io
+import sys
 
 from services import log_ring
 
@@ -38,16 +39,26 @@ def test_stderr_tee_records_error_level():
     assert entries[-1]["msg"] == "boom"
 
 
-def test_log_event_appends_entry_and_writes_through(monkeypatch):
+def test_log_event_no_double_capture_in_installed_state(monkeypatch):
+    # Simulate the *installed* state: sys.stdout is the tee. If log_event wrote
+    # to sys.stdout instead of the saved real stream, the tee would re-capture
+    # it and the message would land in the ring twice. The real stream behind
+    # the tee is the sink, which is also log_event's bypass target — so a
+    # correct implementation writes the human line once (to the sink) and
+    # pushes the entry once (directly), never through the tee.
     log_ring._reset_for_test()
     sink = io.StringIO()
+    tee = log_ring._TeeStream(sink, "info")
+    monkeypatch.setattr(sys, "stdout", tee)
     monkeypatch.setattr(log_ring, "_real_stdout", sink)
+
     log_ring.log_event("warn", "POST /upload 200 8ms")
+
     entries, _ = log_ring.get_recent(10)
     assert entries[-1]["level"] == "warn"
     assert entries[-1]["msg"] == "POST /upload 200 8ms"
-    assert sink.getvalue().count("POST /upload 200 8ms") == 1
     assert _msgs(entries).count("POST /upload 200 8ms") == 1
+    assert sink.getvalue().count("POST /upload 200 8ms") == 1
 
 
 def test_get_recent_clamps_and_flags_truncation():

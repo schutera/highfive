@@ -393,9 +393,9 @@ export interface LogEntry {
 
 export interface ServerLogsResponse {
   service: ServerLogService;
-  // Captured log entries, chronological (oldest→newest), like `tail`. Backed
-  // by an in-memory ring with on-disk persistence (ADR-022), so this survives
-  // process restart up to the retention bound (30 days / 100 MB).
+  // Captured log entries, chronological (oldest→newest), like `tail`. In-memory
+  // in Phase 1 (resets on process restart); on-disk persistence + rotation
+  // (survives restart, bounded to 30 days / 100 MB) is ADR-022 / Phase 2.
   entries: LogEntry[];
   // True when the ring held more entries than were returned (clipped to the
   // requested `lines`, itself capped server-side). Lets the UI show a

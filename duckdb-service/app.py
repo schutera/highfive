@@ -13,6 +13,7 @@ from routes.progress import progress_bp
 from routes.heartbeats import heartbeats_bp
 from services.backup import run_backup
 from services.log_ring import install as install_log_ring
+from services.log_ring import log_event
 from services.silence_watcher import check_silence
 from services.weather_worker import run_weather_fetch
 
@@ -21,6 +22,12 @@ from services.weather_worker import run_weather_fetch
 # print() re-resolves sys.stdout per call and Flask/werkzeug log handlers are
 # constructed lazily at app.run, so capture is complete. See services/log_ring.py.
 install_log_ring()
+
+# Structured boot banner through the logger (#178) — the analogue to the
+# backend's server.ts banner. Runs at import under flask run / gunicorn and
+# under `python app.py`, so the structured ingestion path has a real
+# production caller (not just the tee fallback). Never log secrets here.
+log_event("info", "🗄 duckdb-service starting (DuckDB persistence)")
 
 app = Flask(__name__)
 app.register_blueprint(health_bp)

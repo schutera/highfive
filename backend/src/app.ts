@@ -626,7 +626,12 @@ app.get('/api/admin/logs', requireAdmin, async (req, res) => {
     // Don't forward a drifted wire shape typed as valid: a service that
     // changed its /logs envelope should surface as a clear 502, not as
     // `undefined` fields reaching the UI.
-    if (!payload || typeof payload.service !== 'string' || !Array.isArray(payload.entries)) {
+    if (
+      !payload ||
+      typeof payload.service !== 'string' ||
+      !Array.isArray(payload.entries) ||
+      typeof payload.truncated !== 'boolean'
+    ) {
       res.status(502).json({ error: `malformed logs response from ${service}` });
       return;
     }

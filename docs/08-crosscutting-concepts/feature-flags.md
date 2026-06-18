@@ -55,7 +55,7 @@ channel** — the only place to inject config is the build.
    so dead UI code is not a leak. (Do **not** try to hide a secret behind a
    flag; `VITE_*` is inlined as a public string — see ADR-019.)
 
-**Where the value is set, per context** (all four must agree on the var name):
+**Where the value is set, per context** (every context that sets it uses the same var name):
 
 | Context         | File                                                                                   | How it's set                                                                                                                         |
 | --------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -66,8 +66,8 @@ channel** — the only place to inject config is the build.
 | Local opt-in    | `homepage/.env` (documented in [`homepage/.env.example`](../../homepage/.env.example)) | `VITE_ENABLE_DASHBOARD_IMAGES=true`                                                                                                  |
 
 **To add a homepage flag:** add one `flagEnabled(import.meta.env.VITE_<NAME>)`
-const to `featureFlags.ts`; gate the mount on it; wire the four contexts above
-(default the prod `ARG` empty, set dev/test stacks `'true'`); document it in
+const to `featureFlags.ts`; gate the mount on it; wire the deploy + test
+contexts above (default the prod `ARG` empty, set dev/test stacks `'true'`); document it in
 `.env.example`; add a one-line `flagEnabled` semantics check if the feature is
 risk-bearing.
 
@@ -82,7 +82,9 @@ bundle.
 Server-side features gate on a plain env var read at runtime. The canonical
 example is the weather worker: `duckdb-service/services/weather_worker.py`'s
 `is_weather_worker_enabled` reads `os.getenv("WEATHER_WORKER_ENABLED", "true")`,
-and `duckdb-service/app.py` skips starting the worker thread when it is false.
+and `duckdb-service/app.py` skips scheduling the weather-worker tick (an
+APScheduler `add_job` on the shared `BackgroundScheduler`) when it is false. The
+scheduler itself always starts — only that one recurring job is gated.
 
 Conventions differ from the homepage flavour on purpose:
 

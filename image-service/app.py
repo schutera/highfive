@@ -4,9 +4,18 @@ import json
 import os
 import random
 import time
+from queue import Empty
 
 import requests as http_requests
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import (
+    Flask,
+    Response,
+    g,
+    jsonify,
+    request,
+    send_from_directory,
+    stream_with_context,
+)
 from pydantic import ValidationError
 
 from services.discord import send_discord_message
@@ -14,7 +23,7 @@ from services.duckdb import DuckDBService
 from services.log_ring import get_recent as _get_recent_logs
 from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
-from services.log_ring import log_event
+from services.log_ring import log_event, subscribe, unsubscribe
 from services.module_id import ModuleId
 from services.sidecar import LogSidecarEnvelope
 from services.upload_pipeline import UploadPipeline, UploadRequest
@@ -155,6 +164,36 @@ def get_logs():
     return jsonify(
         {"service": "image-service", "entries": entries, "truncated": truncated}
     ), 200
+
+
+@app.get("/logs/stream")
+def stream_logs():
+    """SSE live tail (#178 Phase 4). One LogEntry JSON per `data:` event. The
+    backend's GET /api/admin/logs/stream?service=image-service pipes this
+    through, forwarding X-Admin-Key. REST /logs stays for the initial backfill."""
+    provided = request.headers.get("X-Admin-Key", "")
+    if not hmac.compare_digest(provided, _logs_resolve_key()):
+        return jsonify({"error": "unauthorized"}), 401
+
+    def gen():
+        q = subscribe()
+        try:
+            yield ": connected\n\n"  # flush headers immediately
+            while True:
+                try:
+                    entry = q.get(timeout=25)
+                except Empty:
+                    yield ": ping\n\n"  # keepalive
+                    continue
+                yield f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+        finally:
+            unsubscribe(q)
+
+    return Response(
+        stream_with_context(gen()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/upload")

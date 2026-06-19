@@ -284,6 +284,32 @@ unreachable or returns a drifted envelope. Design + caveats:
 when the ring held more than were returned. The TypeScript contract is
 `LogEntry` / `ServerLogsResponse` in [`contracts/src/index.ts`](../contracts/src/index.ts).
 
+### Live tail (SSE)
+
+```
+GET /api/admin/logs/stream?service=backend|duckdb-service|image-service
+Headers: Cookie: hf_admin_session=…   # or  X-Admin-Key: <HIGHFIVE_API_KEY>
+Accept: text/event-stream
+```
+
+Server-Sent Events live tail (#178 / ADR-022). After the REST `GET /api/admin/logs`
+backfill, the panel opens this for "tail -f": each new log entry arrives as one
+`data:` event whose payload is a single `LogEntry` JSON (`{ ts, level, msg }`);
+`: ping` comments keep the connection alive. `service` validation, the admin gate,
+and the cross-service `X-Admin-Key` proxy match the REST endpoint (`backend`
+streams its own ring; the Flask services are piped from their internal
+`/logs/stream`). The response sets `X-Accel-Buffering: no`; the host-nginx vhost
+must also set `proxy_buffering off` for this location (see
+[production-deployment.md](07-deployment-view/production-deployment.md)).
+
+```
+: connected
+
+data: {"ts":"2026-06-18T20:42:56.004Z","level":"info","msg":"POST /heartbeat 200 3ms"}
+
+: ping
+```
+
 ## 1.5 User location hint (dashboard map)
 
 ```

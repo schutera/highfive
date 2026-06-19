@@ -19,6 +19,14 @@ const mockApi = vi.hoisted(() => ({
   getImageUrl: vi.fn((f: string) => `/api/images/${f}`),
   deleteModule: vi.fn(),
   deleteImage: vi.fn(),
+  // ServerLogsPanel (#178) backfills then opens an SSE stream; stub both so the
+  // embedded panel neither errors nor leaves an unhandled rejection.
+  getServerLogs: vi.fn().mockResolvedValue({ service: 'backend', entries: [], truncated: false }),
+  streamServerLogs: vi.fn(() => ({
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    close: vi.fn(),
+  })),
 }));
 
 vi.mock('../services/api', () => ({ api: mockApi }));

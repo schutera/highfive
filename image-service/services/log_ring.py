@@ -26,6 +26,7 @@ import glob
 import json
 import logging
 import os
+import queue
 import sys
 import threading
 from collections import deque
@@ -50,6 +51,12 @@ _LOG_FILENAME = "service.log"  # each service has its OWN LOG_DIR (no collision)
 _MAX_TOTAL_BYTES = 100 * 1024 * 1024
 _disk_logger: "logging.Logger | None" = None
 
+# Live SSE subscribers (#178 Phase 4). Each /logs/stream connection registers a
+# bounded queue; _push fans every entry out to all of them (drop on full, never
+# block the logger). Guarded by _lock alongside the ring.
+_SUBSCRIBER_MAXSIZE = 1000
+_subscribers: "set[queue.Queue]" = set()
+
 
 def _now_iso() -> str:
     # Millisecond precision, 'Z' suffix — matches the LogEntry contract.
@@ -60,12 +67,33 @@ def _push(level: str, msg: str) -> None:
     entry = {"ts": _now_iso(), "level": level, "msg": msg}
     with _lock:
         _ring.append(entry)
+        subs = list(_subscribers)
     if _disk_logger is not None:
         try:
             _disk_logger.info(json.dumps(entry, ensure_ascii=False))
         except Exception:
             # Persistence must never break in-memory logging.
             pass
+    for q in subs:
+        try:
+            q.put_nowait(entry)
+        except queue.Full:
+            # Slow/stuck subscriber — drop rather than block the logger.
+            pass
+
+
+def subscribe() -> "queue.Queue":
+    """Register a live-tail subscriber (SSE). Returns a bounded queue the caller
+    drains; pair with unsubscribe() in a finally so a disconnect cleans up."""
+    q: queue.Queue = queue.Queue(maxsize=_SUBSCRIBER_MAXSIZE)
+    with _lock:
+        _subscribers.add(q)
+    return q
+
+
+def unsubscribe(q: "queue.Queue") -> None:
+    with _lock:
+        _subscribers.discard(q)
 
 
 def _prune_by_size(log_path: str) -> None:
@@ -222,6 +250,7 @@ def _reset_for_test():
     global _disk_logger
     with _lock:
         _ring.clear()
+        _subscribers.clear()
     # Also clear any installed tee's partial-line carry so a half-line from a
     # previous test can't bleed into the next.
     for tee in _tees:

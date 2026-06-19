@@ -333,6 +333,22 @@ server {
 
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
+    # SSE live tail of the admin Server Logs (#178 / ADR-022). Must come BEFORE
+    # the catch-all `location /` so nginx routes it here. Buffering off so events
+    # reach the browser as they happen, not in one chunk at disconnect. The
+    # backend also sets `X-Accel-Buffering: no` as a safety net, but pin it here.
+    location /api/admin/logs/stream {
+        proxy_pass http://127.0.0.1:3001/api/admin/logs/stream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 1h;       # long-lived stream
+        proxy_set_header X-Accel-Buffering no;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:3001/;
         proxy_http_version 1.1;

@@ -228,6 +228,18 @@ class ApiService {
   }
 
   /**
+   * Admin-only: open an SSE live-tail of a service's structured log entries
+   * (#178 / ADR-022). Maps to `GET /api/admin/logs/stream?service=…`; the admin
+   * session cookie rides along via `withCredentials`. Pair with the REST
+   * `getServerLogs` backfill — the caller appends each `message` `LogEntry` and
+   * MUST `close()` the source on unmount / service change.
+   */
+  streamServerLogs(service: ServerLogService): EventSource {
+    const url = `${this.baseUrl}/admin/logs/stream?service=${encodeURIComponent(service)}`;
+    return new EventSource(url, { withCredentials: true });
+  }
+
+  /**
    * Bucketed image-upload activity for the dashboard weather chart.
    * Maps to `GET /api/modules/:id/activity` on the backend, which in
    * turn proxies the duckdb-service aggregate. `interval` is `'hourly'`

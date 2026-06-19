@@ -3,6 +3,9 @@
 import io
 import json
 import sys
+from queue import Empty
+
+import pytest
 
 from services import log_ring
 
@@ -177,3 +180,43 @@ def test_persistence_is_noop_without_dir(tmp_path):
     log_ring._push("info", "in-memory only")
     assert "in-memory only" in _msgs(log_ring.get_recent(10)[0])
     assert list(tmp_path.iterdir()) == []
+
+
+# --- SSE live tail (#178 Phase 4) ---
+
+
+def test_subscribe_receives_push_then_unsubscribe_stops():
+    log_ring._reset_for_test()
+    q = log_ring.subscribe()
+    log_ring._push("warn", "sub-entry")
+    got = q.get_nowait()
+    assert got["msg"] == "sub-entry" and got["level"] == "warn"
+    log_ring.unsubscribe(q)
+    log_ring._push("info", "after-unsub")
+    with pytest.raises(Empty):
+        q.get_nowait()
+
+
+def test_stream_requires_admin_key(client):
+    assert client.get("/logs/stream").status_code == 401
+    assert client.get("/logs/stream", headers={"X-Admin-Key": "wrong"}).status_code == 401
+
+
+def test_stream_emits_pushed_entry_as_sse(client):
+    log_ring._reset_for_test()
+    resp = client.get("/logs/stream", headers={"X-Admin-Key": VALID_KEY})
+    assert resp.status_code == 200
+    assert resp.mimetype == "text/event-stream"
+    assert resp.headers.get("X-Accel-Buffering") == "no"
+
+    it = iter(resp.response)
+    first = next(it)  # ": connected" — also registers the subscriber
+    assert b"connected" in (first if isinstance(first, bytes) else first.encode())
+
+    log_ring._push("error", "stream-entry")
+    chunk = next(it)
+    text = chunk.decode() if isinstance(chunk, bytes) else chunk
+    assert text.startswith("data: ")
+    payload = json.loads(text[len("data: ") :].strip())
+    assert payload["msg"] == "stream-entry" and payload["level"] == "error"
+    it.close()

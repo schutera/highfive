@@ -51,6 +51,11 @@ const carry: Record<'out' | 'err', string> = { out: '', err: '' };
 
 const LOG_FILENAME = 'backend.log';
 
+// Live subscribers for SSE (#178 Phase 4). Every entry — from the tee or the
+// structured logger — flows through pushEntryInternal, so emitting here is the
+// single broadcast point. A Set (not EventEmitter) avoids MaxListeners warnings.
+const subscribers = new Set<(entry: LogEntry) => void>();
+
 function pushEntryInternal(entry: LogEntry): void {
   ring.push(entry);
   if (ring.length > MAX_RING_ENTRIES) {
@@ -63,6 +68,25 @@ function pushEntryInternal(entry: LogEntry): void {
       // Persistence must never break in-memory logging.
     }
   }
+  for (const cb of subscribers) {
+    try {
+      cb(entry);
+    } catch {
+      // A broken subscriber must never break logging or other subscribers.
+    }
+  }
+}
+
+/**
+ * Subscribe to live entries (SSE live tail). The callback fires for every new
+ * entry from any ingestion path. Returns an unsubscribe function — call it on
+ * client disconnect.
+ */
+export function subscribeEntries(cb: (entry: LogEntry) => void): () => void {
+  subscribers.add(cb);
+  return () => {
+    subscribers.delete(cb);
+  };
 }
 
 /**
@@ -175,11 +199,12 @@ export function getRecentEntries(n: number): { entries: LogEntry[]; truncated: b
   return { entries, truncated: ring.length > entries.length };
 }
 
-/** Test-only: clear the ring and partial-line carry (does not touch disk). */
+/** Test-only: clear the ring, partial-line carry, and subscribers (not disk). */
 export function __resetLogRingForTest(): void {
   ring.length = 0;
   carry.out = '';
   carry.err = '';
+  subscribers.clear();
 }
 
 /**

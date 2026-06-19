@@ -362,7 +362,13 @@ each entry `ts`/`level`/`msg`), so the backend proxies the JSON through verbatim
 and only the `backend` branch constructs it locally. The proxy branch rejects a
 drifted envelope (no `entries` array) with `502` rather than letting `undefined`
 fields reach the UI. `nginx` is intentionally not a `ServerLogService` (no app
-ring). Design + caveats: [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.md).
+ring). Design + caveats: [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.md)
+/ [ADR-022](../09-architecture-decisions/adr-022-persistent-structured-server-logs.md).
+
+The live tail `GET /api/admin/logs/stream` (SSE) reuses the **same** `LogEntry`
+shape: each `data:` event payload is one `LogEntry` JSON. No separate wire type —
+the REST array and the SSE event are the same element, so the panel appends stream
+entries to the backfilled list without a transform.
 
 ## `ImageUploadsPage` — admin gallery pagination
 

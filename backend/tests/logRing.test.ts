@@ -3,6 +3,7 @@ import {
   installLogRing,
   getRecentEntries,
   pushEntry,
+  subscribeEntries,
   __resetLogRingForTest,
 } from '../src/logRing';
 
@@ -74,5 +75,20 @@ describe('logRing (#171/#178)', () => {
     expect(all.length).toBeLessThan(N); // bounded — not unbounded growth
     expect(all).toContain(`hf-cap ${N - 1}`); // newest kept
     expect(all).not.toContain('hf-cap 0'); // oldest evicted
+  });
+
+  it('subscribeEntries fires for every new entry and stops after unsubscribe', () => {
+    // Filter to our own markers — the tee broadcasts ALL stdout, including any
+    // stray test-runner output, so strict equality must ignore that noise.
+    const seen: string[] = [];
+    const unsub = subscribeEntries((e) => {
+      if (e.msg.startsWith('hf-sub-')) seen.push(e.msg);
+    });
+    pushEntry({ ts: '2026-06-18T00:00:00.000Z', level: 'info', msg: 'hf-sub-1' });
+    process.stdout.write('hf-sub-2\n'); // tee path also broadcasts
+    expect(seen).toEqual(['hf-sub-1', 'hf-sub-2']);
+    unsub();
+    pushEntry({ ts: '2026-06-18T00:00:01.000Z', level: 'info', msg: 'hf-sub-3' });
+    expect(seen).toEqual(['hf-sub-1', 'hf-sub-2']); // no further deliveries
   });
 });

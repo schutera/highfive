@@ -88,3 +88,24 @@ if (!globalThis.fetch || !(globalThis.fetch as { _isStub?: boolean })._isStub) {
   (stubFetch as unknown as { _isStub: boolean })._isStub = true;
   globalThis.fetch = stubFetch;
 }
+
+// jsdom doesn't implement EventSource (#178 SSE live tail) — provide a minimal
+// class stub so SSE code can construct one without throwing. Component tests
+// typically mock `api.streamServerLogs` to inject a controllable fake instead.
+if (typeof globalThis.EventSource === 'undefined') {
+  class MockEventSource {
+    url: string;
+    withCredentials: boolean;
+    onmessage: ((e: MessageEvent) => void) | null = null;
+    onerror: ((e: Event) => void) | null = null;
+    onopen: ((e: Event) => void) | null = null;
+    constructor(url: string, init?: { withCredentials?: boolean }) {
+      this.url = url;
+      this.withCredentials = init?.withCredentials ?? false;
+    }
+    addEventListener = vi.fn();
+    removeEventListener = vi.fn();
+    close = vi.fn();
+  }
+  globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
+}

@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -7,6 +8,7 @@ import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
 import { accessLog } from './accessLog';
 import { getRecentEntries } from './logRing';
+import { streamBackendRing, writeSseHeaders } from './logStream';
 import {
   SESSION_COOKIE,
   issueSessionToken,
@@ -646,5 +648,51 @@ app.get('/api/admin/logs', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('[GET /api/admin/logs]', { service, error: String(error) });
     res.status(502).json({ error: `${service} unreachable` });
+  }
+});
+
+// SSE live tail (#178 Phase 4). One `LogEntry` JSON per `data:` event. The panel
+// fetches GET /api/admin/logs once for backfill, then opens this for live tail.
+// `backend` streams its own ring; the two Flask services are piped from their
+// internal `/logs/stream` (X-Admin-Key forwarded). See ADR-022 / logStream.ts.
+app.get('/api/admin/logs/stream', requireAdmin, async (req, res) => {
+  const service = String(req.query.service ?? '');
+  if (!(LOG_SERVICES as readonly string[]).includes(service)) {
+    res.status(400).json({
+      error: `invalid service; expected one of: ${LOG_SERVICES.join(', ')}`,
+    });
+    return;
+  }
+
+  if (service === 'backend') {
+    writeSseHeaders(res);
+    const cleanup = streamBackendRing(res);
+    req.on('close', cleanup);
+    return;
+  }
+
+  // Proxy the Flask service's SSE stream. Connect FIRST so a failure still
+  // surfaces as 502 before we commit to a 200 event-stream response.
+  const base = service === 'duckdb-service' ? DUCKDB_URL : IMAGE_SERVICE_URL;
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
+  try {
+    const upstream = await fetch(`${base}/logs/stream`, {
+      headers: { 'X-Admin-Key': getApiKey() },
+      signal: controller.signal,
+    });
+    if (!upstream.ok || !upstream.body) {
+      res.status(502).json({ error: `Failed to open ${service} log stream` });
+      return;
+    }
+    writeSseHeaders(res);
+    // Pipe the upstream SSE bytes straight through (Flask emits the same
+    // `data:`/keepalive framing and its own keepalives).
+    Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+  } catch (error) {
+    if (controller.signal.aborted) return; // client went away mid-connect
+    console.error('[GET /api/admin/logs/stream]', { service, error: String(error) });
+    if (!res.headersSent) res.status(502).json({ error: `${service} unreachable` });
+    else res.end();
   }
 });

@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import sys
 from queue import Empty
 
@@ -218,3 +219,37 @@ def test_stream_emits_pushed_entry_as_sse(client):
     payload = json.loads(text[len("data: ") :].strip())
     assert payload["msg"] == "stream-entry" and payload["level"] == "error"
     it.close()
+
+
+# --- Rotation / retention (#178 / ADR-022) ---
+
+
+def test_prune_by_size_evicts_oldest_and_keeps_active(tmp_path, monkeypatch):
+    monkeypatch.setattr(log_ring, "_MAX_TOTAL_BYTES", 100)
+    active = tmp_path / "service.log"
+    old1 = tmp_path / "service.log.2026-06-01"
+    old2 = tmp_path / "service.log.2026-06-02"
+    active.write_text("a" * 40)
+    old1.write_text("b" * 40)
+    old2.write_text("c" * 40)  # total 120 > 100
+    os.utime(old1, (1, 1))  # oldest
+    os.utime(old2, (2, 2))
+    os.utime(active, (3, 3))
+
+    log_ring._prune_by_size(str(active))
+
+    assert not old1.exists()
+    assert old2.exists()
+    assert active.exists()
+
+
+def test_active_file_rolls_over_at_size_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(log_ring, "_MAX_FILE_BYTES", 200)
+    log_ring._reset_for_test()
+    log_ring.init_persistence(str(tmp_path))
+    for i in range(40):
+        log_ring._push("info", f"size-roll line {i}")
+    log_ring._reset_for_test()  # close + flush the handler
+
+    rotated = [p for p in tmp_path.iterdir() if p.name != "service.log"]
+    assert rotated, "active file should have rolled over once it passed _MAX_FILE_BYTES"

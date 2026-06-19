@@ -33,18 +33,27 @@ export function writeSseHeaders(res: Response): void {
  * cleanup function (also wired to `req`'s close); calling it is idempotent.
  */
 export function streamBackendRing(res: Response): () => void {
+  let cleanup = (): void => {};
+  // Guard every write: if the socket died before `req.on('close')` fired, a
+  // write-after-end can throw — treat that as a disconnect and tear down.
+  const safeWrite = (chunk: string): void => {
+    try {
+      res.write(chunk);
+    } catch {
+      cleanup();
+    }
+  };
   const unsubscribe = subscribeEntries((entry: LogEntry) => {
-    res.write(`data: ${JSON.stringify(entry)}\n\n`);
+    safeWrite(`data: ${JSON.stringify(entry)}\n\n`);
   });
-  const keepalive = setInterval(() => {
-    res.write(': ping\n\n');
-  }, KEEPALIVE_MS);
+  const keepalive = setInterval(() => safeWrite(': ping\n\n'), KEEPALIVE_MS);
   let done = false;
-  return () => {
+  cleanup = () => {
     if (done) return;
     done = true;
     clearInterval(keepalive);
     unsubscribe();
     res.end();
   };
+  return cleanup;
 }

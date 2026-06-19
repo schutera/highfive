@@ -2,7 +2,9 @@
 
 import io
 import json
+import os
 import sys
+from pathlib import Path
 from queue import Empty
 
 import pytest
@@ -220,3 +222,54 @@ def test_stream_emits_pushed_entry_as_sse(client):
     payload = json.loads(text[len("data: ") :].strip())
     assert payload["msg"] == "stream-entry" and payload["level"] == "error"
     it.close()
+
+
+# --- Rotation / retention (#178 / ADR-022) ---
+
+
+def test_prune_by_size_evicts_oldest_and_keeps_active(tmp_path, monkeypatch):
+    # Shrink the cap so we don't need 100 MB of fixtures.
+    monkeypatch.setattr(log_ring, "_MAX_TOTAL_BYTES", 100)
+    active = tmp_path / "service.log"
+    old1 = tmp_path / "service.log.2026-06-01"
+    old2 = tmp_path / "service.log.2026-06-02"
+    active.write_text("a" * 40)
+    old1.write_text("b" * 40)
+    old2.write_text("c" * 40)  # total 120 > 100
+    os.utime(old1, (1, 1))  # oldest
+    os.utime(old2, (2, 2))
+    os.utime(active, (3, 3))
+
+    log_ring._prune_by_size(str(active))
+
+    # Oldest rotated file is evicted to bring the total to ≤100; the active file
+    # is never deleted even though it is "newest".
+    assert not old1.exists()
+    assert old2.exists()
+    assert active.exists()
+
+
+def test_active_file_rolls_over_at_size_cap(tmp_path, monkeypatch):
+    # Tiny per-file cap so a handful of entries forces a mid-day size rollover.
+    monkeypatch.setattr(log_ring, "_MAX_FILE_BYTES", 200)
+    log_ring._reset_for_test()
+    log_ring.init_persistence(str(tmp_path))
+    for i in range(40):
+        log_ring._push("info", f"size-roll line {i}")
+    log_ring._reset_for_test()  # close + flush the handler
+
+    rotated = [p for p in tmp_path.iterdir() if p.name != "service.log"]
+    assert rotated, "active file should have rolled over once it passed _MAX_FILE_BYTES"
+
+
+def test_log_ring_byte_identical_across_services():
+    # The two services' log_ring.py MUST stay byte-identical (ADR-022 symmetry).
+    # A code-review checklist isn't a guard; this test is. If it fails, copy one
+    # over the other — do not let the implementations drift.
+    here = Path(__file__).resolve()
+    duckdb_copy = here.parents[1] / "services" / "log_ring.py"
+    image_copy = here.parents[2] / "image-service" / "services" / "log_ring.py"
+    assert image_copy.exists(), f"expected {image_copy}"
+    assert duckdb_copy.read_bytes() == image_copy.read_bytes(), (
+        "duckdb-service and image-service log_ring.py have drifted — re-sync them"
+    )

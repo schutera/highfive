@@ -81,6 +81,10 @@ export default function ServerLogsPanel() {
       if (cancelled) return;
       const es = api.streamServerLogs(service);
       es.addEventListener('open', () => setLive(true));
+      // On error EventSource auto-reconnects; we just flip the indicator. We do
+      // NOT re-run the REST backfill, so entries emitted during the reconnect
+      // gap are not retroactively filled — acceptable for a live ops console
+      // (the gap is visible via the indicator; a manual Refresh re-backfills).
       es.addEventListener('error', () => setLive(false));
       es.addEventListener('message', (e: MessageEvent) => {
         try {

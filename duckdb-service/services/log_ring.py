@@ -46,9 +46,13 @@ _real_stderr = None
 # On-disk persistence (#178 / ADR-022). Gated on LOG_DIR: when set, each entry is
 # also appended as one JSON object per line (JSONL) to a rotating file, and the
 # ring is backfilled from that file at startup so history survives a restart.
-# Rotation: daily, retain ≤30 files AND ≤100 MB total (prune oldest past either).
+# Rotation: daily OR at 50 MB, retain ≤30 files AND ≤100 MB total (prune oldest).
 _LOG_FILENAME = "service.log"  # each service has its OWN LOG_DIR (no collision)
 _MAX_TOTAL_BYTES = 100 * 1024 * 1024
+# Roll the active file at 50 MB too (not just at midnight), matching the Node
+# rfs `size: '50M'` trigger — so a high-volume day can't grow the active file
+# unbounded between daily rotations and the 100 MB total bound holds continuously.
+_MAX_FILE_BYTES = 50 * 1024 * 1024
 _disk_logger: "logging.Logger | None" = None
 
 # Live SSE subscribers (#178 Phase 4). Each /logs/stream connection registers a
@@ -63,7 +67,7 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _push(level: str, msg: str) -> None:
+def _push(level: str, msg: str) -> dict:
     entry = {"ts": _now_iso(), "level": level, "msg": msg}
     with _lock:
         _ring.append(entry)
@@ -80,6 +84,7 @@ def _push(level: str, msg: str) -> None:
         except queue.Full:
             # Slow/stuck subscriber — drop rather than block the logger.
             pass
+    return entry
 
 
 def subscribe() -> "queue.Queue":
@@ -114,8 +119,22 @@ def _prune_by_size(log_path: str) -> None:
 
 
 class _PruningTimedHandler(TimedRotatingFileHandler):
-    """Daily rotation + backupCount, with a 100 MB total-size sweep after each
-    rollover so both retention bounds hold."""
+    """Daily rotation + backupCount, plus a per-file size trigger (so the active
+    file rolls at _MAX_FILE_BYTES, not only at midnight) and a 100 MB total-size
+    sweep after each rollover — so both retention bounds hold continuously."""
+
+    def shouldRollover(self, record):  # noqa: N802 (stdlib name)
+        if super().shouldRollover(record):
+            return 1
+        try:
+            if self.stream is None:
+                self.stream = self._open()
+            self.stream.seek(0, 2)  # to EOF
+            if self.stream.tell() >= _MAX_FILE_BYTES:
+                return 1
+        except (OSError, ValueError):
+            pass
+        return 0
 
     def doRollover(self):  # noqa: N802 (stdlib name)
         super().doRollover()
@@ -222,9 +241,8 @@ def log_event(level: str, msg: str) -> None:
     SECURITY: never pass secrets, auth headers, request bodies, or the admin
     password — entries are admin-readable and (ADR-022) persisted to disk.
     """
-    _push(level, msg)
-    ts = _ring[-1]["ts"] if _ring else _now_iso()
-    line = f"{ts} {level.upper()} {msg}\n"
+    entry = _push(level, msg)
+    line = f"{entry['ts']} {level.upper()} {msg}\n"
     real = _real_stderr if level == "error" else _real_stdout
     if real is None:
         # Tee not installed yet (e.g. very early startup): fall back to the

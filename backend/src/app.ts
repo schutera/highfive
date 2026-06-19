@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+import { Readable, pipeline } from 'node:stream';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -687,8 +687,20 @@ app.get('/api/admin/logs/stream', requireAdmin, async (req, res) => {
     }
     writeSseHeaders(res);
     // Pipe the upstream SSE bytes straight through (Flask emits the same
-    // `data:`/keepalive framing and its own keepalives).
-    Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+    // `data:`/keepalive framing and its own keepalives). Use `pipeline`, not a
+    // bare `.pipe()`: on client disconnect `controller.abort()` makes the
+    // source emit an AbortError, and an unhandled stream 'error' would crash
+    // the process — pipeline routes it to the callback and destroys both ends.
+    pipeline(
+      Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]),
+      res,
+      (err) => {
+        // Abort on client disconnect is the normal teardown path, not an error.
+        if (err && !controller.signal.aborted) {
+          console.error('[GET /api/admin/logs/stream] pipe', { service, error: String(err) });
+        }
+      },
+    );
   } catch (error) {
     if (controller.signal.aborted) return; // client went away mid-connect
     console.error('[GET /api/admin/logs/stream]', { service, error: String(error) });

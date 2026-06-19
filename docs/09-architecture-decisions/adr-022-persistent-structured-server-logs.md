@@ -51,10 +51,13 @@ query string, so no credential can reach the ring.
 **Persistence** is gated on a `LOG_DIR` env var (set in compose; unset = in-memory only, as
 ADR-021). When set, each entry is also appended as one JSON object per line (**JSONL**) to a
 rotating file, and at startup the ring is **backfilled** from the file's tail so the panel
-shows pre-restart history immediately. Rotation keeps **≤30 daily files AND ≤100 MB total**
-(prune oldest past either bound). The backend uses the `rotating-file-stream` npm package
-(both bounds native via `maxFiles` + `maxSize`); the Flask services use stdlib
-`TimedRotatingFileHandler` subclassed with a 100 MB size-prune sweep after each rollover.
+shows pre-restart history immediately. Files rotate **daily or at 50 MB**, and retention keeps
+**≤30 files AND ≤100 MB total** (prune oldest past either bound) — so the total bound holds
+continuously, not just at the daily boundary. The backend uses the `rotating-file-stream` npm
+package (`size: '50M'`, `interval: '1d'`, both retention bounds native via `maxFiles` + `maxSize`);
+the Flask services use stdlib `TimedRotatingFileHandler` subclassed to also roll at 50 MB
+(`shouldRollover` size check) and to run a 100 MB size-prune sweep after each rollover — kept
+byte-identical across the two services (guarded by a test that diffs the two files).
 The backend writes to its own `backend_logs` volume; the two Flask services write to
 **distinct subdirs** of the shared `duckdb_data` volume (`/data/logs/duckdb`,
 `/data/logs/image`) so they never collide on one file.

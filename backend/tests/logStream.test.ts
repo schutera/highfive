@@ -127,4 +127,52 @@ describe('GET /api/admin/logs/stream (#178 Phase 4)', () => {
     expect(res.status).toBe(502);
     expect(res.body.error).toMatch(/unreachable/i);
   });
+
+  it('does not crash when the client disconnects mid-stream (proxy abort path)', async () => {
+    // A long-lived upstream that never closes — so the only way the pipe ends
+    // is the client aborting, which makes Readable.fromWeb emit an AbortError.
+    // With a bare `.pipe()` that unhandled error crashes the process.
+    const openStream = new ReadableStream({
+      start(c) {
+        c.enqueue(
+          new TextEncoder().encode(
+            'data: {"ts":"2026-06-18T00:00:00.000Z","level":"info","msg":"keep-open"}\n\n',
+          ),
+        );
+        // intentionally never close
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200, body: openStream }),
+    );
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const { port } = server.address() as { port: number };
+
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(
+        {
+          port,
+          path: '/api/admin/logs/stream?service=duckdb-service',
+          headers: { 'X-Admin-Key': KEY },
+        },
+        (res) => {
+          res.on('data', () => {
+            req.destroy(); // client abort mid-stream — the would-be crash path
+            resolve();
+          });
+        },
+      );
+      req.on('error', () => resolve()); // ECONNRESET from our own destroy is fine
+      setTimeout(() => reject(new Error('no data before timeout')), 4000);
+    });
+
+    // Let the abort propagate through pipeline, then prove the process is still
+    // alive and serving — an uncaught stream error would have killed the run.
+    await new Promise((r) => setTimeout(r, 50));
+    await request(app).get('/api/health').expect(200);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
 });

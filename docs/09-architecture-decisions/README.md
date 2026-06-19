@@ -5,6 +5,15 @@ context, the choice, and the consequences. ADRs are append-only and
 immutable; if a decision is overturned, supersede it with a new ADR
 and link backwards.
 
+> **Numbering across parallel branches.** The ADR number is only
+> reserved when a branch merges to `main`, so two long-lived branches can
+> both grab the next free number and collide. The branch that merges
+> **second** must renumber: rename the file, fix the index row + any
+> supersede pointer, and update every `ADR-NNN` reference in code
+> comments, compose files, and docs to the new number. (ADR-022 collided
+> this way — `build-time-feature-flags` landed first, so
+> `persistent-structured-server-logs` became ADR-023.)
+
 ## Index
 
 | ADR                                                         | Title                                                                           | Status                                                            |

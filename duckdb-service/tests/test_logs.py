@@ -249,17 +249,28 @@ def test_prune_by_size_evicts_oldest_and_keeps_active(tmp_path, monkeypatch):
     assert active.exists()
 
 
-def test_active_file_rolls_over_at_size_cap(tmp_path, monkeypatch):
-    # Tiny per-file cap so a handful of entries forces a mid-day size rollover.
-    monkeypatch.setattr(log_ring, "_MAX_FILE_BYTES", 200)
+def test_active_file_stays_bounded_under_sustained_writes(tmp_path, monkeypatch):
+    # The size trigger's whole point: the ACTIVE file must stay near the cap
+    # under sustained same-day writes — not just "a rotated file appeared".
+    # stdlib's dated-name collision (fixed by our doRollover override) would let
+    # the active file grow unbounded and this asserts it does not.
+    monkeypatch.setattr(log_ring, "_MAX_FILE_BYTES", 500)
     log_ring._reset_for_test()
     log_ring.init_persistence(str(tmp_path))
-    for i in range(40):
-        log_ring._push("info", f"size-roll line {i}")
+    for i in range(2000):
+        log_ring._push("info", f"size-roll line {i} " + "x" * 20)
     log_ring._reset_for_test()  # close + flush the handler
 
+    active = tmp_path / "service.log"
     rotated = [p for p in tmp_path.iterdir() if p.name != "service.log"]
-    assert rotated, "active file should have rolled over once it passed _MAX_FILE_BYTES"
+    # Active file is bounded near the cap (at most one over-cap entry past it),
+    # NOT the ~100 KB of total volume written.
+    assert active.stat().st_size < 4 * log_ring._MAX_FILE_BYTES
+    # Multiple distinct same-day rolls actually happened (unique timestamped
+    # files), not a single repeatedly-clobbered one.
+    assert len(rotated) >= 2
+    # And the per-file count bound holds.
+    assert len(rotated) <= log_ring._MAX_BACKUP_FILES
 
 
 def test_log_ring_byte_identical_across_services():

@@ -29,6 +29,7 @@ import os
 import queue
 import sys
 import threading
+import time
 from collections import deque
 from datetime import UTC, datetime
 from logging.handlers import TimedRotatingFileHandler
@@ -53,6 +54,7 @@ _MAX_TOTAL_BYTES = 100 * 1024 * 1024
 # rfs `size: '50M'` trigger — so a high-volume day can't grow the active file
 # unbounded between daily rotations and the 100 MB total bound holds continuously.
 _MAX_FILE_BYTES = 50 * 1024 * 1024
+_MAX_BACKUP_FILES = 30
 _disk_logger: "logging.Logger | None" = None
 
 # Live SSE subscribers (#178 Phase 4). Each /logs/stream connection registers a
@@ -101,6 +103,17 @@ def unsubscribe(q: "queue.Queue") -> None:
         _subscribers.discard(q)
 
 
+def _prune_by_count(log_path: str) -> None:
+    """Keep only the newest _MAX_BACKUP_FILES rotated files (the active file,
+    which has no `.<stamp>` suffix, is never matched)."""
+    rotated = sorted(glob.glob(log_path + ".*"), key=os.path.getmtime)
+    for p in rotated[:-_MAX_BACKUP_FILES] if len(rotated) > _MAX_BACKUP_FILES else []:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
 def _prune_by_size(log_path: str) -> None:
     """Delete oldest rotated files until the total of <log>* is ≤ 100 MB.
     Never deletes the active file."""
@@ -119,12 +132,16 @@ def _prune_by_size(log_path: str) -> None:
 
 
 class _PruningTimedHandler(TimedRotatingFileHandler):
-    """Daily rotation + backupCount, plus a per-file size trigger (so the active
-    file rolls at _MAX_FILE_BYTES, not only at midnight) and a 100 MB total-size
-    sweep after each rollover — so both retention bounds hold continuously."""
+    """Rotate daily OR at _MAX_FILE_BYTES, retain ≤30 rotated files AND ≤100 MB
+    total. We fully override ``doRollover`` because stdlib's dated filename
+    (``service.log.YYYY-MM-DD``) collides on a SECOND same-day, size-triggered
+    roll and then refuses to rotate — letting the active file grow unbounded.
+    Our rollover always renames to a unique timestamped file, so every size
+    trigger truly rotates, then enforces both retention bounds."""
 
     def shouldRollover(self, record):  # noqa: N802 (stdlib name)
-        if super().shouldRollover(record):
+        # Time trigger (stdlib computes self.rolloverAt) OR per-file size trigger.
+        if int(time.time()) >= self.rolloverAt:
             return 1
         try:
             if self.stream is None:
@@ -137,8 +154,23 @@ class _PruningTimedHandler(TimedRotatingFileHandler):
         return 0
 
     def doRollover(self):  # noqa: N802 (stdlib name)
-        super().doRollover()
-        _prune_by_size(self.baseFilename)
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        base = self.baseFilename
+        stamp = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
+        dfn = f"{base}.{stamp}"
+        idx = 1
+        while os.path.exists(dfn):  # multiple rolls within the same second
+            dfn = f"{base}.{stamp}.{idx}"
+            idx += 1
+        if os.path.exists(base):
+            os.rename(base, dfn)
+        self.rolloverAt = self.computeRollover(int(time.time()))  # next daily boundary
+        if not self.delay:
+            self.stream = self._open()
+        _prune_by_count(base)
+        _prune_by_size(base)
 
 
 def _backfill_from_disk(log_path: str) -> None:

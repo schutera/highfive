@@ -275,7 +275,7 @@ the seed on a reused stack accumulates uploads and breaks exact-count
 specs) are documented where spec authors will look:
 `tests/ui/README.md` → "Seeded image bytes are NOT decodable".
 (The carousel this proves is gated behind `VITE_ENABLE_DASHBOARD_IMAGES`,
-default off — [ADR-023](../09-architecture-decisions/adr-022-build-time-feature-flags.md);
+default off — [ADR-022](../09-architecture-decisions/adr-022-build-time-feature-flags.md);
 the UI-test stack builds the homepage flag-on so `module-latest-capture.spec.ts`
 exercises it.)
 

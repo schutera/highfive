@@ -48,7 +48,7 @@ services:
       - '5173:5173'
     environment:
       NODE_ENV: development
-      # Feature flags (ADR-023). On in the dev stack so the dashboard
+      # Feature flags (ADR-022). On in the dev stack so the dashboard
       # latest-captures gallery (#154) is visible locally; default off in prod.
       VITE_ENABLE_DASHBOARD_IMAGES: 'true'
     volumes:

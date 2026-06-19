@@ -310,6 +310,11 @@ data: {"ts":"2026-06-18T20:42:56.004Z","level":"info","msg":"POST /heartbeat 200
 : ping
 ```
 
+The admin **Server Logs** panel consumes both: a live indicator reflects the SSE
+connection, follow-mode auto-scrolls (pausing when you scroll up), and the loaded
+entries can be searched, filtered by level, and exported to a plain `.log` —
+all client-side, no extra endpoints.
+
 ## 1.5 User location hint (dashboard map)
 
 ```

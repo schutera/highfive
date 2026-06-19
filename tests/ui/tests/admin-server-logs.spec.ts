@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
 import type { ServerLogsResponse } from '@highfive/contracts';
 
@@ -59,5 +60,46 @@ test.describe('admin server logs (#171)', () => {
     await expect
       .poll(async () => (await output.textContent())?.length ?? 0, { timeout: 10_000 })
       .toBeGreaterThan(0);
+  });
+
+  // The only layer that proves the full pipeline — a real request becomes an
+  // access-log entry that STREAMS into the panel over SSE (no refresh), is
+  // filterable, and exports to a .log (#178 Phase 4/5; CLAUDE.md rules #4/#5).
+  test('streams a live access-log entry, filters it, and exports a .log', async ({ page }) => {
+    await page.goto('/admin');
+    const output = page.getByTestId('server-logs-output');
+    await expect(output).toBeVisible();
+    // Wait until the SSE subscription is live before probing, else we could
+    // emit the entry before the EventSource is connected and miss it.
+    await expect(page.getByTestId('logs-live-indicator')).toHaveAttribute('data-live', 'true', {
+      timeout: 15_000,
+    });
+
+    // Trigger a uniquely-identifiable backend access entry. Path-only logging
+    // means the unique path IS logged (and no query/header/body ever is).
+    const marker = `__live_probe_${Date.now()}`;
+    const probe = await page.request.get(`${API}/api/${marker}`);
+    expect(probe.status()).toBe(404);
+
+    // It streams into the panel with no manual refresh.
+    await expect
+      .poll(async () => (await output.textContent()) ?? '', { timeout: 15_000 })
+      .toContain(marker);
+
+    // Search narrows to just the probe entry (banner/boot lines filtered out).
+    await page.getByTestId('logs-search').fill(marker);
+    await expect.poll(() => page.getByTestId('server-log-entry').count()).toBeGreaterThan(0);
+    const visible = await page.getByTestId('server-log-entry').allTextContents();
+    expect(visible.every((t) => t.includes(marker))).toBeTruthy();
+
+    // Export downloads a .log of the filtered view with structured lines.
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByTestId('logs-download').click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/\.log$/);
+    const content = await readFile(await download.path(), 'utf8');
+    expect(content).toContain(marker);
+    expect(content).toMatch(/\d{4}-\d{2}-\d{2}T[\d:.]+Z (INFO|WARN|ERROR) /);
   });
 });

@@ -30,9 +30,24 @@ export default function ServerLogsPanel() {
   const [live, setLive] = useState(false);
   // Follow mode: auto-scroll to the newest entry until the user scrolls up.
   const [follow, setFollow] = useState(true);
+  // Search + level filters (#178 Phase 5). Default: show everything.
+  const [query, setQuery] = useState('');
+  const [levelsOn, setLevelsOn] = useState<Record<LogLevel, boolean>>({
+    info: true,
+    warn: true,
+    error: true,
+  });
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const esRef = useRef<EventSource | null>(null);
+
+  // Entries actually rendered: the full buffer narrowed by the level toggles
+  // and a case-insensitive substring search over the message.
+  const needle = query.trim().toLowerCase();
+  const filterActive = needle !== '' || !(levelsOn.info && levelsOn.warn && levelsOn.error);
+  const visibleEntries = entries.filter(
+    (e) => levelsOn[e.level] && (needle === '' || e.msg.toLowerCase().includes(needle)),
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,6 +125,26 @@ export default function ServerLogsPanel() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   };
 
+  const toggleLevel = (level: LogLevel) =>
+    setLevelsOn((prev) => ({ ...prev, [level]: !prev[level] }));
+
+  // Download the loaded entries as a plain `.log`. When a filter is active, the
+  // file matches what's on screen (the filtered view); unfiltered, it's the full
+  // loaded buffer. Built client-side — no endpoint. (#178 Phase 5)
+  const toExport = filterActive ? visibleEntries : entries;
+  const downloadLog = () => {
+    if (toExport.length === 0) return;
+    const text = `${toExport.map((e) => `${e.ts} ${e.level.toUpperCase()} ${e.msg}`).join('\n')}\n`;
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${service}-logs.log`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-8 overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center gap-3 justify-between">
@@ -168,6 +203,40 @@ export default function ServerLogsPanel() {
         </div>
       </div>
 
+      <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center gap-3">
+        <input
+          type="search"
+          data-testid="logs-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search messages…"
+          aria-label="Search log messages"
+          className="flex-1 min-w-[12rem] border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+        />
+        <div className="flex items-center gap-3">
+          {(['info', 'warn', 'error'] as LogLevel[]).map((lvl) => (
+            <label key={lvl} className="flex items-center gap-1 text-sm text-gray-600 capitalize">
+              <input
+                type="checkbox"
+                data-testid={`logs-level-${lvl}`}
+                checked={levelsOn[lvl]}
+                onChange={() => toggleLevel(lvl)}
+                className="accent-amber-500"
+              />
+              {lvl}
+            </label>
+          ))}
+        </div>
+        <button
+          onClick={downloadLog}
+          data-testid="logs-download"
+          disabled={toExport.length === 0}
+          className="px-3 py-1.5 border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 text-sm font-medium rounded-lg transition-colors"
+        >
+          Download .log
+        </button>
+      </div>
+
       <div className="p-4 relative">
         {error && <p className="text-red-600 text-sm mb-2">{error}</p>}
         {truncated && !error && (
@@ -177,6 +246,10 @@ export default function ServerLogsPanel() {
         )}
         {!error && entries.length === 0 && !loading ? (
           <p className="text-sm text-gray-400">No log entries captured yet.</p>
+        ) : !error && visibleEntries.length === 0 ? (
+          <p className="text-sm text-gray-400" data-testid="logs-no-match">
+            No entries match the filter.
+          </p>
         ) : (
           <div
             ref={scrollRef}
@@ -184,7 +257,7 @@ export default function ServerLogsPanel() {
             data-testid="server-logs-output"
             className="bg-gray-900 text-xs font-mono rounded-lg p-3 overflow-auto max-h-[32rem]"
           >
-            {entries.map((entry, i) => {
+            {visibleEntries.map((entry, i) => {
               const style = LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.info;
               return (
                 <div
@@ -205,7 +278,7 @@ export default function ServerLogsPanel() {
             })}
           </div>
         )}
-        {!follow && entries.length > 0 && (
+        {!follow && visibleEntries.length > 0 && (
           <button
             data-testid="logs-jump-latest"
             onClick={jumpToLatest}

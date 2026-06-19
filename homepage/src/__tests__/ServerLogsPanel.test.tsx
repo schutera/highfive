@@ -155,4 +155,79 @@ describe('ServerLogsPanel (#171/#178)', () => {
     await waitFor(() => expect(createdStreams).toHaveLength(2));
     expect(createdStreams[0].close).toHaveBeenCalled();
   });
+
+  it('filters entries by the search query', async () => {
+    render(<ServerLogsPanel />);
+    await screen.findByText('GET /api/modules 200 4ms');
+    expect(screen.getAllByTestId('server-log-entry')).toHaveLength(2);
+
+    fireEvent.change(screen.getByTestId('logs-search'), { target: { value: 'modules' } });
+
+    const rows = screen.getAllByTestId('server-log-entry');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('GET /api/modules 200 4ms');
+  });
+
+  it('hides a level when its checkbox is unchecked', async () => {
+    (api.getServerLogs as ReturnType<typeof vi.fn>).mockResolvedValue(duckdbLogs);
+    render(<ServerLogsPanel />);
+    await screen.findByText('GET /health 500 12ms');
+    expect(screen.getAllByTestId('server-log-entry')).toHaveLength(2);
+
+    fireEvent.click(screen.getByTestId('logs-level-info'));
+
+    const rows = screen.getAllByTestId('server-log-entry');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].getAttribute('data-level')).toBe('error');
+  });
+
+  it('shows a no-match message and disables download when the filter matches nothing', async () => {
+    render(<ServerLogsPanel />);
+    await screen.findByText('GET /api/modules 200 4ms');
+
+    fireEvent.change(screen.getByTestId('logs-search'), { target: { value: 'zzz-no-such-line' } });
+
+    expect(screen.getByTestId('logs-no-match')).toBeTruthy();
+    expect(screen.queryByTestId('server-logs-output')).toBeNull();
+    expect((screen.getByTestId('logs-download') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  describe('Download .log export', () => {
+    // jsdom's Blob has no .text(); capture the text via the Blob constructor.
+    let exported: string;
+    beforeEach(() => {
+      exported = '';
+      vi.spyOn(globalThis, 'Blob').mockImplementation(
+        (parts?: BlobPart[]) => {
+          exported = (parts ?? []).join('');
+          return {} as Blob;
+        },
+      );
+      (URL as unknown as { createObjectURL: unknown }).createObjectURL = vi.fn(() => 'blob:mock');
+      (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn();
+    });
+
+    it('exports all loaded entries as <ts> <LEVEL> <msg> lines when unfiltered', async () => {
+      render(<ServerLogsPanel />);
+      await screen.findByText('GET /api/modules 200 4ms');
+
+      fireEvent.click(screen.getByTestId('logs-download'));
+
+      expect(exported).toContain(
+        '2026-06-18T20:42:55.000Z INFO 🐝 HighFive Backend API listening on port 3002 (all interfaces)',
+      );
+      expect(exported).toContain('2026-06-18T20:42:56.000Z INFO GET /api/modules 200 4ms');
+    });
+
+    it('exports only the filtered view when a search is active', async () => {
+      render(<ServerLogsPanel />);
+      await screen.findByText('GET /api/modules 200 4ms');
+
+      fireEvent.change(screen.getByTestId('logs-search'), { target: { value: 'modules' } });
+      fireEvent.click(screen.getByTestId('logs-download'));
+
+      expect(exported).toContain('GET /api/modules 200 4ms');
+      expect(exported).not.toContain('HighFive Backend API listening');
+    });
+  });
 });

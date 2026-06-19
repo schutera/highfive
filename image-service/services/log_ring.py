@@ -74,6 +74,11 @@ def _push(level: str, msg: str) -> dict:
     with _lock:
         _ring.append(entry)
         subs = list(_subscribers)
+    # The disk write + SSE fan-out below are intentionally OUTSIDE _lock: under
+    # threaded=True two threads may flush in a different order than they appended,
+    # but sub-millisecond entry ordering is not a contract. Do NOT widen the lock
+    # to cover them — the disk .info() can block on I/O and would serialize every
+    # logging call across all request threads.
     if _disk_logger is not None:
         try:
             _disk_logger.info(json.dumps(entry, ensure_ascii=False))

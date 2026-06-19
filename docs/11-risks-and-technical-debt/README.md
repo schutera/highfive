@@ -90,6 +90,12 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   only the serving worker's in-process entries. Single-process today, so complete. A future
   multi-worker backend (gunicorn/PM2 cluster) would stream only one worker's live entries;
   history via the shared on-disk file stays complete. Revisit if/when workers multiply.
+- **A live tail holds a worker open (#178 / ADR-023).** Each `/logs/stream` (Flask) and the
+  backend's piping `fetch` occupy one request for the stream's whole lifetime. The Flask
+  services run `app.run(..., threaded=True)` (Flask's default, pinned explicitly in both
+  `app.py`) so an open admin tail doesn't stall uploads/reads. A future gunicorn move must
+  preserve per-stream concurrency — a single sync worker would block all traffic while a tail
+  is open. Verified empirically: `/health` stays sub-second while a stream is held.
 
 ## Lessons learned
 

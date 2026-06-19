@@ -395,7 +395,7 @@ export interface ServerLogsResponse {
   service: ServerLogService;
   // Captured log entries, chronological (oldest→newest), like `tail`. In-memory
   // in Phase 1 (resets on process restart); on-disk persistence + rotation
-  // (survives restart, bounded to 30 days / 100 MB) is ADR-023 / Phase 2.
+  // (survives restart, bounded to 30 days / 100 MB) is ADR-023 / Phase 3.
   entries: LogEntry[];
   // True when the ring held more entries than were returned (clipped to the
   // requested `lines`, itself capped server-side). Lets the UI show a

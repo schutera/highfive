@@ -188,7 +188,12 @@ def _backfill_from_disk(log_path: str) -> None:
             entry = json.loads(ln)
         except (ValueError, TypeError):
             continue
-        if isinstance(entry, dict) and "ts" in entry and "msg" in entry:
+        if (
+            isinstance(entry, dict)
+            and "ts" in entry
+            and "msg" in entry
+            and entry.get("level") in ("info", "warn", "error")
+        ):
             with _lock:
                 _ring.append(entry)
 

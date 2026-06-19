@@ -274,8 +274,10 @@ def test_active_file_stays_bounded_under_sustained_writes(tmp_path, monkeypatch)
     active = tmp_path / "service.log"
     rotated = [p for p in tmp_path.iterdir() if p.name != "service.log"]
     # Active file is bounded near the cap (at most one over-cap entry past it),
-    # NOT the ~100 KB of total volume written.
-    assert active.stat().st_size < 4 * log_ring._MAX_FILE_BYTES
+    # NOT the ~100 KB of total volume written. Pin "≤ one entry over": the size
+    # roll fires the emit after the file crosses the cap, so the peak is the cap
+    # plus at most one line (each test line is < 256 bytes).
+    assert active.stat().st_size < log_ring._MAX_FILE_BYTES + 256
     # Many distinct same-day rolls happened (unique timestamped files, not one
     # repeatedly-clobbered file) and the count bound is reached and held exactly.
     assert len(rotated) == log_ring._MAX_BACKUP_FILES

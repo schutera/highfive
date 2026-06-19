@@ -92,6 +92,14 @@ own ring's emitter and pipes the Flask services' internal `/logs/stream`; the RE
 - **The SSE emitter is per-process.** A future multi-worker backend (gunicorn/PM2 cluster)
   would stream only the serving worker's live entries; history via the shared disk file is
   still complete. Revisit if/when workers multiply.
+- **A live tail occupies a worker for its whole lifetime.** The Flask `/logs/stream`
+  generator and the backend's piping `fetch` each hold one request open until the client
+  disconnects. The two Flask services therefore depend on serving requests concurrently:
+  `app.run(..., threaded=True)` (Flask's default, now pinned explicitly in both `app.py`)
+  gives each request its own thread, so an open admin tail does not stall uploads or reads.
+  A future move to gunicorn must keep per-stream concurrency (threaded/gevent workers, or
+  enough sync workers) — a single sync worker would block all other traffic while a tail is
+  open.
 - New runtime dependency (`rotating-file-stream`) on the Node side.
 
 ### Forbidden

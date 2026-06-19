@@ -31,7 +31,7 @@ const MAX_RING_ENTRIES = 2000;
 const ring: LogEntry[] = [];
 let installed = false;
 
-// On-disk persistence (#178 Phase 2 / ADR-023). Gated on LOG_DIR: when set, each
+// On-disk persistence (#178 Phase 3 / ADR-023). Gated on LOG_DIR: when set, each
 // entry is also appended as one JSON object per line (JSONL) to a rotating file,
 // and the ring is backfilled from that file at startup so history survives a
 // restart. When unset (e.g. unit tests), the ring is in-memory only — the
@@ -120,7 +120,12 @@ function backfillFromDisk(file: string): void {
   for (const line of lines.slice(-MAX_RING_ENTRIES)) {
     try {
       const e = JSON.parse(line) as LogEntry;
-      if (e && typeof e.ts === 'string' && typeof e.msg === 'string') {
+      if (
+        e &&
+        typeof e.ts === 'string' &&
+        typeof e.msg === 'string' &&
+        (e.level === 'info' || e.level === 'warn' || e.level === 'error')
+      ) {
         ring.push(e);
       }
     } catch {

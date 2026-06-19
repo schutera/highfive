@@ -105,4 +105,9 @@ scheduler.start()
 
 if __name__ == "__main__":
     debug = os.getenv("DEBUG", "false").lower() == "true"
-    app.run(host="0.0.0.0", port=8000, debug=debug)
+    # threaded=True (also Flask's app.run default — pinned explicitly because it
+    # is load-bearing): the SSE live tail (`GET /logs/stream`, #178/ADR-023) holds
+    # one worker for the stream's whole lifetime, so concurrent request handling is
+    # required or an open admin tail would stall all other traffic. A future move
+    # to gunicorn must keep per-stream concurrency (threaded/async workers).
+    app.run(host="0.0.0.0", port=8000, debug=debug, threaded=True)

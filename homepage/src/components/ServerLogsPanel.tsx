@@ -178,7 +178,7 @@ export default function ServerLogsPanel() {
             data-testid="log-service-select"
             value={service}
             onChange={(e) => setService(e.target.value as ServerLogService)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white text-gray-800 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
           >
             {SERVICES.map((s) => (
               <option key={s} value={s}>

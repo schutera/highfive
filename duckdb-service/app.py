@@ -1,5 +1,7 @@
 import os
-from flask import Flask
+import time
+
+from flask import Flask, g, request
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from db.schema import init_db
@@ -12,7 +14,9 @@ from routes.nests import nests_bp
 from routes.progress import progress_bp
 from routes.heartbeats import heartbeats_bp
 from services.backup import run_backup
+from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
+from services.log_ring import log_event
 from services.silence_watcher import check_silence
 from services.weather_worker import run_weather_fetch
 
@@ -21,8 +25,50 @@ from services.weather_worker import run_weather_fetch
 # print() re-resolves sys.stdout per call and Flask/werkzeug log handlers are
 # constructed lazily at app.run, so capture is complete. See services/log_ring.py.
 install_log_ring()
+# Enable on-disk persistence + backfill the ring from prior history when LOG_DIR
+# is set (compose sets it; unset = in-memory only). Before the banner so it is
+# persisted too. See ADR-023.
+init_log_persistence()
+
+# Structured boot banner through the logger (#178) — the analogue to the
+# backend's server.ts banner. Runs at import under flask run / gunicorn and
+# under `python app.py`, so the structured ingestion path has a real
+# production caller (not just the tee fallback). Never log secrets here.
+log_event("info", "🗄 duckdb-service starting (DuckDB persistence)")
 
 app = Flask(__name__)
+
+
+def _status_level(code: int) -> str:
+    if code >= 500:
+        return "error"
+    if code >= 400:
+        return "warn"
+    return "info"
+
+
+@app.before_request
+def _access_log_start():
+    g._access_start = time.perf_counter()
+
+
+@app.after_request
+def _access_log_finish(resp):
+    # One structured access entry per request (#178): "method path status ms".
+    # path ONLY — never query string, headers, or body — so the X-Admin-Key
+    # header and any ?token=/?key= value can't reach the admin-readable /
+    # disk-persisted ring. werkzeug's own request line is still tee-captured;
+    # this is the canonical, level-tagged entry.
+    start = g.pop("_access_start", None)
+    if start is not None:
+        ms = (time.perf_counter() - start) * 1000.0
+        log_event(
+            _status_level(resp.status_code),
+            f"{request.method} {request.path} {resp.status_code} {ms:.1f}ms",
+        )
+    return resp
+
+
 app.register_blueprint(health_bp)
 app.register_blueprint(logs_bp)
 app.register_blueprint(modules_bp)
@@ -59,4 +105,9 @@ scheduler.start()
 
 if __name__ == "__main__":
     debug = os.getenv("DEBUG", "false").lower() == "true"
-    app.run(host="0.0.0.0", port=8000, debug=debug)
+    # threaded=True (also Flask's app.run default — pinned explicitly because it
+    # is load-bearing): the SSE live tail (`GET /logs/stream`, #178/ADR-023) holds
+    # one worker for the stream's whole lifetime, so concurrent request handling is
+    # required or an open admin tail would stall all other traffic. A future move
+    # to gunicorn must keep per-stream concurrency (threaded/async workers).
+    app.run(host="0.0.0.0", port=8000, debug=debug, threaded=True)

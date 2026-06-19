@@ -12,7 +12,7 @@ import type {
 import { parseModuleId } from '@highfive/contracts';
 
 export type { TelemetryEntry } from '@highfive/contracts';
-export type { ServerLogService, ServerLogsResponse } from '@highfive/contracts';
+export type { LogEntry, LogLevel, ServerLogService, ServerLogsResponse } from '@highfive/contracts';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api';
 
@@ -225,6 +225,18 @@ class ApiService {
       throw new Error(`Failed to fetch ${service} logs`);
     }
     return response.json();
+  }
+
+  /**
+   * Admin-only: open an SSE live-tail of a service's structured log entries
+   * (#178 / ADR-023). Maps to `GET /api/admin/logs/stream?service=…`; the admin
+   * session cookie rides along via `withCredentials`. Pair with the REST
+   * `getServerLogs` backfill — the caller appends each `message` `LogEntry` and
+   * MUST `close()` the source on unmount / service change.
+   */
+  streamServerLogs(service: ServerLogService): EventSource {
+    const url = `${this.baseUrl}/admin/logs/stream?service=${encodeURIComponent(service)}`;
+    return new EventSource(url, { withCredentials: true });
   }
 
   /**

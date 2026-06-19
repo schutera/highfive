@@ -155,7 +155,7 @@ a first-ever boot still does the live lookup.
 
 Caching forever would remove the pre-change self-healing property (every boot
 used to re-resolve location). To keep a **relocated** module from reporting
-stale coordinates indefinitely — duckdb-service only patches a fix *from*
+stale coordinates indefinitely — duckdb-service only patches a fix _from_
 (0,0), so the heartbeat recovery path cannot correct a stale non-(0,0) cache —
 the cache carries a **boot-count TTL** (`kGeoCacheMaxBoots`, currently 14): the
 fix is re-resolved roughly every 14 boots (~2 weeks given the 24 h daily
@@ -269,6 +269,26 @@ is being staged):
    will log the non-2xx response, but heartbeats, uploads, and the
    map view are unaffected (the saved geolocation from first boot
    persists in module config).
+
+## Server logs: secrets must never be logged (ADR-023)
+
+The admin **Server Logs** panel tails each service's own log ring
+(`GET /api/admin/logs`, `requireAdmin`). As of [ADR-023](../09-architecture-decisions/adr-023-persistent-structured-server-logs.md)
+that ring is **persisted to disk** (JSONL, 30 days / 100 MB, gated on `LOG_DIR`) and
+backfilled on restart — so anything printed to stdout no longer just flashes past in
+`docker logs`, it lands on disk for up to a month. That makes "never print secrets"
+load-bearing, not advisory. Three controls keep credentials out of the ring:
+
+- **Access logs are path-only.** The per-request access entry is `method path status ms`
+  using the request **path only** — never headers, body, or query string — so the
+  `X-Admin-Key` header, the `POST /api/admin/login` body password, and any `?token=`/`?key=`
+  query value cannot reach the ring. (`accessLog.ts`; Flask `@app.after_request`.)
+- **The dev admin-key banner bypasses the ring.** `server.ts` prints the dev key via the
+  ring-bypassing `writeStdout`, so it reaches the terminal as a developer convenience but is
+  not captured into the ring/disk — and the whole block is suppressed in production by
+  `auth.ts`'s boot guards (see [The secret](#the-secret)).
+- **The endpoint stays admin-only.** The ring may still capture whatever other code prints,
+  so the gate is the backstop — and the reason not to `console.log`/`print` secrets anywhere.
 
 ## Why one secret, two header names
 

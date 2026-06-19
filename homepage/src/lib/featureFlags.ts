@@ -25,6 +25,4 @@ export function flagEnabled(value: string | undefined): boolean {
 // Public dashboard "Latest captures" gallery in ModulePanel (#154). Off in
 // production until segmentation guarantees only bee nests are visible in the
 // uploaded photos; the dev and UI-test stacks set it to 'true'.
-export const DASHBOARD_IMAGES_ENABLED = flagEnabled(
-  import.meta.env.VITE_ENABLE_DASHBOARD_IMAGES,
-);
+export const DASHBOARD_IMAGES_ENABLED = flagEnabled(import.meta.env.VITE_ENABLE_DASHBOARD_IMAGES);

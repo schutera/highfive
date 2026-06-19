@@ -78,6 +78,24 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   / data-protection notice does not mention this; if HiveHive ever
   reaches an audience that warrants a real GDPR posture, this flow
   needs to surface there. Tracked here, not as a bug.
+- **Server logs are persisted for up to 30 days (#178, [ADR-023](../09-architecture-decisions/adr-023-persistent-structured-server-logs.md)).**
+  The admin server-log ring is now written to disk (JSONL, 30 days / 100 MB,
+  gated on `LOG_DIR`) and backfilled on restart. Two standing obligations: (1) the
+  per-request access logs are closer to an audit log than ADR-021's "recent tail" — they
+  must stay **path-only** (no headers/body/query) and request paths must carry no PII
+  (today: MACs + module ids, no personal data); (2) **no secret may ever be `print`/`console.log`-ed**,
+  since it would now persist on disk for a month, not just flash past in `docker logs`.
+  Both are enforced in code + tests, recorded here as a load-bearing invariant.
+- **The server-log SSE emitter is per-process (#178 / ADR-023).** Live "tail -f" streams
+  only the serving worker's in-process entries. Single-process today, so complete. A future
+  multi-worker backend (gunicorn/PM2 cluster) would stream only one worker's live entries;
+  history via the shared on-disk file stays complete. Revisit if/when workers multiply.
+- **A live tail holds a worker open (#178 / ADR-023).** Each `/logs/stream` (Flask) and the
+  backend's piping `fetch` occupy one request for the stream's whole lifetime. The Flask
+  services run `app.run(..., threaded=True)` (Flask's default, pinned explicitly in both
+  `app.py`) so an open admin tail doesn't stall uploads/reads. A future gunicorn move must
+  preserve per-stream concurrency — a single sync worker would block all traffic while a tail
+  is open. Verified empirically: `/health` stays sub-second while a stream is held.
 
 ## Lessons learned
 

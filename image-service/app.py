@@ -4,15 +4,26 @@ import json
 import os
 import random
 import time
+from queue import Empty
 
 import requests as http_requests
-from flask import Flask, jsonify, request, send_from_directory
+from flask import (
+    Flask,
+    Response,
+    g,
+    jsonify,
+    request,
+    send_from_directory,
+    stream_with_context,
+)
 from pydantic import ValidationError
 
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
 from services.log_ring import get_recent as _get_recent_logs
+from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
+from services.log_ring import log_event, subscribe, unsubscribe
 from services.module_id import ModuleId
 from services.sidecar import LogSidecarEnvelope
 from services.upload_pipeline import UploadPipeline, UploadRequest
@@ -22,8 +33,49 @@ from services.upload_pipeline import UploadPipeline, UploadRequest
 # print() re-resolves sys.stdout per call and Flask/werkzeug log handlers are
 # constructed lazily at app.run, so capture is complete. See services/log_ring.py.
 install_log_ring()
+# Enable on-disk persistence + backfill the ring from prior history when LOG_DIR
+# is set (compose sets it; unset = in-memory only). Before the banner so it is
+# persisted too. See ADR-023.
+init_log_persistence()
+
+# Structured boot banner through the logger (#178) — the analogue to the
+# backend's server.ts banner. Runs at import under flask run / gunicorn and
+# under `python app.py`, so the structured ingestion path has a real
+# production caller (not just the tee fallback). Never log secrets here.
+log_event("info", "📷 image-service starting")
 
 app = Flask(__name__)
+
+
+def _status_level(code: int) -> str:
+    if code >= 500:
+        return "error"
+    if code >= 400:
+        return "warn"
+    return "info"
+
+
+@app.before_request
+def _access_log_start():
+    g._access_start = time.perf_counter()
+
+
+@app.after_request
+def _access_log_finish(resp):
+    # One structured access entry per request (#178): "method path status ms".
+    # path ONLY — never query string, headers, or body — so the X-Admin-Key
+    # header and any ?token=/?key= value can't reach the admin-readable /
+    # disk-persisted ring. werkzeug's own request line is still tee-captured;
+    # this is the canonical, level-tagged entry.
+    start = g.pop("_access_start", None)
+    if start is not None:
+        ms = (time.perf_counter() - start) * 1000.0
+        log_event(
+            _status_level(resp.status_code),
+            f"{request.method} {request.path} {resp.status_code} {ms:.1f}ms",
+        )
+    return resp
+
 
 UPLOAD_FOLDER = os.getenv("IMAGE_STORE_PATH", "/data/images")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -108,10 +160,40 @@ def get_logs():
         n = _LOGS_LINES_DEFAULT
     n = max(1, min(n, _LOGS_LINES_CAP))
 
-    lines, truncated = _get_recent_logs(n)
+    entries, truncated = _get_recent_logs(n)
     return jsonify(
-        {"service": "image-service", "lines": lines, "truncated": truncated}
+        {"service": "image-service", "entries": entries, "truncated": truncated}
     ), 200
+
+
+@app.get("/logs/stream")
+def stream_logs():
+    """SSE live tail (#178 Phase 4). One LogEntry JSON per `data:` event. The
+    backend's GET /api/admin/logs/stream?service=image-service pipes this
+    through, forwarding X-Admin-Key. REST /logs stays for the initial backfill."""
+    provided = request.headers.get("X-Admin-Key", "")
+    if not hmac.compare_digest(provided, _logs_resolve_key()):
+        return jsonify({"error": "unauthorized"}), 401
+
+    def gen():
+        q = subscribe()
+        try:
+            yield ": connected\n\n"  # flush headers immediately
+            while True:
+                try:
+                    entry = q.get(timeout=25)
+                except Empty:
+                    yield ": ping\n\n"  # keepalive
+                    continue
+                yield f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+        finally:
+            unsubscribe(q)
+
+    return Response(
+        stream_with_context(gen()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/upload")
@@ -289,4 +371,9 @@ def serve_image(filename):
 if __name__ == "__main__":
     test_duckdb()
     debug = os.getenv("DEBUG", "false").lower() == "true"
-    app.run(host="0.0.0.0", port=4444, debug=debug)
+    # threaded=True (also Flask's app.run default — pinned explicitly because it
+    # is load-bearing): the SSE live tail (`GET /logs/stream`, #178/ADR-023) holds
+    # one worker for the stream's whole lifetime, so concurrent request handling is
+    # required or an open admin tail would stall image uploads. A future move to
+    # gunicorn must keep per-stream concurrency (threaded/async workers).
+    app.run(host="0.0.0.0", port=4444, debug=debug, threaded=True)

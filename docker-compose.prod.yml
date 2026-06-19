@@ -17,6 +17,11 @@ services:
       - PORT=3001
       - DUCKDB_SERVICE_URL=http://duckdb-service:8000
       - IMAGE_SERVICE_URL=http://image-service:4444
+      # On-disk server-log persistence (#178 / ADR-023): JSONL + daily rotation,
+      # retained ≤30 files / ≤100 MB, backfilled into the ring on restart.
+      - LOG_DIR=/var/log/highfive
+    volumes:
+      - backend_logs:/var/log/highfive
     restart: unless-stopped
     networks:
       - highfive-network
@@ -75,6 +80,9 @@ services:
       # forwards X-Admin-Key) authenticates against this service's internal
       # /logs gate.
       - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:?HIGHFIVE_API_KEY must be set in .env.production (see .env.production.example)}
+      # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
+      # duckdb_data volume so the two Flask services don't collide on one file.
+      - LOG_DIR=/data/logs/image
     volumes:
       - duckdb_data:/data
     restart: unless-stopped
@@ -105,6 +113,9 @@ services:
       - SEED_DATA=false
       # Must match the backend's key for the #171 server-logs proxy.
       - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:?HIGHFIVE_API_KEY must be set in .env.production (see .env.production.example)}
+      # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
+      # duckdb_data volume so the two Flask services don't collide on one file.
+      - LOG_DIR=/data/logs/duckdb
     volumes:
       - duckdb_data:/data
     restart: unless-stopped
@@ -125,6 +136,9 @@ services:
 
 volumes:
   duckdb_data:
+  # Backend server logs (#178 / ADR-023). The Flask services persist under
+  # subdirs of duckdb_data; the backend has no data volume, so it gets its own.
+  backend_logs:
 
 networks:
   highfive-network:

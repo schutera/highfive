@@ -111,6 +111,20 @@ The DuckDB database is stored in the Docker volume:
 This volume is shared between the **image service** and the
 **DuckDB service** to persist the database and images across container restarts.
 
+### Server log persistence (#178 / ADR-023)
+
+Each service also persists its admin **Server Logs** ring to disk (JSONL, daily
+rotation, retained ≤30 files / ≤100 MB), gated on the `LOG_DIR` env var, and
+backfills the ring from disk on restart so the panel shows pre-restart history:
+
+- **backend** → its own `backend_logs` volume at `/var/log/highfive`.
+- **duckdb-service** and **image-service** → distinct subdirs of `duckdb_data`
+  (`/data/logs/duckdb`, `/data/logs/image`) so the two services sharing that
+  volume never collide on one file.
+
+`docker compose down -v` clears these along with `duckdb_data`. Unset `LOG_DIR`
+to fall back to the in-memory-only ring (pre-ADR-023 behaviour).
+
 During development it may be necessary to reset the database, for example
 when **primary key conflicts** occur due to previously inserted test data.
 

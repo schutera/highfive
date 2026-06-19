@@ -7,6 +7,14 @@ Accepted ([#171](https://github.com/schutera/highfive/issues/171)). Spun out of 
 server-side visibility the per-module telemetry sidecars (`GET /api/modules/:id/logs`)
 do not provide.
 
+**Superseded in part by [ADR-023](adr-023-persistent-structured-server-logs.md)
+([#178](https://github.com/schutera/highfive/issues/178)):** the ring is no longer
+in-memory-only and the wire shape is no longer raw `string[]`. ADR-023 makes entries
+structured (`{ ts, level, msg }`), persists them to disk (30 days / 100 MB, surviving
+restart), and adds SSE streaming. The endpoint design, the admin gate, the per-service
+ring + backend-proxy topology, and the "never `print`/`console.log` secrets" rule below
+all carry forward unchanged.
+
 ## Context
 
 There was no way to read the services' **own** process logs (backend,
@@ -48,10 +56,12 @@ and exposes it; the backend aggregates.
   readable unauthenticated. This requires `HIGHFIVE_API_KEY` to resolve to the same value
   in all three services (dev: shared `.env`; UI + prod compose: set explicitly on each).
 - **The ring faithfully captures whatever any code prints** — including any credential a log
-  line chooses to emit (e.g. `server.ts` prints the dev admin key to stdout at startup, so
-  it appears in `service=backend`). This is bounded by the admin gate on the endpoint and by
-  that banner being suppressed in production, but it is a reason the endpoint must stay
-  admin-only and a reason not to `console.log`/`print` secrets.
+  line chooses to emit. This is bounded by the admin gate on the endpoint, but it is the
+  reason the endpoint must stay admin-only and a reason not to `console.log`/`print` secrets.
+  (As of #178 the dev admin-key banner in `server.ts` is written via the ring-bypassing
+  `writeStdout`, so the key reaches the terminal but **not** the ring; and the per-request
+  access logs added in #178 log `method path status ms` **path-only** — never headers, body,
+  or query string — so the `X-Admin-Key` header and login password cannot reach the ring.)
 
 ### Alternatives rejected
 

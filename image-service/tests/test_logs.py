@@ -258,5 +258,5 @@ def test_active_file_stays_bounded_under_sustained_writes(tmp_path, monkeypatch)
     active = tmp_path / "service.log"
     rotated = [p for p in tmp_path.iterdir() if p.name != "service.log"]
     assert active.stat().st_size < 4 * log_ring._MAX_FILE_BYTES
-    assert len(rotated) >= 2
-    assert len(rotated) <= log_ring._MAX_BACKUP_FILES
+    # Many distinct same-day rolls happened and the count bound is reached exactly.
+    assert len(rotated) == log_ring._MAX_BACKUP_FILES

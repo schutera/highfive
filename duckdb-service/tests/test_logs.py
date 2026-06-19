@@ -266,11 +266,9 @@ def test_active_file_stays_bounded_under_sustained_writes(tmp_path, monkeypatch)
     # Active file is bounded near the cap (at most one over-cap entry past it),
     # NOT the ~100 KB of total volume written.
     assert active.stat().st_size < 4 * log_ring._MAX_FILE_BYTES
-    # Multiple distinct same-day rolls actually happened (unique timestamped
-    # files), not a single repeatedly-clobbered one.
-    assert len(rotated) >= 2
-    # And the per-file count bound holds.
-    assert len(rotated) <= log_ring._MAX_BACKUP_FILES
+    # Many distinct same-day rolls happened (unique timestamped files, not one
+    # repeatedly-clobbered file) and the count bound is reached and held exactly.
+    assert len(rotated) == log_ring._MAX_BACKUP_FILES
 
 
 def test_log_ring_byte_identical_across_services():

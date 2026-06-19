@@ -116,7 +116,9 @@ def _prune_by_count(log_path: str) -> None:
 
 def _prune_by_size(log_path: str) -> None:
     """Delete oldest rotated files until the total of <log>* is ≤ 100 MB.
-    Never deletes the active file."""
+    Never deletes the active file — which is fine because _MAX_FILE_BYTES (50 MB)
+    < _MAX_TOTAL_BYTES (100 MB), so the active file alone can't exceed the total
+    cap and a size-roll always moves its bytes into an evictable rotated file."""
     files = sorted(glob.glob(log_path + "*"), key=lambda p: os.path.getmtime(p))
     total = sum(os.path.getsize(p) for p in files if os.path.exists(p))
     for p in files:

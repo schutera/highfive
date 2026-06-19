@@ -19,7 +19,7 @@
 // Caveats (see ADR-021): in-memory, so it resets on process restart (only
 // holds entries since startup) and is per-process (a future multi-worker prod
 // would have one ring per worker). On-disk persistence + startup backfill
-// (ADR-022) is layered on separately.
+// (ADR-023) is layered on separately.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,11 +31,11 @@ const MAX_RING_ENTRIES = 2000;
 const ring: LogEntry[] = [];
 let installed = false;
 
-// On-disk persistence (#178 Phase 2 / ADR-022). Gated on LOG_DIR: when set, each
+// On-disk persistence (#178 Phase 2 / ADR-023). Gated on LOG_DIR: when set, each
 // entry is also appended as one JSON object per line (JSONL) to a rotating file,
 // and the ring is backfilled from that file at startup so history survives a
 // restart. When unset (e.g. unit tests), the ring is in-memory only — the
-// pre-ADR-022 behaviour. Rotation: daily + 50 MB, retain ≤30 files AND ≤100 MB
+// pre-ADR-023 behaviour. Rotation: daily + 50 MB, retain ≤30 files AND ≤100 MB
 // total (rfs prunes oldest past either bound).
 let diskStream: RotatingFileStream | null = null;
 

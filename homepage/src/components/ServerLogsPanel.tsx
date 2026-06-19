@@ -5,7 +5,7 @@ import type { LogEntry, LogLevel, ServerLogService } from '../services/api';
 // Admin-only server-log viewer (#171, #178). Tails a service's own recent
 // structured log entries: a REST backfill (GET /api/admin/logs) followed by an
 // SSE live tail (GET /api/admin/logs/stream). English-only, like the rest of
-// AdminPage (operator-facing). See ADR-021/ADR-022.
+// AdminPage (operator-facing). See ADR-021/ADR-023.
 const SERVICES: ServerLogService[] = ['backend', 'duckdb-service', 'image-service'];
 const DEFAULT_LINES = 200;
 const MAX_LINES = 1000;

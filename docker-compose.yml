@@ -21,7 +21,7 @@ services:
       PORT: '3002'
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       IMAGE_SERVICE_URL: http://image-service:4444
-      # On-disk server-log persistence (#178 / ADR-022): JSONL + daily rotation,
+      # On-disk server-log persistence (#178 / ADR-023): JSONL + daily rotation,
       # retained ≤30 files / ≤100 MB, backfilled into the ring on restart.
       LOG_DIR: /var/log/highfive
     volumes:
@@ -48,6 +48,9 @@ services:
       - '5173:5173'
     environment:
       NODE_ENV: development
+      # Feature flags (ADR-023). On in the dev stack so the dashboard
+      # latest-captures gallery (#154) is visible locally; default off in prod.
+      VITE_ENABLE_DASHBOARD_IMAGES: 'true'
     volumes:
       - ./homepage:/app/homepage
       - ./contracts:/app/contracts
@@ -67,7 +70,7 @@ services:
       - '8000:4444'
     environment:
       DUCKDB_PATH: /data/app.duckdb
-      # Server-log persistence (#178 / ADR-022). Distinct subdir of the shared
+      # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       LOG_DIR: /data/logs/image
     volumes:
@@ -91,7 +94,7 @@ services:
       - .env
     environment:
       SEED_DATA: 'true'
-      # Server-log persistence (#178 / ADR-022). Distinct subdir of the shared
+      # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       LOG_DIR: /data/logs/duckdb
       # Dev-only: register /firmware.json + /firmware.app.bin proxy to
@@ -127,7 +130,7 @@ services:
 
 volumes:
   duckdb_data:
-  # Backend server logs (#178 / ADR-022). The Flask services persist under
+  # Backend server logs (#178 / ADR-023). The Flask services persist under
   # subdirs of duckdb_data; the backend has no data volume, so it gets its own.
   backend_logs:
 

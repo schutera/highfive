@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Pin the rotation config passed to rotating-file-stream (#178 / ADR-022). The
+// Pin the rotation config passed to rotating-file-stream (#178 / ADR-023). The
 // actual eviction is the library's well-tested behaviour; what this guards is
 // that BOTH retention bounds (≤30 files via maxFiles AND ≤100 MB via maxSize)
 // plus the 50 MB active-file trigger are configured — a silent drop of either
@@ -29,7 +29,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe('disk rotation config (#178 / ADR-022)', () => {
+describe('disk rotation config (#178 / ADR-023)', () => {
   it('configures rotating-file-stream with both retention bounds + size trigger', () => {
     initLogPersistence(dir);
     expect(createStream).toHaveBeenCalledTimes(1);

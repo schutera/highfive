@@ -272,7 +272,11 @@ unreachable or returns a drifted envelope. Design + caveats:
 {
   "service": "duckdb-service",
   "entries": [
-    { "ts": "2026-06-18T20:42:55.123Z", "level": "info", "msg": "[heartbeat] mac=aabbccddeeff battery=None rssi=-67 …" },
+    {
+      "ts": "2026-06-18T20:42:55.123Z",
+      "level": "info",
+      "msg": "[heartbeat] mac=aabbccddeeff battery=None rssi=-67 …"
+    },
     { "ts": "2026-06-18T20:42:56.004Z", "level": "info", "msg": "POST /heartbeat 200 3ms" }
   ],
   "truncated": false
@@ -292,7 +296,7 @@ Headers: Cookie: hf_admin_session=…   # or  X-Admin-Key: <HIGHFIVE_API_KEY>
 Accept: text/event-stream
 ```
 
-Server-Sent Events live tail (#178 / ADR-022). After the REST `GET /api/admin/logs`
+Server-Sent Events live tail (#178 / ADR-023). After the REST `GET /api/admin/logs`
 backfill, the panel opens this for "tail -f": each new log entry arrives as one
 `data:` event whose payload is a single `LogEntry` JSON (`{ ts, level, msg }`);
 `: ping` comments keep the connection alive. `service` validation, the admin gate,

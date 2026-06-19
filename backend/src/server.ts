@@ -14,7 +14,7 @@ import { DEFAULT_PORT, resolvePort } from './port';
 installLogRing();
 // Enable on-disk persistence + backfill the ring from prior history when
 // LOG_DIR is set (compose sets it; unset = in-memory only). Must run before
-// the boot banners below so they are persisted too. See ADR-022.
+// the boot banners below so they are persisted too. See ADR-023.
 initLogPersistence();
 
 const { port: PORT, warned: portUnsetWarning } = resolvePort(process.env.PORT);
@@ -39,14 +39,14 @@ async function bootstrap() {
     // admin log panel (#178). State the port instead.
     log.info(`🐝 HighFive Backend API listening on port ${PORT} (all interfaces)`);
     // Never print the configured API key in production - it would land
-    // in Docker logs, the admin log panel, and (ADR-022) on disk. Dev/test
+    // in Docker logs, the admin log panel, and (ADR-023) on disk. Dev/test
     // only. `isProduction()` normalises NODE_ENV across casing/whitespace
     // typos so `"Production"` or `"production "` don't accidentally re-enable
     // the print on prod (PR #84 senior-review finding).
     if (!isProduction()) {
       // Write via the saved original stream (bypassing the ring tee) so the
       // dev key reaches the terminal as a developer convenience but is NEVER
-      // captured into the admin-readable / (ADR-022) disk-persisted ring —
+      // captured into the admin-readable / (ADR-023) disk-persisted ring —
       // the ring must not hold secrets even in dev. See log.ts SECURITY note.
       writeStdout(`🔑 Dev admin key: ${getApiKey()}\n`);
       writeStdout(`   Admin login: POST /api/admin/login {"password":"<key>"}\n`);

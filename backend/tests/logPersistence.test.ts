@@ -10,7 +10,7 @@ import {
   __flushDiskForTest,
 } from '../src/logRing';
 
-// Disk persistence + startup backfill (#178 / ADR-022). Gated on LOG_DIR: these
+// Disk persistence + startup backfill (#178 / ADR-023). Gated on LOG_DIR: these
 // tests pass an explicit tmp dir; unit tests that don't enable persistence stay
 // in-memory and write nothing.
 
@@ -27,10 +27,9 @@ afterEach(async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const entry = (msg: string) =>
-  ({ ts: new Date().toISOString(), level: 'info', msg }) as const;
+const entry = (msg: string) => ({ ts: new Date().toISOString(), level: 'info', msg }) as const;
 
-describe('log persistence (#178/ADR-022)', () => {
+describe('log persistence (#178/ADR-023)', () => {
   it('appends each entry as a JSONL line to the log file', async () => {
     initLogPersistence(dir);
     pushEntry(entry('hf-persist alpha'));

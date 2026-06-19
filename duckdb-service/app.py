@@ -27,7 +27,7 @@ from services.weather_worker import run_weather_fetch
 install_log_ring()
 # Enable on-disk persistence + backfill the ring from prior history when LOG_DIR
 # is set (compose sets it; unset = in-memory only). Before the banner so it is
-# persisted too. See ADR-022.
+# persisted too. See ADR-023.
 init_log_persistence()
 
 # Structured boot banner through the logger (#178) — the analogue to the

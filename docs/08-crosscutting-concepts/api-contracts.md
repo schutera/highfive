@@ -363,7 +363,7 @@ and only the `backend` branch constructs it locally. The proxy branch rejects a
 drifted envelope (no `entries` array) with `502` rather than letting `undefined`
 fields reach the UI. `nginx` is intentionally not a `ServerLogService` (no app
 ring). Design + caveats: [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.md)
-/ [ADR-022](../09-architecture-decisions/adr-022-persistent-structured-server-logs.md).
+/ [ADR-023](../09-architecture-decisions/adr-023-persistent-structured-server-logs.md).
 
 The live tail `GET /api/admin/logs/stream` (SSE) reuses the **same** `LogEntry`
 shape: each `data:` event payload is one `LogEntry` JSON. No separate wire type —

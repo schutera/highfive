@@ -64,7 +64,11 @@ def test_log_event_no_double_capture_in_installed_state(monkeypatch):
 
     entries, _ = log_ring.get_recent(10)
     assert len(entries) == 1  # exactly one entry — not re-captured via the tee
-    assert entries[0] == {"ts": entries[0]["ts"], "level": "warn", "msg": "POST /upload 200 8ms"}
+    assert entries[0] == {
+        "ts": entries[0]["ts"],
+        "level": "warn",
+        "msg": "POST /upload 200 8ms",
+    }
     # The human line reached the real stream exactly once.
     assert sink.getvalue().count("POST /upload 200 8ms") == 1
 
@@ -136,7 +140,9 @@ def test_access_log_redacts_query_and_credentials(client):
     # path ONLY: the token-ish query param and the admin key must never appear
     # in any entry, and no entry may carry a query string.
     log_ring._reset_for_test()
-    resp = client.get("/logs?lines=5&token=secret123", headers={"X-Admin-Key": VALID_KEY})
+    resp = client.get(
+        "/logs?lines=5&token=secret123", headers={"X-Admin-Key": VALID_KEY}
+    )
     assert resp.status_code == 200
     blob = "\n".join(_msgs(log_ring.get_recent(50)[0]))
     assert "secret123" not in blob
@@ -144,7 +150,9 @@ def test_access_log_redacts_query_and_credentials(client):
     assert VALID_KEY not in blob
     assert "X-Admin-Key" not in blob
     # The path itself is still logged (without the query).
-    assert any(e["msg"].startswith("GET /logs 200 ") for e in log_ring.get_recent(50)[0])
+    assert any(
+        e["msg"].startswith("GET /logs 200 ") for e in log_ring.get_recent(50)[0]
+    )
 
 
 def test_persistence_writes_jsonl(tmp_path):
@@ -198,7 +206,9 @@ def test_subscribe_receives_push_then_unsubscribe_stops():
 
 def test_stream_requires_admin_key(client):
     assert client.get("/logs/stream").status_code == 401
-    assert client.get("/logs/stream", headers={"X-Admin-Key": "wrong"}).status_code == 401
+    assert (
+        client.get("/logs/stream", headers={"X-Admin-Key": "wrong"}).status_code == 401
+    )
 
 
 def test_stream_emits_pushed_entry_as_sse(client):
@@ -221,7 +231,7 @@ def test_stream_emits_pushed_entry_as_sse(client):
     it.close()
 
 
-# --- Rotation / retention (#178 / ADR-022) ---
+# --- Rotation / retention (#178 / ADR-023) ---
 
 
 def test_prune_by_size_evicts_oldest_and_keeps_active(tmp_path, monkeypatch):

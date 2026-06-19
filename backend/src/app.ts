@@ -654,7 +654,7 @@ app.get('/api/admin/logs', requireAdmin, async (req, res) => {
 // SSE live tail (#178 Phase 4). One `LogEntry` JSON per `data:` event. The panel
 // fetches GET /api/admin/logs once for backfill, then opens this for live tail.
 // `backend` streams its own ring; the two Flask services are piped from their
-// internal `/logs/stream` (X-Admin-Key forwarded). See ADR-022 / logStream.ts.
+// internal `/logs/stream` (X-Admin-Key forwarded). See ADR-023 / logStream.ts.
 app.get('/api/admin/logs/stream', requireAdmin, async (req, res) => {
   const service = String(req.query.service ?? '');
   if (!(LOG_SERVICES as readonly string[]).includes(service)) {

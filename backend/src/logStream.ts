@@ -15,7 +15,7 @@ const KEEPALIVE_MS = 25_000;
 /**
  * Write the SSE response headers. `X-Accel-Buffering: no` + `no-transform` stop
  * nginx/proxies from buffering the stream (the host-nginx config also sets
- * `proxy_buffering off` — this header is the safety net). See ADR-022.
+ * `proxy_buffering off` — this header is the safety net). See ADR-023.
  */
 export function writeSseHeaders(res: Response): void {
   res.writeHead(200, {

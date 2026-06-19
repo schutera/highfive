@@ -1,4 +1,4 @@
-# ADR-022: Server logs become structured, disk-persisted, and SSE-streamed
+# ADR-023: Server logs become structured, disk-persisted, and SSE-streamed
 
 ## Status
 
@@ -42,7 +42,7 @@ Replace the raw line ring with a ring of structured **`LogEntry { ts, level, msg
 Each service feeds its ring through **two no-double-capture paths**: the existing
 stdout/stderr tee (stray `print`/`console.*` → `info`/`error` entries) and a **structured
 logger** (`backend/src/log.ts` `log.*`; Flask `log_ring.log_event`) that pushes an entry
-directly and writes a human line to the *saved original* stream so the tee can't re-capture
+directly and writes a human line to the _saved original_ stream so the tee can't re-capture
 it. A per-request **access-log** middleware (Express `accessLog`; Flask
 `@app.after_request`) emits one `method path status ms` entry per request, level by status
 (`≥500` error, `≥400` warn, else info) — logged **path-only**, never headers, body, or

@@ -13,7 +13,7 @@
 // the tee fallback (see logRing.ts).
 //
 // SECURITY: never pass secrets, auth headers, request bodies, or the admin
-// password to these functions — entries are admin-readable and (ADR-022)
+// password to these functions — entries are admin-readable and (ADR-023)
 // persisted to disk. See accessLog.ts for the redaction rules on request data.
 
 import type { LogEntry, LogLevel } from '@highfive/contracts';

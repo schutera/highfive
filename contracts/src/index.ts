@@ -372,7 +372,7 @@ export interface MeasurementTimeSeries {
 // `GET /api/admin/logs?service=…&lines=N` and streamed live via
 // `GET /api/admin/logs/stream?service=…`.
 // `nginx` is deliberately absent — it has no app process to host a ring, so
-// its logs stay a host/file concern (out of scope). See ADR-021/ADR-022.
+// its logs stay a host/file concern (out of scope). See ADR-021/ADR-023.
 export type ServerLogService = 'backend' | 'duckdb-service' | 'image-service';
 
 // Severity of a single log entry. Drives the panel's color coding and the
@@ -395,7 +395,7 @@ export interface ServerLogsResponse {
   service: ServerLogService;
   // Captured log entries, chronological (oldest→newest), like `tail`. In-memory
   // in Phase 1 (resets on process restart); on-disk persistence + rotation
-  // (survives restart, bounded to 30 days / 100 MB) is ADR-022 / Phase 2.
+  // (survives restart, bounded to 30 days / 100 MB) is ADR-023 / Phase 2.
   entries: LogEntry[];
   // True when the ring held more entries than were returned (clipped to the
   // requested `lines`, itself capped server-side). Lets the UI show a

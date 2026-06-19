@@ -4,8 +4,10 @@ import type { HeartbeatSnapshot, Module, ModuleDetail } from '@highfive/contract
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
+import LatestCaptures from './LatestCaptures';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
+import { DASHBOARD_IMAGES_ENABLED } from '../lib/featureFlags';
 // TODO(perf/data): Re-enable once these panels are backed by real data.
 // Both were disabled because the series are not real telemetry — the ESP
 // has no battery-voltage sensing, so `carpenter`+ firmware OMITS battery from
@@ -483,6 +485,20 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
               </div>
             )}
           </div>
+        )}
+
+        {/* Latest captures (#154) — newest-first gallery, two 4:3 cards
+            visible, arrows to scroll older, click for a full-size lightbox.
+            Self-contained: renders nothing for modules without uploads and
+            degrades silently on fetch errors (never via onError).
+            Gated behind the VITE_ENABLE_DASHBOARD_IMAGES build-time flag
+            (default off in prod; see featureFlags.ts / ADR-022). */}
+        {DASHBOARD_IMAGES_ENABLED && (
+          <LatestCaptures
+            moduleId={moduleDetail.id}
+            moduleName={displayLabel(moduleDetail)}
+            locale={locale}
+          />
         )}
 
         {/* Species cards. The auto-fit grid flows to 2 columns once the panel is

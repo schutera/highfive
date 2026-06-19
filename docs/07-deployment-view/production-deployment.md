@@ -333,7 +333,7 @@ server {
 
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
-    # SSE live tail of the admin Server Logs (#178 / ADR-022). Must come BEFORE
+    # SSE live tail of the admin Server Logs (#178 / ADR-023). Must come BEFORE
     # the catch-all `location /` so nginx routes it here. Buffering off so events
     # reach the browser as they happen, not in one chunk at disconnect. The
     # backend also sets `X-Accel-Buffering: no` as a safety net, but pin it here.

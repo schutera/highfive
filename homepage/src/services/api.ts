@@ -229,7 +229,7 @@ class ApiService {
 
   /**
    * Admin-only: open an SSE live-tail of a service's structured log entries
-   * (#178 / ADR-022). Maps to `GET /api/admin/logs/stream?service=…`; the admin
+   * (#178 / ADR-023). Maps to `GET /api/admin/logs/stream?service=…`; the admin
    * session cookie rides along via `withCredentials`. Pair with the REST
    * `getServerLogs` backfill — the caller appends each `message` `LogEntry` and
    * MUST `close()` the source on unmount / service change.

@@ -155,7 +155,7 @@ a first-ever boot still does the live lookup.
 
 Caching forever would remove the pre-change self-healing property (every boot
 used to re-resolve location). To keep a **relocated** module from reporting
-stale coordinates indefinitely — duckdb-service only patches a fix *from*
+stale coordinates indefinitely — duckdb-service only patches a fix _from_
 (0,0), so the heartbeat recovery path cannot correct a stale non-(0,0) cache —
 the cache carries a **boot-count TTL** (`kGeoCacheMaxBoots`, currently 14): the
 fix is re-resolved roughly every 14 boots (~2 weeks given the 24 h daily
@@ -270,10 +270,10 @@ is being staged):
    map view are unaffected (the saved geolocation from first boot
    persists in module config).
 
-## Server logs: secrets must never be logged (ADR-022)
+## Server logs: secrets must never be logged (ADR-023)
 
 The admin **Server Logs** panel tails each service's own log ring
-(`GET /api/admin/logs`, `requireAdmin`). As of [ADR-022](../09-architecture-decisions/adr-022-persistent-structured-server-logs.md)
+(`GET /api/admin/logs`, `requireAdmin`). As of [ADR-023](../09-architecture-decisions/adr-023-persistent-structured-server-logs.md)
 that ring is **persisted to disk** (JSONL, 30 days / 100 MB, gated on `LOG_DIR`) and
 backfilled on restart — so anything printed to stdout no longer just flashes past in
 `docker logs`, it lands on disk for up to a month. That makes "never print secrets"

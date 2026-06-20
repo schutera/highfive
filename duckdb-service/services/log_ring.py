@@ -6,8 +6,10 @@ Two ingestion paths feed the same bounded deque of structured entries
   1. A stdout/stderr *tee* installed at startup: every write NOT produced by the
      structured logger is wrapped as an entry AND passed through to the real
      stream, so ``docker logs`` / PM2 still see everything unchanged. Captures
-     ``print(...)`` and werkzeug's request lines. stdout lines become
-     ``info``, stderr lines become ``error``.
+     ``print(...)`` and werkzeug's error/exception output; werkzeug's own
+     *access* request lines are silenced at the logger (#181) so they don't
+     double-log the structured access entry. stdout lines become ``info``,
+     stderr lines become ``error``.
   2. The structured logger (``log_event``) appends an entry directly, then
      writes its formatted human line to the *saved real* stream (bypassing the
      tee, so its own output is not re-captured as a duplicate entry).

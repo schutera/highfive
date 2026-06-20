@@ -78,6 +78,13 @@ own ring's emitter and pipes the Flask services' internal `/logs/stream`; the RE
 - Retention is bounded on both axes, so the store can't grow without limit.
 - `LOG_DIR`-gating keeps unit tests and any "in-memory is fine" deployment on the old path
   with zero file I/O.
+- **One access entry per Flask request, at the right level (#181).** Each `app.py` silences
+  werkzeug's built-in access logger (`logging.getLogger("werkzeug").setLevel(logging.ERROR)`)
+  at import. Otherwise werkzeug's own request line is tee-captured from stderr and tagged
+  `error`, so every healthy `200` double-logged and rendered red in the panel — this reaches
+  prod too, where `docker-compose.prod.yml` still runs the Flask dev server. `ERROR` keeps
+  werkzeug's genuine error/exception logging; the `_access_log_finish` hook remains the sole,
+  level-tagged access entry.
 
 ### Negative
 

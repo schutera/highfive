@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 
@@ -30,6 +31,14 @@ install_log_ring()
 # persisted too. See ADR-023.
 init_log_persistence()
 
+# Silence werkzeug's built-in access logger (#181). _access_log_finish below
+# already emits one structured access entry per request; werkzeug's own request
+# line would otherwise be tee-captured from stderr and mis-tagged `error` (red),
+# double-logging every 200. ERROR keeps werkzeug's genuine error/exception
+# logging. Must run before the first request — werkzeug only forces INFO when
+# the level is still NOTSET.
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
 # Structured boot banner through the logger (#178) — the analogue to the
 # backend's server.ts banner. Runs at import under flask run / gunicorn and
 # under `python app.py`, so the structured ingestion path has a real
@@ -57,8 +66,8 @@ def _access_log_finish(resp):
     # One structured access entry per request (#178): "method path status ms".
     # path ONLY — never query string, headers, or body — so the X-Admin-Key
     # header and any ?token=/?key= value can't reach the admin-readable /
-    # disk-persisted ring. werkzeug's own request line is still tee-captured;
-    # this is the canonical, level-tagged entry.
+    # disk-persisted ring. werkzeug's own access request line is silenced at the
+    # logger (#181), so this is the only access entry — no duplicate, no false-red.
     start = g.pop("_access_start", None)
     if start is not None:
         ms = (time.perf_counter() - start) * 1000.0

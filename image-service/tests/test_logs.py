@@ -155,6 +155,22 @@ def test_access_log_redacts_query_and_credentials(client):
     )
 
 
+# The two services' log_ring.py byte-identity is guarded by
+# test_log_ring_byte_identical_across_services, which lives only in
+# duckdb-service/tests/test_logs.py (it cross-reads both files, so one copy
+# suffices). No mirror needed here.
+
+
+def test_werkzeug_access_logger_silenced(client):
+    # #181: importing app silences werkzeug's built-in access logger so its
+    # request line can't be tee-captured from stderr as a duplicate (false-red)
+    # entry. INFO access lines are dropped; ERROR-level werkzeug logs survive.
+    import logging
+
+    assert not logging.getLogger("werkzeug").isEnabledFor(logging.INFO)
+    assert logging.getLogger("werkzeug").isEnabledFor(logging.ERROR)
+
+
 def test_persistence_writes_jsonl(tmp_path):
     log_ring._reset_for_test()
     log_ring.init_persistence(str(tmp_path))

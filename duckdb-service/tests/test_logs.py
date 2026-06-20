@@ -158,6 +158,16 @@ def test_access_log_redacts_query_and_credentials(client):
     )
 
 
+def test_werkzeug_access_logger_silenced(client):
+    # #181: importing app silences werkzeug's built-in access logger so its
+    # request line can't be tee-captured from stderr as a duplicate (false-red)
+    # entry. INFO access lines are dropped; ERROR-level werkzeug logs survive.
+    import logging
+
+    assert not logging.getLogger("werkzeug").isEnabledFor(logging.INFO)
+    assert logging.getLogger("werkzeug").isEnabledFor(logging.ERROR)
+
+
 def test_persistence_writes_jsonl(tmp_path):
     log_ring._reset_for_test()
     log_ring.init_persistence(str(tmp_path))

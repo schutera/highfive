@@ -8,11 +8,11 @@ For symptom-based diagnosis, see
 
 ## Access point
 
-| Setting  | Value                           |
-| -------- | ------------------------------- |
-| SSID     | `ESP32-Access-Point`            |
-| Password | `esp-12345`                     |
-| Source   | `ESP32-CAM/host.cpp` lines 9–10 |
+| Setting  | Value                                                 |
+| -------- | ----------------------------------------------------- |
+| SSID     | `ESP32-Access-Point`                                  |
+| Password | `esp-12345`                                           |
+| Source   | `HOST_SSID` / `HOST_PASSWORD` in `ESP32-CAM/host.cpp` |
 
 Old documentation (now removed) called it `HiveHive-Access-Point`. It
 never had that name in the code.

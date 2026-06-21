@@ -608,3 +608,146 @@ def test_heartbeat_omitting_failure_streak_stores_null(client, fresh_db):
     hb = resp.get_json()["heartbeats"][0]
     assert hb["last_hb_fail_code"] is None
     assert hb["last_hb_fail_count"] is None
+
+
+# ---------- stage breadcrumb on the heartbeat: last_stage_before_reboot (#172 opt 2) ----
+
+
+def test_heartbeat_persists_stage_before_reboot(client, fresh_db):
+    resp = client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "reset_reason": "SW",
+            "last_stage_before_reboot": "loop:livenessReboot",
+        },
+    )
+    assert resp.status_code == 200, resp.get_json()
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT last_stage_before_reboot FROM module_heartbeats "
+            "WHERE module_id = ?",
+            (CANONICAL_MAC,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert row == ("loop:livenessReboot",)
+
+
+def test_heartbeat_stage_surfaces_in_get_and_summary(client, fresh_db):
+    client.post(
+        "/heartbeat",
+        data={"mac": CANONICAL_MAC, "last_stage_before_reboot": "setup:getGeolocation"},
+    )
+    hb = client.get(f"/heartbeats/{CANONICAL_MAC}").get_json()["heartbeats"][0]
+    assert hb["last_stage_before_reboot"] == "setup:getGeolocation"
+    summary = client.get("/heartbeats_summary").get_json()["summary"][CANONICAL_MAC]
+    assert summary["last_stage_before_reboot"] == "setup:getGeolocation"
+
+
+def test_heartbeat_dense_empty_stage_is_stored_not_null(client, fresh_db):
+    # Dense send: a healthy module reports "" (no breadcrumb survived) — distinct
+    # on the wire from legacy firmware that omits the field (NULL).
+    client.post(
+        "/heartbeat",
+        data={"mac": CANONICAL_MAC, "last_stage_before_reboot": ""},
+    )
+    hb = client.get(f"/heartbeats/{CANONICAL_MAC}").get_json()["heartbeats"][0]
+    assert hb["last_stage_before_reboot"] == ""
+
+
+def test_heartbeat_omitting_stage_stores_null(client, fresh_db):
+    # Pre-opt-2 firmware omits the field entirely → NULL, not "".
+    client.post("/heartbeat", data={"mac": CANONICAL_MAC, "rssi": -70})
+    hb = client.get(f"/heartbeats/{CANONICAL_MAC}").get_json()["heartbeats"][0]
+    assert hb["last_stage_before_reboot"] is None
+
+
+# ---------- derived heartbeat gaps: GET /heartbeats/<id>/gaps (#172 opt 3) ----
+#
+# Server-side complement to the device-reported streak above: the silent
+# windows the device could NOT report (power loss, hang, timeout — a failed
+# heartbeat never reaches the server). Derived from the persisted
+# `received_at` timeline. These seed real rows with a deliberate gap and assert
+# the gap lands with the right bounds — behaviour, not envelope (CLAUDE.md
+# rule 5: an empty `gaps` list satisfies any shape-only assertion, which is
+# exactly what a silently-broken window function looks like).
+
+
+def _insert_heartbeats(fresh_db, mac, timestamps):
+    """Insert bare heartbeat rows at explicit received_at instants. The
+    `/heartbeat` POST stamps received_at=now(), so gaps can only be seeded by
+    writing the timeline directly."""
+    con = fresh_db.connection.get_conn()
+    try:
+        for ts in timestamps:
+            con.execute(
+                "INSERT INTO module_heartbeats (module_id, received_at) VALUES (?, ?)",
+                (mac, ts),
+            )
+    finally:
+        con.close()
+
+
+def test_heartbeat_gaps_detects_silent_window(client, fresh_db):
+    from datetime import datetime, timedelta
+
+    base = datetime(2026, 6, 1, 0, 0, 0)
+    # Hourly until 02:00, then a 4 h silence, then resumes at 06:00. Only the
+    # 02:00 -> 06:00 interval (> 90 min threshold) is a gap.
+    _insert_heartbeats(
+        fresh_db,
+        CANONICAL_MAC,
+        [
+            base,
+            base + timedelta(hours=1),
+            base + timedelta(hours=2),
+            base + timedelta(hours=6),
+            base + timedelta(hours=7),
+        ],
+    )
+    resp = client.get(f"/heartbeats/{CANONICAL_MAC}/gaps")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["module_id"] == CANONICAL_MAC
+    assert len(body["gaps"]) == 1, body["gaps"]
+    gap = body["gaps"][0]
+    assert gap["gap_start"] == (base + timedelta(hours=2)).isoformat()
+    assert gap["gap_end"] == (base + timedelta(hours=6)).isoformat()
+    assert gap["gap_seconds"] == 4 * 3600
+
+
+def test_heartbeat_gaps_empty_for_regular_hourly(client, fresh_db):
+    from datetime import datetime, timedelta
+
+    base = datetime(2026, 6, 2, 0, 0, 0)
+    _insert_heartbeats(
+        fresh_db, CANONICAL_MAC, [base + timedelta(hours=h) for h in range(6)]
+    )
+    resp = client.get(f"/heartbeats/{CANONICAL_MAC}/gaps")
+    assert resp.status_code == 200
+    assert resp.get_json()["gaps"] == []
+
+
+def test_heartbeat_gaps_newest_first(client, fresh_db):
+    from datetime import datetime, timedelta
+
+    base = datetime(2026, 6, 3, 0, 0, 0)
+    # Two distinct gaps; the endpoint returns newest-first.
+    _insert_heartbeats(
+        fresh_db,
+        CANONICAL_MAC,
+        [base, base + timedelta(hours=3), base + timedelta(hours=10)],
+    )
+    resp = client.get(f"/heartbeats/{CANONICAL_MAC}/gaps")
+    gaps = resp.get_json()["gaps"]
+    assert len(gaps) == 2
+    assert gaps[0]["gap_start"] == (base + timedelta(hours=3)).isoformat()
+    assert gaps[1]["gap_start"] == base.isoformat()
+
+
+def test_heartbeat_gaps_unknown_module_empty(client, fresh_db):
+    resp = client.get(f"/heartbeats/{CANONICAL_MAC}/gaps")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"module_id": CANONICAL_MAC, "gaps": []}

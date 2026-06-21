@@ -400,6 +400,23 @@ int sendHeartbeat(esp_config_t *esp_config) {
          prevHbFail.code, (unsigned long)prevHbFail.count);
   }
 
+  // #172 option 2: carry the recovered stage breadcrumb on the heartbeat. It
+  // previously rode ONLY the per-upload telemetry sidecar (the noon image), so
+  // after a `livenessReboot` the "which stage stalled" signal could wait up to
+  // 24 h to reach the server. The boot heartbeat fires on every reboot, so
+  // lifting it here gets it to the server immediately — the device-side
+  // companion to `last_hb_fail_*` (that says the hourly pings failed; this says
+  // which boot stage was active when the previous run died). Sent densely
+  // (empty string when no breadcrumb survived) so the `/heartbeats_summary`
+  // ARG_MAX fold always reflects the latest heartbeat. NOTE: unlike the dense
+  // `reset_reason` above — which the server collapses ""→NULL — the server
+  // deliberately PRESERVES this field's "" (a healthy "no breadcrumb") as
+  // distinct from NULL (firmware predating this field). See the heartbeats route.
+  // The breadcrumb alphabet is controlled (`prefix:name`, alnum + ':' + '_' —
+  // see the breadcrumbSet call sites), so it carries no '&'/'='/'+'/space and
+  // needs no percent-encoding, same as the reset_reason strings above.
+  body += String("&last_stage_before_reboot=") + String(getLastStageBeforeReboot());
+
   hf::breadcrumbSet("sendHeartbeat:write");
   hbClient.print(String("POST /heartbeat HTTP/1.1\r\n")
                + "Host: " + String(url.host.c_str()) + ":" + String((unsigned)url.port) + "\r\n"

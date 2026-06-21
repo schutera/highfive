@@ -97,6 +97,30 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   preserve per-stream concurrency — a single sync worker would block all traffic while a tail
   is open. Verified empirically: `/health` stays sub-second while a stream is held.
 
+- **The #179 boot-capture throttle fails open without NTP.** The reboot-loop
+  guardrail ([ADR-024](../09-architecture-decisions/adr-024-boot-capture-rate-limit.md),
+  [`ESP32-CAM/lib/capture_gate`](../../ESP32-CAM/lib/capture_gate/)) needs a wall
+  clock to measure its 30-min window, and the only cross-reboot clock is the NTP
+  epoch. When NTP hasn't synced, the gate captures (fails open) rather than risk
+  silencing a legitimate boot image. A WiFi-up-but-NTP-down reboot loop would
+  therefore **not** be throttled — but that case fits the documented #143 storm
+  poorly (its uploads succeeded, implying a working network and NTP), and the
+  throttle anchors only on _successful_ uploads, so an unthrottled loop that
+  can't upload still produces no server spam. Accepted: erring toward capturing
+  beats ever dropping a real boot image. A boot-count-cadence fallback was
+  considered and rejected (can't express an N-_minute_ window) — see ADR-024.
+- **Heartbeat gaps are derived on read, not alerted on (#172 opt 3,
+  [ADR-025](../09-architecture-decisions/adr-025-heartbeat-gap-derived-read.md)).**
+  `GET /api/modules/:id/heartbeat-gaps` computes silent windows from the
+  `module_heartbeats` timeline on demand; it does **not** push an alert when a
+  new gap opens (that stays `silence_watcher`'s 3 h Discord job, ADR-005). It's a
+  for-diagnosis query, not a monitor. A >90 min gap can't be created through the
+  `/heartbeat` ingestion API (it stamps `received_at = now()`), so the demo gap is
+  written as backdated rows directly in the `SEED_DATA` block
+  (`duckdb-service/db/schema.py`, module `000000000005`); that lets the gap query
+  be pinned at every layer — duckdb-service unit, backend-proxy, homepage-component,
+  **and** a Playwright E2E (`tests/ui/tests/module-heartbeat-gaps.spec.ts`).
+
 ## Lessons learned
 
 This section grows over time. Each entry is a problem we paid for —

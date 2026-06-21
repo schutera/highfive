@@ -1,5 +1,6 @@
 import type {
   ActivityTimeSeries,
+  HeartbeatGap,
   ImageUploadsPage,
   MeasurementTimeSeries,
   Module,
@@ -206,6 +207,28 @@ class ApiService {
       throw new Error(`Failed to fetch logs for module ${id}`);
     }
     return response.json();
+  }
+
+  /**
+   * Admin-only: derived heartbeat-gap timeline for a module (#172, option 3).
+   * Maps to `GET /api/modules/:id/heartbeat-gaps`, gated by the admin session
+   * cookie (`credentials: 'include'`). Throws `'unauthorized'` on 401/403 so
+   * the caller can prompt for login, mirroring `getModuleLogs`. Newest gap
+   * first; the silent windows the device itself can't report.
+   */
+  async getHeartbeatGaps(id: string, limit: number = 50): Promise<HeartbeatGap[]> {
+    const response = await fetch(`${this.baseUrl}/modules/${id}/heartbeat-gaps?limit=${limit}`, {
+      headers: this.getHeaders(),
+      credentials: 'include',
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('unauthorized');
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch heartbeat gaps for module ${id}`);
+    }
+    const body = (await response.json()) as { gaps?: HeartbeatGap[] };
+    return body.gaps ?? [];
   }
 
   /**

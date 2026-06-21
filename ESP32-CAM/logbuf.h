@@ -45,6 +45,16 @@ void logbufNoteWifiReconnect();
 void noteLastStageBeforeReboot(const char *stage);
 
 /*
+  Returns the recovered breadcrumb stage set by noteLastStageBeforeReboot,
+  or "" if none survived (clean / power-on boot). Never nullptr. Used by
+  sendHeartbeat (#172, option 2) to carry the breadcrumb on the boot
+  heartbeat — so a watchdog/liveness reboot reports WHICH stage stalled at
+  boot time, instead of waiting up to 24 h for the next noon image upload's
+  telemetry sidecar (the only place this previously surfaced).
+*/
+const char *getLastStageBeforeReboot();
+
+/*
   Serializes the log buffer + metrics into a compact JSON object.
   The returned String is intended to be put into a multipart form
   field named "logs".

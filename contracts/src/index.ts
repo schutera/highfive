@@ -129,6 +129,32 @@ export interface HeartbeatSnapshot {
   // recovery. So `0` (cleared) and `null` (legacy) are genuinely distinct here.
   lastHbFailCode: number | null;
   lastHbFailCount: number | null;
+  // Stage breadcrumb on the heartbeat (#172, option 2). The device's RTC_NOINIT
+  // breadcrumb recovered at boot — which long-running stage was active when the
+  // previous run died (e.g. `loop:livenessReboot`, `setup:getGeolocation`). It
+  // previously rode ONLY the per-upload telemetry sidecar (the noon image; see
+  // `TelemetryPayload.lastStageBeforeReboot` — note the snake_case there is the
+  // raw ESP JSON), so after a watchdog reboot it could wait up to 24 h to
+  // surface. Lifting it onto the boot heartbeat gets it to the server
+  // immediately. Three-valued: a non-empty string is the recovered stage; `''`
+  // is a healthy module reporting "no breadcrumb survived" (dense send, like
+  // `resetReason`); `null` is firmware predating option 2.
+  lastStageBeforeReboot: string | null;
+}
+
+// Derived, server-side heartbeat gap (#172, option 3). One interval between
+// two consecutive heartbeats that is wider than the server's gap threshold
+// (~90 min — one missed hourly ping plus margin). Surfaces the silent windows
+// the device itself could NOT report — a failed/timed-out heartbeat never
+// reaches the server, so `HeartbeatSnapshot.lastHbFailCount` only covers
+// streaks the device lived through and recovered from. Read-only and derived
+// from `module_heartbeats.received_at` (no table, no writer — see ADR-005),
+// returned by `backend GET /api/modules/:id/heartbeat-gaps` (admin-gated,
+// proxying duckdb-service `GET /heartbeats/<id>/gaps`). Newest gap first.
+export interface HeartbeatGap {
+  gapStart: string; // ISO timestamp — last heartbeat before the silence
+  gapEnd: string; // ISO timestamp — first heartbeat after the silence
+  gapSeconds: number; // wall-clock width of the gap, in seconds
 }
 
 export interface Module {

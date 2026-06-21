@@ -6,6 +6,7 @@
 #include "led.h"
 #include "logbuf.h"
 #include "breadcrumb.h"
+#include "capture_gate.h"  // #179 boot-capture rate-limit (reboot-loop guardrail)
 #include "module_id.h"
 #include "loop_health.h"
 #include "ota_rollback.h"
@@ -615,6 +616,21 @@ void setup() {
     bootPrefs.end();
   }
 
+  // #179 reboot-loop guardrail (spun out of #143). If the device rebooted again
+  // within the throttle window, skip the boot smoke-test capture so a runaway
+  // software-reset loop can't dump thousands of images (the field "storm":
+  // ~90–100/h, boot_count 3169). The RTC_NOINIT slot survives software resets
+  // but is wiped on power-on, so a genuine power-cycle/redeploy always images.
+  // Runs after the NTP sync above; fails open (captures) when NTP hasn't synced.
+  // Skipped if the daily-reboot path already suppressed the capture.
+  if (!firstCaptureDone) {
+    const uint32_t nowEpoch = (uint32_t)time(nullptr);
+    if (!hf::captureGateShouldCapture(nowEpoch, hf::kBootCaptureWindowSec)) {
+      Serial.println("[BOOT] boot-capture throttled (reboot-loop guardrail)");
+      firstCaptureDone = true;
+    }
+  }
+
   // OTA rollback gate (#26, narrowed by #148 Phase 3). Surviving setup() —
   // WiFi, registration, camera init, AND the warm-up loop — clears the
   // faulty-boot crash-loop counter for a proven/factory slot and (idempotently)
@@ -934,6 +950,11 @@ void loop() {
     if (captureAndUpload()) {
       firstCaptureDone = true;
       onServerContact(millis());  // #148 Phase 3: 2xx upload == live contact (items 2+3)
+      // #179: anchor the throttle window to this successful boot upload. Noting
+      // on success (not attempt) bounds the SERVER-visible image rate to ≤1 per
+      // window; a failed upload makes no server spam and leaves the gate
+      // re-armed. No-op if NTP hasn't synced (bogus epoch not persisted).
+      hf::captureGateNote((uint32_t)time(nullptr));
     }
   }
 

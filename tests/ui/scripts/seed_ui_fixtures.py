@@ -84,6 +84,10 @@ HEARTBEAT_BOOT_COUNT = 4242
 # sentinel; a non-zero count is the #170 reboot-loop signature.
 HEARTBEAT_LAST_FAIL_CODE = -2
 HEARTBEAT_LAST_FAIL_COUNT = 2
+# Stage breadcrumb on the heartbeat (#172 opt 2): the stage active when the
+# previous run died, now carried on the boot heartbeat instead of only the noon
+# image. A `livenessReboot` is the canonical reboot-loop breadcrumb.
+HEARTBEAT_LAST_STAGE = "loop:livenessReboot"
 
 
 def wait_for_stack(timeout_s: int = 180) -> None:
@@ -269,12 +273,16 @@ def seed_heartbeat_diagnostics() -> None:
         # banner renders — the remote-visibility signal #172 adds.
         last_hb_fail_code=HEARTBEAT_LAST_FAIL_CODE,
         last_hb_fail_count=HEARTBEAT_LAST_FAIL_COUNT,
+        # #172 opt 2: breadcrumb on the heartbeat so the diagnostics card can
+        # prove it renders end-to-end (carried on the boot HB, not the noon image).
+        last_stage_before_reboot=HEARTBEAT_LAST_STAGE,
     )
     r.raise_for_status()
     print(
         f"[ui-seed] sent diagnostic heartbeat for {HEARTBEAT_MAC} "
         f"(reset={HEARTBEAT_RESET_REASON} boots={HEARTBEAT_BOOT_COUNT} "
-        f"hb_fail={HEARTBEAT_LAST_FAIL_CODE}x{HEARTBEAT_LAST_FAIL_COUNT})",
+        f"hb_fail={HEARTBEAT_LAST_FAIL_CODE}x{HEARTBEAT_LAST_FAIL_COUNT} "
+        f"stage={HEARTBEAT_LAST_STAGE})",
         flush=True,
     )
 

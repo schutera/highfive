@@ -41,6 +41,8 @@ and link backwards.
 | [021](adr-021-admin-server-log-ring.md)                     | Admin server logs via an in-process stdout/stderr ring, not the Docker socket   | Superseded by [023](adr-023-persistent-structured-server-logs.md) |
 | [022](adr-022-build-time-feature-flags.md)                  | Homepage feature flags are build-time `VITE_*` env vars, default off            | Accepted                                                          |
 | [023](adr-023-persistent-structured-server-logs.md)         | Server logs become structured, disk-persisted (30 d / 100 MB), SSE-streamed     | Accepted                                                          |
+| [024](adr-024-boot-capture-rate-limit.md)                   | Boot-capture rate-limit via an RTC_NOINIT epoch, wiped on power-on              | Accepted                                                          |
+| [025](adr-025-heartbeat-gap-derived-read.md)                | Server-side heartbeat gaps are a derived read, not a persisted table            | Accepted                                                          |
 
 ## When to create an ADR
 

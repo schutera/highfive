@@ -628,29 +628,31 @@ def test_migration_adds_heartbeat_diagnostic_columns(fresh_db):
             "boot_count",
             "last_hb_fail_code",
             "last_hb_fail_count",
+            "last_stage_before_reboot",
         } <= cols
 
         # The legacy row survived and reads NULL for the new columns.
         row = con.execute(
             "SELECT fw_version, reset_reason, min_free_heap, boot_count, "
-            "last_hb_fail_code, last_hb_fail_count "
+            "last_hb_fail_code, last_hb_fail_count, last_stage_before_reboot "
             "FROM module_heartbeats WHERE module_id = ?",
             ("aabbccddeeff",),
         ).fetchone()
-        assert row == ("mason", None, None, None, None, None)
+        assert row == ("mason", None, None, None, None, None, None)
 
         # A new-shape insert lands in the migrated table.
         con.execute(
             "INSERT INTO module_heartbeats "
             "(module_id, reset_reason, min_free_heap, boot_count, "
-            " last_hb_fail_code, last_hb_fail_count) VALUES (?, ?, ?, ?, ?, ?)",
-            ("aabbccddeeff", "TASK_WDT", 51234, 9, -2, 3),
+            " last_hb_fail_code, last_hb_fail_count, last_stage_before_reboot) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("aabbccddeeff", "TASK_WDT", 51234, 9, -2, 3, "loop:livenessReboot"),
         )
         new_row = con.execute(
             "SELECT reset_reason, min_free_heap, boot_count, "
-            "last_hb_fail_code, last_hb_fail_count "
+            "last_hb_fail_code, last_hb_fail_count, last_stage_before_reboot "
             "FROM module_heartbeats WHERE reset_reason = 'TASK_WDT'"
         ).fetchone()
-        assert new_row == ("TASK_WDT", 51234, 9, -2, 3)
+        assert new_row == ("TASK_WDT", 51234, 9, -2, 3, "loop:livenessReboot")
     finally:
         con.close()

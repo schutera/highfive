@@ -29,6 +29,9 @@ const healthy: HeartbeatSnapshot = {
   // 0/0, distinct on the wire from pre-#172 firmware's null/null.
   lastHbFailCode: 0,
   lastHbFailCount: 0,
+  // #172 opt 2: dense ('' = no breadcrumb survived this boot), distinct from
+  // legacy null.
+  lastStageBeforeReboot: '',
 };
 
 describe('HeartbeatDiagnostics', () => {
@@ -157,8 +160,30 @@ describe('HeartbeatDiagnostics', () => {
       ...healthy,
       lastHbFailCode: null,
       lastHbFailCount: null,
+      lastStageBeforeReboot: null,
     };
     render(<HeartbeatDiagnostics heartbeat={legacy} />);
     expect(screen.queryByText(/failed before last contact/)).not.toBeInTheDocument();
+  });
+
+  // ---- #172 opt 2: stage breadcrumb carried on the heartbeat ----
+  it('renders the stage breadcrumb when one survived the previous reboot', () => {
+    const withCrumb: HeartbeatSnapshot = {
+      ...healthy,
+      uptimeMs: 16_000,
+      resetReason: 'SW',
+      lastStageBeforeReboot: 'loop:livenessReboot',
+    };
+    render(<HeartbeatDiagnostics heartbeat={withCrumb} />);
+    expect(screen.getByText('loop:livenessReboot')).toBeInTheDocument();
+    expect(screen.getByText('stage at previous reboot')).toBeInTheDocument();
+  });
+
+  it('omits the stage breadcrumb line when empty (clean boot) or null (legacy)', () => {
+    // healthy fixture has '' — a healthy module reporting "no breadcrumb".
+    const { rerender } = render(<HeartbeatDiagnostics heartbeat={healthy} />);
+    expect(screen.queryByText('stage at previous reboot')).not.toBeInTheDocument();
+    rerender(<HeartbeatDiagnostics heartbeat={{ ...healthy, lastStageBeforeReboot: null }} />);
+    expect(screen.queryByText('stage at previous reboot')).not.toBeInTheDocument();
   });
 });

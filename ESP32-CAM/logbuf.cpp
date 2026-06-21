@@ -95,6 +95,10 @@ void noteLastStageBeforeReboot(const char *stage) {
   s_last_stage_before_reboot[sizeof(s_last_stage_before_reboot) - 1] = '\0';
 }
 
+const char *getLastStageBeforeReboot() {
+  return s_last_stage_before_reboot;
+}
+
 String buildTelemetryJson() {
   // Gather Arduino-specific inputs here; pass them to the pure host-
   // testable serializer in lib/telemetry. The wire format is pinned by

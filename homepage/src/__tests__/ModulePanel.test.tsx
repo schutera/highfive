@@ -54,6 +54,7 @@ vi.mock('../services/api', () => ({
       (filename: string) => `http://localhost:3002/api/images/${encodeURIComponent(filename)}`,
     ),
     getModuleLogs: vi.fn().mockResolvedValue([]),
+    getHeartbeatGaps: vi.fn().mockResolvedValue([]),
     checkSession: vi.fn().mockResolvedValue(false),
     login: vi.fn().mockResolvedValue(true),
     logout: vi.fn().mockResolvedValue(undefined),
@@ -114,6 +115,7 @@ const baseModule: ModuleDetail = {
     bootCount: 1,
     lastHbFailCode: 0,
     lastHbFailCount: 0,
+    lastStageBeforeReboot: '',
   },
   nests: [],
 };

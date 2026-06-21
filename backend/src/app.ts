@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { tryParseModuleId } from '@highfive/contracts';
-import type { ServerLogsResponse } from '@highfive/contracts';
+import type { ServerLogsResponse, HeartbeatGap } from '@highfive/contracts';
 import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
 import { accessLog } from './accessLog';
@@ -583,6 +583,60 @@ app.get('/api/modules/:id/logs', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('[GET /api/modules/:id/logs]', { id, error: String(error) });
     res.status(502).json({ error: 'image-service unreachable' });
+  }
+});
+
+// snake_case wire shape from duckdb-service `GET /heartbeats/:id/gaps`,
+// camelCased into the `HeartbeatGap` contract by the route below.
+interface ApiHeartbeatGap {
+  gap_start: string;
+  gap_end: string;
+  gap_seconds: number;
+}
+
+// Admin-only: derived heartbeat-gap timeline for a module (#172, option 3).
+// Gated by `requireAdmin` (session cookie OR X-Admin-Key — like the sibling
+// /logs route). Proxies duckdb-service `GET /heartbeats/:id/gaps`, forwarding
+// the machine credential. Read-only; the upstream derives gaps from the
+// existing heartbeat timeline (no schema/writer — see ADR-005).
+app.get('/api/modules/:id/heartbeat-gaps', requireAdmin, async (req, res) => {
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
+  try {
+    const limit = req.query.limit ? `?limit=${encodeURIComponent(String(req.query.limit))}` : '';
+    const url = `${DUCKDB_URL}/heartbeats/${encodeURIComponent(id)}/gaps${limit}`;
+    const upstream = await fetch(url, { headers: { 'X-Admin-Key': getApiKey() } });
+    if (!upstream.ok) {
+      res.status(upstream.status).json({ error: 'Failed to fetch heartbeat gaps' });
+      return;
+    }
+    const payload = (await upstream.json()) as { module_id?: string; gaps?: unknown };
+    // Map the snake_case upstream shape to the camelCase HeartbeatGap contract.
+    // Don't forward a drifted shape typed as valid (CLAUDE.md wire-shape rule):
+    // validate the array AND each element's fields, so a `[{}]` from upstream
+    // surfaces as a 502 rather than reaching the UI as `{gapStart: undefined}`.
+    const isGap = (g: unknown): g is ApiHeartbeatGap =>
+      typeof g === 'object' &&
+      g !== null &&
+      typeof (g as ApiHeartbeatGap).gap_start === 'string' &&
+      typeof (g as ApiHeartbeatGap).gap_end === 'string' &&
+      typeof (g as ApiHeartbeatGap).gap_seconds === 'number';
+    if (!payload || !Array.isArray(payload.gaps) || !payload.gaps.every(isGap)) {
+      res.status(502).json({ error: 'malformed heartbeat-gaps response' });
+      return;
+    }
+    const gaps: HeartbeatGap[] = (payload.gaps as ApiHeartbeatGap[]).map((g) => ({
+      gapStart: g.gap_start,
+      gapEnd: g.gap_end,
+      gapSeconds: g.gap_seconds,
+    }));
+    res.json({ gaps });
+  } catch (error) {
+    console.error('[GET /api/modules/:id/heartbeat-gaps]', { id, error: String(error) });
+    res.status(502).json({ error: 'duckdb-service unreachable' });
   }
 });
 

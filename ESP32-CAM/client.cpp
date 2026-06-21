@@ -166,7 +166,11 @@ int postImage(esp_config_t *esp_config) {
       // per-read stalls but NOT the handshake itself — a stalled cert
       // exchange here could block the upload past the task-WDT budget
       // and reboot a field module, the #148 reboot-loop class. 8 s is
-      // ample for a healthy handshake to the pinned server.
+      // ample for a healthy handshake to the pinned server. Like
+      // setCACert above, this must stay inside the !connected() branch:
+      // keep-alive reuse skips it (no fresh handshake to bound), and the
+      // static tlsClient carries the setting across calls — don't "tidy"
+      // it out as redundant.
       tlsClient.setHandshakeTimeout(8);  // seconds
     }
     if (!client.connect(url.host.c_str(), url.port)) {

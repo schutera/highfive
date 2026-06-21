@@ -1,0 +1,10 @@
+{
+  "name": "hf_capture_gate",
+  "version": "0.1.0",
+  "description": "RTC_NOINIT boot-capture rate-limit that survives ESP32 software resets. Guardrail for issue #179 (reboot-loop image storm, spun out of #143) — records the wall-clock epoch of the last boot smoke-test capture so a runaway software-reset loop takes at most one boot image per N-minute window. Wiped on power-on, so a genuine power-cycle/redeploy always captures. Pure C++17, host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

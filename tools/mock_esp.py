@@ -139,6 +139,7 @@ class MockEsp:
         rssi: Optional[int] = None,
         last_hb_fail_code: Optional[int] = None,
         last_hb_fail_count: Optional[int] = None,
+        last_stage_before_reboot: Optional[str] = None,
     ) -> requests.Response:
         """POST /heartbeat on duckdb-service, mirrors sendHeartbeat in client.cpp.
 
@@ -190,6 +191,11 @@ class MockEsp:
             data["last_hb_fail_code"] = str(last_hb_fail_code)
         if last_hb_fail_count is not None:
             data["last_hb_fail_count"] = str(last_hb_fail_count)
+        # Stage breadcrumb on the heartbeat (#172 opt 2). Like the failure-streak
+        # fields, omitted unless explicitly passed (test-ergonomics legacy → NULL
+        # default); real opt-2 firmware sends it densely ("" when no breadcrumb).
+        if last_stage_before_reboot is not None:
+            data["last_stage_before_reboot"] = last_stage_before_reboot
         return requests.post(hb_url, data=data, timeout=self.timeout_s)
 
     def upload_loop(self, cycles: int, interval_s: float) -> List[int]:

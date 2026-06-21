@@ -386,6 +386,9 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
         const uint32_t prev = written - static_cast<uint32_t>(got_chunk);
         if (written / 102400u != prev / 102400u) {
             char crumb[40];
+            // Keep within the URL-safe breadcrumb alphabet (alnum + ':' + '_'):
+            // the recovered breadcrumb now also rides the heartbeat form body
+            // raw (#172 opt 2). An unsigned-int interpolation is safe.
             snprintf(crumb, sizeof(crumb), "ota:body_read_%u_kb",
                      (unsigned)(written / 1024));
             hf::breadcrumbSet(crumb);

@@ -248,6 +248,64 @@ doesn't double the daily image cost. Both sites live in
 Clears heap fragmentation, stale TCP state, anything else that
 degrades over time.
 
+### 4a. Boot-capture rate-limit (reboot-loop guardrail, #179)
+
+The daily-reboot capture-skip above suppresses the **scheduled** restart's
+boot image, but a crash / watchdog / liveness **reboot loop** still takes one
+boot smoke-test image per cycle. The #143 field investigation recorded exactly
+this: a module crash-looping every ~40 s uploaded ~90–100 images/hour
+(`boot_count` 3169). [`ESP32-CAM/lib/capture_gate`](../../ESP32-CAM/lib/capture_gate/)
+caps that.
+
+After the `setup()` NTP sync, `captureGateShouldCapture(time(nullptr),
+kBootCaptureWindowSec)` decides whether to take the boot capture; on a
+successful boot upload, `captureGateNote()` records the wall-clock epoch in a
+magic-guarded `RTC_NOINIT_ATTR` slot (same storage class as the breadcrumb and
+the `hb_failure` streak). Because RTC_NOINIT survives software resets but is
+**wiped on power-on**, a reboot loop (chain of software resets) gets throttled
+to ≤1 boot image per 30 min window, while a genuine power-cycle/redeploy always
+images. The gate **fails open** (captures) when NTP hasn't synced, when no
+anchor exists, or when the clock moves backwards; `captureGateNote` never
+persists a pre-NTP bogus epoch. Noting only on a _successful_ upload bounds the
+**server-visible** image rate — a failed upload makes no spam and re-arms the
+gate. Both call sites are in
+[`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino) (grep `captureGate`);
+rationale in
+[ADR-024](../09-architecture-decisions/adr-024-boot-capture-rate-limit.md). This
+is defence-in-depth — it caps the blast radius without diagnosing the reset
+cause (hardened separately in #149/#148/#170).
+
+**Bench-testing caveat (same as the §8 breadcrumb / `hb_failure` streak): the
+EN-pin reset that `scripts/esp_reset.py` / `scripts/esp_capture.py` drive is a
+`POWERON_RESET`, which wipes `RTC_NOINIT`.** So bench-reset tooling can never
+make the throttle _engage_ — every bench reset clears the stored epoch, so the
+gate always captures (you'll see `reset_reason=1` and `-- First capture after
+boot`, never `[BOOT] boot-capture throttled`). To observe the throttle you need
+(a) a _successful_ boot upload to arm `captureGateNote` — so the dev upload host
+must be reachable from the board (on Windows: WLAN profile **Private**, see
+[troubleshooting.md](../troubleshooting.md)) — and (b) a real **software**
+reboot within the window (induce a watchdog / circuit-breaker `ESP.restart()`),
+not an EN-pin reset. See §8 "Only software resets preserve the streak".
+
+**Bench catch-22 (learned the hard way, #179 hardware bring-up).** Beyond the
+EN-reset wipe above, the two preconditions for _seeing_ the throttle engage
+actively conflict on the bench: arming needs a **successful** boot upload, which
+sets `firstCaptureDone = true` so the board goes idle — and the only _rapid_
+software-reset path, the 5-failed-upload circuit breaker, then can't fire
+(nothing is uploading to fail). The slower SW-reset paths don't help either:
+liveness is 2 h (the epoch is older than the 30 min window by then, so the gate
+fails open and captures), and wifiHealth is 10 min but needs a sustained WiFi
+outage that also cuts the dev box. Net: with stock firmware the engage line is
+impractical to reproduce on the bench. The throttle _logic_ is fully covered by
+`test/test_native_capture_gate`; the field case it targets is a loop of
+involuntary crashes/WDTs that each follow a _successful_ boot upload (the #143
+storm), which the bench can't cheaply mimic. To get the visual anyway, add a
+plain `reboot` verb to the serial console (a bare `ESP.restart()` that preserves
+config) and: arm via one successful upload → send `reboot` within 30 min →
+observe `[BOOT] boot-capture throttled`. (`reopen-portal` restarts too, but it
+clears the configured flag and drops into the captive portal, so it can't be
+used for this.)
+
 ### 5. Camera recovery via PWDN cycle (new in PR 17)
 
 When `esp_camera_fb_get()` returns NULL, `captureAndUpload` does
@@ -349,6 +407,18 @@ renders the field as a `stage at previous reboot` row when present, next to
 the `reset` row per upload, so a "TASK_WDT in `getGeolocation:http_post`"
 pattern across the fleet is visible without a serial cable on every
 board.
+
+**Also carried on the heartbeat (#172 option 2).** The sidecar path above
+only lands with the **daily noon image**, so after a watchdog/liveness reboot
+the breadcrumb could be up to 24 h late — and a module that reboot-loops never
+reaches the noon upload at all. So `sendHeartbeat` in
+[`ESP32-CAM/client.cpp`](../../ESP32-CAM/client.cpp) also sends the recovered
+breadcrumb (via `getLastStageBeforeReboot()`) as a dense
+`last_stage_before_reboot` heartbeat field; `duckdb-service` persists it on
+`module_heartbeats`, and `HeartbeatDiagnostics` renders a matching "stage at
+previous reboot" line. The boot heartbeat fires on every reboot, so the stage
+reaches the server immediately — the device-side complement to the
+`hb_failure` streak.
 
 The slot uses a magic guard (`0xCAFEBABE`) so the random RTC contents
 on a true power-on don't masquerade as a valid breadcrumb. False-positive

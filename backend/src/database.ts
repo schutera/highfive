@@ -29,6 +29,10 @@ interface ApiHeartbeatSummaryEntry {
   // HeartbeatSnapshot below.
   last_hb_fail_code: number | null;
   last_hb_fail_count: number | null;
+  // Stage breadcrumb on the heartbeat (#172, option 2). snake_case mirrors the
+  // duckdb-service /heartbeats_summary wire shape; camelCased into
+  // HeartbeatSnapshot below.
+  last_stage_before_reboot: string | null;
 }
 
 interface ApiHeartbeatSummaryResponse {
@@ -316,6 +320,7 @@ export class ModuleReadModel {
             bootCount: hbEntry.boot_count ?? null,
             lastHbFailCode: hbEntry.last_hb_fail_code ?? null,
             lastHbFailCount: hbEntry.last_hb_fail_count ?? null,
+            lastStageBeforeReboot: hbEntry.last_stage_before_reboot ?? null,
           }
         : null;
 

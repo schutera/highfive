@@ -843,6 +843,10 @@ bool getGeolocation(esp_config_t *esp_config) {
 
   for (int attempt = 0; attempt < 3; ++attempt) {
     char crumb[40];
+    // Keep within the URL-safe breadcrumb alphabet (alnum + ':' + '_'): the
+    // recovered breadcrumb now also rides the heartbeat form body raw (#172
+    // opt 2, client.cpp sendHeartbeat), so a value with '&'/'='/'+'/space would
+    // corrupt that body. An int interpolation can't produce those.
     snprintf(crumb, sizeof(crumb), "getGeolocation:retry_attempt_%d", attempt + 1);
     hf::breadcrumbSet(crumb);
 

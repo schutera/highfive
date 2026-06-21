@@ -154,7 +154,8 @@ def init_db():
                 min_free_heap INTEGER,
                 boot_count BIGINT,
                 last_hb_fail_code INTEGER,
-                last_hb_fail_count INTEGER
+                last_hb_fail_count INTEGER,
+                last_stage_before_reboot VARCHAR(64)
             );
             CREATE INDEX IF NOT EXISTS idx_heartbeat_module ON module_heartbeats(module_id);
             CREATE INDEX IF NOT EXISTS idx_heartbeat_received ON module_heartbeats(received_at);
@@ -290,6 +291,20 @@ def init_db():
         if "last_hb_fail_count" not in heartbeat_cols:
             con.execute(
                 "ALTER TABLE module_heartbeats ADD COLUMN last_hb_fail_count INTEGER"
+            )
+
+        # Stage breadcrumb on the heartbeat (issue #172, option 2). Recovered
+        # from the device's RTC_NOINIT breadcrumb slot at boot, it names which
+        # long-running stage was active when the previous run died (e.g.
+        # `loop:livenessReboot`, `setup:getGeolocation`). It previously rode
+        # only the per-upload telemetry sidecar (the noon image), delaying it up
+        # to 24 h; carrying it on the boot heartbeat surfaces it immediately.
+        # Additive ALTER, same as the blocks above; older firmware omits it →
+        # NULL. Empty string ("" dense send) is distinct from NULL (legacy).
+        if "last_stage_before_reboot" not in heartbeat_cols:
+            con.execute(
+                "ALTER TABLE module_heartbeats "
+                "ADD COLUMN last_stage_before_reboot VARCHAR(64)"
             )
 
         # Migration: drop the dead-weight `status` column from existing DBs
@@ -569,5 +584,43 @@ def init_db():
                         f"✅ Seeded measurements for {len(canonical_seed_ids)} "
                         "canonical module(s)"
                     )
+
+            # Seed a heartbeat history with a deliberate gap on one canonical
+            # module (issue #172 option 3) so the derived `/heartbeats/<id>/gaps`
+            # read and its dashboard card have demo data — and so the Playwright
+            # spec can assert the gap renders end-to-end. The `/heartbeat`
+            # ingestion API stamps `received_at = now()`, so a >90 min gap can
+            # only be created by writing backdated rows directly here (the sole
+            # writer, ADR-001). Idempotent on its own row count; the latest
+            # heartbeat is recent so module 5 stays "online".
+            heartbeats_seeded = con.execute(
+                "SELECT COUNT(*) FROM module_heartbeats WHERE module_id = '000000000005'"
+            ).fetchone()[0]
+            if heartbeats_seeded == 0:
+                now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+                # Two heartbeats exactly 4 h apart bracket one silent window
+                # (> 90 min threshold; 14400 s, matching the api-reference /
+                # ADR-025 examples); the recent one keeps the module online and
+                # carries a stage breadcrumb so the #172 opt-2 field is demoable
+                # too. The older one sits 4 h 5 min back so the gap is a round 4 h.
+                con.execute(
+                    "INSERT INTO module_heartbeats "
+                    "(module_id, received_at, reset_reason, boot_count, "
+                    " last_stage_before_reboot) VALUES (?, ?, ?, ?, ?)",
+                    ["000000000005", now - timedelta(hours=4, minutes=5), "SW", 41, ""],
+                )
+                con.execute(
+                    "INSERT INTO module_heartbeats "
+                    "(module_id, received_at, reset_reason, boot_count, "
+                    " last_stage_before_reboot) VALUES (?, ?, ?, ?, ?)",
+                    [
+                        "000000000005",
+                        now - timedelta(minutes=5),
+                        "SW",
+                        42,
+                        "loop:livenessReboot",
+                    ],
+                )
+                print("✅ Seeded heartbeat gap for module 000000000005")
 
         con.close()

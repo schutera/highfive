@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type TelemetryEntry } from '../services/api';
-import type { HeartbeatSnapshot, Module, ModuleDetail } from '@highfive/contracts';
+import type { HeartbeatGap, HeartbeatSnapshot, Module, ModuleDetail } from '@highfive/contracts';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
@@ -51,6 +51,10 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   const [error, setError] = useState<string | null>(null);
 
   const [logs, setLogs] = useState<TelemetryEntry[] | null>(null);
+  // Derived server-side heartbeat gaps (#172, option 3). Fetched alongside the
+  // telemetry logs (same admin gate); the silent windows the device can't
+  // self-report.
+  const [gaps, setGaps] = useState<HeartbeatGap[] | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -63,6 +67,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
   useEffect(() => {
     loadModuleDetail();
     setLogs(null);
+    setGaps(null);
     setLogsOpen(false);
     setLogsError(null);
     setKeyError(null);
@@ -104,8 +109,21 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
       setLogsLoading(true);
       setLogsError(null);
       setKeyError(null);
-      const data = await api.getModuleLogs(module.id, 10);
+      const [data, gapData] = await Promise.all([
+        api.getModuleLogs(module.id, 10),
+        // Gaps are a secondary diagnostic: a non-auth failure here (502, etc.)
+        // shouldn't sink the logs render, so degrade to an empty list. But do
+        // NOT swallow 'unauthorized' — re-throw it so a future divergence in the
+        // two endpoints' admin gating can't silently hide an auth failure on
+        // this one (today both share `requireAdmin`, so the sibling logs fetch
+        // surfaces it too; this keeps that from being load-bearing).
+        api.getHeartbeatGaps(module.id, 50).catch((e) => {
+          if (e instanceof Error && e.message === 'unauthorized') throw e;
+          return [] as HeartbeatGap[];
+        }),
+      ]);
       setLogs(data);
+      setGaps(gapData);
       setHasKey(true);
     } catch (err) {
       console.error('Error loading telemetry:', err);
@@ -156,6 +174,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
     await api.logout();
     setHasKey(false);
     setLogs(null);
+    setGaps(null);
     setLogsError(null);
     setKeyError(null);
   };
@@ -439,6 +458,7 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
                     still require it. This is the surface that distinguishes
                     "healthy" from "boot-looping/hung". */}
                 <HeartbeatDiagnostics heartbeat={moduleDetail.latestHeartbeat} />
+                {hasKey && gaps && gaps.length > 0 && <HeartbeatGaps gaps={gaps} />}
                 {!hasKey && (
                   <AdminKeyForm
                     onSubmit={submitAdminKey}
@@ -683,6 +703,7 @@ export function HeartbeatDiagnostics({ heartbeat }: { heartbeat: HeartbeatSnapsh
     bootCount,
     lastHbFailCode,
     lastHbFailCount,
+    lastStageBeforeReboot,
   } = heartbeat;
 
   const uptime = typeof uptimeMs === 'number' ? formatUptime(Math.floor(uptimeMs / 1000)) : '—';
@@ -752,6 +773,15 @@ export function HeartbeatDiagnostics({ heartbeat }: { heartbeat: HeartbeatSnapsh
           <span className="text-hf-fg-mute">hb fails</span>{' '}
           {typeof lastHbFailCount === 'number' ? lastHbFailCount : '—'}
         </div>
+        {/* #172 opt 2: stage active when the previous run died, now carried on
+            the heartbeat (not just the noon image). Only meaningful when non-
+            empty — '' is a healthy "no breadcrumb survived", null is legacy. */}
+        {lastStageBeforeReboot && (
+          <div className="col-span-2 font-mono">
+            <span className="text-hf-fg-mute">stage at previous reboot</span>{' '}
+            {lastStageBeforeReboot}
+          </div>
+        )}
         {fwVersion && (
           <div className="col-span-2">
             <span className="text-hf-fg-mute">fw</span> {fwVersion}
@@ -769,6 +799,40 @@ export function HeartbeatDiagnostics({ heartbeat }: { heartbeat: HeartbeatSnapsh
           ({hbFailCodeLabel}) — possible reboot loop
         </div>
       )}
+    </div>
+  );
+}
+
+// Derived server-side heartbeat gaps (#172, option 3). Complements
+// HeartbeatDiagnostics: that card shows the failure streaks the device LIVED
+// THROUGH and reported on its next 2xx; this lists the silent windows the
+// device could NOT report (power loss, hang, timeout — a failed heartbeat
+// never reaches the server). Admin-only, English copy to match the sibling
+// diagnostic cards (deliberately not routed through i18n).
+export function HeartbeatGaps({ gaps }: { gaps: HeartbeatGap[] }) {
+  if (gaps.length === 0) return null;
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString(locale, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  return (
+    <div className="hf-card p-2.5 text-hf-xs">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-semibold text-hf-fg-soft">heartbeat gaps</span>
+        <span className="text-hf-fg-mute">({gaps.length})</span>
+      </div>
+      <div className="space-y-0.5 text-hf-fg-soft">
+        {gaps.map((g, i) => (
+          <div key={i} className="font-mono">
+            <span className="text-hf-fg-mute">{formatUptime(g.gapSeconds)} gap</span> ·{' '}
+            {fmt(g.gapStart)} → {fmt(g.gapEnd)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

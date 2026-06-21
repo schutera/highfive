@@ -58,6 +58,7 @@ export interface HeartbeatSnapshot {
   bootCount: number | null; // #148 — NVS-backed monotonic reboot counter
   lastHbFailCode: number | null; // #172 — last failed heartbeat's return value (-2 connect/WiFi, -4 bad response, else HTTP code); null pre-#172
   lastHbFailCount: number | null; // #172 — consecutive heartbeat failures before the last 2xx
+  lastStageBeforeReboot: string | null; // #172 opt 2 — RTC breadcrumb on the heartbeat; '' = none survived (dense), null pre-opt-2
 }
 ```
 
@@ -104,6 +105,34 @@ is why `0` (cleared) and `null` (legacy) are genuinely distinct on the wire —
 the regression is pinned by
 `duckdb-service/tests/test_heartbeats_endpoint.py`'s
 `test_heartbeats_summary_clears_streak_after_recovery_not_latching`.
+
+`lastStageBeforeReboot` was added in #172 **option 2**. The RTC stage
+breadcrumb (`ESP32-CAM/lib/breadcrumb`, recovered at boot) previously rode
+**only** the per-upload telemetry sidecar (`TelemetryPayload`, the noon image),
+so after a watchdog/liveness reboot it could be up to 24 h late. Carrying it on
+the boot heartbeat surfaces it immediately — the device-side complement to the
+`lastHbFail*` streak (that says the hourly pings failed; this says which boot
+stage was active when the previous run died). Like `resetReason` it is sent
+**densely** (`''` when no breadcrumb survived); `null` is firmware predating
+option 2. `HeartbeatDiagnostics` renders it as a "stage at previous reboot" line.
+
+`HeartbeatGap` (#172 **option 3**) is a separate, **derived** read — the
+server-side complement that surfaces the silent windows the device cannot report
+(a failed/timed-out heartbeat never reaches the server):
+
+```ts
+export interface HeartbeatGap {
+  gapStart: string; // ISO — last heartbeat before the silence
+  gapEnd: string; // ISO — first heartbeat after the silence
+  gapSeconds: number; // wall-clock width of the gap
+}
+```
+
+It is computed on demand from the `module_heartbeats.received_at` timeline (a
+`LAG` window function over rows wider than ~90 min) by
+`duckdb-service GET /heartbeats/<id>/gaps`, proxied admin-gated and camelCased by
+`backend GET /api/modules/:id/heartbeat-gaps`. No table, no writer — see
+[ADR-025](../09-architecture-decisions/adr-025-heartbeat-gap-derived-read.md).
 
 `Module` gained `displayName`, `email`, `updatedAt`, `lastSeenAt`, and
 `latestHeartbeat`. `displayName` is the admin-settable label override

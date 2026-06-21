@@ -118,6 +118,17 @@ def post_heartbeat():
     last_hb_fail_code = _to_int(data.get("last_hb_fail_code"))
     last_hb_fail_count = _to_int(data.get("last_hb_fail_count"))
 
+    # Stage breadcrumb on the heartbeat (issue #172, option 2). The device's
+    # RTC_NOINIT breadcrumb recovered at boot, naming which long-running stage
+    # was active when the previous run died. Carried on the boot heartbeat so it
+    # reaches us immediately rather than waiting for the next noon image's
+    # telemetry sidecar. Sent densely ("" when no breadcrumb survived) so the
+    # summary ARG_MAX fold reflects the latest heartbeat; older firmware omits
+    # it → None → NULL (distinct from a dense "").
+    last_stage_before_reboot = (data.get("last_stage_before_reboot") or "")[:64]
+    if last_stage_before_reboot == "" and "last_stage_before_reboot" not in data:
+        last_stage_before_reboot = None
+
     # Optional geolocation-recovery fields. Absent → None → not
     # written. Present-but-implausible → silently dropped (logged
     # below for observability).
@@ -131,7 +142,8 @@ def post_heartbeat():
         f"reset_reason={reset_reason} min_free_heap={min_free_heap} "
         f"boot_count={boot_count} "
         f"last_hb_fail_code={last_hb_fail_code} "
-        f"last_hb_fail_count={last_hb_fail_count}"
+        f"last_hb_fail_count={last_hb_fail_count} "
+        f"last_stage_before_reboot={last_stage_before_reboot}"
         + (
             f" lat={lat} lng={lng} acc={acc}"
             if (lat is not None or lng is not None)
@@ -164,8 +176,8 @@ def post_heartbeat():
             INSERT INTO module_heartbeats
               (module_id, received_at, battery, rssi, uptime_ms, free_heap,
                fw_version, reset_reason, min_free_heap, boot_count,
-               last_hb_fail_code, last_hb_fail_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               last_hb_fail_code, last_hb_fail_count, last_stage_before_reboot)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 mac,
@@ -180,6 +192,7 @@ def post_heartbeat():
                 boot_count,
                 last_hb_fail_code,
                 last_hb_fail_count,
+                last_stage_before_reboot,
             ],
         )
 
@@ -270,7 +283,8 @@ def get_heartbeats(module_id):
             """
             SELECT received_at, battery, rssi, uptime_ms, free_heap, fw_version,
                    reset_reason, min_free_heap, boot_count,
-                   last_hb_fail_code, last_hb_fail_count
+                   last_hb_fail_code, last_hb_fail_count,
+                   last_stage_before_reboot
               FROM module_heartbeats
              WHERE module_id = ?
              ORDER BY received_at DESC
@@ -294,9 +308,74 @@ def get_heartbeats(module_id):
                     "boot_count": r[8],
                     "last_hb_fail_code": r[9],
                     "last_hb_fail_count": r[10],
+                    "last_stage_before_reboot": r[11],
                 }
                 for r in rows
             ]
+        }
+    )
+
+
+# Heartbeat-gap threshold (issue #172, option 3). The steady-state heartbeat
+# fires hourly, so a healthy module's consecutive `received_at` rows sit ~1 h
+# apart. A gap wider than this means heartbeats stopped reaching the server —
+# the device was power-/WiFi-down, hung before the send, or the call timed out
+# (none of which the firmware can self-report, since a failed heartbeat never
+# round-trips). 90 min = one missed hourly ping plus margin, and stays well
+# under the 2 h liveness watchdog so a reboot loop's silent window surfaces as a
+# gap rather than being masked by the recovery reboot.
+_GAP_THRESHOLD_S = 90 * 60
+
+
+@heartbeats_bp.get("/heartbeats/<module_id>/gaps")
+def get_heartbeat_gaps(module_id):
+    """Derived, read-only heartbeat-gap timeline for a module (issue #172,
+    option 3). Computes intervals between consecutive `received_at` rows in
+    `module_heartbeats` and returns those wider than `_GAP_THRESHOLD_S` — the
+    server-side complement to the device-reported `last_hb_fail_*` streak: it
+    surfaces the silent windows the device could NOT report (power loss, hang,
+    timeout) because the heartbeat never reached us.
+
+    Read-only: no schema, no new writer (ADR-005 keeps `module_configs`
+    single-writer; this derives from the already-persisted timeline so it can
+    never drift). Newest gap first.
+    """
+    limit = _to_int(request.args.get("limit"), default=50) or 50
+    limit = max(1, min(limit, 500))
+
+    with lock:
+        con = get_conn()
+        rows = con.execute(
+            """
+            WITH ordered AS (
+                SELECT received_at,
+                       LAG(received_at) OVER (ORDER BY received_at) AS prev_at
+                  FROM module_heartbeats
+                 WHERE module_id = ?
+            )
+            SELECT prev_at AS gap_start,
+                   received_at AS gap_end,
+                   EPOCH(received_at) - EPOCH(prev_at) AS gap_seconds
+              FROM ordered
+             WHERE prev_at IS NOT NULL
+               AND EPOCH(received_at) - EPOCH(prev_at) > ?
+             ORDER BY received_at DESC
+             LIMIT ?
+            """,
+            [module_id, _GAP_THRESHOLD_S, limit],
+        ).fetchall()
+
+    return jsonify(
+        {
+            "module_id": module_id,
+            "gaps": [
+                {
+                    "gap_start": r[0].isoformat() if r[0] else None,
+                    "gap_end": r[1].isoformat() if r[1] else None,
+                    "gap_seconds": int(r[2]),
+                }
+                for r in rows
+            ],
         }
     )
 
@@ -320,7 +399,9 @@ def get_heartbeats_summary():
                    ARG_MAX(min_free_heap, received_at) AS min_free_heap,
                    ARG_MAX(boot_count, received_at) AS boot_count,
                    ARG_MAX(last_hb_fail_code, received_at) AS last_hb_fail_code,
-                   ARG_MAX(last_hb_fail_count, received_at) AS last_hb_fail_count
+                   ARG_MAX(last_hb_fail_count, received_at) AS last_hb_fail_count,
+                   ARG_MAX(last_stage_before_reboot, received_at)
+                       AS last_stage_before_reboot
               FROM module_heartbeats
           GROUP BY module_id
             """
@@ -341,6 +422,7 @@ def get_heartbeats_summary():
                     "boot_count": r[9],
                     "last_hb_fail_code": r[10],
                     "last_hb_fail_count": r[11],
+                    "last_stage_before_reboot": r[12],
                 }
                 for r in rows
             }

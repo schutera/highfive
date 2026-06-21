@@ -18,6 +18,8 @@ const BOOT_COUNT = 4242;
 // #172 failure-streak fields seeded alongside the #148 ones.
 const LAST_FAIL_CODE = -2;
 const LAST_FAIL_COUNT = 2;
+// #172 opt 2: stage breadcrumb carried on the heartbeat (was sidecar-only).
+const LAST_STAGE = 'loop:livenessReboot';
 
 test.describe('module heartbeat diagnostics (#148, #172)', () => {
   test('HeartbeatDiagnostics renders the seeded reset_reason / boot_count / hb-fail streak', async ({
@@ -37,6 +39,9 @@ test.describe('module heartbeat diagnostics (#148, #172)', () => {
     // #172: the failure streak survived the same boundary.
     expect(detail.latestHeartbeat?.lastHbFailCode).toBe(LAST_FAIL_CODE);
     expect(detail.latestHeartbeat?.lastHbFailCount).toBe(LAST_FAIL_COUNT);
+    // #172 opt 2: the stage breadcrumb survived the same boundary — proving it
+    // now rides the heartbeat (previously sidecar-only, up to 24 h late).
+    expect(detail.latestHeartbeat?.lastStageBeforeReboot).toBe(LAST_STAGE);
 
     // 2) Drive the browser: the card lives in the admin telemetry section
     //    (?admin=1 reveals the toggle). The card itself reads the already-
@@ -70,5 +75,8 @@ test.describe('module heartbeat diagnostics (#148, #172)', () => {
     await expect(telemetryBody).toContainText(
       /2 heartbeats failed before last contact \(connect\/WiFi\)/,
     );
+    // #172 opt 2: the stage breadcrumb renders on the heartbeat card.
+    await expect(telemetryBody).toContainText('stage at previous reboot');
+    await expect(telemetryBody).toContainText(LAST_STAGE);
   });
 });

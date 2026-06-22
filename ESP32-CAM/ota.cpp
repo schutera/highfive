@@ -13,6 +13,7 @@
 #include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
 #include "tls_roots.h" // hf::tls::kIsrgRootX1Pem — issue #79
+#include "tls_client.h" // hf::tls::configureBoundedClient — issue #185
 
 #include <cstring>
 #include <string>
@@ -175,13 +176,11 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
         WiFiClient& client = useTls ? static_cast<WiFiClient&>(tlsClient)
                                     : plainClient;
         if (useTls) {
-            tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
-            // Bound the handshake like the boot + upload/heartbeat paths
-            // (esp_init.cpp, client.cpp — all setHandshakeTimeout(8)). OTA
-            // runs in setup() under the same 60 s task-WDT, so an unbounded
-            // 120 s-default handshake here is the same reboot-loop risk
-            // (#148 class). 8 s is ample to the pinned OTA origin.
-            tlsClient.setHandshakeTimeout(8);  // seconds
+            // Pin ISRG Root X1 + bound the handshake via the shared helper
+            // (#185). OTA runs in setup() under the same 60 s task-WDT, so
+            // an unbounded 120 s-default handshake here is the same
+            // reboot-loop risk (#148 class).
+            hf::tls::configureBoundedClient(tlsClient, hf::tls::kIsrgRootX1Pem);
         }
         client.setTimeout(10);  // seconds, applies to read
 
@@ -279,11 +278,10 @@ void httpOtaCheckAndApply(const esp_config_t* config) {
     WiFiClient& binClient = useTls ? static_cast<WiFiClient&>(tlsBinClient)
                                    : plainBinClient;
     if (useTls) {
-        tlsBinClient.setCACert(hf::tls::kIsrgRootX1Pem);
-        // Same handshake bound as the manifest fetch above and the boot +
-        // upload/heartbeat paths — keeps the OTA binary download under the
+        // Same shared bounded-client helper as the manifest fetch above
+        // (#185) — keeps the OTA binary download's handshake under the
         // setup() task-WDT budget (#148 class).
-        tlsBinClient.setHandshakeTimeout(8);  // seconds
+        hf::tls::configureBoundedClient(tlsBinClient, hf::tls::kIsrgRootX1Pem);
     }
     binClient.setTimeout(15);
 

@@ -22,6 +22,7 @@
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 #include "tls_roots.h" // hf::tls::k{IsrgRootX1,GtsRootR1}Pem — issue #79
+#include "tls_client.h" // hf::tls::configureBoundedClient — issue #185
 
 // Geolocation retry state for the heartbeat-side recovery path (PR
 // II / issue #89). When the boot-time 3-attempt loop in
@@ -789,8 +790,12 @@ static bool attemptGeolocation(geolocation_t* out) {
   // but skip peer verification, which leaks the WiFi-BSSID list to any
   // MITM with a self-signed cert. Issue #79; CA-rotation fix 2026-06-05.
   WiFiClientSecure secureClient;
-  secureClient.setHandshakeTimeout(8);  // seconds (ESP32 default 120 s) — see above
-  secureClient.setCACert(hf::tls::kGoogleApisCaBundlePem);
+  // Pin the Google CA bundle + bound the handshake via the shared helper
+  // (#185). Geolocation is always HTTPS to googleapis.com; without peer
+  // verification the WiFi-BSSID list leaks to a MITM, and the 8 s bound
+  // keeps a stalled handshake under the 60 s task-WDT (the longhorn
+  // reboot-loop class). See the CA-rotation note above. Issue #79.
+  hf::tls::configureBoundedClient(secureClient, hf::tls::kGoogleApisCaBundlePem);
   HTTPClient http;
   String url = String("https://www.googleapis.com/geolocation/v1/geolocate?key=") + apiKey;
   http.begin(secureClient, url);
@@ -1022,13 +1027,11 @@ void initNewModuleOnServer(esp_config_t *esp_config) {
     WiFiClient& netClient = useTls ? static_cast<WiFiClient&>(tlsClient)
                                    : plainClient;
     if (useTls) {
-      tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
-      // Bound the TLS handshake (ESP32 default is 120 s) so a stalled
-      // connect can't block past the 60 s task-WDT. Same unbounded-call
-      // defect as attemptGeolocation's pre-`carpenter` geolocation POST —
-      // hardened here too so the whole boot-path TLS class is covered, not
-      // just the one call the longhorn telemetry happened to fingerprint.
-      tlsClient.setHandshakeTimeout(8);  // seconds
+      // Pin ISRG Root X1 + bound the handshake via the shared helper (#185)
+      // so a stalled connect can't block past the 60 s task-WDT — the same
+      // unbounded-call defect that caused the longhorn reboot loop
+      // (#148/#186), now closed across every TLS site through one helper.
+      hf::tls::configureBoundedClient(tlsClient, hf::tls::kIsrgRootX1Pem);
     }
 
     HTTPClient http;

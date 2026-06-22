@@ -159,6 +159,19 @@ int postImage(esp_config_t *esp_config) {
       // via [lib/tls_roots/tls_roots.h], program lifetime, so the
       // pointer outlives every reuse. Issue #79.
       tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
+      // Bound the TLS handshake the same way the boot paths do
+      // (`esp_init.cpp::initNewModuleOnServer` / `attemptGeolocation`,
+      // both `setHandshakeTimeout(8)`). The ESP32 default is 120 s, and
+      // the `setTimeout(8000)` below is set AFTER connect, so it bounds
+      // per-read stalls but NOT the handshake itself — a stalled cert
+      // exchange here could block the upload past the task-WDT budget
+      // and reboot a field module, the #148 reboot-loop class. 8 s is
+      // ample for a healthy handshake to the pinned server. Like
+      // setCACert above, this must stay inside the !connected() branch:
+      // keep-alive reuse skips it (no fresh handshake to bound), and the
+      // static tlsClient carries the setting across calls — don't "tidy"
+      // it out as redundant.
+      tlsClient.setHandshakeTimeout(8);  // seconds
     }
     if (!client.connect(url.host.c_str(), url.port)) {
       logf("[HTTP] connect failed to %s:%u",
@@ -308,6 +321,13 @@ int sendHeartbeat(esp_config_t *esp_config) {
                                   : plainHbClient;
   if (hbUseTls) {
     tlsHbClient.setCACert(hf::tls::kIsrgRootX1Pem);
+    // Bound the handshake like the boot paths and postImage above — the
+    // ESP32 default is 120 s and `setTimeout(5000)` below is the per-read
+    // stall bound, not the handshake bound. An unbounded cert exchange on
+    // the hourly heartbeat could block past the task-WDT budget and reboot
+    // a field module (#148 reboot-loop class). 8 s is ample for the pinned
+    // server; a fresh client per call means the handshake runs every hour.
+    tlsHbClient.setHandshakeTimeout(8);  // seconds
   }
   hbClient.setTimeout(5000);
   // Issue #42 instrumentation: breadcrumb at each section boundary

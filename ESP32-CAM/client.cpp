@@ -19,6 +19,7 @@
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
 #include "tls_roots.h" // hf::tls::kIsrgRootX1Pem — issue #79
+#include "tls_client.h" // hf::tls::configureBoundedClient — issue #185
 
 // Module-level keep-alive clients for /upload (issue #79). Two
 // storage objects — one TLS, one plain — and `postImage` picks the
@@ -151,27 +152,14 @@ int postImage(esp_config_t *esp_config) {
   if (!client.connected()) {
     Serial.println("[!client.connect()]");
     if (useTls) {
-      // Pin against ISRG Root X1 (Let's Encrypt) before each fresh
-      // connect — only on the !connected() branch; on keep-alive
-      // reuse the session was already pinned the last time the
-      // socket was opened, and setCACert on a connected TLS client
-      // is undefined behaviour in mbedTLS. The PEM lives in .rodata
-      // via [lib/tls_roots/tls_roots.h], program lifetime, so the
-      // pointer outlives every reuse. Issue #79.
-      tlsClient.setCACert(hf::tls::kIsrgRootX1Pem);
-      // Bound the TLS handshake the same way the boot paths do
-      // (`esp_init.cpp::initNewModuleOnServer` / `attemptGeolocation`,
-      // both `setHandshakeTimeout(8)`). The ESP32 default is 120 s, and
-      // the `setTimeout(8000)` below is set AFTER connect, so it bounds
-      // per-read stalls but NOT the handshake itself — a stalled cert
-      // exchange here could block the upload past the task-WDT budget
-      // and reboot a field module, the #148 reboot-loop class. 8 s is
-      // ample for a healthy handshake to the pinned server. Like
-      // setCACert above, this must stay inside the !connected() branch:
-      // keep-alive reuse skips it (no fresh handshake to bound), and the
-      // static tlsClient carries the setting across calls — don't "tidy"
-      // it out as redundant.
-      tlsClient.setHandshakeTimeout(8);  // seconds
+      // Pin ISRG Root X1 + bound the handshake (8 s vs the ESP32 120 s
+      // default) through the one shared TLS-setup helper (#185). MUST stay
+      // inside the !connected() branch: keep-alive reuse skips a fresh
+      // handshake, the static tlsClient carries the CA pin across reuse,
+      // and setCACert on an already-connected client is UB in mbedTLS. The
+      // PEM lives in .rodata (lib/tls_roots), program lifetime. Issue #79;
+      // handshake bound #148/#186. Don't "tidy" this out of the branch.
+      hf::tls::configureBoundedClient(tlsClient, hf::tls::kIsrgRootX1Pem);
     }
     if (!client.connect(url.host.c_str(), url.port)) {
       logf("[HTTP] connect failed to %s:%u",
@@ -320,14 +308,11 @@ int sendHeartbeat(esp_config_t *esp_config) {
   WiFiClient& hbClient = hbUseTls ? static_cast<WiFiClient&>(tlsHbClient)
                                   : plainHbClient;
   if (hbUseTls) {
-    tlsHbClient.setCACert(hf::tls::kIsrgRootX1Pem);
-    // Bound the handshake like the boot paths and postImage above — the
-    // ESP32 default is 120 s and `setTimeout(5000)` below is the per-read
-    // stall bound, not the handshake bound. An unbounded cert exchange on
-    // the hourly heartbeat could block past the task-WDT budget and reboot
-    // a field module (#148 reboot-loop class). 8 s is ample for the pinned
-    // server; a fresh client per call means the handshake runs every hour.
-    tlsHbClient.setHandshakeTimeout(8);  // seconds
+    // Pin ISRG Root X1 + bound the handshake via the shared helper (#185).
+    // Fresh client per call → the handshake runs every hour; the 8 s bound
+    // keeps a stalled cert exchange under the task-WDT (#148 class). The
+    // separate setTimeout(5000) below bounds per-read stalls, not this.
+    hf::tls::configureBoundedClient(tlsHbClient, hf::tls::kIsrgRootX1Pem);
   }
   hbClient.setTimeout(5000);
   // Issue #42 instrumentation: breadcrumb at each section boundary

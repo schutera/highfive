@@ -1,0 +1,10 @@
+{
+  "name": "hf_tls_client",
+  "version": "0.1.0",
+  "description": "Single configuration point for WiFiClientSecure clients: hf::tls::configureBoundedClient pins a CA PEM and bounds the TLS handshake to 8 s (vs the ESP32 120 s default) so a stalled handshake can't exceed the 60 s task-WDT budget (#148 reboot-loop class). Every TLS site in client.cpp, ota.cpp and esp_init.cpp funnels through it (issue #185) so a new site can't silently reintroduce the default. ESP-only (depends on WiFiClientSecure); not host-testable, not built in the native env.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcFilter": ["+<*>"]
+  }
+}

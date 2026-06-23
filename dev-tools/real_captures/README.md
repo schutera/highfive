@@ -35,8 +35,37 @@ Robust real-image detection needs:
 Until then the detector degrades honestly on real captures rather than guessing.
 See ADR-026 and the module docstring.
 
+## Labelling workflow (recalibration loop)
+
+To recalibrate against reality instead of the mocks:
+
+1. Drop a real **4×4** capture here (ideally straight from a module, so the
+   resolution/optics match production — not a phone photo).
+2. Copy `*.labels.example.json` to `<image>.labels.json` and fill in `grid` and
+   the list of `sealed` holes as 1-based `[row, col]` (row 1 = top, col 1 =
+   left). Everything not listed is treated as empty.
+3. Run the harness from the repo root:
+
+   ```
+   python dev-tools/calibrate_holes.py            # report per image
+   python dev-tools/calibrate_holes.py --overlay  # also draw detected circles
+   ```
+
+   It prints, per capture, whether detection fired, how many holes it kept, and
+   predicted-vs-labelled sealed counts. `--overlay` writes `<image>_overlay.png`
+   so you can see exactly where circles landed vs the real holes.
+
+4. Tune `image-service/services/hole_detection.py` (Hough params, quorum,
+   grid-fitting, the empty/sealed thresholds) until every capture fires and
+   `pred_sealed == truth_sealed`, then promote the best captures into the
+   regression test.
+
+A handful of labelled captures spanning the lighting/white-balance range
+(warm/tungsten/daylight) is enough to start. Until they exist the detector
+degrades to no-detection on real input rather than guessing.
+
 ## Ground-truth note
 
-Per-hole occupancy labels are still sparse. The block geometry also varies across
-field units (some captures show a wider block than the canonical 4×4), so labels
-must be tied to a specific fixture image before they can drive a per-hole test.
+The block geometry varies across field units — some captures show a **wider**
+block than the canonical 4×4 — so labels must be tied to a specific fixture image
+(and that image's actual grid) before they can drive a test.

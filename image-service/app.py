@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
+from services.hole_detection import HoleDetector
 from services.log_ring import get_recent as _get_recent_logs
 from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
@@ -89,6 +90,13 @@ def _access_log_finish(resp):
 UPLOAD_FOLDER = os.getenv("IMAGE_STORE_PATH", "/data/images")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Per-nest snips (#165) live in a subdir of the upload volume so the same
+# mounted volume that serves full captures also carries the crops. Cropping is
+# the privacy mechanism (issue #154): a snip shows only the hole, no
+# garden/house background, so snips are served publicly without auth.
+SNIP_FOLDER = os.path.join(UPLOAD_FOLDER, "snips")
+os.makedirs(SNIP_FOLDER, exist_ok=True)
+
 DUCKDB_SERVICE_URL = os.getenv("DUCKDB_SERVICE_URL", "http://duckdb-service:8000")
 duckdb_service = DuckDBService()
 
@@ -126,7 +134,14 @@ upload_pipeline = UploadPipeline(
     upload_folder=UPLOAD_FOLDER,
     duckdb_service=duckdb_service,
     send_discord=_send_discord,
+    # `stub_classify` is now only the degradation fallback — real per-nest
+    # empty/sealed values come from the OpenCV `HoleDetector` (#165). When
+    # detection finds nothing (unreadable image, no circles), the pipeline
+    # falls back to the stub so the dashboard never blanks and /upload never
+    # 500s.
     classify=stub_classify,
+    detector=HoleDetector(),
+    snip_folder=SNIP_FOLDER,
 )
 
 
@@ -375,6 +390,20 @@ def serve_image(filename):
     if not os.path.isfile(file_path):
         return jsonify({"error": "Image not found"}), 404
     return send_from_directory(UPLOAD_FOLDER, filename)
+
+
+@app.get("/snips/<path:filename>")
+def serve_snip(filename):
+    """Serve a per-nest snip crop (#165) from the snip folder.
+
+    A dedicated route (rather than reusing ``/images`` with a ``snips/``
+    prefix) keeps the public backend proxy a clean ``/api/snips/:filename``
+    without a slash-in-param. Snips are public by design — the crop removes all
+    background, so no auth is required (issue #154)."""
+    file_path = os.path.join(SNIP_FOLDER, filename)
+    if not os.path.isfile(file_path):
+        return jsonify({"error": "Snip not found"}), 404
+    return send_from_directory(SNIP_FOLDER, filename)
 
 
 if __name__ == "__main__":

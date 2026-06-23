@@ -17,6 +17,7 @@ from pathlib import Path
 
 from requests import RequestException
 
+from services.hole_detection import DetectionResult, Snip
 from services.upload_pipeline import UploadPipeline, UploadRequest
 
 # Canonical 12-hex-char ModuleId fixtures.
@@ -52,16 +53,19 @@ class _FakeDuckDB:
         add_progress_raises: bool = False,
         heartbeat_raises: bool = False,
         record_image_raises: bool = False,
+        record_detections_raises: bool = False,
     ):
         self.progress_count = progress_count
         self.progress_count_raises = progress_count_raises
         self.add_progress_raises = add_progress_raises
         self.heartbeat_raises = heartbeat_raises
         self.record_image_raises = record_image_raises
+        self.record_detections_raises = record_detections_raises
         self.progress_count_calls: list[str] = []
         self.add_progress_calls: list[dict] = []
         self.heartbeat_calls: list[tuple[str, int]] = []
         self.record_image_calls: list[tuple[str, str]] = []
+        self.record_detections_calls: list[tuple[str, str, list]] = []
 
     def get_progress_count(self, mac: str) -> int:
         self.progress_count_calls.append(mac)
@@ -87,6 +91,14 @@ class _FakeDuckDB:
             raise RequestException("boom")
         return {"message": "Image recorded"}
 
+    def record_detections(
+        self, module_id: str, filename: str, detections: list
+    ) -> dict:
+        self.record_detections_calls.append((module_id, filename, detections))
+        if self.record_detections_raises:
+            raise RequestException("boom")
+        return {"message": "Detections recorded", "inserted": len(detections)}
+
 
 def _make_pipeline(
     upload_dir: Path,
@@ -105,6 +117,124 @@ def _make_pipeline(
 
 
 # --------------------------- tests ---------------------------
+
+
+class _FakeDetector:
+    """Returns a preconfigured DetectionResult; records the path it saw."""
+
+    def __init__(self, result: DetectionResult):
+        self._result = result
+        self.detect_calls: list[str] = []
+
+    def detect(self, image_path: str) -> DetectionResult:
+        self.detect_calls.append(image_path)
+        return self._result
+
+
+def _sealed_detection() -> DetectionResult:
+    """One sealed leafcutter snip with real (tiny) bytes."""
+    snip = Snip(
+        bee_type="leafcutter_bee",
+        nest_index=2,
+        bbox=(0.1, 0.2, 0.3, 0.3),
+        state="sealed",
+        confidence=0.9,
+        jpeg=b"\xff\xd8\xff-fake-jpeg",
+    )
+    return DetectionResult(
+        classification={"leafcutter_bee": {"2": 1}},
+        snips=[snip],
+    )
+
+
+# --------------------------- detection tests ---------------------------
+
+
+def test_pipeline_uses_detection_classification_and_persists_snips(tmp_path: Path):
+    """When the detector produces a result, its classification flows to
+    add_progress (not the stub) and each snip is written + recorded."""
+    duckdb = _FakeDuckDB(progress_count=5)
+    detector = _FakeDetector(_sealed_detection())
+    pipeline = UploadPipeline(
+        upload_folder=str(tmp_path),
+        duckdb_service=duckdb,
+        send_discord=lambda msg: None,
+        classify=lambda: {"stub": {"1": 0}},  # must NOT be used
+        detector=detector,
+        snip_folder=str(tmp_path / "snips"),
+    )
+
+    req = UploadRequest(
+        mac=TEST_MAC_1, battery=50, image=_FakeImage("cap.jpg"), logs_raw=None
+    )
+    result = pipeline.run(req)
+
+    # Real detection classification used, stub ignored.
+    assert result.classification == {"leafcutter_bee": {"2": 1}}
+    assert duckdb.add_progress_calls[0]["classification"] == {
+        "leafcutter_bee": {"2": 1}
+    }
+
+    # Snip JPEG written to the snip folder with the derived filename.
+    snip_path = tmp_path / "snips" / "cap-leafcutter_bee-2.jpg"
+    assert snip_path.exists()
+    assert snip_path.read_bytes() == b"\xff\xd8\xff-fake-jpeg"
+
+    # Detection row recorded with the canonical DB bee type (not the wire key).
+    assert len(duckdb.record_detections_calls) == 1
+    mac, filename, rows = duckdb.record_detections_calls[0]
+    assert (mac, filename) == (TEST_MAC_1, "cap.jpg")
+    assert rows[0]["bee_type"] == "leafcutter"
+    assert rows[0]["state"] == "sealed"
+    assert rows[0]["snip_filename"] == "cap-leafcutter_bee-2.jpg"
+
+
+def test_pipeline_falls_back_to_stub_when_detection_empty(tmp_path: Path):
+    """An empty DetectionResult (no circles) => stub classification is used and
+    no snips/detections are recorded — the dashboard never blanks."""
+    duckdb = _FakeDuckDB(progress_count=5)
+    detector = _FakeDetector(DetectionResult())  # ok == False
+    pipeline = UploadPipeline(
+        upload_folder=str(tmp_path),
+        duckdb_service=duckdb,
+        send_discord=lambda msg: None,
+        classify=lambda: {"orchard_bee": {"1": 1}},
+        detector=detector,
+        snip_folder=str(tmp_path / "snips"),
+    )
+
+    req = UploadRequest(
+        mac=TEST_MAC_2, battery=50, image=_FakeImage("blank.jpg"), logs_raw=None
+    )
+    result = pipeline.run(req)
+
+    assert result.classification == {"orchard_bee": {"1": 1}}
+    assert duckdb.record_detections_calls == []
+    assert not (tmp_path / "snips").exists() or not any((tmp_path / "snips").iterdir())
+
+
+def test_pipeline_tolerates_record_detections_failure(tmp_path: Path, capsys):
+    """A duckdb failure on record_detections logs and never 500s the upload."""
+    duckdb = _FakeDuckDB(progress_count=5, record_detections_raises=True)
+    detector = _FakeDetector(_sealed_detection())
+    pipeline = UploadPipeline(
+        upload_folder=str(tmp_path),
+        duckdb_service=duckdb,
+        send_discord=lambda msg: None,
+        classify=lambda: {},
+        detector=detector,
+        snip_folder=str(tmp_path / "snips"),
+    )
+
+    req = UploadRequest(
+        mac=TEST_MAC_3, battery=50, image=_FakeImage("cap.jpg"), logs_raw=None
+    )
+    result = pipeline.run(req)  # must not raise
+
+    assert result.filename == "cap.jpg"
+    # Snip still written even though the DB record failed.
+    assert (tmp_path / "snips" / "cap-leafcutter_bee-2.jpg").exists()
+    assert "[record_detections]" in capsys.readouterr().out
 
 
 def test_pipeline_first_upload_runs_all_steps_and_pings_discord(tmp_path: Path):

@@ -51,11 +51,13 @@ and flags the synonyms, typos, and overloads that have caused bugs.
 
 ## Classification
 
-| Term                      | Definition                                                                                                                                       | Aliases to avoid                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
-| **Classification**        | The act (and result) of converting an uploaded image into per-nest cell-state values. Currently produced by `stub_classify()`; MaskRCNN planned. | inference, prediction (free prose only) |
-| **Classification Output** | The JSON payload the image-service POSTs to `/add_progress_for_module`. Pydantic model `ClassificationOutput`.                                   | progress payload                        |
-| **Stub Classifier**       | The placeholder `stub_classify()` returning random 0/1 per (bee_type, nest index). Stand-in for MaskRCNN.                                        | dummy classifier                        |
+| Term                      | Definition                                                                                                                                                                                                                                     | Aliases to avoid                        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| **Classification**        | The act (and result) of converting an uploaded image into per-nest cell-state values. Produced by the OpenCV `HoleDetector` (#165); MaskRCNN planned.                                                                                          | inference, prediction (free prose only) |
+| **Classification Output** | The JSON payload the image-service POSTs to `/add_progress_for_module`. Pydantic model `ClassificationOutput`.                                                                                                                                 | progress payload                        |
+| **Stub Classifier**       | The placeholder `stub_classify()` returning random 0/1 per (bee_type, nest index). Now only the degradation fallback when `HoleDetector` finds nothing.                                                                                        | dummy classifier                        |
+| **Hole detection**        | Locating the nest holes in a capture (OpenCV `HoughCircles` + grid snap) and labelling each empty/sealed. The user-facing name for what produces a **Snip** and the real sealed-% values. Issue #165, ADR-026.                                 | —                                       |
+| **Snip**                  | A cropped image of a single nest hole, stored per upload in `nest_detections` and served publicly at `/api/snips/:filename`. The crop is the privacy mechanism (#154): no garden/house background, so it needs no auth. Wire shape `NestSnip`. | cutout, thumbnail, crop (in prose OK)   |
 
 ## Telemetry and admin
 

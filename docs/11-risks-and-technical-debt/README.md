@@ -128,6 +128,31 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### `opencv-python-headless` still needs `libglib2.0-0`; and `circle.txt` was stale (#165)
+
+**What happened.** Two gotchas surfaced while adding hole detection (#165).
+(1) Adding `opencv-python-headless` to image-service's `requirements.txt` is not
+enough — on the `python:3.12-slim` base, `import cv2` fails at **runtime** with
+`libgthread-2.0.so.0: cannot open shared object file`. The `headless` wheel drops
+the GUI/GL libs but still links **glib**. (2) The prior-art `dev-tools/circle.txt`
+described a 4-bee-type × **3**-nest grid on a 791×528 frame; the physical block is
+actually 4×4, and ESP captures are VGA/UXGA, never 791×528 — so its absolute pixel
+boxes were doubly wrong.
+
+**Why it happened.** `headless` is widely assumed to be "zero system deps", and
+the slim image has no glib. The stale `circle.txt` had no "as-of" marker and read
+like ground truth, so an early plan targeted 12 holes off it before the hardware
+owner corrected it to 16.
+
+**How to avoid it next time.** When adding an OpenCV (or any native-wheel)
+dependency to a slim-based service, install its system libs in the Dockerfile
+(`libglib2.0-0` here) and verify `import` _in the container_, not just on the dev
+host — a green local import proves nothing about the slim image. Treat
+hand-measured reference assets as provenance, not truth: detect dynamically and
+work in **normalized** coordinates so resolution/pose can't invalidate a fixed
+calibration. `circle.txt` is now annotated as superseded; the live fallback grid
+lives in `image-service/services/hole_detection.py` as normalized fractions.
+
 ### A sparse wire field broke an `ARG_MAX` summary fold — the dashboard signal would have latched forever (#172, review-caught)
 
 **What happened.** #172 added `last_hb_fail_code` / `last_hb_fail_count`

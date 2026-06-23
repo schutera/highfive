@@ -1,22 +1,31 @@
-x, y (from, to)
-Black Masked Bee
-1: 44,28 - 208, 192
-2: 44,192 - 208, 356
-3: 44,356 - 208, 520
-Resin Bee
-1: 236,28 - 400, 192
-2: 236,192 - 400, 356
-3: 236,356 - 400, 520
-Leafcutter Bee
-1: 420,28 - 584, 192
-2: 420,192 - 584, 356
-3: 420,356 - 584, 520
-Orchard Bee
-1: 591,28 - 755, 192
-2: 591,192 - 755, 356
-3: 591,356 - 755, 520
-
-
-Whole picture
-791px width 
-528px height
+# Nest-hole grid reference (issue #165)
+#
+# SUPERSEDED. The original hand-measured pixel boxes below were taken on a
+# single 791x528 reference frame and described a 4-bee-type x 3-nest layout.
+# The physical laser-cut block actually has 4 nests per bee type (a 4x4 grid),
+# and ESP captures arrive at VGA (640x480) or UXGA (1600x1200) — never 791x528 —
+# so absolute pixel boxes don't transfer.
+#
+# The live detector (`image-service/services/hole_detection.py`) now finds holes
+# dynamically with OpenCV HoughCircles and labels bee type *by measured
+# diameter*, so it needs no per-resolution calibration. Its only fixed asset is
+# a NORMALIZED fallback grid (fractions of width/height, resolution-independent),
+# used when HoughCircles fails. That fallback lives in code as
+# `_FALLBACK_X_FRACS` / `_FALLBACK_Y_FRACS` / `_FALLBACK_RADIUS_FRAC` and SHOULD
+# be recalibrated against a current capture from a representative module.
+#
+# Normalized 4x4 fallback (as fractions; mirror of the code constants):
+#   columns (nests, x):     0.30  0.44  0.58  0.72
+#   rows    (bee types, y): 0.22  0.42  0.62  0.82
+#   radius (of width):      0.06
+#
+# Bee types are ordered by ascending hole diameter (homepage BEE_TYPES):
+#   2 mm black-masked < 3 mm resin < 6 mm leafcutter < 9 mm orchard.
+#
+# ---------------------------------------------------------------------------
+# ORIGINAL (stale) measurement, kept for provenance only — DO NOT use as truth:
+# x, y (from, to) on a 791x528 frame
+# Black Masked Bee: 1: 44,28-208,192   2: 44,192-208,356   3: 44,356-208,520
+# Resin Bee:        1: 236,28-400,192  2: 236,192-400,356  3: 236,356-400,520
+# Leafcutter Bee:   1: 420,28-584,192  2: 420,192-584,356  3: 420,356-584,520
+# Orchard Bee:      1: 591,28-755,192  2: 591,192-755,356  3: 591,356-755,520

@@ -27,6 +27,7 @@ from typing import Any
 
 from requests import RequestException
 
+from services.hole_detection import BEE_TYPE_WIRE_TO_DB, DetectionResult, HoleDetector
 from services.sidecar import LogSidecarEnvelope
 
 # Type-only hint for the werkzeug FileStorage. Importing werkzeug here is
@@ -69,19 +70,34 @@ class UploadPipeline:
         duckdb_service,
         send_discord: Callable[[str], None],
         classify: Callable[[], dict],
+        detector: HoleDetector | None = None,
+        snip_folder: str | None = None,
     ):
         self.upload_folder = upload_folder
         self.duckdb_service = duckdb_service
         self.send_discord = send_discord
+        # `classify` is the degradation fallback (the historical stub): used
+        # only when hole detection produces nothing, so a detection miss never
+        # blanks the dashboard (issue #165 graceful-degradation criterion).
         self.classify = classify
+        self.detector = detector
+        # Where per-nest snips are written. Defaults to a `snips/` subdir of the
+        # upload folder so the existing image-serving volume carries them too.
+        self.snip_folder = snip_folder or os.path.join(upload_folder, "snips")
 
     def run(self, req: UploadRequest) -> UploadResult:
         is_first = self._check_first_upload(req.mac)
         file_path = self._persist_image(req)
         self._record_image_upload(req.mac, req.image.filename)
         self._persist_sidecar(req, file_path)
-        classification = self.classify()
+        # Hole detection (#165): real per-nest empty/sealed classification +
+        # cropped snips. Falls back to the historical stub `classify()` when
+        # detection finds nothing, so the existing wire contract always carries
+        # a value and the upload never 500s on a detection problem.
+        detection = self._detect(file_path)
+        classification = detection.classification if detection.ok else self.classify()
         self._record_progress(req.mac, classification)
+        self._persist_and_record_snips(req.mac, req.image.filename, detection)
         self._record_heartbeat(req.mac, req.battery)
         if is_first:
             self._notify_first_sighting(req.mac, req.battery, req.image.filename)
@@ -166,6 +182,72 @@ class UploadPipeline:
             self.duckdb_service.add_progress_for_module(payload)
         except RequestException:
             pass
+
+    def _detect(self, file_path: str) -> DetectionResult:
+        """Run hole detection on the saved image. Never raises — the detector
+        already degrades internally, but a missing detector (e.g. pure-unit
+        pipeline tests that don't inject one) yields an empty result so the
+        caller falls back to the stub classifier."""
+        if self.detector is None:
+            return DetectionResult()
+        return self.detector.detect(file_path)
+
+    def _persist_and_record_snips(
+        self, mac: str, source_filename: str, detection: DetectionResult
+    ) -> None:
+        """Write each snip JPEG to the snip folder and record detection rows.
+
+        Best-effort and non-fatal, mirroring ``_record_image_upload``: the
+        upload itself already succeeded, so a failure to persist snips logs and
+        moves on rather than turning a 200 into a 500. Snip filenames are
+        derived from the source upload + bee type + nest index so a re-upload of
+        the same capture is idempotent on disk and history accrues per upload
+        (enabling the phase-3 time-lapse, #166)."""
+        if not detection.snips:
+            return
+        base = os.path.splitext(os.path.basename(source_filename))[0]
+        try:
+            os.makedirs(self.snip_folder, exist_ok=True)
+        except OSError as exc:
+            print(
+                f"[snips] could not create snip folder {self.snip_folder}: {exc}",
+                flush=True,
+            )
+            return
+
+        rows: list[dict] = []
+        for snip in detection.snips:
+            snip_filename = f"{base}-{snip.bee_type}-{snip.nest_index}.jpg"
+            snip_path = os.path.join(self.snip_folder, snip_filename)
+            try:
+                with open(snip_path, "wb") as f:
+                    f.write(snip.jpeg)
+            except OSError as exc:
+                print(f"[snips] failed to write {snip_filename}: {exc}", flush=True)
+                continue
+            rows.append(
+                {
+                    # Store the canonical DB bee type so detection rows match
+                    # `nest_data.beeType`; the wire key stays on the snip itself.
+                    "bee_type": BEE_TYPE_WIRE_TO_DB.get(snip.bee_type, snip.bee_type),
+                    "nest_index": snip.nest_index,
+                    "bbox": list(snip.bbox),
+                    "state": snip.state,
+                    "confidence": snip.confidence,
+                    "snip_filename": snip_filename,
+                }
+            )
+
+        if not rows:
+            return
+        try:
+            self.duckdb_service.record_detections(mac, source_filename, rows)
+        except RequestException as exc:
+            print(
+                f"[record_detections] duckdb-service failed for mac={mac} "
+                f"filename={source_filename}: {exc}",
+                flush=True,
+            )
 
     def _record_heartbeat(self, mac: str, battery: int) -> None:
         """Bump post-upload aggregates on `module_configs` via

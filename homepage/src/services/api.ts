@@ -5,6 +5,7 @@ import type {
   MeasurementTimeSeries,
   Module,
   ModuleDetail,
+  NestSnip,
   ServerLogService,
   ServerLogsResponse,
   TelemetryEntry,
@@ -21,6 +22,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 // here so existing `import { ImageUpload } from '../services/api'` sites
 // keep working.
 export type { ImageUpload, ImageUploadsPage } from '@highfive/contracts';
+export type { NestSnip } from '@highfive/contracts';
 
 /**
  * Thrown by `api.renameModule()` when the server returns 409 because
@@ -354,6 +356,28 @@ class ApiService {
 
   getImageUrl(filename: string): string {
     return `${this.baseUrl}/images/${encodeURIComponent(filename)}`;
+  }
+
+  /**
+   * Fetch a module's latest per-nest hole-detection snips (#165). Maps to
+   * `GET /api/modules/:id/snips`; reads are public so no credential is
+   * required, but `credentials: 'include'` is harmless and matches the sibling
+   * read calls. Returns one entry per detected nest hole (latest per nest);
+   * empty array when the module has no detections yet.
+   */
+  async getSnips(moduleId: string): Promise<NestSnip[]> {
+    const response = await fetch(`${this.baseUrl}/modules/${encodeURIComponent(moduleId)}/snips`, {
+      headers: this.getHeaders(),
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error(`Failed to fetch snips for module ${moduleId}`);
+    const body = (await response.json()) as { snips?: NestSnip[] };
+    return body.snips ?? [];
+  }
+
+  /** Resolve a snip filename to its public image URL (mirrors getImageUrl). */
+  getSnipUrl(snipFilename: string): string {
+    return `${this.baseUrl}/snips/${encodeURIComponent(snipFilename)}`;
   }
 
   async healthCheck(): Promise<{ status: string; timestamp: string }> {

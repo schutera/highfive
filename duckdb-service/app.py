@@ -7,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from db.schema import init_db
 from routes.admin_weather import admin_weather_bp
+from routes.detections import detections_bp
 from routes.health import health_bp
 from routes.logs import logs_bp
 from routes.measurements import measurements_bp
@@ -83,6 +84,7 @@ app.register_blueprint(logs_bp)
 app.register_blueprint(modules_bp)
 app.register_blueprint(nests_bp)
 app.register_blueprint(progress_bp)
+app.register_blueprint(detections_bp)
 app.register_blueprint(heartbeats_bp)
 app.register_blueprint(measurements_bp)
 app.register_blueprint(admin_weather_bp)

@@ -453,6 +453,47 @@ Error responses bubble verbatim from duckdb-service:
 - `404` — module unknown.
 - `502` — duckdb-service unreachable.
 
+## 1.6b Module nest snips (dashboard hole-detection grid)
+
+```
+GET /api/modules/:id/snips
+GET /api/snips/:filename
+```
+
+Public — no auth (#165, ADR-026). Snips are cropped to the hole only, so they
+carry no garden/house background and need no credential (the privacy mechanism
+of #154).
+
+`GET /api/modules/:id/snips` proxies duckdb-service `GET /detections` (§3.15)
+and maps the snake_case rows to the camelCase `NestSnip` shape pinned in
+[`contracts/src/index.ts`](../contracts/src/index.ts). One entry per nest hole —
+the latest detection per `(beeType, nestIndex)`. Malformed rows (unknown bee
+type / state) are dropped rather than forwarded.
+
+```json
+{
+  "snips": [
+    {
+      "beeType": "leafcutter",
+      "nestIndex": 1,
+      "state": "sealed",
+      "confidence": 0.91,
+      "snipFilename": "esp_cap_123-leafcutter-1.jpg",
+      "bbox": [0.41, 0.18, 0.18, 0.27],
+      "sourceFilename": "esp_cap_123.jpg",
+      "detectedAt": "2026-06-23 12:00:05"
+    }
+  ]
+}
+```
+
+`GET /api/snips/:filename` proxies the snip JPEG bytes from image-service
+`GET /snips/:filename` (§2.5). Resolve a `snipFilename` to its URL with
+`api.getSnipUrl(...)` on the homepage, mirroring `getImageUrl`.
+
+Errors: `400` invalid module id; `502` duckdb-service / image-service
+unreachable; `404` snip not found (bytes route).
+
 ## 1.7 Module measurements timeseries (per-module canonical store)
 
 ```
@@ -732,6 +773,19 @@ The TypeScript wire type is `ImageUploadsPage` in
 [`contracts/src/index.ts`](../contracts/src/index.ts); see
 [api-contracts.md](08-crosscutting-concepts/api-contracts.md) for the
 backend↔homepage contract.
+
+## 2.5 Serve a nest snip (hole detection)
+
+```
+GET /snips/<filename>
+```
+
+Serves a cropped per-nest snip JPEG from the snip folder
+(`IMAGE_STORE_PATH/snips/`). Public, like `GET /images/<filename>` — the crop
+removes all background (#154). The backend re-exposes this at
+`GET /api/snips/:filename` (§1.6b). Snips are produced on `/upload` by the
+OpenCV `HoleDetector` and recorded via duckdb `POST /record_detections` (§3.15).
+`404` when the snip file is absent.
 
 <br>
 
@@ -1211,6 +1265,49 @@ skip across pages. Implementation: `duckdb-service/routes/modules.py`'s
 `list_image_uploads`. The unbounded variant (omitted `limit`) is slow on
 a large table — see chapter 11 "failed to load images"; callers should
 always paginate.
+
+## 3.15 Record / list nest detections (hole detection)
+
+```
+POST /record_detections
+GET  /detections?module_id=<mac>
+```
+
+Per-nest hole-detection rows + snips (#165, ADR-026). duckdb-service is the
+sole writer (ADR-001), so image-service POSTs here after cropping snips on
+`/upload`; the read backs the public snip grid via `backend GET
+/api/modules/:id/snips` (§1.6b).
+
+`POST /record_detections` body:
+
+```json
+{
+  "module_id": "aabbccddeeff",
+  "filename": "esp_cap_123.jpg",
+  "detections": [
+    {
+      "bee_type": "leafcutter",
+      "nest_index": 1,
+      "bbox": [0.41, 0.18, 0.18, 0.27],
+      "state": "sealed",
+      "confidence": 0.91,
+      "snip_filename": "esp_cap_123-leafcutter-1.jpg"
+    }
+  ]
+}
+```
+
+Rows with an invalid `state` (not `empty`/`sealed`) or missing `snip_filename`
+are skipped, not fatal — one bad item can't reject the capture. Returns
+`{"message": "...", "inserted": N}`. `bee_type` is the canonical DB form
+(`blackmasked`/`resin`/`leafcutter`/`orchard`), matching `nest_data.beeType`.
+
+`GET /detections?module_id=<mac>` returns the **latest** detection per
+`(bee_type, nest_index)` (`ROW_NUMBER() … ORDER BY detected_at DESC, id DESC`) —
+full history is retained in `nest_detections` but the read folds to current
+state for the dashboard. `bbox` is reassembled to `[x, y, w, h]` (normalized).
+`400` on missing/invalid `module_id`; empty `{"detections": []}` for a module
+with no detections yet. Implementation: `duckdb-service/routes/detections.py`.
 
 <br>
 

@@ -53,6 +53,12 @@ vi.mock('../services/api', () => ({
     getImageUrl: vi.fn(
       (filename: string) => `http://localhost:3002/api/images/${encodeURIComponent(filename)}`,
     ),
+    // Per-nest snip grid (#165). Defaults to no snips so this suite focuses on
+    // the panel chrome; the NestSnipGrid component has its own test file.
+    getSnips: vi.fn().mockResolvedValue([]),
+    getSnipUrl: vi.fn(
+      (filename: string) => `http://localhost:3002/api/snips/${encodeURIComponent(filename)}`,
+    ),
     getModuleLogs: vi.fn().mockResolvedValue([]),
     getHeartbeatGaps: vi.fn().mockResolvedValue([]),
     checkSession: vi.fn().mockResolvedValue(false),

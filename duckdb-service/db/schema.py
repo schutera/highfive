@@ -159,6 +159,33 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_heartbeat_module ON module_heartbeats(module_id);
             CREATE INDEX IF NOT EXISTS idx_heartbeat_received ON module_heartbeats(received_at);
+
+            -- Per-nest hole detections + snips (#165). One row per detected
+            -- hole per upload; full history is retained (no upsert) so the
+            -- phase-3 time-lapse (#166) can scrub a nest across days. `bbox_*`
+            -- are normalized [0,1] fractions of the source image so a snip's
+            -- location is resolution-independent. No FK to module_configs:
+            -- mirrors image_uploads / measurements so an out-of-order or
+            -- orphaned detection survives; the read endpoint filters by
+            -- module_id so orphans stay invisible.
+            CREATE SEQUENCE IF NOT EXISTS nest_detections_seq START 1;
+            CREATE TABLE IF NOT EXISTS nest_detections (
+                id INTEGER PRIMARY KEY DEFAULT nextval('nest_detections_seq'),
+                module_id VARCHAR(20) NOT NULL,
+                filename VARCHAR(255) NOT NULL,
+                bee_type VARCHAR(20) NOT NULL,
+                nest_index INTEGER NOT NULL,
+                bbox_x DOUBLE,
+                bbox_y DOUBLE,
+                bbox_w DOUBLE,
+                bbox_h DOUBLE,
+                state VARCHAR(10) NOT NULL,
+                confidence DOUBLE,
+                snip_filename VARCHAR(255) NOT NULL,
+                detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_detection_module ON nest_detections(module_id);
+            CREATE INDEX IF NOT EXISTS idx_detection_detected ON nest_detections(detected_at);
             """
         )
 

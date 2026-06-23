@@ -57,6 +57,27 @@ class DuckDBService:
         r.raise_for_status()
         return r.json()
 
+    def record_detections(
+        self, module_id: str, filename: str, detections: list[dict]
+    ) -> dict:
+        """Insert nest_detections rows for one capture's per-hole snips (#165).
+
+        ``detections`` is a list of dicts with keys ``bee_type``,
+        ``nest_index``, ``bbox`` ([x, y, w, h] normalized), ``state``
+        ("empty"/"sealed"), ``confidence`` and ``snip_filename``.
+        """
+        r = requests.post(
+            f"{self.base_url}/record_detections",
+            json={
+                "module_id": module_id,
+                "filename": filename,
+                "detections": detections,
+            },
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        return r.json()
+
     def heartbeat(self, module_id: str, battery: int) -> bool:
         """Record a module heartbeat (battery + image_count++).
 

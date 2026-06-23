@@ -20,9 +20,12 @@ sequenceDiagram
     IMG->>DDB: POST /record_image<br/>(body: {module_id, filename})
     DDB->>DDB: insert image_uploads row (uploaded_at server-stamped)
     IMG->>IMG: write &lt;img&gt;.log.json sidecar (if logs present)
-    IMG->>IMG: stub_classify()
-    IMG->>DDB: POST /add_progress_for_module
+    IMG->>IMG: HoleDetector.detect() — locate holes, crop snips, empty/sealed<br/>(falls back to stub_classify() if detection finds nothing)
+    IMG->>DDB: POST /add_progress_for_module (real sealed values)
     DDB->>DDB: insert/replace daily_progress row
+    IMG->>IMG: write per-nest snips to /data/images/snips/
+    IMG->>DDB: POST /record_detections<br/>(snips + bboxes + state per hole, #165)
+    DDB->>DDB: insert nest_detections rows
     IMG->>DDB: POST /modules/&lt;mac&gt;/heartbeat<br/>(post-upload aggregate, body: {battery})
     DDB->>DDB: update battery, image_count (first_online COALESCE-guarded, #75)
     IMG-->>ESP: 200 OK
@@ -138,9 +141,15 @@ sequenceDiagram
      `image`, `payload`). Unparseable logs are preserved with a
      `parse_error: true` marker inside `payload` (the image itself
      still persists).
-   - Runs `stub_classify()` — returns random 0/1 per (bee_type, nest
-     index). This is a placeholder; the contract shape is what
-     MaskRCNN will fill.
+   - Runs `HoleDetector.detect()` (#165,
+     [ADR-026](../09-architecture-decisions/adr-026-hole-detection-snips.md)):
+     OpenCV `HoughCircles` locates the nest holes, a per-hole snip is cropped to
+     `/data/images/snips/`, and each hole is classified empty/sealed by a
+     brightness+texture heuristic — producing **real** values in the same
+     `{bee_type: {nest: 0|1}}` contract shape. If detection finds nothing
+     (unreadable image, no circles) it degrades to the historical
+     `stub_classify()` fallback, so a detection miss never blanks the dashboard
+     and `/upload` never 500s.
 
 3. **Persistence write-back.**
    `image-service` calls `duckdb-service` over HTTP (never opens its
@@ -159,6 +168,11 @@ sequenceDiagram
      line is the on-call's signal that an orphaned file exists.
    - `POST /add_progress_for_module` — inserts or replaces a
      `daily_progress` row for today. Missing nests are auto-created.
+   - `POST /record_detections` — inserts the per-hole snip rows
+     (`nest_detections`: bee type, nest index, normalized bbox, state,
+     confidence, snip filename). Best-effort and **non-fatal but logged**,
+     like `record_image`: snips are written to disk first, so a DB failure
+     leaves the JPEGs recoverable. Backs the public snip grid (#165).
    - `POST /modules/<mac>/heartbeat` — **post-upload aggregate**:
      updates `battery_level` and `image_count` on `module_configs`.
      `first_online` is `COALESCE`-guarded (issue

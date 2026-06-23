@@ -122,9 +122,10 @@ Values: `1` = filled/sealed, `0` = empty.
 The current `HoleDetector` (`services/hole_detection.py`,
 [ADR-026](../09-architecture-decisions/adr-026-hole-detection-snips.md)):
 
-- locates holes with OpenCV `HoughCircles`, snapping to a 4×4 grid (normalized
-  fixed-grid fallback when detection is weak) — all in resolution-independent
-  fractions;
+- locates holes with OpenCV `HoughCircles`, snapping to a 4×4 grid in
+  resolution-independent fractions; below a circle quorum it returns **no
+  detection** (degrade to the stub) rather than fabricating a grid — real
+  captures currently hit this path, see `dev-tools/real_captures/README.md`;
 - labels bee type **by measured hole diameter** (rows ordered by median radius →
   ascending size: black-masked < resin < leafcutter < orchard);
 - classifies each hole empty vs sealed with a brightness+texture heuristic;

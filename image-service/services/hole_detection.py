@@ -3,10 +3,11 @@
 Replaces the random ``stub_classify`` with a real, OpenCV-based detector that:
 
 1. **Locates** the nest holes on an uploaded capture (``cv2.HoughCircles``),
-   snapping detections to a 4x4 grid (4 bee types x 4 nest replicates). When
-   detection is too weak it falls back to a normalized fixed grid (the
-   resolution-independent successor to the stale hand-measured
-   ``dev-tools/circle.txt``).
+   snapping detections to a 4x4 grid (4 bee types x 4 nest replicates). When too
+   few circles are found (below ``_MIN_CIRCLES_QUORUM``) it returns NO detection
+   rather than fabricating holes — an earlier fixed-grid fallback silently
+   produced wood-sampled "sealed" snips on real captures (see the calibration
+   note below).
 2. **Labels** each hole's bee type *by measured diameter* — rows are ordered by
    their median radius ascending and mapped onto the canonical bee-type order
    (``blackmasked`` 2 mm < ``resin`` 3 mm < ``leafcutter`` 6 mm <
@@ -31,14 +32,17 @@ classification) rather than raising, so ``/upload`` never 500s on a detection
 problem. The caller (``UploadPipeline``) treats an empty classification as
 "leave the existing behaviour".
 
-CALIBRATION LIMITATION (track before trusting on the public dashboard): the
-Hough params and the fixed fallback grid are tuned against the 791x528 mock
-fixtures, which render a uniform 3x4 grid of same-size holes. They therefore do
-NOT exercise the real block's 4th row or its four *distinct* diameters — the
-exact input the diameter-driven labelling relies on. The diameter logic itself
-is unit-tested with synthetic circles (``test_bee_type_follows_diameter_not_position``),
-but the constants below should be re-derived from a real UXGA capture (one
-sealed, one empty) before this is relied on in the field. See ADR-026."""
+CALIBRATION LIMITATION (known; tracked for follow-up): the Hough params are
+tuned to the 791x528 mock fixtures, on which they find a clean 12-circle grid.
+On the real ESP captures in ``dev-tools/real_captures/`` those same strict
+params find too few circles, so detection currently **degrades to no-detection**
+there (honest blank) rather than guessing. There is no single Hough config that
+fits both the high-contrast synthetic mocks and the low-contrast real captures —
+robust real-image detection needs a candidate-selection / grid-fitting stage and
+a labelled real-capture corpus, which is follow-up work. The diameter-labelling
+logic is unit-tested independently with synthetic circles
+(``test_bee_type_follows_diameter_not_position``). See ADR-026 and
+``dev-tools/real_captures/README.md``."""
 
 from __future__ import annotations
 
@@ -97,9 +101,13 @@ _MIN_RADIUS_FRAC = 0.05
 _MAX_RADIUS_FRAC = 0.095
 _MEDIAN_BLUR_KSIZE = 5
 
-# Below this many detected circles we don't trust the adaptive grid and fall
-# back to the fixed normalized lattice.
-_MIN_CIRCLES_FOR_GRID = 4
+# Minimum number of detected circles before we trust the result at all. Below
+# this we return NO detection (degrade to the stub) rather than fabricating a
+# grid — fabrication on real captures produced confident all-"sealed" garbage.
+# The mock fixtures find 12 with the strict params; real ESP captures currently
+# find too few, so they degrade honestly until the detector is recalibrated
+# against a labelled real-capture corpus (see dev-tools/real_captures/README).
+_MIN_CIRCLES_QUORUM = 8
 
 # ---- Empty vs sealed heuristic --------------------------------------------
 #
@@ -111,17 +119,6 @@ _MIN_CIRCLES_FOR_GRID = 4
 _SEALED_BRIGHTNESS_RATIO = 0.6  # hole_mean / wood_median above this => sealed
 _SEALED_TEXTURE_STD = 20.0  # inner-disk std above this => sealed
 _INNER_DISK_FRAC = 0.55  # sample brightness/texture within r * this
-
-# ---- Fixed-grid fallback (replaces stale dev-tools/circle.txt) ------------
-#
-# Normalized 4x4 lattice of hole centres + radius, as fractions of (width,
-# height) and width respectively. Used only when HoughCircles fails to find a
-# usable set. These are approximate (the laser-cut block roughly fills the
-# central frame) and SHOULD be recalibrated against a real capture from a
-# representative module; see docs/05-building-block-view/image-service.md.
-_FALLBACK_X_FRACS = (0.30, 0.44, 0.58, 0.72)  # 4 columns (nests)
-_FALLBACK_Y_FRACS = (0.22, 0.42, 0.62, 0.82)  # 4 rows (bee types, top->bottom)
-_FALLBACK_RADIUS_FRAC = 0.06
 
 _SNIP_PAD = 1.25  # crop box = radius * this, so the snip frames the hole
 _SNIP_JPEG_QUALITY = 85
@@ -205,10 +202,23 @@ class HoleDetector:
         wood_median = float(np.median(gray)) or 1.0
 
         circles = self._find_circles(gray, w)
-        if circles is None or len(circles) < _MIN_CIRCLES_FOR_GRID:
-            holes = self._fallback_grid(w, h)
-        else:
-            holes = self._assign_to_grid(circles)
+        # Quorum gate (#165 follow-up): only proceed when HoughCircles actually
+        # found a credible number of holes. The earlier behaviour fabricated a
+        # full fixed grid here when detection found nothing — which, on real ESP
+        # captures (where the mock-tuned params find no circles), silently
+        # produced 16 wood-sampled "sealed" snips: confident garbage on the
+        # public dashboard. Degrading to an empty result instead means the
+        # pipeline falls back to the stub and the panel renders no snips, rather
+        # than inventing them. Validated against dev-tools/real_captures/.
+        if circles is None or len(circles) < _MIN_CIRCLES_QUORUM:
+            n = 0 if circles is None else len(circles)
+            print(
+                f"[hole_detection] only {n} circle(s) found (< {_MIN_CIRCLES_QUORUM} "
+                f"quorum) for {image_path}; degrading to no-detection",
+                flush=True,
+            )
+            return DetectionResult()
+        holes = self._assign_to_grid(circles)
 
         if not holes:
             return DetectionResult()
@@ -293,20 +303,6 @@ class HoleDetector:
         if current:
             rows.append(current)
         return rows
-
-    def _fallback_grid(
-        self, width: int, height: int
-    ) -> list[tuple[str, int, tuple[int, int, int]]]:
-        """Place holes on the normalized fixed lattice (detection too weak)."""
-        radius = max(1, int(width * _FALLBACK_RADIUS_FRAC))
-        holes: list[tuple[str, int, tuple[int, int, int]]] = []
-        for row_idx, yf in enumerate(_FALLBACK_Y_FRACS):
-            bee_type = BEE_TYPES_BY_SIZE[row_idx]
-            for nest_idx, xf in enumerate(_FALLBACK_X_FRACS, start=1):
-                x = int(xf * width)
-                y = int(yf * height)
-                holes.append((bee_type, nest_idx, (x, y, radius)))
-        return holes
 
     def _classify_hole(
         self, gray, x: int, y: int, r: int, wood_median: float

@@ -107,3 +107,33 @@ def test_corrupt_image_degrades_without_raising(tmp_path: Path):
     res = HoleDetector().detect(str(bad))
     assert not res.ok
     assert res.snips == []
+
+
+# Real ESP captures (low-res, blurry, low-contrast) — the regression that pins
+# the silent-fabrication fix. With the mock-tuned strict Hough params these find
+# too few circles, so the detector MUST degrade to no-detection rather than
+# fabricate a full grid of wood-sampled "sealed" snips (the bug these fixtures
+# exposed). When the detector is recalibrated for real captures (follow-up),
+# this asserts the safety floor: it must never confidently emit a full 16-hole
+# all-"sealed" result on input it cannot actually read.
+_REAL = _DEV_TOOLS / "real_captures"
+_REAL_CAPTURES = [
+    _REAL / "block_warm_1024.jpg",
+    _REAL / "block_tungsten_640.jpg",
+    _REAL / "block_daylight_640.jpg",
+]
+
+
+@pytest.mark.parametrize("path", _REAL_CAPTURES, ids=lambda p: p.name)
+def test_real_capture_never_fabricates_a_full_sealed_grid(path: Path):
+    if not path.exists():  # fixtures are committed, but stay defensive
+        pytest.skip(f"missing fixture {path}")
+    res = HoleDetector().detect(str(path))
+    # The bug: 16 fabricated snips, all "sealed", over plain wood. Forbid it.
+    fabricated_full_sealed = len(res.snips) >= 16 and all(
+        s.state == "sealed" for s in res.snips
+    )
+    assert not fabricated_full_sealed, (
+        f"{path.name}: detector fabricated a full all-sealed grid "
+        f"({len(res.snips)} snips) on an unreadable real capture"
+    )

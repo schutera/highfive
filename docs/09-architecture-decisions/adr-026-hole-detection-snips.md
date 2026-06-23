@@ -26,9 +26,12 @@ Constraints and prior art:
 ## Decision
 
 Detect holes on upload with **OpenCV `HoughCircles`** (headless), snap detections
-to a 4×4 grid, and fall back to a **normalized fixed grid** when detection is
-weak — all in **normalized coordinates** so the same logic works at any
-resolution. Bee type is assigned **by measured hole diameter** (rows ordered by
+to a 4×4 grid — all in **normalized coordinates** so the same logic works at any
+resolution. When too few circles are found (below a quorum) the detector returns
+**no detection** and the pipeline falls back to the stub; it does **not**
+fabricate a fixed grid. (An earlier cut did fabricate one, which on real
+low-contrast captures produced 16 wood-sampled "sealed" snips — see Consequences
+and chapter 11.) Bee type is assigned **by measured hole diameter** (rows ordered by
 median radius → the canonical ascending-size order), not by absolute position, so
 labelling survives pose/orientation drift. Empty vs sealed is a **binary
 brightness+texture heuristic** (`sealed = brightness_ratio ≥ R OR std ≥ S`):
@@ -56,6 +59,12 @@ never 500s. No ML model ships here.
   (#155/#12); they degrade to whatever the brightness/texture call yields rather
   than failing. When the real model lands it replaces only the `HoleDetector`
   internals — the storage, serving, and wire shapes stay.
-- **The normalized fallback grid is a guess** until recalibrated against a real
-  capture; it only matters when HoughCircles fails, and is documented in
-  `dev-tools/circle.txt` + the code constants.
+- **Real captures aren't reliably readable yet.** Real ESP fixtures
+  (`dev-tools/real_captures/`) showed the mock-tuned params find too few circles,
+  and there is no single Hough config that fits both the high-contrast mocks and
+  the low-contrast real images. The detector therefore **degrades to no-detection**
+  on real captures today (honest blank, not a fabricated grid). Robust real-image
+  detection — a grid-fitting / candidate-selection stage plus a labelled
+  real-capture corpus for the empty/sealed heuristic — is follow-up work. The
+  earlier fixed-grid fabrication was removed because it turned a detection miss
+  into confident garbage on the public dashboard (chapter 11 lesson).

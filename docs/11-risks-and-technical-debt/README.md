@@ -150,8 +150,36 @@ dependency to a slim-based service, install its system libs in the Dockerfile
 host — a green local import proves nothing about the slim image. Treat
 hand-measured reference assets as provenance, not truth: detect dynamically and
 work in **normalized** coordinates so resolution/pose can't invalidate a fixed
-calibration. `circle.txt` is now annotated as superseded; the live fallback grid
-lives in `image-service/services/hole_detection.py` as normalized fractions.
+calibration. `circle.txt` is now annotated as superseded.
+
+### A "graceful" fixed-grid fallback fabricated confident garbage on real captures (#165, found with real fixtures)
+
+**What happened.** The hole detector's hybrid design fell back to a fixed 4×4
+grid when `HoughCircles` found nothing, so `/upload` would "always produce snips."
+Against the synthetic mocks this looked great. The first **real** ESP captures
+(`dev-tools/real_captures/`) revealed the trap: the mock-tuned params find **zero**
+circles on real low-contrast images, so every real upload hit the fallback —
+which placed 16 holes on plain wood and classified them all "sealed." The
+dashboard would have shown a confident, fully-occupied grid for blocks that were
+actually empty. The bug was invisible because the only test inputs were the
+mocks, on which Hough succeeds and the fallback never fires.
+
+**Why it happened.** A fallback that _fabricates_ output converts "I couldn't
+detect anything" into "here is a clean answer." Combined with calibration tuned
+only to unrealistic fixtures, the failure mode (total detection miss) was exactly
+the path with no test coverage. There is also no single Hough config that fits
+both the high-contrast mocks and the low-contrast real captures, so the mock
+success actively hid the real failure.
+
+**How to avoid it next time.** A fallback may _degrade_ (return less, or nothing)
+but must never _fabricate_ data that flows to users as if measured. Gate on real
+evidence (a detection quorum) and return "no result" below it, so the honest
+empty state shows instead of invented values. And calibrate/regression-test CV
+against representative real input, not just clean synthetic fixtures — the mock
+that makes your happy path green is also the one that hides your failure path. The
+fixed-grid fabrication was removed; the detector now degrades to no-detection
+below `_MIN_CIRCLES_QUORUM`, pinned by
+`test_real_capture_never_fabricates_a_full_sealed_grid`.
 
 ### A sparse wire field broke an `ARG_MAX` summary fold — the dashboard signal would have latched forever (#172, review-caught)
 

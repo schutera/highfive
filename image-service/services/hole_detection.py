@@ -29,7 +29,16 @@ Graceful degradation is a hard contract (issue #165 acceptance criterion): any
 failure here returns an empty :class:`DetectionResult` (no snips, empty
 classification) rather than raising, so ``/upload`` never 500s on a detection
 problem. The caller (``UploadPipeline``) treats an empty classification as
-"leave the existing behaviour"."""
+"leave the existing behaviour".
+
+CALIBRATION LIMITATION (track before trusting on the public dashboard): the
+Hough params and the fixed fallback grid are tuned against the 791x528 mock
+fixtures, which render a uniform 3x4 grid of same-size holes. They therefore do
+NOT exercise the real block's 4th row or its four *distinct* diameters — the
+exact input the diameter-driven labelling relies on. The diameter logic itself
+is unit-tested with synthetic circles (``test_bee_type_follows_diameter_not_position``),
+but the constants below should be re-derived from a real UXGA capture (one
+sealed, one empty) before this is relied on in the field. See ADR-026."""
 
 from __future__ import annotations
 

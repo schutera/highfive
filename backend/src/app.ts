@@ -3,7 +3,12 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { tryParseModuleId } from '@highfive/contracts';
-import type { ServerLogsResponse, HeartbeatGap } from '@highfive/contracts';
+import type {
+  ServerLogsResponse,
+  HeartbeatGap,
+  NestSnip,
+  NestSnipsResponse,
+} from '@highfive/contracts';
 import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
 import { accessLog } from './accessLog';
@@ -498,9 +503,13 @@ app.get('/api/modules/:id/snips', async (req, res) => {
       (SNIP_BEE_TYPES as readonly string[]).includes(d.bee_type) &&
       (d.state === 'empty' || d.state === 'sealed') &&
       typeof d.snip_filename === 'string' &&
+      typeof d.nest_index === 'number' &&
+      typeof d.confidence === 'number' &&
       Array.isArray(d.bbox) &&
       d.bbox.length === 4;
-    const snips = raw.filter(isValid).map((d) => ({
+    // Annotate against the contract so the camelCase mapping is checked at
+    // compile time on the producer side too (ADR-004), not just the consumer's.
+    const snips: NestSnip[] = raw.filter(isValid).map((d) => ({
       beeType: d.bee_type as SnipBeeType,
       nestIndex: d.nest_index,
       state: d.state as 'empty' | 'sealed',
@@ -510,7 +519,8 @@ app.get('/api/modules/:id/snips', async (req, res) => {
       sourceFilename: d.filename,
       detectedAt: d.detected_at,
     }));
-    res.json({ snips });
+    const payload: NestSnipsResponse = { snips };
+    res.json(payload);
   } catch (error) {
     console.error('[GET /api/modules/:id/snips]', { id, error: String(error) });
     res.status(502).json({ error: 'duckdb-service unreachable' });

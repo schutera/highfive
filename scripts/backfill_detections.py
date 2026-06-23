@@ -10,8 +10,7 @@ where the upload volume is mounted and the services are reachable — typically
 inside the `image-service` container or a shell with `IMAGE_STORE_PATH` pointing
 at the same volume:
 
-    docker compose exec image-service python /app/../scripts/backfill_detections.py
-    # or, from a dev checkout with the volume mounted:
+    # from a dev checkout with the upload volume mounted and the services up:
     IMAGE_STORE_PATH=/data/images DUCKDB_SERVICE_URL=http://localhost:8002 \
         python scripts/backfill_detections.py [--module <mac>] [--dry-run]
 

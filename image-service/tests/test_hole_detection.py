@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from services.hole_detection import BEE_TYPES_BY_SIZE, DetectionResult, HoleDetector
@@ -58,16 +59,39 @@ def test_classification_keeps_wire_shape():
         assert all(k.isdigit() for k in nests)
 
 
-def test_bee_type_ordered_by_diameter():
-    """Bee-type labels come from measured diameter: the rows present must be a
-    prefix of the ascending-size order (smallest hole -> black_masked_bee)."""
+def test_bee_type_follows_diameter_not_position():
+    """The load-bearing design claim: bee type is driven by *measured diameter*,
+    not by where the row sits in the frame. Feed two rows whose vertical order
+    DISAGREES with their diameter order — the physically-TOP row (small y) has
+    the LARGER holes, the bottom row the smaller — and assert the small-radius
+    row is labelled the smallest bee (`black_masked_bee`) regardless of being at
+    the bottom. A position-driven implementation would label the top row first
+    and fail this."""
+    big_r, small_r = 40, 20
+    top_y, bottom_y = 100, 320  # gap >> median_r*1.2 so they cluster as 2 rows
+    circles = np.array(
+        [(x, top_y, big_r) for x in (100, 200, 300, 400)]
+        + [(x, bottom_y, small_r) for x in (100, 200, 300, 400)],
+        dtype=int,
+    )
+
+    holes = HoleDetector()._assign_to_grid(circles)
+    by_radius: dict[int, set[str]] = {}
+    for bee_type, _nest_idx, (_x, _y, r) in holes:
+        by_radius.setdefault(r, set()).add(bee_type)
+
+    # Smallest holes -> smallest bee, even though they're the BOTTOM row.
+    assert by_radius[small_r] == {"black_masked_bee"}
+    # Largest of the two -> the next size up (resin), even though it's the TOP.
+    assert by_radius[big_r] == {"resin_bee"}
+
+
+def test_classification_keys_are_in_ascending_size_order():
+    """The emitted bee-type keys are a contiguous ascending-size prefix."""
     res = HoleDetector().detect(str(MOCK_FILLED))
     present = list(res.classification.keys())
-    expected_prefix = list(BEE_TYPES_BY_SIZE[: len(present)])
-    # Order is by ascending diameter; the detector emits them in that order.
-    assert set(present).issubset(set(BEE_TYPES_BY_SIZE))
     assert present == [b for b in BEE_TYPES_BY_SIZE if b in present]
-    assert expected_prefix[0] == "black_masked_bee"
+    assert present[0] == "black_masked_bee"
 
 
 def test_missing_image_degrades_to_empty_result():

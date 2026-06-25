@@ -115,7 +115,13 @@ def test_duckdb(retries: int = 20, delay: float = 0.5):
 
 
 def stub_classify() -> dict:
-    """Return dummy classification values. Replace with MaskRCNN later."""
+    """Fallback progress values used when the detector does not classify.
+
+    The learned detector (ADR-027) localizes holes and crops real snips but
+    defers the empty-vs-sealed call, so it leaves ``classification`` empty and
+    the pipeline uses this stub for the species progress bars. A learned
+    empty/sealed classifier is future work; until it lands the bars stay stubbed.
+    """
     return {
         "black_masked_bee": {str(i): random.choice([0, 1]) for i in range(1, 5)},
         "leafcutter_bee": {str(i): random.choice([0, 1]) for i in range(1, 5)},
@@ -134,11 +140,12 @@ upload_pipeline = UploadPipeline(
     upload_folder=UPLOAD_FOLDER,
     duckdb_service=duckdb_service,
     send_discord=_send_discord,
-    # `stub_classify` is now only the degradation fallback — real per-nest
-    # empty/sealed values come from the OpenCV `HoleDetector` (#165). When
-    # detection finds nothing (unreadable image, no circles), the pipeline
-    # falls back to the stub so the dashboard never blanks and /upload never
-    # 500s.
+    # The learned `HoleDetector` (YOLO26n-seg via ONNX, ADR-027) locates every
+    # hole and crops a real per-nest snip; it defers empty/sealed, so it leaves
+    # `classification` empty and `stub_classify` still drives the progress bars.
+    # On a detection miss (unreadable image, missing/broken model) the pipeline
+    # also falls back to the stub, so the dashboard never blanks and /upload
+    # never 500s (#165 graceful-degradation criterion).
     classify=stub_classify,
     detector=HoleDetector(),
     snip_folder=SNIP_FOLDER,

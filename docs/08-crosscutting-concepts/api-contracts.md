@@ -457,8 +457,8 @@ Rendered by `homepage/src/components/NestSnipGrid.tsx`. The type lives in
 export interface NestSnip {
   beeType: 'blackmasked' | 'resin' | 'leafcutter' | 'orchard'; // matches NestData.beeType, NOT the image-service wire key 'leafcutter_bee'
   nestIndex: number; // 1-based
-  state: 'empty' | 'sealed';
-  confidence: number; // 0-1
+  state: 'empty' | 'sealed' | 'undetermined'; // learned detector localizes → 'undetermined'; empty/sealed await a classifier (ADR-027)
+  confidence: number; // 0-1; detection confidence for this hole
   snipFilename: string; // resolve via api.getSnipUrl(...), like ImageUpload.filename
   bbox: [number, number, number, number]; // normalized [x, y, w, h] in [0,1]
   sourceFilename: string;

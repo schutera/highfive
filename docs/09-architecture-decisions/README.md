@@ -43,7 +43,8 @@ and link backwards.
 | [023](adr-023-persistent-structured-server-logs.md)         | Server logs become structured, disk-persisted (30 d / 100 MB), SSE-streamed     | Accepted                                                          |
 | [024](adr-024-boot-capture-rate-limit.md)                   | Boot-capture rate-limit via an RTC_NOINIT epoch, wiped on power-on              | Accepted                                                          |
 | [025](adr-025-heartbeat-gap-derived-read.md)                | Server-side heartbeat gaps are a derived read, not a persisted table            | Accepted                                                          |
-| [026](adr-026-hole-detection-snips.md)                      | Hole detection — OpenCV HoughCircles + per-nest snips, no ML yet                | Accepted                                                          |
+| [026](adr-026-hole-detection-snips.md)                      | Hole detection — OpenCV HoughCircles + per-nest snips, no ML yet                | Detector superseded by [027](adr-027-hole-detection-model.md)     |
+| [027](adr-027-hole-detection-model.md)                      | Hole detection — learned YOLO26n-seg model, DINO+SAM labelling                  | Accepted                                                          |
 
 ## When to create an ADR
 

@@ -463,6 +463,11 @@ app.get('/api/modules/:id/activity', async (req, res) => {
 // by design (the crop removes all background; reads are public per #142).
 const SNIP_BEE_TYPES = ['blackmasked', 'resin', 'leafcutter', 'orchard'] as const;
 type SnipBeeType = (typeof SNIP_BEE_TYPES)[number];
+// `undetermined` is the localize-only state the learned detector emits (ADR-027);
+// `empty`/`sealed` remain for a future classifier. Mirror duckdb-service
+// `routes/detections.py::_VALID_STATES` and the `NestSnip.state` contract union.
+const SNIP_STATES = ['empty', 'sealed', 'undetermined'] as const;
+type SnipState = (typeof SNIP_STATES)[number];
 
 interface ApiDetection {
   bee_type: string;
@@ -501,7 +506,7 @@ app.get('/api/modules/:id/snips', async (req, res) => {
     const isValid = (d: ApiDetection): boolean =>
       d != null &&
       (SNIP_BEE_TYPES as readonly string[]).includes(d.bee_type) &&
-      (d.state === 'empty' || d.state === 'sealed') &&
+      (SNIP_STATES as readonly string[]).includes(d.state) &&
       typeof d.snip_filename === 'string' &&
       typeof d.nest_index === 'number' &&
       typeof d.confidence === 'number' &&
@@ -512,7 +517,7 @@ app.get('/api/modules/:id/snips', async (req, res) => {
     const snips: NestSnip[] = raw.filter(isValid).map((d) => ({
       beeType: d.bee_type as SnipBeeType,
       nestIndex: d.nest_index,
-      state: d.state as 'empty' | 'sealed',
+      state: d.state as SnipState,
       confidence: d.confidence,
       snipFilename: d.snip_filename,
       bbox: d.bbox,

@@ -179,7 +179,7 @@ def init_db():
                 bbox_y DOUBLE,
                 bbox_w DOUBLE,
                 bbox_h DOUBLE,
-                state VARCHAR(10) NOT NULL,
+                state VARCHAR(20) NOT NULL,  -- 'empty' | 'sealed' | 'undetermined'
                 confidence DOUBLE,
                 snip_filename VARCHAR(255) NOT NULL,
                 detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP

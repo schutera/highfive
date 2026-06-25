@@ -25,13 +25,13 @@ configuration drift.
 
 ## Strategic choices
 
-| Choice | Rationale | ADR |
-|--------|-----------|-----|
-| **DuckDB-service is the sole DB writer** | An older variant let `image-service` open its own DuckDB connection; this caused write conflicts and broke the "one owner per resource" invariant. All persistence now goes via HTTP. | [ADR-001](../09-architecture-decisions/adr-001-duckdb-as-sole-writer.md) |
-| **Pure C++ helpers under `ESP32-CAM/lib/`** | Most ESP firmware is hard to test on the CI host. Splitting URL parsing, ring-buffer, and telemetry serialisation into dependency-free libraries lets `pio test -e native` cover them on every CI run. | [ADR-002](../09-architecture-decisions/adr-002-esp-host-testable-lib.md) |
-| **Single `HIGHFIVE_API_KEY` for both API and admin gates** | Two separate secrets in dev mean two more env vars to forget. Reusing the same key under different header names (`X-API-Key`, `X-Admin-Key`) keeps onboarding to one secret without losing the gating semantics. | [ADR-003](../09-architecture-decisions/adr-003-shared-api-key-for-admin.md) |
-| **Docker Compose for the dev stack** | Lets a contributor go from `git clone` to a working multi-service environment in one command. Production deploys can use the same images on Compose, Swarm, or Kubernetes — image boundaries are unchanged. | (no ADR — convention) |
-| **`@highfive/contracts` shared TypeScript package** | Frontend and backend used to declare separate `Module` / `NestData` types and they drifted. Moving the canonical types into a workspace package made drift a TypeScript compile error. | (no ADR — convention; see [api-contracts](../08-crosscutting-concepts/api-contracts.md)) |
+| Choice                                                     | Rationale                                                                                                                                                                                                        | ADR                                                                                      |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **DuckDB-service is the sole DB writer**                   | An older variant let `image-service` open its own DuckDB connection; this caused write conflicts and broke the "one owner per resource" invariant. All persistence now goes via HTTP.                            | [ADR-001](../09-architecture-decisions/adr-001-duckdb-as-sole-writer.md)                 |
+| **Pure C++ helpers under `ESP32-CAM/lib/`**                | Most ESP firmware is hard to test on the CI host. Splitting URL parsing, ring-buffer, and telemetry serialisation into dependency-free libraries lets `pio test -e native` cover them on every CI run.           | [ADR-002](../09-architecture-decisions/adr-002-esp-host-testable-lib.md)                 |
+| **Single `HIGHFIVE_API_KEY` for both API and admin gates** | Two separate secrets in dev mean two more env vars to forget. Reusing the same key under different header names (`X-API-Key`, `X-Admin-Key`) keeps onboarding to one secret without losing the gating semantics. | [ADR-003](../09-architecture-decisions/adr-003-shared-api-key-for-admin.md)              |
+| **Docker Compose for the dev stack**                       | Lets a contributor go from `git clone` to a working multi-service environment in one command. Production deploys can use the same images on Compose, Swarm, or Kubernetes — image boundaries are unchanged.      | (no ADR — convention)                                                                    |
+| **`@highfive/contracts` shared TypeScript package**        | Frontend and backend used to declare separate `Module` / `NestData` types and they drifted. Moving the canonical types into a workspace package made drift a TypeScript compile error.                           | (no ADR — convention; see [api-contracts](../08-crosscutting-concepts/api-contracts.md)) |
 
 ## Service topology
 
@@ -51,8 +51,10 @@ future contributors don't "fix" them without context.
   optimised for high QPS.
 - **Stub classifier ships in production.** `image-service` calls
   `stub_classify()` returning random 0/1 per (bee_type, nest index).
-  This is the contract shape MaskRCNN will fill — the data flow works
-  end-to-end before classification quality matters.
+  A learned detector already localizes holes for the per-nest snips
+  (ADR-027); this stub fills the same contract shape until a learned
+  empty/sealed classifier lands — the data flow works end-to-end
+  before classification quality matters.
 - **Dev API key as fallback.** `hf_dev_key_2026` is the dev-mode
   default. **Never** ship this in a production deploy — override
   `HIGHFIVE_API_KEY` (see [02-constraints](../02-constraints/README.md)).

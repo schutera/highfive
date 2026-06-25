@@ -1,0 +1,25 @@
+# Dependencies for the ML hole-detection tooling (dev-tools/ml_hole_detection, #165).
+# Offline/dev only — NOT pulled by any service image. Install into a PyTorch-capable
+# venv (your digitalsreeni annotator's env already has most of these):
+#     pip install -r dev-tools/ml_hole_detection/requirements.txt
+
+# prepare_dataset.py — annotator COCO|YOLO export → split YOLO dataset (+ optional QA overlay). Torch-free.
+opencv-python-headless>=4.10   # matches image-service; headless avoids libGL/X11
+numpy>=1.26
+
+# train.py — YOLO26n-seg training. Heavy: ultralytics pulls torch (~GBs).
+ultralytics>=8.3.0             # YOLO26 needs a recent (2026) release; `pip install -U ultralytics` if its weights won't download
+albumentations>=1.4            # enables Ultralytics' auto contrast/CLAHE/brightness augmentation
+
+# export_onnx.py + verify_onnx_parity.py — ONNX export and the runtime-parity
+# check. ultralytics' ONNX export needs onnx + onnxslim; the shape-guard and the
+# parity verifier use onnxruntime (the same lean runtime image-service ships).
+onnx>=1.17
+onnxruntime>=1.20
+onnxslim>=0.1.48
+
+# GPU note: the default torch wheel above is CPU-only on Windows. For NVIDIA GPU
+# training, reinstall the CUDA build AFTER this file (verified on an RTX 4070,
+# driver 595, CUDA 12.6):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+# Verify: python -c "import torch; print(torch.cuda.is_available())"  ->  True

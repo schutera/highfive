@@ -1,71 +1,76 @@
-"""Hole detection + per-nest snip extraction for the image-service (issue #165).
+"""Hole detection + per-nest snip extraction for the image-service (#165, ADR-027).
 
-Replaces the random ``stub_classify`` with a real, OpenCV-based detector that:
+Runs the **learned YOLO26n-seg** detector (single class ``hole``), exported to
+ONNX and executed through the lean ``onnxruntime`` — no torch/ultralytics in the
+service image. The classical ``HoughCircles`` detector this replaces could not
+find holes on real ESP captures (one fixed radius band, no block ROI); the model
+locates every hole — empty or filled equally — across the warm/tungsten/daylight/
+dark range and both block geometries. Training + export pipeline and how the ONNX
+is regenerated: ``dev-tools/ml_hole_detection/`` and
+``docs/05-building-block-view/hole-detection-model.md``.
 
-1. **Locates** the nest holes on an uploaded capture (``cv2.HoughCircles``),
-   snapping detections to a 4x4 grid (4 bee types x 4 nest replicates). When too
-   few circles are found (below ``_MIN_CIRCLES_QUORUM``) it returns NO detection
-   rather than fabricating holes — an earlier fixed-grid fallback silently
-   produced wood-sampled "sealed" snips on real captures (see the calibration
-   note below).
-2. **Labels** each hole's bee type *by measured diameter* — rows are ordered by
-   their median radius ascending and mapped onto the canonical bee-type order
-   (``blackmasked`` 2 mm < ``resin`` 3 mm < ``leafcutter`` 6 mm <
-   ``orchard`` 9 mm, mirroring ``homepage/src/types/index.ts``'s ``BEE_TYPES``).
-   Doing it by diameter rather than by absolute y-position is what makes the
-   labelling robust to camera pose / block orientation drift across modules.
-3. **Classifies** each hole empty vs sealed with a brightness+texture heuristic:
-   an empty hole is a dark, smooth void; a sealed one is a brighter and/or
-   textured plug. ``sealed = (brightness_ratio >= R) OR (std >= S)`` so a
-   shadowed-but-textured plug and a bright-smooth plug are both caught.
-4. **Crops** a tight per-hole snip (JPEG bytes). The crop is the privacy
-   mechanism (issue #154): a snip shows only the hole, no garden/house
-   background, so per-nest imagery can stay on the public dashboard without auth.
+The detector does four things:
 
-Everything is computed in **normalized coordinates** (fractions of the image
-dimensions) so the same logic works at VGA (640x480), UXGA (1600x1200), or the
-791x528 mock fixtures.
+1. **Locate** every nest hole with the ONNX model. The exported graph is
+   end2end (YOLO26 is NMS-free): ``output0`` is ``[1, 300, 4+1+1+32]`` =
+   ``[x1, y1, x2, y2, conf, cls, *mask_coeffs]`` in letterboxed-640 px. We read
+   only the box columns (snips are rectangular crops), un-letterbox to source
+   pixels, drop sub-``_CONF_THRES`` rows, and apply one conservative NMS pass
+   (``_NMS_IOU``) to remove export-precision duplicate boxes. Verified
+   bit-for-bit against ultralytics' own inference on the real captures.
+2. **Label** each hole's bee type *by measured diameter*: holes are clustered
+   into rows, rows ordered by median radius ascending and mapped onto the
+   canonical bee-type order (``black_masked_bee`` < ``resin_bee`` <
+   ``leafcutter_bee`` < ``orchard_bee``). Diameter-driven labelling is robust to
+   camera pose / block orientation (the block mounts large-on-top *or*
+   small-on-top); nest index is left-to-right within a row. Unlike the old
+   detector there is **no fixed 4-per-row cap** — the real blocks are irregular
+   (rows of 7/5/5/4 = 21 holes, or 4x4 = 16), so every detected hole is kept.
+3. **Crop** a tight per-hole snip (JPEG bytes). The crop is the privacy
+   mechanism (#154): a snip shows only the hole, no garden/house background, so
+   per-nest imagery stays on the public dashboard without auth.
+4. **Defer classification.** The model localizes; it does not call empty vs
+   sealed. Each snip's ``state`` is ``"undetermined"`` and the aggregate
+   ``classification`` dict is left empty, so ``UploadPipeline`` keeps using the
+   stub for the progress bars while the *snips* become real. A learned
+   empty/sealed classifier is future work (ADR-027).
 
-Graceful degradation is a hard contract (issue #165 acceptance criterion): any
-failure here returns an empty :class:`DetectionResult` (no snips, empty
-classification) rather than raising, so ``/upload`` never 500s on a detection
-problem. The caller (``UploadPipeline``) treats an empty classification as
-"leave the existing behaviour".
+Everything downstream of the box is in **normalized coordinates** (fractions of
+the image dimensions) so the same logic works at VGA (640x480), UXGA, or any
+resolution.
 
-CALIBRATION LIMITATION (known; tracked for follow-up): the Hough params are
-tuned to the 791x528 mock fixtures, on which they find a clean 12-circle grid.
-On the real ESP captures in ``dev-tools/real_captures/`` those same strict
-params find too few circles, so detection currently **degrades to no-detection**
-there (honest blank) rather than guessing. There is no single Hough config that
-fits both the high-contrast synthetic mocks and the low-contrast real captures —
-robust real-image detection needs a candidate-selection / grid-fitting stage and
-a labelled real-capture corpus, which is follow-up work. The diameter-labelling
-logic is unit-tested independently with synthetic circles
-(``test_bee_type_follows_diameter_not_position``). See ADR-026 and
-``dev-tools/real_captures/README.md``."""
+Graceful degradation is a hard contract (#165 acceptance criterion): any failure
+here — missing onnxruntime/OpenCV, an absent/corrupt model, an unreadable image,
+zero detections — returns an empty :class:`DetectionResult` (no snips) rather
+than raising, so ``/upload`` never 500s on a detection problem. The caller
+(``UploadPipeline``) treats an empty classification as "leave existing behaviour".
+"""
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
-# OpenCV / numpy are heavy native deps; import defensively so a misconfigured
-# image without them degrades to "no detection" instead of crashing import of
-# the whole image-service.
+# onnxruntime / OpenCV / numpy are heavy native deps; import defensively so a
+# misconfigured image without them degrades to "no detection" instead of
+# crashing import of the whole image-service.
 try:
     import cv2
     import numpy as np
+    import onnxruntime as ort
 
-    _CV_AVAILABLE = True
+    _RUNTIME_AVAILABLE = True
 except Exception:  # pragma: no cover - exercised only on a broken install
-    _CV_AVAILABLE = False
+    _RUNTIME_AVAILABLE = False
 
 
 # ---- Canonical bee-type order, ascending by hole diameter -----------------
 #
 # Mirrors `homepage/src/types/index.ts` BEE_TYPES (2/3/6/9 mm) and the
-# `BEE_TYPE_MAP` keys in `duckdb-service/models/progress.py`. The wire keys
-# below are what `POST /add_progress_for_module` expects; the row with the
-# smallest measured radius maps to index 0 (`black_masked_bee`).
+# `BEE_TYPE_MAP` keys in `duckdb-service/models/progress.py`. The wire keys below
+# are what `POST /add_progress_for_module` and the snip rows expect; the row with
+# the smallest measured radius maps to index 0 (`black_masked_bee`).
 BEE_TYPES_BY_SIZE: tuple[str, ...] = (
     "black_masked_bee",  # 2 mm
     "resin_bee",  # 3 mm
@@ -73,13 +78,12 @@ BEE_TYPES_BY_SIZE: tuple[str, ...] = (
     "orchard_bee",  # 9 mm
 )
 
-MAX_NESTS_PER_TYPE = 4  # matches duckdb-service TARGET_NESTS_PER_TYPE
+NUM_BEE_TYPES = 4  # one row of holes per bee type (4 species)
 
 # Wire-key -> canonical DB bee type. Inverse of duckdb-service's `BEE_TYPE_MAP`
 # (`duckdb-service/models/progress.py`); duplicated here the same way `ModuleId`
-# is, since image-service can't import duckdb-service. The classification dict
-# keeps the wire keys (the `/add_progress_for_module` contract); snip rows store
-# the DB key so `nest_detections.bee_type` matches `nest_data.beeType`.
+# is, since image-service can't import duckdb-service. Snip rows store the DB key
+# so `nest_detections.bee_type` matches `nest_data.beeType`.
 BEE_TYPE_WIRE_TO_DB: dict[str, str] = {
     "black_masked_bee": "blackmasked",
     "resin_bee": "resin",
@@ -87,40 +91,32 @@ BEE_TYPE_WIRE_TO_DB: dict[str, str] = {
     "orchard_bee": "orchard",
 }
 
-# ---- Detection tuning -----------------------------------------------------
+# Snip state when the model only localizes (no empty/sealed call yet). Must be in
+# duckdb-service `routes/detections.py::_VALID_STATES` and the `NestSnip.state`
+# union in `contracts/src/index.ts`, or the snip row is dropped / unrenderable.
+STATE_UNDETERMINED = "undetermined"
+
+# ---- Model + inference tuning ---------------------------------------------
 #
-# All radii / distances are fractions of the image WIDTH so the detector is
-# resolution-robust. Calibrated against the 791x528 mock fixtures
-# (`dev-tools/mock_fully_filled.jpg`, `mock_not_filled.png`) which produce a
-# clean 12-circle (3x4) grid; real UXGA captures rescale the same fractions.
-_HOUGH_DP = 1.2
-_HOUGH_PARAM1 = 120
-_HOUGH_PARAM2 = 40  # accumulator threshold; lower = more (false) circles
-_MIN_DIST_FRAC = 0.12
-_MIN_RADIUS_FRAC = 0.05
-_MAX_RADIUS_FRAC = 0.095
-_MEDIAN_BLUR_KSIZE = 5
+# The ONNX is baked into the image at build time (Dockerfile copies models/);
+# HOLE_MODEL_PATH overrides for a volume-mounted model. Regenerate it with
+# `dev-tools/ml_hole_detection/export_onnx.py` after retraining.
+_DEFAULT_MODEL_PATH = (
+    Path(__file__).resolve().parents[1] / "models" / "hole_detector.onnx"
+)
+_MODEL_PATH = os.getenv("HOLE_MODEL_PATH") or str(_DEFAULT_MODEL_PATH)
+# onnxruntime defaults to every core; cap it — this box runs four services and
+# the upload path is once-per-module-per-day, so a 50 ms -> 100 ms inference is
+# irrelevant but a core spike is not. Override with HOLE_MODEL_THREADS.
+_NUM_THREADS = max(1, int(os.getenv("HOLE_MODEL_THREADS", "2")))
 
-# Minimum number of detected circles before we trust the result at all. Below
-# this we return NO detection (degrade to the stub) rather than fabricating a
-# grid — fabrication on real captures produced confident all-"sealed" garbage.
-# The mock fixtures find 12 with the strict params; real ESP captures currently
-# find too few, so they degrade honestly until the detector is recalibrated
-# against a labelled real-capture corpus (see dev-tools/real_captures/README).
-_MIN_CIRCLES_QUORUM = 8
+_IMGSZ = 640  # the model's fixed square input; captures are letterboxed to it
+_CONF_THRES = 0.25  # min detection confidence (matches the validated export)
+_NMS_IOU = 0.7  # dedupe export-precision duplicate boxes; provably never merges
+#                 distinct neighbours (their box IoU is < 0.6 on the real blocks)
+_PAD_VALUE = 114  # letterbox fill, matching ultralytics
 
-# ---- Empty vs sealed heuristic --------------------------------------------
-#
-# An empty hole is a dark, smooth void; a sealed plug is brighter and/or
-# textured. Either signal alone marks "sealed" (logical OR) so a shadowed but
-# textured plug (low brightness, high std) and a bright smooth plug are both
-# classified sealed. Calibrated on the mocks: sealed holes have std ~39-54 and
-# brightness ratio ~0.5-0.7; empty holes are (0, 0).
-_SEALED_BRIGHTNESS_RATIO = 0.6  # hole_mean / wood_median above this => sealed
-_SEALED_TEXTURE_STD = 20.0  # inner-disk std above this => sealed
-_INNER_DISK_FRAC = 0.55  # sample brightness/texture within r * this
-
-_SNIP_PAD = 1.25  # crop box = radius * this, so the snip frames the hole
+_SNIP_PAD = 1.25  # crop half-extent = radius * this, so the snip frames the hole
 _SNIP_JPEG_QUALITY = 85
 
 
@@ -135,8 +131,8 @@ class Snip:
     bee_type: str  # wire key, e.g. "leafcutter_bee"
     nest_index: int  # 1-based
     bbox: tuple[float, float, float, float]
-    state: str  # "empty" | "sealed"
-    confidence: float  # 0-1; how strongly the sealed/empty call was made
+    state: str  # "empty" | "sealed" | "undetermined"
+    confidence: float  # 0-1; model detection confidence for this hole
     jpeg: bytes
 
 
@@ -145,9 +141,10 @@ class DetectionResult:
     """Output of :meth:`HoleDetector.detect`.
 
     ``classification`` keeps the *existing* wire contract shape consumed by
-    ``POST /add_progress_for_module`` — ``{bee_type: {"1": 0|1, ...}}`` — so
-    only the values become real; the contract is unchanged. Empty when
-    detection produced nothing (the graceful-degradation path).
+    ``POST /add_progress_for_module`` — ``{bee_type: {"1": 0|1, ...}}``. The
+    learned detector only localizes (no empty/sealed call yet), so it leaves this
+    empty: the pipeline then keeps the stub for the progress bars while the
+    ``snips`` become real. ``ok`` stays False on the localize-only path by design.
     """
 
     classification: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -161,16 +158,26 @@ class DetectionResult:
 class HoleDetector:
     """Detects nest holes and extracts per-nest snips from a capture.
 
-    Stateless and pure aside from reading the image off disk; safe to share a
-    single instance across requests.
+    The ONNX session is loaded once (lazily, on first ``detect``) and reused; a
+    single instance is safe to share across requests. A missing/broken model or
+    runtime degrades to no-detection rather than raising.
     """
+
+    def __init__(self, model_path: str | None = None):
+        self._model_path = model_path or _MODEL_PATH
+        self._session = None
+        self._load_failed = False
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def detect(self, image_path: str) -> DetectionResult:
         """Run the full pipeline on ``image_path``.
 
-        Never raises: any failure (missing OpenCV, unreadable image, OpenCV
-        error) returns an empty :class:`DetectionResult` so ``/upload`` stays a
-        200. See the module docstring's graceful-degradation contract.
+        Never raises: any failure (missing runtime/model, unreadable image,
+        inference error) returns an empty :class:`DetectionResult` so ``/upload``
+        stays a 200. See the module docstring's graceful-degradation contract.
         """
         try:
             return self._detect(image_path)
@@ -186,10 +193,15 @@ class HoleDetector:
     # ------------------------------------------------------------------
 
     def _detect(self, image_path: str) -> DetectionResult:
-        if not _CV_AVAILABLE:
+        if not _RUNTIME_AVAILABLE:
             print(
-                "[hole_detection] OpenCV not available; skipping detection", flush=True
+                "[hole_detection] onnxruntime/OpenCV not available; skipping detection",
+                flush=True,
             )
+            return DetectionResult()
+
+        session = self._session_or_none()
+        if session is None:
             return DetectionResult()
 
         bgr = cv2.imread(image_path)
@@ -197,103 +209,178 @@ class HoleDetector:
             print(f"[hole_detection] could not read image {image_path}", flush=True)
             return DetectionResult()
 
-        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-        h, w = gray.shape[:2]
-        wood_median = float(np.median(gray)) or 1.0
-
-        circles = self._find_circles(gray, w)
-        # Quorum gate (#165 follow-up): only proceed when HoughCircles actually
-        # found a credible number of holes. The earlier behaviour fabricated a
-        # full fixed grid here when detection found nothing — which, on real ESP
-        # captures (where the mock-tuned params find no circles), silently
-        # produced 16 wood-sampled "sealed" snips: confident garbage on the
-        # public dashboard. Degrading to an empty result instead means the
-        # pipeline falls back to the stub and the panel renders no snips, rather
-        # than inventing them. Validated against dev-tools/real_captures/.
-        if circles is None or len(circles) < _MIN_CIRCLES_QUORUM:
-            n = 0 if circles is None else len(circles)
+        h, w = bgr.shape[:2]
+        dets = self._infer(session, bgr)  # (N, 4): cx, cy, r, conf  (source px)
+        if dets.shape[0] == 0:
             print(
-                f"[hole_detection] only {n} circle(s) found (< {_MIN_CIRCLES_QUORUM} "
-                f"quorum) for {image_path}; degrading to no-detection",
+                f"[hole_detection] model found no holes in {image_path}; "
+                "degrading to no-detection",
                 flush=True,
             )
             return DetectionResult()
-        holes = self._assign_to_grid(circles)
 
+        holes = self._assign_to_grid(dets)
         if not holes:
             return DetectionResult()
 
         snips: list[Snip] = []
-        classification: dict[str, dict[str, int]] = {}
-        for bee_type, nest_index, (x, y, r) in holes:
-            state, confidence = self._classify_hole(gray, x, y, r, wood_median)
+        for bee_type, nest_index, (x, y, r), conf in holes:
             jpeg = self._crop_snip(bgr, x, y, r, w, h)
-            bbox = self._normalized_bbox(x, y, r, w, h)
+            if not jpeg:
+                continue
             snips.append(
                 Snip(
                     bee_type=bee_type,
                     nest_index=nest_index,
-                    bbox=bbox,
-                    state=state,
-                    confidence=round(confidence, 3),
+                    bbox=self._normalized_bbox(x, y, r, w, h),
+                    state=STATE_UNDETERMINED,
+                    confidence=round(float(conf), 3),
                     jpeg=jpeg,
                 )
             )
-            classification.setdefault(bee_type, {})[str(nest_index)] = (
-                1 if state == "sealed" else 0
-            )
 
-        return DetectionResult(classification=classification, snips=snips)
+        # Localize-only: leave `classification` empty so the pipeline keeps the
+        # stub for the progress bars; the snips above are the real output.
+        return DetectionResult(classification={}, snips=snips)
 
-    def _find_circles(self, gray, width: int):
-        """Return an (N, 3) int array of ``(x, y, r)`` or None."""
-        blurred = cv2.medianBlur(gray, _MEDIAN_BLUR_KSIZE)
-        found = cv2.HoughCircles(
-            blurred,
-            cv2.HOUGH_GRADIENT,
-            dp=_HOUGH_DP,
-            minDist=max(1, int(width * _MIN_DIST_FRAC)),
-            param1=_HOUGH_PARAM1,
-            param2=_HOUGH_PARAM2,
-            minRadius=max(1, int(width * _MIN_RADIUS_FRAC)),
-            maxRadius=max(1, int(width * _MAX_RADIUS_FRAC)),
-        )
-        if found is None:
+    def _session_or_none(self):
+        """Lazily build and cache the onnxruntime session; None if unavailable."""
+        if self._session is not None:
+            return self._session
+        if self._load_failed:
             return None
-        return np.round(found[0]).astype(int)
+        if not os.path.isfile(self._model_path):
+            print(
+                f"[hole_detection] model not found at {self._model_path}; "
+                "skipping detection",
+                flush=True,
+            )
+            self._load_failed = True
+            return None
+        try:
+            opts = ort.SessionOptions()
+            opts.intra_op_num_threads = _NUM_THREADS
+            opts.inter_op_num_threads = 1
+            self._session = ort.InferenceSession(
+                self._model_path, opts, providers=["CPUExecutionProvider"]
+            )
+            self._input_name = self._session.get_inputs()[0].name
+            print(
+                f"[hole_detection] loaded model {self._model_path} "
+                f"({_NUM_THREADS} threads)",
+                flush=True,
+            )
+            return self._session
+        except Exception as exc:  # noqa: BLE001 - degrade on a broken model
+            print(
+                f"[hole_detection] failed to load model {self._model_path}: {exc!r}",
+                flush=True,
+            )
+            self._load_failed = True
+            return None
 
-    def _assign_to_grid(self, circles) -> list[tuple[str, int, tuple[int, int, int]]]:
-        """Cluster detected circles into rows, label by diameter, index by x.
+    def _infer(self, session, bgr):
+        """Run the ONNX model on one image; return (N, 4) of cx, cy, r, conf in
+        source pixels, deduped. Mirrors the dev-tools parity probe exactly."""
+        blob, scale, pad_left, pad_top = self._letterbox(bgr)
+        out0 = session.run(None, {self._input_name: blob})[0][0]  # (300, 38)
+        keep = out0[:, 4] >= _CONF_THRES
+        rows = out0[keep]
+        if rows.shape[0] == 0:
+            return np.zeros((0, 4), dtype=np.float32)
 
-        Rows are formed by clustering on ``y``; each row is then ordered by
-        ``x`` (nest index). Rows are sorted by their *median radius ascending*
-        and mapped onto :data:`BEE_TYPES_BY_SIZE`, so the bee-type label is
-        driven by measured hole diameter (resolution- and orientation-robust),
-        not by absolute position.
+        boxes = rows[:, :4].astype(np.float32).copy()  # x1, y1, x2, y2 (letterboxed)
+        h, w = bgr.shape[:2]
+        boxes[:, [0, 2]] = ((boxes[:, [0, 2]] - pad_left) / scale).clip(0, w)
+        boxes[:, [1, 3]] = ((boxes[:, [1, 3]] - pad_top) / scale).clip(0, h)
+        scores = rows[:, 4].astype(np.float32)
+
+        keep_idx = self._nms(boxes, scores, _NMS_IOU)
+        boxes, scores = boxes[keep_idx], scores[keep_idx]
+
+        cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
+        cy = (boxes[:, 1] + boxes[:, 3]) / 2.0
+        r = (boxes[:, 2] - boxes[:, 0] + boxes[:, 3] - boxes[:, 1]) / 4.0
+        return np.stack([cx, cy, r, scores], axis=1)
+
+    def _letterbox(self, bgr):
+        """Resize-with-padding to the model's square input; return the NCHW blob
+        plus the scale and left/top pad needed to map boxes back to source px."""
+        h, w = bgr.shape[:2]
+        scale = min(_IMGSZ / h, _IMGSZ / w)
+        nh, nw = int(round(h * scale)), int(round(w * scale))
+        resized = cv2.resize(bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        canvas = np.full((_IMGSZ, _IMGSZ, 3), _PAD_VALUE, dtype=np.uint8)
+        top, left = (_IMGSZ - nh) // 2, (_IMGSZ - nw) // 2
+        canvas[top : top + nh, left : left + nw] = resized
+        blob = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        blob = np.transpose(blob, (2, 0, 1))[None]  # NCHW
+        return np.ascontiguousarray(blob), scale, left, top
+
+    @staticmethod
+    def _nms(boxes, scores, iou_thres: float):
+        """Greedy NMS by descending score; returns kept indices. Used only to
+        drop near-duplicate boxes (IoU >= iou_thres) the end2end export can emit
+        for one hole — distinct neighbours overlap far less, so they survive."""
+        order = scores.argsort()[::-1]
+        keep: list[int] = []
+        while order.size:
+            i = int(order[0])
+            keep.append(i)
+            if order.size == 1:
+                break
+            rest = order[1:]
+            ious = np.array([_iou(boxes[i], boxes[j]) for j in rest])
+            order = rest[ious < iou_thres]
+        return keep
+
+    def _assign_to_grid(self, dets):
+        """Cluster detections into rows, label by diameter, index by x.
+
+        ``dets`` is an (N, 4) array of ``(cx, cy, r, conf)``. Rows are formed by
+        clustering on ``y``; each row is ordered by ``x`` (nest index). Rows are
+        sorted by their *median radius ascending* and mapped onto
+        :data:`BEE_TYPES_BY_SIZE`, so the bee-type label is driven by measured
+        hole diameter (resolution- and orientation-robust), not absolute
+        position. No per-row cap: the real blocks are irregular (7/5/5/4, 4x4),
+        so every detected hole in the four size-rows is kept.
+
+        Returns a list of ``(bee_type, nest_index, (x, y, r), conf)``.
         """
-        rows = self._cluster_rows(circles)
+        rows = self._cluster_rows(dets)
         # Order rows by measured diameter ascending -> bee type ascending.
         rows.sort(key=lambda row: float(np.median([c[2] for c in row])))
 
-        holes: list[tuple[str, int, tuple[int, int, int]]] = []
-        for row_idx, row in enumerate(rows[:MAX_NESTS_PER_TYPE]):
+        # The real blocks have exactly four size-rows (one per bee type). If
+        # y-clustering ever splits one into a 5th, the slice below keeps the four
+        # smallest-radius rows and drops the rest — log it so the silent drop is
+        # visible rather than reading as a clean (but wrong) relabelling.
+        if len(rows) > NUM_BEE_TYPES:
+            print(
+                f"[hole_detection] clustered {len(rows)} rows (> {NUM_BEE_TYPES} "
+                f"bee types); keeping the {NUM_BEE_TYPES} smallest-radius rows",
+                flush=True,
+            )
+
+        holes: list[tuple[str, int, tuple[int, int, int], float]] = []
+        for row_idx, row in enumerate(rows[:NUM_BEE_TYPES]):
             bee_type = BEE_TYPES_BY_SIZE[row_idx]
             ordered = sorted(row, key=lambda c: c[0])  # by x -> nest index
-            for nest_idx, (x, y, r) in enumerate(ordered[:MAX_NESTS_PER_TYPE], start=1):
-                holes.append((bee_type, nest_idx, (int(x), int(y), int(r))))
+            for nest_idx, (x, y, r, conf) in enumerate(ordered, start=1):
+                holes.append(
+                    (bee_type, nest_idx, (int(x), int(y), int(r)), float(conf))
+                )
         return holes
 
-    def _cluster_rows(self, circles) -> list[list[tuple[int, int, int]]]:
-        """Greedy 1-D clustering of circles into rows by their y-coordinate."""
-        ordered = sorted(
-            (tuple(int(v) for v in c) for c in circles), key=lambda c: c[1]
-        )
-        median_r = float(np.median([c[2] for c in circles])) or 1.0
+    def _cluster_rows(self, dets):
+        """Greedy 1-D clustering of detections into rows by their y-coordinate."""
+        ordered = sorted((tuple(float(v) for v in c) for c in dets), key=lambda c: c[1])
+        median_r = float(np.median([c[2] for c in dets])) or 1.0
         row_gap = median_r * 1.2  # a new row starts when y jumps more than this
 
-        rows: list[list[tuple[int, int, int]]] = []
-        current: list[tuple[int, int, int]] = []
-        last_y: int | None = None
+        rows: list[list[tuple[float, float, float, float]]] = []
+        current: list[tuple[float, float, float, float]] = []
+        last_y: float | None = None
         for c in ordered:
             if last_y is not None and (c[1] - last_y) > row_gap:
                 rows.append(current)
@@ -304,35 +391,10 @@ class HoleDetector:
             rows.append(current)
         return rows
 
-    def _classify_hole(
-        self, gray, x: int, y: int, r: int, wood_median: float
-    ) -> tuple[str, float]:
-        """Return ``("sealed"|"empty", confidence)`` for one hole."""
-        rr = max(1, int(r * _INNER_DISK_FRAC))
-        disk = gray[max(0, y - rr) : y + rr, max(0, x - rr) : x + rr]
-        if disk.size == 0:
-            return "empty", 0.0
-        disk = disk.astype("float32")
-        mean = float(disk.mean())
-        std = float(disk.std())
-        brightness_ratio = mean / wood_median
-        texture_score = std / _SEALED_TEXTURE_STD
-
-        sealed = (
-            brightness_ratio >= _SEALED_BRIGHTNESS_RATIO or std >= _SEALED_TEXTURE_STD
-        )
-        # Confidence: how far past (or short of) the decision the stronger
-        # signal sits, clamped to [0, 1].
-        signal = max(brightness_ratio / _SEALED_BRIGHTNESS_RATIO, texture_score)
-        confidence = max(0.0, min(1.0, signal if sealed else 1.0 - signal))
-        return ("sealed" if sealed else "empty"), confidence
-
     def _crop_snip(self, bgr, x: int, y: int, r: int, width: int, height: int) -> bytes:
         pad = int(r * _SNIP_PAD)
-        x0 = max(0, x - pad)
-        y0 = max(0, y - pad)
-        x1 = min(width, x + pad)
-        y1 = min(height, y + pad)
+        x0, y0 = max(0, x - pad), max(0, y - pad)
+        x1, y1 = min(width, x + pad), min(height, y + pad)
         crop = bgr[y0:y1, x0:x1]
         if crop.size == 0:
             return b""
@@ -350,3 +412,13 @@ class HoleDetector:
         bw = min(1.0, (x + pad) / width) - x0
         bh = min(1.0, (y + pad) / height) - y0
         return (round(x0, 4), round(y0, 4), round(bw, 4), round(bh, 4))
+
+
+def _iou(a, b) -> float:
+    """IoU of two (x1, y1, x2, y2) boxes."""
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    inter = iw * ih
+    ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return float(inter / ua) if ua > 0 else 0.0

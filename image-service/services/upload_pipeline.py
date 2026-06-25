@@ -90,10 +90,12 @@ class UploadPipeline:
         file_path = self._persist_image(req)
         self._record_image_upload(req.mac, req.image.filename)
         self._persist_sidecar(req, file_path)
-        # Hole detection (#165): real per-nest empty/sealed classification +
-        # cropped snips. Falls back to the historical stub `classify()` when
-        # detection finds nothing, so the existing wire contract always carries
-        # a value and the upload never 500s on a detection problem.
+        # Hole detection (#165, ADR-027): the learned detector locates holes and
+        # crops a real per-nest snip from each, but defers empty/sealed — so it
+        # returns an empty `classification` (`detection.ok` is False) and the
+        # historical stub `classify()` drives the progress bars. The same stub
+        # path also covers a detection miss, so the wire contract always carries a
+        # value and the upload never 500s on a detection problem.
         detection = self._detect(file_path)
         classification = detection.classification if detection.ok else self.classify()
         self._record_progress(req.mac, classification)

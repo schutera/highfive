@@ -52,6 +52,24 @@ DEBUG=true
 DUCKDB_SERVICE_URL=http://duckdb-service:8000
 ```
 
+### `image-service` exits with `ImportError: libgomp.so.1: cannot open shared object file`
+
+The hole detector runs the learned model through `onnxruntime` (#165, ADR-027),
+whose CPU kernels link the GNU OpenMP runtime. On a slim base image `import
+onnxruntime` fails at startup if `libgomp1` is absent (the analogue of opencv's
+`libglib2.0-0` need). `image-service/Dockerfile.dev` already installs it; if you
+run the service outside that image (bare `pip install -r requirements.txt` on a
+slim Debian/Ubuntu), add the system lib:
+
+```bash
+apt-get update && apt-get install -y --no-install-recommends libgomp1
+```
+
+The detector degrades gracefully (no snips, `/upload` still 200) if the runtime
+or model is missing — so a stack that boots but produces no snips is worth a
+`docker compose logs image-service | grep hole_detection` to see whether the model
+loaded (`loaded model …/hole_detector.onnx`) or was skipped.
+
 ### Admin page (`/admin`) shows "Failed to load images. Is the image service running?"
 
 **Symptom.** The admin image gallery renders the error banner even though

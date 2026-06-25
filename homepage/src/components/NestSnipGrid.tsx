@@ -73,12 +73,21 @@ export default function NestSnipGrid({ moduleId }: NestSnipGridProps) {
             >
               {row.size}
             </div>
-            <div className="grid grid-cols-4 gap-2 flex-1">
+            {/* One visual row per bee type, one column per detected nest. The
+                real blocks are irregular (7/5/5/4, not 4×4), so the row width
+                follows the hole count — `auto-cols-fr` keeps all of a row's
+                snips on a single line instead of wrapping a 7-hole row to 4+3. */}
+            <div className="grid grid-flow-col auto-cols-fr gap-2 flex-1">
               {row.snips.map((snip) => {
+                // `undetermined` is the learned detector's localize-only state
+                // (ADR-027): the hole is found but empty/sealed is deferred, so
+                // the badge reads a neutral "Detected" rather than guessing.
                 const stateLabel =
                   snip.state === 'sealed'
                     ? t('modulePanel.snipSealed')
-                    : t('modulePanel.snipEmpty');
+                    : snip.state === 'empty'
+                      ? t('modulePanel.snipEmpty')
+                      : t('modulePanel.snipDetected');
                 return (
                   <figure
                     key={`${snip.beeType}-${snip.nestIndex}`}

@@ -271,8 +271,11 @@ export interface NestSnip {
   // wire key `leafcutter_bee`). The backend maps the stored key to this form.
   beeType: 'blackmasked' | 'resin' | 'leafcutter' | 'orchard';
   nestIndex: number; // 1-based replicate within the bee type
-  state: 'empty' | 'sealed';
-  confidence: number; // 0-1; strength of the empty/sealed call
+  // `undetermined`: the learned detector (ADR-027) located the hole but the
+  // empty-vs-sealed call is deferred — the model is a single-class `hole`
+  // localizer. `empty`/`sealed` remain for when a classifier lands.
+  state: 'empty' | 'sealed' | 'undetermined';
+  confidence: number; // 0-1; detection confidence for this hole
   // Filename of the cropped snip JPEG; resolve to a URL with `getSnipUrl`.
   snipFilename: string;
   // Normalized [x, y, w, h] in [0,1] of the snip box in the source capture.

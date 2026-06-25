@@ -205,15 +205,19 @@ def seed_admin_gallery_images() -> None:
         module_name="UI Test Gallery",
     )
     esp.register().raise_for_status()
-    # The LAST (= newest) upload is a real, decodable JPEG — mock_esp's
-    # default `_make_fake_image()` bytes carry JPEG markers but random
-    # payload, which a browser cannot decode (naturalWidth stays 0).
-    # module-latest-capture.spec.ts asserts the ModulePanel "Latest
-    # capture" card actually renders pixels end-to-end, so the newest
-    # gallery image must decode for real. The five older uploads stay
-    # fake on purpose: admin-image-pagination.spec.ts counts cells, not
-    # loaded thumbnails, exactly because fake bytes may fail to render.
-    real_jpeg = (REPO_ROOT / "dev-tools" / "mock_fully_filled.jpg").read_bytes()
+    # The LAST (= newest) upload is a real ESP capture — mock_esp's default
+    # `_make_fake_image()` bytes carry JPEG markers but random payload, which a
+    # browser cannot decode (naturalWidth stays 0). Two specs need this newest
+    # image to be real: module-latest-capture.spec.ts asserts the "Latest
+    # capture" card renders pixels end-to-end, and module-nest-snips.spec.ts
+    # needs the learned detector (ADR-027) to actually find holes — which it only
+    # does on a real capture, not a synthetic mock (out of distribution). A
+    # 7/5/5/4 block capture yields ~21 `undetermined` snips. The five older
+    # uploads stay fake on purpose: admin-image-pagination.spec.ts counts cells,
+    # not loaded thumbnails, exactly because fake bytes may fail to render.
+    real_jpeg = (
+        REPO_ROOT / "dev-tools" / "real_captures" / "block_tungsten_640.jpg"
+    ).read_bytes()
     for i in range(GALLERY_IMAGE_COUNT):
         is_last = i == GALLERY_IMAGE_COUNT - 1
         esp.upload(image_bytes=real_jpeg if is_last else None).raise_for_status()

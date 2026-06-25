@@ -2,12 +2,16 @@
 
 The **image-service** receives images captured by ESP32-CAM hive modules, stores them on a Docker volume, and forwards classification results to the DuckDB service for persistent storage.
 
-Classification is produced by an **OpenCV hole detector** (`HoleDetector`, #165 /
-[ADR-026](../09-architecture-decisions/adr-026-hole-detection-snips.md)): it
-locates the nest holes, crops a per-nest **snip**, and labels each empty/sealed.
-The old random `stub_classify()` is now only the graceful-degradation fallback.
-A MaskRCNN-based model (#112) is still planned to replace the heuristic; the
-stored snips are its bootstrap training data.
+Per-nest snips are produced by a **learned hole detector** (`HoleDetector`, #165 /
+[ADR-027](../09-architecture-decisions/adr-027-hole-detection-model.md)): a
+YOLO26n-seg model, exported to ONNX and run through the lean `onnxruntime`,
+**locates** every nest hole and crops a per-nest **snip** from each. It replaces
+the earlier OpenCV `HoughCircles` detector (ADR-026), which could not find holes
+on real captures. The model only localizes, so each snip is `state =
+"undetermined"` and the random `stub_classify()` still drives the species progress
+bars — a learned empty-vs-sealed classifier is the next step. Training, export,
+and the runtime parse:
+[hole-detection-model.md](hole-detection-model.md).
 
 <br>
 
@@ -37,20 +41,23 @@ _Figure 1: Example of a Hive module equipped with ESP32-camera. (Mark Schutera, 
 ```
 image-service/
 ├── app.py                  # Flask app, /upload + /snips endpoints, detector wiring
-├── Dockerfile.dev          # installs libglib2.0-0 for opencv-python-headless
+├── Dockerfile.dev          # installs libglib2.0-0 (opencv) + libgomp1 (onnxruntime)
 ├── requirements.txt
 ├── pyproject.toml
 ├── README.md
+├── models/
+│   └── hole_detector.onnx  # learned YOLO26n-seg detector, run via onnxruntime (#165)
 └── services/
     ├── duckdb.py           # HTTP client for DuckDB service (incl. record_detections)
-    ├── hole_detection.py   # OpenCV HoleDetector — HoughCircles + snip crop (#165)
+    ├── hole_detection.py   # learned HoleDetector — ONNX inference + snip crop (#165)
     └── upload_pipeline.py  # orchestrates detect → record progress → persist snips
 ```
 
 ### Technologies
 
 - **Python + Flask** — lightweight REST API
-- **OpenCV (`opencv-python-headless`) + NumPy** — hole detection / snip cropping
+- **onnxruntime** — runs the learned YOLO26n-seg hole detector (ONNX); no torch in the image
+- **OpenCV (`opencv-python-headless`) + NumPy** — letterbox, box math, snip cropping
 - **DuckDB client** — forwards classification + detection results to the database service
 
 <br>
@@ -79,12 +86,13 @@ The central entry point. Called by Hive modules whenever a new image is captured
 1. Hive module sends image to `/upload`
 2. Image is saved to the Docker volume (`/data/images/`); a `.log.json`
    sidecar is written next to it if `logs` is present
-3. `HoleDetector` locates the nest holes, crops a snip per hole into
-   `/data/images/snips/`, and classifies each empty/sealed. On detection
-   failure it returns nothing and the pipeline falls back to `stub_classify()`,
-   so `/upload` never 500s.
-4. Real classification is forwarded to `duckdb-service /add_progress_for_module`,
-   and the snips + bboxes to `duckdb-service /record_detections`
+3. `HoleDetector` runs the learned ONNX model to locate every nest hole and
+   crops a snip per hole into `/data/images/snips/` (`state = "undetermined"` —
+   empty/sealed is deferred). On detection failure it returns nothing and the
+   pipeline falls back to `stub_classify()`, so `/upload` never 500s.
+4. The snips + bboxes are forwarded to `duckdb-service /record_detections`; the
+   species progress bars run on the `stub_classify()` values forwarded to
+   `duckdb-service /add_progress_for_module` (the model localizes only)
 5. Module `battery_level` and `image_count` are updated via the
    **post-upload aggregate** at `POST /modules/<mac>/heartbeat` on
    `duckdb-service` (`first_online` is `COALESCE`-guarded since
@@ -117,25 +125,30 @@ Values: `1` = filled/sealed, `0` = empty.
 
 <br>
 
-# 4. Hole detection (#165) and the planned MaskRCNN
+# 4. Hole detection (#165, ADR-027)
 
-The current `HoleDetector` (`services/hole_detection.py`,
-[ADR-026](../09-architecture-decisions/adr-026-hole-detection-snips.md)):
+The `HoleDetector` (`services/hole_detection.py`,
+[ADR-027](../09-architecture-decisions/adr-027-hole-detection-model.md)) runs a
+learned **YOLO26n-seg** model, exported to ONNX and executed through the lean
+`onnxruntime` (no torch/ultralytics in the image). Per upload it:
 
-- locates holes with OpenCV `HoughCircles`, snapping to a 4×4 grid in
-  resolution-independent fractions; below a circle quorum it returns **no
-  detection** (degrade to the stub) rather than fabricating a grid — real
-  captures currently hit this path, see `dev-tools/real_captures/README.md`;
+- **locates** every hole with the model (CPU ~50 ms): letterbox to 640², read the
+  end2end `output0` boxes, un-letterbox, drop sub-0.25-confidence rows, and apply
+  one conservative NMS (IoU 0.7) to drop export-precision duplicates;
 - labels bee type **by measured hole diameter** (rows ordered by median radius →
-  ascending size: black-masked < resin < leafcutter < orchard);
-- classifies each hole empty vs sealed with a brightness+texture heuristic;
+  ascending size: black-masked < resin < leafcutter < orchard), indexing nests
+  left-to-right with **no per-row cap** so the irregular 7/5/5/4 (21-hole) and 4×4
+  (16-hole) blocks both keep every hole;
+- **defers** the empty-vs-sealed call — each snip is `state = "undetermined"` and
+  `classification` is left empty, so the species progress bars keep the stub;
 - crops a per-nest **snip** (served at `GET /snips/:filename`, recorded via
   duckdb `POST /record_detections`).
 
-A **MaskRCNN model** (#112) is still planned to replace the heuristic with
-learned per-tube detection robust to lighting/angle. The architecture isolates
-the swap to `HoleDetector` — the upload pipeline, storage, serving, and wire
-shapes stay; the stored snips are the model's labelled bootstrap data.
+This replaces the earlier OpenCV `HoughCircles` detector (ADR-026), which could
+not find holes on real captures, and supersedes the earlier MaskRCNN idea (#112).
+The architecture isolates the swap to `HoleDetector` — the upload pipeline,
+storage, serving, and wire shapes are unchanged. Training, export, and the runtime
+parse: [hole-detection-model.md](hole-detection-model.md).
 
 In future revisions, the system may output values between **0–100%** representing estimated brood development progress, rather than binary 0/1.
 

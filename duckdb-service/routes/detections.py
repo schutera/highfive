@@ -4,8 +4,10 @@
 detected snips here rather than opening the DB itself. Two routes:
 
 * ``POST /record_detections`` — append one capture's per-hole detections.
-* ``GET  /detections`` — read a module's *latest snip per nest* for the public
-  dashboard 4x4 grid (full history is retained; this read folds to the newest).
+* ``GET  /detections`` — read the per-nest snips of a module's *most recent
+  capture* for the public dashboard grid (full history is retained; this read
+  scopes to the latest capture and dedups to one row per nest — the real blocks
+  are irregular 7/5/5/4 or 4x4, not a fixed 4x4).
 """
 
 from datetime import datetime, timezone
@@ -18,9 +20,12 @@ from models.module_id import ModuleId
 
 detections_bp = Blueprint("detections", __name__)
 
-# Valid empty/sealed states. Kept tiny and explicit so a producer typo lands as
-# a 400 here rather than as a silently-unrenderable badge on the dashboard.
-_VALID_STATES = {"empty", "sealed"}
+# Valid snip states. Kept tiny and explicit so a producer typo lands as a skipped
+# row here rather than as a silently-unrenderable badge on the dashboard.
+# `undetermined` is the learned detector's localize-only state (ADR-027): the
+# model finds the hole but defers the empty-vs-sealed call. Mirror the
+# `NestSnip.state` union (contracts) and the backend `SNIP_STATES` guard.
+_VALID_STATES = {"empty", "sealed", "undetermined"}
 
 
 def _canonicalize_or_400(raw: str):
@@ -113,12 +118,25 @@ def record_detections():
 
 @detections_bp.get("/detections")
 def list_detections():
-    """Return a module's latest snip per (bee_type, nest_index).
+    """Return the per-nest snips from a module's **most recent capture**.
 
-    Full history is retained in the table; this read folds to the newest row per
-    nest (``ROW_NUMBER() ... ORDER BY detected_at DESC``) so the public 4x4
-    snip grid shows current state. ``id DESC`` is the stable tiebreaker for
-    same-second rows, mirroring ``list_image_uploads``.
+    Full history is retained in the table; this read folds in two steps so it is
+    correct on *both* axes the learned detector exposes:
+
+    1. **Latest-capture scope** — restrict to the single newest capture
+       (``WITH latest`` = max ``detected_at``, ``id DESC`` tiebreaker, matched by
+       ``(filename, detected_at)``). The grid reflects the *current* block: a nest
+       not detected in the latest capture is simply absent, not latched to a stale
+       crop from an older one. This matters because the detector's per-row hole
+       count can vary by ±1 frame-to-frame — a per-(bee_type, nest_index) "latest
+       snip across all captures" fold would serve a days-old crop for a nest that
+       dropped out this frame.
+    2. **Per-nest dedup** — ``ROW_NUMBER() ... PARTITION BY bee_type, nest_index
+       ORDER BY id DESC`` keeps one row per nest. ``record_detections`` is
+       append-only (no DELETE), so a re-upload of the same capture (a network
+       retry) re-records its rows; without this an idempotency-breaking same-second
+       retry would return two rows per nest → duplicate grid cells + React key
+       collisions. Step 1 alone scopes to the capture; step 2 makes it idempotent.
 
     Wire shape: ``{"detections": [{module_id, filename, bee_type, nest_index,
     bbox:[x,y,w,h], state, confidence, snip_filename, detected_at}, ...]}``.
@@ -132,21 +150,30 @@ def list_detections():
 
     rows = query_all(
         """
+        WITH latest AS (
+            SELECT filename, detected_at
+            FROM nest_detections
+            WHERE module_id = ?
+            ORDER BY detected_at DESC, id DESC
+            LIMIT 1
+        )
         SELECT module_id, filename, bee_type, nest_index,
                bbox_x, bbox_y, bbox_w, bbox_h,
                state, confidence, snip_filename, detected_at
         FROM (
-            SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY bee_type, nest_index
-                ORDER BY detected_at DESC, id DESC
+            SELECT n.*, ROW_NUMBER() OVER (
+                PARTITION BY n.bee_type, n.nest_index
+                ORDER BY n.id DESC
             ) AS rn
-            FROM nest_detections
-            WHERE module_id = ?
+            FROM nest_detections n, latest
+            WHERE n.module_id = ?
+              AND n.filename = latest.filename
+              AND n.detected_at = latest.detected_at
         ) t
         WHERE rn = 1
         ORDER BY bee_type, nest_index
         """,
-        (canonical,),
+        (canonical, canonical),
     )
     detections = [
         {

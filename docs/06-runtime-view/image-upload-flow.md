@@ -20,8 +20,8 @@ sequenceDiagram
     IMG->>DDB: POST /record_image<br/>(body: {module_id, filename})
     DDB->>DDB: insert image_uploads row (uploaded_at server-stamped)
     IMG->>IMG: write &lt;img&gt;.log.json sidecar (if logs present)
-    IMG->>IMG: HoleDetector.detect() — locate holes, crop snips, empty/sealed<br/>(falls back to stub_classify() if detection finds nothing)
-    IMG->>DDB: POST /add_progress_for_module (real sealed values)
+    IMG->>IMG: HoleDetector.detect() — ONNX model locates holes, crop snips (undetermined)<br/>(classification deferred → stub_classify() drives the progress bars)
+    IMG->>DDB: POST /add_progress_for_module (stub values — model localizes only)
     DDB->>DDB: insert/replace daily_progress row
     IMG->>IMG: write per-nest snips to /data/images/snips/
     IMG->>DDB: POST /record_detections<br/>(snips + bboxes + state per hole, #165)
@@ -142,14 +142,14 @@ sequenceDiagram
      `parse_error: true` marker inside `payload` (the image itself
      still persists).
    - Runs `HoleDetector.detect()` (#165,
-     [ADR-026](../09-architecture-decisions/adr-026-hole-detection-snips.md)):
-     OpenCV `HoughCircles` locates the nest holes, a per-hole snip is cropped to
-     `/data/images/snips/`, and each hole is classified empty/sealed by a
-     brightness+texture heuristic — producing **real** values in the same
-     `{bee_type: {nest: 0|1}}` contract shape. If detection finds nothing
-     (unreadable image, no circles) it degrades to the historical
-     `stub_classify()` fallback, so a detection miss never blanks the dashboard
-     and `/upload` never 500s.
+     [ADR-027](../09-architecture-decisions/adr-027-hole-detection-model.md)): the
+     learned **YOLO26n-seg** model (ONNX via `onnxruntime`) locates every nest
+     hole and a per-hole snip is cropped to `/data/images/snips/` with `state =
+"undetermined"`. The model only **localizes** — empty-vs-sealed is deferred —
+     so `classification` is left empty and the historical `stub_classify()` still
+     produces the `{bee_type: {nest: 0|1}}` progress values. If detection finds
+     nothing (unreadable image, missing/broken model) it likewise degrades to the
+     stub, so a detection miss never blanks the dashboard and `/upload` never 500s.
 
 3. **Persistence write-back.**
    `image-service` calls `duckdb-service` over HTTP (never opens its

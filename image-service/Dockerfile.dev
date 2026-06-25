@@ -2,12 +2,15 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# opencv-python-headless (hole detection, #165) still links libglib at import
-# time; the GUI/GL libs are what `headless` drops, not glib. Without this the
-# container builds fine but `import cv2` fails at runtime with
-# "libgthread-2.0.so.0: cannot open shared object file".
+# Native runtime libs for hole detection (#165, ADR-027):
+#  * libglib2.0-0 — opencv-python-headless still links libglib at import time
+#    (the GUI/GL libs are what `headless` drops, not glib); without it the
+#    container builds fine but `import cv2` fails with
+#    "libgthread-2.0.so.0: cannot open shared object file".
+#  * libgomp1 — onnxruntime's CPU kernels link the GNU OpenMP runtime; without
+#    it `import onnxruntime` fails with "libgomp.so.1: cannot open shared object".
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libglib2.0-0 \
+    && apt-get install -y --no-install-recommends libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

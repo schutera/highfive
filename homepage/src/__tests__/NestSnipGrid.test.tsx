@@ -67,6 +67,18 @@ describe('NestSnipGrid', () => {
     expect(screen.getByText('Empty')).toBeInTheDocument();
   });
 
+  it('renders a neutral "Detected" badge for the localize-only undetermined state', async () => {
+    // The learned detector (ADR-027) emits `undetermined` — located but
+    // empty/sealed deferred. The badge must read neutral, never guess sealed.
+    nextSnips = [snip('leafcutter', 1, 'undetermined')];
+    renderGrid();
+
+    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(1));
+    expect(screen.getByText('Detected')).toBeInTheDocument();
+    expect(screen.queryByText('Sealed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Empty')).not.toBeInTheDocument();
+  });
+
   it('groups by bee type in ascending-diameter order', async () => {
     // Provide out-of-order types; the grid must order rows by BEE_TYPES
     // (blackmasked < resin < leafcutter < orchard) regardless of input order.

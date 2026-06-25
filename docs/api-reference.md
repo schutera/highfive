@@ -784,8 +784,8 @@ Serves a cropped per-nest snip JPEG from the snip folder
 (`IMAGE_STORE_PATH/snips/`). Public, like `GET /images/<filename>` — the crop
 removes all background (#154). The backend re-exposes this at
 `GET /api/snips/:filename` (§1.6b). Snips are produced on `/upload` by the
-OpenCV `HoleDetector` and recorded via duckdb `POST /record_detections` (§3.15).
-`404` when the snip file is absent.
+learned `HoleDetector` (YOLO26n-seg via ONNX, ADR-027) and recorded via duckdb
+`POST /record_detections` (§3.15). `404` when the snip file is absent.
 
 <br>
 
@@ -1297,8 +1297,10 @@ sole writer (ADR-001), so image-service POSTs here after cropping snips on
 }
 ```
 
-Rows with an invalid `state` (not `empty`/`sealed`) or missing `snip_filename`
-are skipped, not fatal — one bad item can't reject the capture. Returns
+Rows with an invalid `state` (not `empty`/`sealed`/`undetermined`) or missing
+`snip_filename` are skipped, not fatal — one bad item can't reject the capture.
+The learned detector emits `undetermined` (it localizes but defers empty/sealed,
+ADR-027). Returns
 `{"message": "...", "inserted": N}`. `bee_type` is the canonical DB form
 (`blackmasked`/`resin`/`leafcutter`/`orchard`), matching `nest_data.beeType`.
 

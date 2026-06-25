@@ -66,9 +66,11 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 - **Backend re-fetches on every request.** Stateless projection. No
   caching layer. Acceptable at the expected read volume; revisit if
   multi-tenant.
-- **Stub classifier.** `stub_classify()` ships in production today.
-  The data-flow contract is what MaskRCNN will fill — replacing the
-  classifier doesn't change the persistence layer.
+- **Stub empty/sealed classifier.** `stub_classify()` ships in
+  production today. The learned detector already localizes holes for the
+  snips (ADR-027) but defers empty/sealed; a learned classifier will fill
+  the same data-flow contract — replacing it doesn't change the
+  persistence layer.
 - **Dashboard visitor IPs leave HiveHive infra to reach ipapi.co.**
   `GET /api/user-location` (issue #14, [ADR-012](../09-architecture-decisions/adr-012-dashboard-ip-geo-hint.md))
   forwards the visitor's IP to a free third-party IP-geolocation
@@ -177,9 +179,45 @@ evidence (a detection quorum) and return "no result" below it, so the honest
 empty state shows instead of invented values. And calibrate/regression-test CV
 against representative real input, not just clean synthetic fixtures — the mock
 that makes your happy path green is also the one that hides your failure path. The
-fixed-grid fabrication was removed; the detector now degrades to no-detection
-below `_MIN_CIRCLES_QUORUM`, pinned by
-`test_real_capture_never_fabricates_a_full_sealed_grid`.
+fixed-grid fabrication was removed first (the Hough detector degraded to
+no-detection below a circle quorum); the `HoughCircles` detector was then replaced
+**entirely** by the learned YOLO26n-seg model ([ADR-027](../09-architecture-decisions/adr-027-hole-detection-model.md)),
+which locates holes on real captures directly — so the quorum gate and its
+fixtures no longer exist in `image-service`.
+
+### Single-band Hough + fixed grid can't find real nest holes at all — the approach, not just the fallback, was mis-fit (#165)
+
+**What happened.** After the fabricating fallback was removed (previous lesson),
+the "honest" `HoleDetector` (`image-service/services/hole_detection.py`) still
+detected **nothing** on real ESP32-CAM captures: run against 10 real frames in
+`dev-tools/real_captures/` it found 0 circles on every one and degraded to
+no-detection. The hole-detection feature on PR #188 was therefore a no-op in the
+field — it only ever produced snips on the synthetic `dev-tools/mock_*` fixtures.
+Root cause: a single `cv2.HoughCircles` band with `minRadius ≈ 0.05·width`
+(≈32 px at 640 px wide) only covers the largest bottom row; there is no block-ROI
+stage, so wall texture and wood cracks compete; and one narrow radius band cannot
+span the real ≈4 px → ≈22 px hole-radius range present in a single frame. Real
+blocks are also not a clean 4×4 (small-bee rows have 5–6 holes) and the block
+mounts in either orientation.
+
+**Why it happened.** The detector was calibrated and unit-tested only against
+high-contrast synthetic mocks, on which a single Hough band succeeds. The mocks
+made the happy path green and hid that the **approach itself** — not merely the
+fabricating fallback — does not fit real optics. "Degrades gracefully" masked
+"never works": a no-op that never raises reads as a working feature in CI.
+
+**How to avoid it next time.** Prove a CV/ML approach on **representative real
+input before building the pipeline around it**, and treat "detected nothing on
+every real frame" as a failure, not a graceful state. For a multi-scale target
+(holes spanning a 4–22 px radius in one frame) a single fixed Hough band is the
+wrong instrument — use a multi-scale or learned detector, and do not assume a
+fixed grid (column count and orientation vary per field unit). The pivot is a
+Grounding-DINO + SAM 2.1 labelling workflow to locate every hole (empty or
+filled) and a learned detector behind the unchanged `HoleDetector().detect()`
+seam, staged evidence-first under `dev-tools/ml_hole_detection/` (see its README
+and the plan in `~/.claude/plans/`). The snip plumbing (duckdb-service
+`nest_detections`, backend `/api/snips`, the `NestSnip` contract, homepage
+`NestSnipGrid`) is detection-agnostic and is kept.
 
 ### A sparse wire field broke an `ARG_MAX` summary fold — the dashboard signal would have latched forever (#172, review-caught)
 

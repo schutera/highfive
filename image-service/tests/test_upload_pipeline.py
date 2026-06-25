@@ -189,6 +189,51 @@ def test_pipeline_uses_detection_classification_and_persists_snips(tmp_path: Pat
     assert rows[0]["snip_filename"] == "cap-leafcutter_bee-2.jpg"
 
 
+def _localize_only_detection() -> DetectionResult:
+    """The real (learned) detector's shape: real snips, but empty classification
+    and ``undetermined`` state — it localizes, it doesn't classify empty/sealed."""
+    snip = Snip(
+        bee_type="orchard_bee",
+        nest_index=1,
+        bbox=(0.4, 0.5, 0.2, 0.2),
+        state="undetermined",
+        confidence=0.88,
+        jpeg=b"\xff\xd8\xff-fake-jpeg",
+    )
+    return DetectionResult(classification={}, snips=[snip])
+
+
+def test_pipeline_localize_only_persists_snips_but_stubs_progress(tmp_path: Path):
+    """The learned detector returns snips with an empty classification (ok=False):
+    the snips are persisted + recorded, but progress falls back to the stub (the
+    model defers empty/sealed). This is the integrated runtime's normal path."""
+    duckdb = _FakeDuckDB(progress_count=5)
+    detector = _FakeDetector(_localize_only_detection())
+    pipeline = UploadPipeline(
+        upload_folder=str(tmp_path),
+        duckdb_service=duckdb,
+        send_discord=lambda msg: None,
+        classify=lambda: {"stub": {"1": 0}},  # used for progress (detection.ok False)
+        detector=detector,
+        snip_folder=str(tmp_path / "snips"),
+    )
+
+    req = UploadRequest(
+        mac=TEST_MAC_1, battery=50, image=_FakeImage("cap.jpg"), logs_raw=None
+    )
+    result = pipeline.run(req)
+
+    # Progress used the stub (classification was empty)...
+    assert result.classification == {"stub": {"1": 0}}
+    assert duckdb.add_progress_calls[0]["classification"] == {"stub": {"1": 0}}
+    # ...but the snip was still written and recorded with its undetermined state.
+    assert (tmp_path / "snips" / "cap-orchard_bee-1.jpg").exists()
+    assert len(duckdb.record_detections_calls) == 1
+    _mac, _fn, rows = duckdb.record_detections_calls[0]
+    assert rows[0]["state"] == "undetermined"
+    assert rows[0]["bee_type"] == "orchard"  # canonical DB key on the row
+
+
 def test_pipeline_falls_back_to_stub_when_detection_empty(tmp_path: Path):
     """An empty DetectionResult (no circles) => stub classification is used and
     no snips/detections are recorded — the dashboard never blanks."""

@@ -106,6 +106,7 @@ const translations = {
       nestSnipsHint: 'Per-hole close-ups, latest detection',
       snipSealed: 'Sealed',
       snipEmpty: 'Empty',
+      snipDetected: 'Detected',
       snipAlt: '{beeType} nest {index} — {state}',
     },
 
@@ -566,6 +567,7 @@ const translations = {
       nestSnipsHint: 'Nahaufnahmen je Loch, neueste Erkennung',
       snipSealed: 'Verschlossen',
       snipEmpty: 'Leer',
+      snipDetected: 'Erkannt',
       snipAlt: '{beeType} Nest {index} — {state}',
     },
 

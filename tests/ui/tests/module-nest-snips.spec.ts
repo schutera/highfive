@@ -9,11 +9,12 @@ import type { NestSnipsResponse } from '@highfive/contracts';
 // duckdb-service /detections → backend /snips proxy → nginx → <img> pixels —
 // actually renders, which jsdom can never do.
 //
-// Reuses the admin-gallery seed: seed_ui_fixtures.py uploads the real
-// dev-tools/mock_fully_filled.jpg as GALLERY_MAC's newest capture, which the
-// live detector turns into sealed snips. The five older fake uploads produce
-// no snips (detection degrades to empty), so the grid is driven entirely by the
-// one real capture.
+// Reuses the admin-gallery seed: seed_ui_fixtures.py uploads a real ESP capture
+// (dev-tools/real_captures/block_tungsten_640.jpg) as GALLERY_MAC's newest
+// image, which the learned detector (ADR-027) localizes into ~21 `undetermined`
+// snips. The model only fires on real captures, not synthetic mocks. The five
+// older fake uploads produce no snips (detection degrades to empty), so the grid
+// is driven entirely by the one real capture.
 
 const GALLERY_MAC = 'ff2222222222';
 
@@ -27,8 +28,14 @@ test.describe('module panel nest snips', () => {
     const body = (await resp.json()) as NestSnipsResponse;
     expect(body.snips.length).toBeGreaterThan(0);
     const first = body.snips[0];
-    expect(['empty', 'sealed']).toContain(first.state);
+    // The learned detector localizes but defers empty/sealed → `undetermined`.
+    expect(['empty', 'sealed', 'undetermined']).toContain(first.state);
     expect(first.snipFilename).toBeTruthy();
+    // block_tungsten is the irregular 7/5/5/4 block: the smallest-bee row alone
+    // has 7 nests. Proves the old 4-per-row cap is gone (it would have silently
+    // dropped 3 holes of this row) — the bug the no-cap change fixed.
+    const blackmasked = body.snips.filter((s) => s.beeType === 'blackmasked');
+    expect(blackmasked.length).toBeGreaterThan(4);
 
     // 2) Open the gallery module's panel on the public dashboard.
     await page.goto('/dashboard');
@@ -41,8 +48,12 @@ test.describe('module panel nest snips', () => {
 
     // 3) The snip grid heading and at least one snip image render.
     await expect(panel.getByText(/Nest holes|Nistlöcher/)).toBeVisible();
-    const snipImg = panel.locator(`img[src*="/api/snips/"]`).first();
+    const snipImgs = panel.locator(`img[src*="/api/snips/"]`);
+    const snipImg = snipImgs.first();
     await expect(snipImg).toBeVisible();
+    // The full irregular block renders — not capped at the old 16 (4×4). The
+    // <img> elements exist even while lazy-loading, so count() is the cap proof.
+    await expect.poll(async () => snipImgs.count()).toBeGreaterThan(16);
 
     // 4) The snip must have actually loaded pixels through nginx → backend →
     //    image-service — the proof jsdom structurally cannot give.
@@ -52,7 +63,8 @@ test.describe('module panel nest snips', () => {
       )
       .toBe(true);
 
-    // 5) Each snip carries an empty/sealed badge (mock_fully_filled => sealed).
-    await expect(panel.getByText(/Sealed|Verschlossen/).first()).toBeVisible();
+    // 5) Each snip carries a neutral "Detected" badge — the model localizes but
+    //    defers the empty/sealed call (ADR-027), so it never guesses sealed.
+    await expect(panel.getByText(/Detected|Erkannt/).first()).toBeVisible();
   });
 });

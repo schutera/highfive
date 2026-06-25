@@ -1,0 +1,12 @@
+# Annotator export (images + labels) and rendered overlays are large and
+# regenerable — keep them out of git. The folders stay (via .gitkeep) so the
+# documented paths exist on a fresh checkout.
+dataset/*
+!dataset/.gitkeep
+overlays/
+# Ultralytics training runs (weights, plots) — large, regenerable.
+runs/
+# Local virtualenv for this tooling (torch/ultralytics — multi-GB).
+.venv/
+# Ultralytics pretrained base weights auto-downloaded into the run CWD.
+*.pt

@@ -48,8 +48,8 @@ def test_record_and_read_back_detections(client):
     assert by_nest[2]["state"] == "empty"
 
 
-def test_read_folds_to_latest_snip_per_nest(client):
-    """Two uploads for the same nest => the read returns only the newest."""
+def test_read_returns_only_the_latest_capture(client):
+    """The grid reflects the most recent capture: a newer upload's snips win."""
     client.post(
         "/record_detections",
         json={
@@ -71,6 +71,83 @@ def test_read_folds_to_latest_snip_per_nest(client):
     assert len(orchard) == 1
     assert orchard[0]["state"] == "sealed"
     assert orchard[0]["snip_filename"] == "new-orchard-1.jpg"
+
+
+def test_vanished_nest_does_not_latch_a_stale_snip(client):
+    """A nest the *latest* capture didn't detect must disappear, not serve an
+    old crop. The learned detector's per-row hole count varies ±1 frame-to-frame
+    (ADR-027); a per-nest "latest snip" fold would latch capA's nest 2 forever
+    once capB detects fewer holes. This pins the latest-capture fold instead."""
+    # Capture A: orchard has TWO nests.
+    client.post(
+        "/record_detections",
+        json={
+            "module_id": TEST_MAC,
+            "filename": "capA.jpg",
+            "detections": [
+                _detection("orchard", 1, "sealed", "capA-orchard-1.jpg"),
+                _detection("orchard", 2, "sealed", "capA-orchard-2.jpg"),
+            ],
+        },
+    )
+    # Capture B (newer): the model only found ONE orchard hole this frame.
+    client.post(
+        "/record_detections",
+        json={
+            "module_id": TEST_MAC,
+            "filename": "capB.jpg",
+            "detections": [_detection("orchard", 1, "empty", "capB-orchard-1.jpg")],
+        },
+    )
+    dets = client.get(f"/detections?module_id={TEST_MAC}").get_json()["detections"]
+    # Only capB's snips — capA's stale nest 2 is gone, not latched.
+    assert all(d["filename"] == "capB.jpg" for d in dets), dets
+    orchard = [d for d in dets if d["bee_type"] == "orchard"]
+    assert len(orchard) == 1
+    assert orchard[0]["snip_filename"] == "capB-orchard-1.jpg"
+
+
+def test_undetermined_state_is_recorded(client):
+    """The learned detector (ADR-027) emits ``undetermined`` (it localizes but
+    defers empty/sealed); that state must persist and read back, not be skipped."""
+    resp = client.post(
+        "/record_detections",
+        json={
+            "module_id": TEST_MAC,
+            "filename": "loc.jpg",
+            "detections": [
+                _detection("blackmasked", 1, "undetermined", "loc-blackmasked-1.jpg"),
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["inserted"] == 1
+    dets = client.get(f"/detections?module_id={TEST_MAC}").get_json()["detections"]
+    assert [d["state"] for d in dets] == ["undetermined"]
+
+
+def test_reupload_same_capture_is_idempotent(client):
+    """A retried upload re-records the same capture (record_detections is
+    append-only, no DELETE). The read must still return ONE row per nest — the
+    latest-capture scope alone would return both copies as duplicate grid cells
+    (and React key collisions); the per-nest dedup keeps it idempotent."""
+    payload = {
+        "module_id": TEST_MAC,
+        "filename": "retry.jpg",
+        "detections": [
+            _detection("leafcutter", 1, "sealed", "retry-leafcutter-1.jpg"),
+            _detection("leafcutter", 2, "empty", "retry-leafcutter-2.jpg"),
+        ],
+    }
+    # Same capture recorded twice (network-retry duplicate).
+    client.post("/record_detections", json=payload)
+    client.post("/record_detections", json=payload)
+
+    dets = client.get(f"/detections?module_id={TEST_MAC}").get_json()["detections"]
+    # One row per nest, not two — no duplicates despite the double-record.
+    nests = sorted(d["nest_index"] for d in dets)
+    assert nests == [1, 2], nests
+    assert len(dets) == 2
 
 
 def test_invalid_state_rows_are_skipped_not_fatal(client):

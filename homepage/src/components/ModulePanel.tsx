@@ -5,6 +5,7 @@ import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
 import LatestCaptures from './LatestCaptures';
+import NestSnipGrid from './NestSnipGrid';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
 import { DASHBOARD_IMAGES_ENABLED } from '../lib/featureFlags';
@@ -520,6 +521,13 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
             locale={locale}
           />
         )}
+
+        {/* Per-nest hole-detection snips (#165) — a grid mirroring the block,
+            one row per bee type, each cell a cropped close-up with an
+            empty/sealed badge. Self-contained and silent on error like
+            LatestCaptures; gated behind the same dashboard-images flag because
+            it shows per-module imagery. */}
+        {DASHBOARD_IMAGES_ENABLED && <NestSnipGrid moduleId={moduleDetail.id} />}
 
         {/* Species cards. The auto-fit grid flows to 2 columns once the panel is
             wide enough (xl aside ≈ 560px). On desktop the grid grows to fill the

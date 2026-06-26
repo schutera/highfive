@@ -1,0 +1,2 @@
+# Export target for the annotator's YOLO v5+ (or COCO) hole dataset.
+# Contents are gitignored; see ../README.md for the labelling protocol.

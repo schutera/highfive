@@ -1,3 +1,12 @@
 Flask==3.1.2
 requests==2.32.5
 pydantic==2.12.5
+# Hole detection (#165, ADR-027): the learned YOLO26n-seg model runs as ONNX
+# through onnxruntime — deliberately lean (no torch/ultralytics, which are the
+# dev-only training stack). The model is baked into the image at
+# models/hole_detector.onnx; regenerate with dev-tools/ml_hole_detection/
+# export_onnx.py. headless OpenCV (no GUI/X11 deps) does the letterbox + crop and
+# numpy the box math; headless keeps the image slim and avoids libGL.
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+onnxruntime==1.27.0

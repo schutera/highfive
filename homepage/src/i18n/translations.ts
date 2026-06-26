@@ -102,6 +102,12 @@ const translations = {
       galleryPrev: 'Previous images',
       galleryNext: 'More images',
       lightboxClose: 'Close',
+      nestSnips: 'Nest holes',
+      nestSnipsHint: 'Per-hole close-ups, latest detection',
+      snipSealed: 'Sealed',
+      snipEmpty: 'Empty',
+      snipDetected: 'Detected',
+      snipAlt: '{beeType} nest {index} — {state}',
     },
 
     // ---- Activity vs weather chart ----
@@ -557,6 +563,12 @@ const translations = {
       galleryPrev: 'Vorherige Bilder',
       galleryNext: 'Weitere Bilder',
       lightboxClose: 'Schließen',
+      nestSnips: 'Nistlöcher',
+      nestSnipsHint: 'Nahaufnahmen je Loch, neueste Erkennung',
+      snipSealed: 'Verschlossen',
+      snipEmpty: 'Leer',
+      snipDetected: 'Erkannt',
+      snipAlt: '{beeType} Nest {index} — {state}',
     },
 
     // ---- Activity vs weather chart ----

@@ -254,6 +254,40 @@ export interface ImageUploadsPage {
   total: number;
 }
 
+// ---- Per-nest hole-detection snips (issue #165) ----
+//
+// Wire-shape returned by `backend GET /api/modules/:id/snips`, which proxies
+// `duckdb-service GET /detections?module_id=`. One entry per nest hole — the
+// latest detection per (beeType, nestIndex). The crop is the privacy mechanism
+// (issue #154): a snip frames only the hole, so it is served without auth via
+// `GET /api/snips/:filename`. Consumers build the image URL from `snipFilename`
+// with `api.getSnipUrl(...)`, mirroring `ImageUpload.filename`/`getImageUrl`.
+//
+// Lives here, not in `homepage/src/services/api.ts`, per ADR-004 — any DTO
+// crossing the backend↔homepage boundary belongs in the shared package.
+
+export interface NestSnip {
+  // Canonical DB bee type, matching `NestData.beeType` (not the image-service
+  // wire key `leafcutter_bee`). The backend maps the stored key to this form.
+  beeType: 'blackmasked' | 'resin' | 'leafcutter' | 'orchard';
+  nestIndex: number; // 1-based replicate within the bee type
+  // `undetermined`: the learned detector (ADR-027) located the hole but the
+  // empty-vs-sealed call is deferred — the model is a single-class `hole`
+  // localizer. `empty`/`sealed` remain for when a classifier lands.
+  state: 'empty' | 'sealed' | 'undetermined';
+  confidence: number; // 0-1; detection confidence for this hole
+  // Filename of the cropped snip JPEG; resolve to a URL with `getSnipUrl`.
+  snipFilename: string;
+  // Normalized [x, y, w, h] in [0,1] of the snip box in the source capture.
+  bbox: [number, number, number, number];
+  sourceFilename: string; // the full capture this snip was cropped from
+  detectedAt: string; // "YYYY-MM-DD HH:MM:SS" UTC, opaque sortable string
+}
+
+export interface NestSnipsResponse {
+  snips: NestSnip[];
+}
+
 // ---- Telemetry sidecar envelope ----
 //
 // Wire-shape returned by `image-service /modules/<mac>/logs` (proxied

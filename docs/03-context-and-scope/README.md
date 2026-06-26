@@ -51,7 +51,9 @@ flowchart TD
 - Real-time push to clients. Dashboard is poll-based.
 - Identity provider integration (OAuth, SSO). Auth is a single shared
   API key — see [auth](../08-crosscutting-concepts/auth.md).
-- Production-grade classification. Today's classifier is a stub;
-  MaskRCNN integration is planned but the contract shape is fixed.
+- Production-grade empty/sealed classification. A learned detector
+  already localizes holes for snips (ADR-027), but the empty/sealed
+  classifier is a stub; a learned classifier is planned and the
+  contract shape is fixed.
 - OTA firmware updates. Tracked as a feature request:
   [issue #26](https://github.com/schutera/highfive/issues/26).

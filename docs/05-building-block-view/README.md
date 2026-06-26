@@ -47,6 +47,13 @@ flowchart TD
 Per-service endpoints and behaviour live in the detail files linked
 above and in [api-reference.md](../api-reference.md).
 
+## ML / hole-detection model
+
+The learned model behind `image-service`'s hole detection (#165) has its own
+label → train → retrain pipeline, with process flowcharts and copy-paste
+commands: [hole-detection-model.md](hole-detection-model.md). Decision record:
+[ADR-027](../09-architecture-decisions/adr-027-hole-detection-model.md).
+
 ## Where things live
 
 For per-file orientation when working in a specific area:

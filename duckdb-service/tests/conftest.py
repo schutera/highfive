@@ -37,6 +37,7 @@ def _purge_service_modules() -> None:
     for name in [
         "app",
         "routes.progress",
+        "routes.detections",
         "routes.nests",
         "routes.modules",
         "routes.measurements",

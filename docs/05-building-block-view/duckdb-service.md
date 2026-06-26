@@ -209,7 +209,8 @@ Returns all saved progress data.
 
 This endpoint is used by the AI model to save classification results.
 
-- There are three nests per bee species per module
+- There are four nests per bee species per module (the older "three" was a stale
+  reference — see #165; the stub emits `range(1, 5)`)
 - Missing nests are automatically generated
 - Progress values are saved for the current date
 

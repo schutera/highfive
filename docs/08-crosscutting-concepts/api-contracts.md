@@ -445,6 +445,46 @@ Per ADR-004 the type lives in `@highfive/contracts`; the previous
 service-local `interface ImageUpload` in `homepage/src/services/api.ts`
 was the exact smell that rule warns against and is now a re-export.
 
+## `NestSnip` — per-nest hole-detection snips (#165)
+
+Served by `GET /api/modules/:id/snips` (backend), which proxies
+`duckdb-service GET /detections` and maps the snake_case rows to camelCase.
+One entry per nest hole — the latest detection per `(beeType, nestIndex)`.
+Rendered by `homepage/src/components/NestSnipGrid.tsx`. The type lives in
+`contracts/src/index.ts`:
+
+```ts
+export interface NestSnip {
+  beeType: 'blackmasked' | 'resin' | 'leafcutter' | 'orchard'; // matches NestData.beeType, NOT the image-service wire key 'leafcutter_bee'
+  nestIndex: number; // 1-based
+  state: 'empty' | 'sealed' | 'undetermined'; // learned detector localizes → 'undetermined'; empty/sealed await a classifier (ADR-027)
+  confidence: number; // 0-1; detection confidence for this hole
+  snipFilename: string; // resolve via api.getSnipUrl(...), like ImageUpload.filename
+  bbox: [number, number, number, number]; // normalized [x, y, w, h] in [0,1]
+  sourceFilename: string;
+  detectedAt: string; // UTC "YYYY-MM-DD HH:MM:SS", opaque sortable
+}
+
+export interface NestSnipsResponse {
+  snips: NestSnip[];
+}
+```
+
+Two non-obvious contract details:
+
+- **`beeType` is the DB form, not the image-service wire key.** image-service's
+  detector emits `leafcutter_bee` in the classification dict (the
+  `/add_progress_for_module` contract), but maps to `leafcutter` when writing
+  `nest_detections.bee_type`, so `NestSnip.beeType` lines up with
+  `NestData.beeType` and the homepage `BEE_TYPES` keys. The backend validates
+  the enum and **drops** unknown bee types / states rather than forwarding a
+  drifted row as `{beeType: undefined}` (CLAUDE.md wire-shape rule). Pinned by
+  `backend/tests/snips-route.test.ts`.
+- **`snipFilename`, not a pre-built URL.** Mirrors `ImageUpload.filename` +
+  `getImageUrl`: the homepage builds the public URL via `api.getSnipUrl(...)`
+  (`/api/snips/:filename`). The crop is the privacy mechanism (#154), so the
+  bytes route is public.
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing

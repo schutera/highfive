@@ -1,0 +1,11 @@
+{
+  "_comment": "EXAMPLE label file. Copy to '<image>.labels.json' (drop the .example) and edit. One per real capture. This documents the format; the values below are a guess, not ground truth — replace them.",
+  "image": "block_warm_1024.jpg",
+  "grid": [4, 4],
+  "_grid_note": "[rows, cols] as they appear in THIS image. Row 1 = top, col 1 = left.",
+  "sealed": [
+    [1, 4],
+    [3, 4]
+  ],
+  "_sealed_note": "List ONLY the sealed holes as 1-based [row, col]. Every hole not listed is treated as empty/open. Leave [] if the whole block is empty."
+}

@@ -66,9 +66,11 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 - **Backend re-fetches on every request.** Stateless projection. No
   caching layer. Acceptable at the expected read volume; revisit if
   multi-tenant.
-- **Stub classifier.** `stub_classify()` ships in production today.
-  The data-flow contract is what MaskRCNN will fill — replacing the
-  classifier doesn't change the persistence layer.
+- **Stub empty/sealed classifier.** `stub_classify()` ships in
+  production today. The learned detector already localizes holes for the
+  snips (ADR-027) but defers empty/sealed; a learned classifier will fill
+  the same data-flow contract — replacing it doesn't change the
+  persistence layer.
 - **Dashboard visitor IPs leave HiveHive infra to reach ipapi.co.**
   `GET /api/user-location` (issue #14, [ADR-012](../09-architecture-decisions/adr-012-dashboard-ip-geo-hint.md))
   forwards the visitor's IP to a free third-party IP-geolocation
@@ -127,6 +129,95 @@ This section grows over time. Each entry is a problem we paid for —
 write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
+
+### `opencv-python-headless` still needs `libglib2.0-0`; and `circle.txt` was stale (#165)
+
+**What happened.** Two gotchas surfaced while adding hole detection (#165).
+(1) Adding `opencv-python-headless` to image-service's `requirements.txt` is not
+enough — on the `python:3.12-slim` base, `import cv2` fails at **runtime** with
+`libgthread-2.0.so.0: cannot open shared object file`. The `headless` wheel drops
+the GUI/GL libs but still links **glib**. (2) The prior-art `dev-tools/circle.txt`
+described a 4-bee-type × **3**-nest grid on a 791×528 frame; the physical block is
+actually 4×4, and ESP captures are VGA/UXGA, never 791×528 — so its absolute pixel
+boxes were doubly wrong.
+
+**Why it happened.** `headless` is widely assumed to be "zero system deps", and
+the slim image has no glib. The stale `circle.txt` had no "as-of" marker and read
+like ground truth, so an early plan targeted 12 holes off it before the hardware
+owner corrected it to 16.
+
+**How to avoid it next time.** When adding an OpenCV (or any native-wheel)
+dependency to a slim-based service, install its system libs in the Dockerfile
+(`libglib2.0-0` here) and verify `import` _in the container_, not just on the dev
+host — a green local import proves nothing about the slim image. Treat
+hand-measured reference assets as provenance, not truth: detect dynamically and
+work in **normalized** coordinates so resolution/pose can't invalidate a fixed
+calibration. `circle.txt` is now annotated as superseded.
+
+### A "graceful" fixed-grid fallback fabricated confident garbage on real captures (#165, found with real fixtures)
+
+**What happened.** The hole detector's hybrid design fell back to a fixed 4×4
+grid when `HoughCircles` found nothing, so `/upload` would "always produce snips."
+Against the synthetic mocks this looked great. The first **real** ESP captures
+(`dev-tools/real_captures/`) revealed the trap: the mock-tuned params find **zero**
+circles on real low-contrast images, so every real upload hit the fallback —
+which placed 16 holes on plain wood and classified them all "sealed." The
+dashboard would have shown a confident, fully-occupied grid for blocks that were
+actually empty. The bug was invisible because the only test inputs were the
+mocks, on which Hough succeeds and the fallback never fires.
+
+**Why it happened.** A fallback that _fabricates_ output converts "I couldn't
+detect anything" into "here is a clean answer." Combined with calibration tuned
+only to unrealistic fixtures, the failure mode (total detection miss) was exactly
+the path with no test coverage. There is also no single Hough config that fits
+both the high-contrast mocks and the low-contrast real captures, so the mock
+success actively hid the real failure.
+
+**How to avoid it next time.** A fallback may _degrade_ (return less, or nothing)
+but must never _fabricate_ data that flows to users as if measured. Gate on real
+evidence (a detection quorum) and return "no result" below it, so the honest
+empty state shows instead of invented values. And calibrate/regression-test CV
+against representative real input, not just clean synthetic fixtures — the mock
+that makes your happy path green is also the one that hides your failure path. The
+fixed-grid fabrication was removed first (the Hough detector degraded to
+no-detection below a circle quorum); the `HoughCircles` detector was then replaced
+**entirely** by the learned YOLO26n-seg model ([ADR-027](../09-architecture-decisions/adr-027-hole-detection-model.md)),
+which locates holes on real captures directly — so the quorum gate and its
+fixtures no longer exist in `image-service`.
+
+### Single-band Hough + fixed grid can't find real nest holes at all — the approach, not just the fallback, was mis-fit (#165)
+
+**What happened.** After the fabricating fallback was removed (previous lesson),
+the "honest" `HoleDetector` (`image-service/services/hole_detection.py`) still
+detected **nothing** on real ESP32-CAM captures: run against 10 real frames in
+`dev-tools/real_captures/` it found 0 circles on every one and degraded to
+no-detection. The hole-detection feature on PR #188 was therefore a no-op in the
+field — it only ever produced snips on the synthetic `dev-tools/mock_*` fixtures.
+Root cause: a single `cv2.HoughCircles` band with `minRadius ≈ 0.05·width`
+(≈32 px at 640 px wide) only covers the largest bottom row; there is no block-ROI
+stage, so wall texture and wood cracks compete; and one narrow radius band cannot
+span the real ≈4 px → ≈22 px hole-radius range present in a single frame. Real
+blocks are also not a clean 4×4 (small-bee rows have 5–6 holes) and the block
+mounts in either orientation.
+
+**Why it happened.** The detector was calibrated and unit-tested only against
+high-contrast synthetic mocks, on which a single Hough band succeeds. The mocks
+made the happy path green and hid that the **approach itself** — not merely the
+fabricating fallback — does not fit real optics. "Degrades gracefully" masked
+"never works": a no-op that never raises reads as a working feature in CI.
+
+**How to avoid it next time.** Prove a CV/ML approach on **representative real
+input before building the pipeline around it**, and treat "detected nothing on
+every real frame" as a failure, not a graceful state. For a multi-scale target
+(holes spanning a 4–22 px radius in one frame) a single fixed Hough band is the
+wrong instrument — use a multi-scale or learned detector, and do not assume a
+fixed grid (column count and orientation vary per field unit). The pivot is a
+Grounding-DINO + SAM 2.1 labelling workflow to locate every hole (empty or
+filled) and a learned detector behind the unchanged `HoleDetector().detect()`
+seam, staged evidence-first under `dev-tools/ml_hole_detection/` (see its README
+and the plan in `~/.claude/plans/`). The snip plumbing (duckdb-service
+`nest_detections`, backend `/api/snips`, the `NestSnip` contract, homepage
+`NestSnipGrid`) is detection-agnostic and is kept.
 
 ### A sparse wire field broke an `ARG_MAX` summary fold — the dashboard signal would have latched forever (#172, review-caught)
 

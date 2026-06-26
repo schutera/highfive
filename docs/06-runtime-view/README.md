@@ -39,6 +39,14 @@ the upload pipeline (edge → server) and the dashboard read flow.
    fetch degrades to "no gallery" — it never tears down the panel. With the
    flag off, the panel shows nests / status / telemetry only and makes no
    image fetch.
+7. Behind the same `VITE_ENABLE_DASHBOARD_IMAGES` flag, the panel also renders
+   the per-nest hole-detection snip grid (#165) from
+   `GET /api/modules/:id/snips` (latest capture per nest). Tapping a snip opens
+   the **per-nest time-lapse** (#166): `SnipTimelapseModal` fetches that one
+   hole's full capture history via
+   `GET /api/modules/:id/snips/:beeType/:nestIndex/timeline` (oldest first) and
+   a slider scrubs the crop across days. Public reads; a failed fetch degrades
+   to a message inside the modal and never tears down the panel.
 
 No caching layer; each browser poll re-fetches. Partial failures
 degrade gracefully (some fields empty) rather than 500ing.

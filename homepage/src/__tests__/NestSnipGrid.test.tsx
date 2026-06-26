@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { NestSnip } from '@highfive/contracts';
 
 import { LanguageProvider } from '../i18n/LanguageContext';
@@ -17,6 +18,11 @@ vi.mock('../services/api', () => ({
       nextSnips ? Promise.resolve(nextSnips) : Promise.reject(new Error('snips unavailable')),
     ),
     getSnipUrl: vi.fn((f: string) => `http://localhost:3002/api/snips/${encodeURIComponent(f)}`),
+    // The grid opens SnipTimelapseModal on click, which fetches the history.
+    // Return a single-frame timeline so the modal renders without extra setup.
+    getSnipTimeline: vi.fn((_id: string, beeType: NestSnip['beeType'], nestIndex: number) =>
+      Promise.resolve([snip(beeType, nestIndex, 'sealed')]),
+    ),
   },
 }));
 
@@ -65,6 +71,22 @@ describe('NestSnipGrid', () => {
     // Badges reflect the real states (one sealed, one empty).
     expect(screen.getByText('Sealed')).toBeInTheDocument();
     expect(screen.getByText('Empty')).toBeInTheDocument();
+  });
+
+  it('opens the per-nest time-lapse modal when a snip is clicked (#166)', async () => {
+    nextSnips = [snip('leafcutter', 1, 'sealed'), snip('leafcutter', 2, 'empty')];
+    renderGrid();
+
+    // Each cell is a button labelled for its hole.
+    const trigger = await screen.findByRole('button', {
+      name: /time-lapse of 6 mm nest 1/i,
+    });
+    await userEvent.click(trigger);
+
+    // The modal mounts and resolves its single-frame timeline.
+    const modal = await screen.findByTestId('snip-timelapse-modal');
+    expect(modal).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('timelapse-frame')).toBeInTheDocument());
   });
 
   it('renders a neutral "Detected" badge for the localize-only undetermined state', async () => {

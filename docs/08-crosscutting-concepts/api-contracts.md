@@ -468,6 +468,13 @@ export interface NestSnip {
 export interface NestSnipsResponse {
   snips: NestSnip[];
 }
+
+// #166 per-nest time-lapse: every capture for ONE nest, oldest first, served by
+// `GET /api/modules/:id/snips/:beeType/:nestIndex/timeline`. Same NestSnip
+// element shape as the grid read — only the response wrapper differs.
+export interface NestSnipTimelineResponse {
+  snips: NestSnip[];
+}
 ```
 
 Two non-obvious contract details:

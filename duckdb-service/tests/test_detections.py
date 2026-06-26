@@ -188,3 +188,108 @@ def test_read_empty_module_returns_empty_list(client):
 
 def test_invalid_module_id_is_400(client):
     assert client.get("/detections?module_id=not-a-mac").status_code == 400
+
+
+# ---- /detections/timeline — per-nest history for the phase-3 time-lapse (#166) ----
+
+
+def _timeline(client, bee_type: str, nest_index: int):
+    return client.get(
+        f"/detections/timeline?module_id={TEST_MAC}"
+        f"&bee_type={bee_type}&nest_index={nest_index}"
+    )
+
+
+def test_timeline_returns_every_capture_oldest_first(client):
+    """The time-lapse needs all captures for one nest, chronological — the inverse
+    of the latest-capture fold. Seed three captures and assert all three frames
+    come back in detected_at order (CLAUDE.md: assert behaviour, not envelope)."""
+    for cap, state, snip in (
+        ("d1.jpg", "empty", "d1-leafcutter-1.jpg"),
+        ("d2.jpg", "undetermined", "d2-leafcutter-1.jpg"),
+        ("d3.jpg", "sealed", "d3-leafcutter-1.jpg"),
+    ):
+        client.post(
+            "/record_detections",
+            json={
+                "module_id": TEST_MAC,
+                "filename": cap,
+                "detections": [_detection("leafcutter", 1, state, snip)],
+            },
+        )
+    resp = _timeline(client, "leafcutter", 1)
+    assert resp.status_code == 200
+    dets = resp.get_json()["detections"]
+    assert [d["snip_filename"] for d in dets] == [
+        "d1-leafcutter-1.jpg",
+        "d2-leafcutter-1.jpg",
+        "d3-leafcutter-1.jpg",
+    ]
+    assert [d["state"] for d in dets] == ["empty", "undetermined", "sealed"]
+
+
+def test_timeline_scopes_to_the_requested_nest(client):
+    """Only the asked-for (bee_type, nest_index) frames — sibling nests excluded."""
+    client.post(
+        "/record_detections",
+        json={
+            "module_id": TEST_MAC,
+            "filename": "cap.jpg",
+            "detections": [
+                _detection("leafcutter", 1, "sealed", "cap-leafcutter-1.jpg"),
+                _detection("leafcutter", 2, "empty", "cap-leafcutter-2.jpg"),
+                _detection("resin", 1, "sealed", "cap-resin-1.jpg"),
+            ],
+        },
+    )
+    dets = _timeline(client, "leafcutter", 1).get_json()["detections"]
+    assert len(dets) == 1
+    assert dets[0]["snip_filename"] == "cap-leafcutter-1.jpg"
+
+
+def test_timeline_dedups_a_reuploaded_capture(client):
+    """A network-retry re-records the same capture (append-only). Each capture must
+    appear once in the timeline, not twice — one frame per filename."""
+    payload = {
+        "module_id": TEST_MAC,
+        "filename": "retry.jpg",
+        "detections": [_detection("leafcutter", 1, "sealed", "retry-leafcutter-1.jpg")],
+    }
+    client.post("/record_detections", json=payload)
+    client.post("/record_detections", json=payload)
+    dets = _timeline(client, "leafcutter", 1).get_json()["detections"]
+    assert len(dets) == 1
+
+
+def test_timeline_empty_nest_returns_empty_list(client):
+    resp = _timeline(client, "leafcutter", 1)
+    assert resp.status_code == 200
+    assert resp.get_json()["detections"] == []
+
+
+def test_timeline_requires_all_params(client):
+    assert client.get(f"/detections/timeline?module_id={TEST_MAC}").status_code == 400
+    assert (
+        client.get(
+            f"/detections/timeline?module_id={TEST_MAC}&bee_type=leafcutter"
+        ).status_code
+        == 400
+    )
+
+
+def test_timeline_non_integer_nest_index_is_400(client):
+    assert (
+        client.get(
+            f"/detections/timeline?module_id={TEST_MAC}&bee_type=leafcutter&nest_index=x"
+        ).status_code
+        == 400
+    )
+
+
+def test_timeline_invalid_module_id_is_400(client):
+    assert (
+        client.get(
+            "/detections/timeline?module_id=not-a-mac&bee_type=leafcutter&nest_index=1"
+        ).status_code
+        == 400
+    )

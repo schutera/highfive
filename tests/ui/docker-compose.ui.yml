@@ -73,6 +73,10 @@ services:
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       # Must match the backend's key for the #171 server-logs proxy.
       HIGHFIVE_API_KEY: hf_test_key
+      # Copy the bundled demo snips into the shared volume so the #166
+      # time-lapse spec (snip-timelapse.spec.ts) has real crops to render —
+      # pairs with the duckdb `nest_detections` seed (SEED_DATA above).
+      SEED_DATA: 'true'
     volumes:
       - duckdb_ui_data:/data
     depends_on:

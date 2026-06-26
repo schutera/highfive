@@ -108,6 +108,15 @@ const translations = {
       snipEmpty: 'Empty',
       snipDetected: 'Detected',
       snipAlt: '{beeType} nest {index} — {state}',
+      snipOpenTimelapse: 'View time-lapse of {beeType} nest {index}',
+      timelapseTitle: '{beeType} nest {index}',
+      timelapseHint: 'Scrub this hole across captures',
+      timelapseScrubLabel: 'Capture date',
+      timelapseFrameOf: 'Capture {current} of {total}',
+      timelapseSingleFrame: 'Only one capture so far — check back as more arrive.',
+      timelapseEmpty: 'No captures yet for this nest.',
+      timelapseLoadError: 'Could not load this nest’s history.',
+      timelapseClose: 'Close (Esc)',
     },
 
     // ---- Activity vs weather chart ----
@@ -569,6 +578,15 @@ const translations = {
       snipEmpty: 'Leer',
       snipDetected: 'Erkannt',
       snipAlt: '{beeType} Nest {index} — {state}',
+      snipOpenTimelapse: 'Zeitraffer von {beeType} Nest {index} ansehen',
+      timelapseTitle: '{beeType} Nest {index}',
+      timelapseHint: 'Dieses Loch über mehrere Aufnahmen durchblättern',
+      timelapseScrubLabel: 'Aufnahmedatum',
+      timelapseFrameOf: 'Aufnahme {current} von {total}',
+      timelapseSingleFrame: 'Bisher nur eine Aufnahme — schau später wieder vorbei.',
+      timelapseEmpty: 'Noch keine Aufnahmen für dieses Nest.',
+      timelapseLoadError: 'Verlauf dieses Nests konnte nicht geladen werden.',
+      timelapseClose: 'Schließen (Esc)',
     },
 
     // ---- Activity vs weather chart ----

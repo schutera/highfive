@@ -152,5 +152,26 @@ of those layers (each independently validates the state enum).
 > latching a stale crop from an older capture. Within a capture, `nest_index` is _positional_
 > (left-to-right inside a diameter-row), not a durable physical-tube identity: "nest 3" need not be
 > the same hole across captures. That is fine for the current-state grid but is a known limitation
-> for the planned per-nest time-lapse (#166), which will need a stable nest identity (e.g. tracking
+> for the per-nest time-lapse (#166), which needs a stable nest identity (e.g. tracking
 > by position, not just re-indexing each frame).
+
+### Per-nest time-lapse (#166 phase 3, feature 1)
+
+Tapping a snip in `NestSnipGrid` opens `SnipTimelapseModal`, which scrubs that one hole across
+captures. The read is the inverse of the grid fold: `duckdb-service GET /detections/timeline`
+returns **every capture for one `(module_id, bee_type, nest_index)`**, oldest first (one frame per
+source `filename`), surfaced by `backend GET /api/modules/:id/snips/:beeType/:nestIndex/timeline`
+and `api.getSnipTimeline(...)`. `nest_detections` is append-only, so the history is already there —
+this is a read endpoint + a slider, no schema change.
+
+Identity caveat (above) applies: the time-lapse groups by `(bee_type, nest_index)`, the best
+identity available today. When the per-row hole count is stable across captures this tracks the
+same physical hole; when it drifts, a frame may show a neighbour. Position-based tracking would
+harden this and is the natural follow-up.
+
+Because real uploads never run in dev/CI, `nest_detections` is **seeded** there: five captures of
+Garten 12's leafcutter nest 1 walking `empty → undetermined → sealed`
+(`duckdb-service/db/schema.py`), paired with bundled demo crops in `image-service/demo_snips/` that
+`image-service` copies into the shared snip volume on boot when `SEED_DATA=true`. Keep the seeded
+`snip_filename`s in sync with the JPEGs. The Playwright spec `tests/ui/tests/snip-timelapse.spec.ts`
+asserts the scrubber swaps the real rendered crop end-to-end.

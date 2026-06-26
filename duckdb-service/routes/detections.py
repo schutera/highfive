@@ -175,18 +175,78 @@ def list_detections():
         """,
         (canonical, canonical),
     )
-    detections = [
-        {
-            "module_id": r["module_id"],
-            "filename": r["filename"],
-            "bee_type": r["bee_type"],
-            "nest_index": r["nest_index"],
-            "bbox": [r["bbox_x"], r["bbox_y"], r["bbox_w"], r["bbox_h"]],
-            "state": r["state"],
-            "confidence": r["confidence"],
-            "snip_filename": r["snip_filename"],
-            "detected_at": str(r["detected_at"]),
-        }
-        for r in rows
-    ]
+    detections = [_row_to_dict(r) for r in rows]
+    return jsonify(detections=detections), 200
+
+
+def _row_to_dict(r) -> dict:
+    """Map a ``nest_detections`` row to the wire shape (shared by both reads)."""
+    return {
+        "module_id": r["module_id"],
+        "filename": r["filename"],
+        "bee_type": r["bee_type"],
+        "nest_index": r["nest_index"],
+        "bbox": [r["bbox_x"], r["bbox_y"], r["bbox_w"], r["bbox_h"]],
+        "state": r["state"],
+        "confidence": r["confidence"],
+        "snip_filename": r["snip_filename"],
+        "detected_at": str(r["detected_at"]),
+    }
+
+
+@detections_bp.get("/detections/timeline")
+def list_detection_timeline():
+    """Return the full capture history of a **single nest**, oldest first (#166).
+
+    Where ``GET /detections`` folds to one row per nest from the module's *latest*
+    capture (the dashboard grid), the phase-3 time-lapse needs the inverse: every
+    capture for *one* ``(module_id, bee_type, nest_index)``, chronological, so the
+    UI can scrub that same hole across days and watch it get sealed.
+
+    ``record_detections`` is append-only, so a re-uploaded capture (a network
+    retry) records its rows twice for the same ``filename``. Dedup to one frame
+    per capture — ``ROW_NUMBER() ... PARTITION BY filename ORDER BY id DESC`` keeps
+    the newest write of each capture — then order by ``detected_at ASC`` (``id``
+    tiebreaker) so the slider walks forward in time.
+
+    Query: ``?module_id=&bee_type=&nest_index=``. Wire shape mirrors
+    ``GET /detections``: ``{"detections": [{...}, ...]}``.
+    """
+    raw_module_id = request.args.get("module_id")
+    bee_type = request.args.get("bee_type")
+    nest_index = request.args.get("nest_index")
+    if not raw_module_id or not bee_type or nest_index is None:
+        return (
+            jsonify({"error": "module_id, bee_type and nest_index required"}),
+            400,
+        )
+    try:
+        nest_index_int = int(nest_index)
+    except (TypeError, ValueError):
+        return jsonify({"error": "nest_index must be an integer"}), 400
+    canonical, err = _canonicalize_or_400(raw_module_id)
+    if err is not None:
+        return err
+
+    rows = query_all(
+        """
+        SELECT module_id, filename, bee_type, nest_index,
+               bbox_x, bbox_y, bbox_w, bbox_h,
+               state, confidence, snip_filename, detected_at
+        FROM (
+            SELECT n.*, ROW_NUMBER() OVER (
+                PARTITION BY n.filename
+                ORDER BY n.id DESC
+            ) AS rn
+            FROM nest_detections n
+            WHERE n.module_id = ?
+              AND n.bee_type = ?
+              AND n.nest_index = ?
+        ) t
+        WHERE rn = 1
+        ORDER BY detected_at ASC, id ASC
+        """,
+        (canonical, bee_type, nest_index_int),
+    )
+    detections = [_row_to_dict(r) for r in rows]
     return jsonify(detections=detections), 200

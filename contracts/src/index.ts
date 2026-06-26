@@ -288,6 +288,17 @@ export interface NestSnipsResponse {
   snips: NestSnip[];
 }
 
+// Wire-shape returned by `backend GET
+// /api/modules/:id/snips/:beeType/:nestIndex/timeline`, which proxies
+// `duckdb-service GET /detections/timeline`. The per-nest time-lapse (#166
+// phase 3): unlike `NestSnipsResponse` (one row per nest from the *latest*
+// capture), this returns *one row per capture* for a *single* nest, oldest
+// first, so the UI can scrub that same hole across days. Same `NestSnip`
+// element shape; `snipFilename`/`detectedAt` vary per frame.
+export interface NestSnipTimelineResponse {
+  snips: NestSnip[];
+}
+
 // ---- Telemetry sidecar envelope ----
 //
 // Wire-shape returned by `image-service /modules/<mac>/logs` (proxied

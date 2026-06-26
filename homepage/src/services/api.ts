@@ -380,6 +380,31 @@ class ApiService {
     return `${this.baseUrl}/snips/${encodeURIComponent(snipFilename)}`;
   }
 
+  /**
+   * Fetch the full capture history of a single nest hole, oldest first (#166
+   * phase-3 time-lapse). Maps to
+   * `GET /api/modules/:id/snips/:beeType/:nestIndex/timeline`. Public read like
+   * `getSnips`. Returns one entry per capture (the same hole across days);
+   * a single-entry array when only one capture exists for that nest.
+   */
+  async getSnipTimeline(
+    moduleId: string,
+    beeType: NestSnip['beeType'],
+    nestIndex: number,
+  ): Promise<NestSnip[]> {
+    const response = await fetch(
+      `${this.baseUrl}/modules/${encodeURIComponent(moduleId)}/snips/${encodeURIComponent(
+        beeType,
+      )}/${encodeURIComponent(String(nestIndex))}/timeline`,
+      { headers: this.getHeaders(), credentials: 'include' },
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to fetch snip timeline for module ${moduleId}`);
+    }
+    const body = (await response.json()) as { snips?: NestSnip[] };
+    return body.snips ?? [];
+  }
+
   async healthCheck(): Promise<{ status: string; timestamp: string }> {
     // Health check doesn't require auth
     const response = await fetch(`${this.baseUrl}/health`);

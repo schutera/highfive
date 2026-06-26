@@ -73,6 +73,10 @@ services:
       # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       LOG_DIR: /data/logs/image
+      # Copy bundled demo snips into the shared volume on boot so the #166
+      # time-lapse has frames to scrub — pairs with the duckdb `nest_detections`
+      # seed, which is gated on the same flag. Prod sets this false.
+      SEED_DATA: 'true'
     volumes:
       - duckdb_data:/data
     restart: unless-stopped

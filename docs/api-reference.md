@@ -494,6 +494,35 @@ type / state) are dropped rather than forwarded.
 Errors: `400` invalid module id; `502` duckdb-service / image-service
 unreachable; `404` snip not found (bytes route).
 
+### Per-nest time-lapse (#166)
+
+```
+GET /api/modules/:id/snips/:beeType/:nestIndex/timeline
+```
+
+Public, like the grid read. Where `/snips` returns one row per nest from the
+module's _latest_ capture, this returns the inverse: **every capture for one
+nest**, oldest first, so the dashboard can scrub that same hole across days
+(tap a snip in `NestSnipGrid` → `SnipTimelapseModal`). Proxies duckdb-service
+`GET /detections/timeline` (§3.15) and maps to the same `NestSnip` element shape
+as `/snips` — `snipFilename`/`state`/`detectedAt` vary per frame
+(`NestSnipTimelineResponse` in [`contracts/src/index.ts`](../contracts/src/index.ts)).
+A re-uploaded capture (network retry) is deduped to one frame per source
+filename.
+
+```json
+{
+  "snips": [
+    { "beeType": "leafcutter", "nestIndex": 1, "state": "empty",        "snipFilename": "...-2026-06-01.jpg", "detectedAt": "2026-06-01 12:00:00", "confidence": 0.92, "bbox": [0.42, 0.3, 0.16, 0.16], "sourceFilename": "..." },
+    { "beeType": "leafcutter", "nestIndex": 1, "state": "sealed",        "snipFilename": "...-2026-06-26.jpg", "detectedAt": "2026-06-26 12:00:00", "confidence": 0.92, "bbox": [0.42, 0.3, 0.16, 0.16], "sourceFilename": "..." }
+  ]
+}
+```
+
+Errors: `400` invalid module id, unknown `beeType`, or non-positive-integer
+`nestIndex` (all rejected before hitting upstream); `502` duckdb-service
+unreachable.
+
 ## 1.7 Module measurements timeseries (per-module canonical store)
 
 ```
@@ -1271,6 +1300,7 @@ always paginate.
 ```
 POST /record_detections
 GET  /detections?module_id=<mac>
+GET  /detections/timeline?module_id=<mac>&bee_type=<type>&nest_index=<n>
 ```
 
 Per-nest hole-detection rows + snips (#165, ADR-026). duckdb-service is the
@@ -1310,6 +1340,14 @@ full history is retained in `nest_detections` but the read folds to current
 state for the dashboard. `bbox` is reassembled to `[x, y, w, h]` (normalized).
 `400` on missing/invalid `module_id`; empty `{"detections": []}` for a module
 with no detections yet. Implementation: `duckdb-service/routes/detections.py`.
+
+`GET /detections/timeline?module_id=&bee_type=&nest_index=` is the inverse fold
+for the #166 per-nest time-lapse: **every capture for one nest**, oldest first
+(`ORDER BY detected_at ASC`), one frame per source `filename` (a re-uploaded
+capture is deduped via `ROW_NUMBER() … PARTITION BY filename ORDER BY id DESC`).
+Same `{"detections": [...]}` row shape as the grid read. `400` on missing
+params, non-integer `nest_index`, or invalid `module_id`; empty list when the
+nest has no captures.
 
 <br>
 

@@ -2,10 +2,14 @@ import { useEffect, useState } from 'react';
 import { api, type NestSnip } from '../services/api';
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
+import SnipTimelapseModal from './SnipTimelapseModal';
 
 interface NestSnipGridProps {
   moduleId: string;
 }
+
+// Which hole's time-lapse is open. `null` = closed.
+type SelectedNest = { beeType: NestSnip['beeType']; nestIndex: number } | null;
 
 /**
  * Per-nest hole-detection snip grid (#165). A grid mirroring the physical
@@ -23,10 +27,12 @@ export default function NestSnipGrid({ moduleId }: NestSnipGridProps) {
   const { t } = useTranslation();
   const [snips, setSnips] = useState<NestSnip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<SelectedNest>(null);
 
   useEffect(() => {
     let cancelled = false;
     setSnips([]);
+    setSelected(null);
     setLoading(true);
     api
       .getSnips(moduleId)
@@ -89,9 +95,20 @@ export default function NestSnipGrid({ moduleId }: NestSnipGridProps) {
                       ? t('modulePanel.snipEmpty')
                       : t('modulePanel.snipDetected');
                 return (
-                  <figure
+                  // A button, not a figure: tapping opens the per-nest
+                  // time-lapse (#166) for this hole. Keyboard-focusable and
+                  // labelled so the grid is navigable without a mouse.
+                  <button
+                    type="button"
                     key={`${snip.beeType}-${snip.nestIndex}`}
-                    className="relative aspect-square overflow-hidden rounded-hf-md border-2"
+                    onClick={() =>
+                      setSelected({ beeType: snip.beeType, nestIndex: snip.nestIndex })
+                    }
+                    aria-label={t('modulePanel.snipOpenTimelapse', {
+                      beeType: row.size,
+                      index: snip.nestIndex,
+                    })}
+                    className="group relative aspect-square overflow-hidden rounded-hf-md border-2 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-hf-honey-500"
                     style={{ borderColor: row.color, backgroundColor: row.lightColor }}
                     title={t('modulePanel.snipAlt', {
                       beeType: row.size,
@@ -107,7 +124,7 @@ export default function NestSnipGrid({ moduleId }: NestSnipGridProps) {
                         state: stateLabel,
                       })}
                       loading="lazy"
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
                     />
                     <span
                       className="absolute bottom-0 inset-x-0 text-center text-[0.6rem] font-semibold leading-tight py-0.5 text-white"
@@ -117,13 +134,22 @@ export default function NestSnipGrid({ moduleId }: NestSnipGridProps) {
                     >
                       {stateLabel}
                     </span>
-                  </figure>
+                  </button>
                 );
               })}
             </div>
           </div>
         ))}
       </div>
+
+      {selected && (
+        <SnipTimelapseModal
+          moduleId={moduleId}
+          beeType={selected.beeType}
+          nestIndex={selected.nestIndex}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   );
 }

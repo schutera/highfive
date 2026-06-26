@@ -131,8 +131,9 @@ services:
         # No VITE_API_KEY: the bundle holds no secret (#142 / ADR-019); the
         # specs log in via POST /api/admin/login to obtain the session cookie.
         VITE_API_URL: http://localhost:4002/api
-        # Feature flags (ADR-022) on, so module-latest-capture.spec.ts can
-        # drive the flag-gated dashboard gallery against a real backend.
+        # Feature flags (ADR-022) on, so the flag-gated dashboard imagery
+        # (module-nest-snips.spec.ts, snip-timelapse.spec.ts) can drive the
+        # snip grid + time-lapse against a real backend.
         VITE_ENABLE_DASHBOARD_IMAGES: 'true'
     ports:
       - '6173:80'

@@ -4,7 +4,6 @@ import type { HeartbeatGap, HeartbeatSnapshot, Module, ModuleDetail } from '@hig
 import { BEE_TYPES } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import AdminKeyForm from './AdminKeyForm';
-import LatestCaptures from './LatestCaptures';
 import NestSnipGrid from './NestSnipGrid';
 import { hasPlausibleLocation } from '../lib/location';
 import { displayLabel } from '../lib/displayLabel';
@@ -508,25 +507,13 @@ export default function ModulePanel({ module, onClose, onError }: ModulePanelPro
           </div>
         )}
 
-        {/* Latest captures (#154) — newest-first gallery, two 4:3 cards
-            visible, arrows to scroll older, click for a full-size lightbox.
-            Self-contained: renders nothing for modules without uploads and
-            degrades silently on fetch errors (never via onError).
-            Gated behind the VITE_ENABLE_DASHBOARD_IMAGES build-time flag
-            (default off in prod; see featureFlags.ts / ADR-022). */}
-        {DASHBOARD_IMAGES_ENABLED && (
-          <LatestCaptures
-            moduleId={moduleDetail.id}
-            moduleName={displayLabel(moduleDetail)}
-            locale={locale}
-          />
-        )}
-
-        {/* Per-nest hole-detection snips (#165) — a grid mirroring the block,
-            one row per bee type, each cell a cropped close-up with an
-            empty/sealed badge. Self-contained and silent on error like
-            LatestCaptures; gated behind the same dashboard-images flag because
-            it shows per-module imagery. */}
+        {/* Per-nest hole-detection snips (#165) + global time-lapse scrubber
+            (#166 phase 3) — a grid mirroring the block, one row per bee type,
+            each cell a cropped close-up; one slider beneath scrubs all holes
+            across captures. Self-contained and silent on error; gated behind the
+            dashboard-images build-time flag because it shows per-module imagery.
+            The full-module "Latest captures" gallery was intentionally removed
+            from this panel in favour of the per-hole time-lapse below. */}
         {DASHBOARD_IMAGES_ENABLED && <NestSnipGrid moduleId={moduleDetail.id} />}
 
         {/* Species cards. The auto-fit grid flows to 2 columns once the panel is

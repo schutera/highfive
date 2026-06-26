@@ -22,7 +22,9 @@ export function flagEnabled(value: string | undefined): boolean {
   return value === 'true';
 }
 
-// Public dashboard "Latest captures" gallery in ModulePanel (#154). Off in
-// production until segmentation guarantees only bee nests are visible in the
-// uploaded photos; the dev and UI-test stacks set it to 'true'.
+// Per-module imagery on the public ModulePanel — the hole-detection snip grid +
+// global time-lapse (`NestSnipGrid`, #165/#166). Off in production until
+// segmentation guarantees only bee nests are visible in the uploaded photos; the
+// dev and UI-test stacks set it to 'true'. (Originally introduced for the #154
+// "Latest captures" gallery, since removed in favour of the snip grid.)
 export const DASHBOARD_IMAGES_ENABLED = flagEnabled(import.meta.env.VITE_ENABLE_DASHBOARD_IMAGES);

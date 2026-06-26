@@ -8,6 +8,9 @@ detected snips here rather than opening the DB itself. Two routes:
   capture* for the public dashboard grid (full history is retained; this read
   scopes to the latest capture and dedups to one row per nest — the real blocks
   are irregular 7/5/5/4 or 4x4, not a fixed 4x4).
+* ``GET  /detections/history`` — read *every* capture's every nest for a module,
+  chronological, for the phase-3 global time-lapse scrubber (#166): one slider
+  under the grid drives all holes to a chosen date at once.
 """
 
 from datetime import datetime, timezone
@@ -194,36 +197,38 @@ def _row_to_dict(r) -> dict:
     }
 
 
-@detections_bp.get("/detections/timeline")
-def list_detection_timeline():
-    """Return the full capture history of a **single nest**, oldest first (#166).
+@detections_bp.get("/detections/history")
+def list_detection_history():
+    """Return a module's **full per-capture detection history**, oldest first (#166).
 
     Where ``GET /detections`` folds to one row per nest from the module's *latest*
-    capture (the dashboard grid), the phase-3 time-lapse needs the inverse: every
-    capture for *one* ``(module_id, bee_type, nest_index)``, chronological, so the
-    UI can scrub that same hole across days and watch it get sealed.
+    capture (the current state of the block), the phase-3 time-lapse needs every
+    capture's every nest, chronological — so the UI can render one global scrubber
+    under the grid that, as the visitor drags it, swaps *all* holes to that date's
+    crops at once. The frontend groups the flat list by ``filename`` into
+    per-capture frames; the rows arrive ordered so first-seen ``filename`` order is
+    already chronological.
 
     ``record_detections`` is append-only, so a re-uploaded capture (a network
-    retry) records its rows twice for the same ``filename``. Dedup to one frame
-    per capture — ``ROW_NUMBER() ... PARTITION BY filename ORDER BY id DESC`` keeps
-    the newest write of each capture — then order by ``detected_at ASC`` (``id``
-    tiebreaker) so the slider walks forward in time.
+    retry) records its rows twice for the same ``(filename, bee_type, nest_index)``.
+    Dedup to one row per nest-per-capture — ``ROW_NUMBER() ... PARTITION BY
+    filename, bee_type, nest_index ORDER BY id DESC`` keeps the newest write — then
+    order by ``detected_at ASC`` so the slider walks forward in time, with
+    ``filename``/``bee_type``/``nest_index`` as stable secondary keys.
 
-    Query: ``?module_id=&bee_type=&nest_index=``. Wire shape mirrors
-    ``GET /detections``: ``{"detections": [{...}, ...]}``.
+    Caveat: ``detected_at`` is the *insert* time (``record_detections`` stamps
+    ``now_utc``), not a capture timestamp — so a network-retry re-upload of an
+    *old* capture sorts by when it was re-recorded, not when it was shot. Benign
+    today because real captures are days apart (and the demo seed hand-writes
+    distinct dates); if a capture-time field ever rides the detection payload,
+    order by that instead.
+
+    Query: ``?module_id=``. Wire shape mirrors ``GET /detections``:
+    ``{"detections": [{...}, ...]}``.
     """
     raw_module_id = request.args.get("module_id")
-    bee_type = request.args.get("bee_type")
-    nest_index = request.args.get("nest_index")
-    if not raw_module_id or not bee_type or nest_index is None:
-        return (
-            jsonify({"error": "module_id, bee_type and nest_index required"}),
-            400,
-        )
-    try:
-        nest_index_int = int(nest_index)
-    except (TypeError, ValueError):
-        return jsonify({"error": "nest_index must be an integer"}), 400
+    if not raw_module_id:
+        return jsonify({"error": "module_id required"}), 400
     canonical, err = _canonicalize_or_400(raw_module_id)
     if err is not None:
         return err
@@ -235,18 +240,16 @@ def list_detection_timeline():
                state, confidence, snip_filename, detected_at
         FROM (
             SELECT n.*, ROW_NUMBER() OVER (
-                PARTITION BY n.filename
+                PARTITION BY n.filename, n.bee_type, n.nest_index
                 ORDER BY n.id DESC
             ) AS rn
             FROM nest_detections n
             WHERE n.module_id = ?
-              AND n.bee_type = ?
-              AND n.nest_index = ?
         ) t
         WHERE rn = 1
-        ORDER BY detected_at ASC, id ASC
+        ORDER BY detected_at ASC, filename, bee_type, nest_index
         """,
-        (canonical, bee_type, nest_index_int),
+        (canonical,),
     )
     detections = [_row_to_dict(r) for r in rows]
     return jsonify(detections=detections), 200

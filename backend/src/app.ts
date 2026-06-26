@@ -8,7 +8,7 @@ import type {
   HeartbeatGap,
   NestSnip,
   NestSnipsResponse,
-  NestSnipTimelineResponse,
+  NestSnipHistoryResponse,
 } from '@highfive/contracts';
 import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
@@ -484,8 +484,8 @@ interface ApiDetection {
 // Validate each row's shape AND the bee-type/state enums, dropping anything
 // malformed rather than forwarding a drifted shape typed as valid (CLAUDE.md
 // wire-shape rule). A bad row becomes "no snip", never a `{beeType: undefined}`
-// reaching the UI. Shared by the grid (`/snips`) and time-lapse (`/timeline`)
-// reads so both folds map the duckdb shape identically.
+// reaching the UI. Shared by the grid (`/snips`) and time-lapse
+// (`/snips/history`) reads so both folds map the duckdb shape identically.
 const isValidDetection = (d: ApiDetection): boolean =>
   d != null &&
   (SNIP_BEE_TYPES as readonly string[]).includes(d.bee_type) &&
@@ -537,33 +537,19 @@ app.get('/api/modules/:id/snips', async (req, res) => {
   }
 });
 
-// Per-nest time-lapse: the full capture history of a single hole (#166 phase 3).
-// Proxies duckdb-service `GET /detections/timeline` and maps to `NestSnip[]`
-// (oldest first) so the UI can scrub one nest across days. Public like `/snips`.
-app.get('/api/modules/:id/snips/:beeType/:nestIndex/timeline', async (req, res) => {
+// Global per-module time-lapse: every nest of every capture (#166 phase 3).
+// Proxies duckdb-service `GET /detections/history` and maps to `NestSnip[]`
+// (oldest first) so the UI can group by capture and scrub all holes across days
+// with one slider. Public like `/snips`.
+app.get('/api/modules/:id/snips/history', async (req, res) => {
   const id = tryParseModuleId(req.params.id);
   if (id === null) {
     res.status(400).json({ error: 'invalid module id format' });
     return;
   }
-  const { beeType, nestIndex } = req.params;
-  if (!(SNIP_BEE_TYPES as readonly string[]).includes(beeType)) {
-    res.status(400).json({ error: 'invalid bee type' });
-    return;
-  }
-  // nestIndex is a 1-based replicate; reject anything non-integer or < 1 before
-  // hitting the upstream so a garbage path can't reach the DB query.
-  if (!/^[1-9][0-9]*$/.test(nestIndex)) {
-    res.status(400).json({ error: 'invalid nest index' });
-    return;
-  }
   try {
-    const qs = new URLSearchParams({
-      module_id: id,
-      bee_type: beeType,
-      nest_index: nestIndex,
-    });
-    const upstream = await fetch(`${DUCKDB_URL}/detections/timeline?${qs.toString()}`, {
+    const qs = new URLSearchParams({ module_id: id });
+    const upstream = await fetch(`${DUCKDB_URL}/detections/history?${qs.toString()}`, {
       signal: AbortSignal.timeout(15000),
     });
     if (!upstream.ok) {
@@ -575,13 +561,11 @@ app.get('/api/modules/:id/snips/:beeType/:nestIndex/timeline', async (req, res) 
     }
     const body = (await upstream.json()) as { detections?: unknown };
     const raw = Array.isArray(body.detections) ? (body.detections as ApiDetection[]) : [];
-    const payload: NestSnipTimelineResponse = { snips: toNestSnips(raw) };
+    const payload: NestSnipHistoryResponse = { snips: toNestSnips(raw) };
     res.json(payload);
   } catch (error) {
-    console.error('[GET /api/modules/:id/snips/:beeType/:nestIndex/timeline]', {
+    console.error('[GET /api/modules/:id/snips/history]', {
       id,
-      beeType,
-      nestIndex,
       error: String(error),
     });
     res.status(502).json({ error: 'duckdb-service unreachable' });

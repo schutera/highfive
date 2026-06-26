@@ -469,10 +469,11 @@ export interface NestSnipsResponse {
   snips: NestSnip[];
 }
 
-// #166 per-nest time-lapse: every capture for ONE nest, oldest first, served by
-// `GET /api/modules/:id/snips/:beeType/:nestIndex/timeline`. Same NestSnip
-// element shape as the grid read — only the response wrapper differs.
-export interface NestSnipTimelineResponse {
+// #166 global time-lapse: every nest of EVERY capture, oldest first, served by
+// `GET /api/modules/:id/snips/history`. Same NestSnip element shape as the grid
+// read; the homepage buckets the flat list by `sourceFilename` into per-capture
+// frames so one slider scrubs all holes at once.
+export interface NestSnipHistoryResponse {
   snips: NestSnip[];
 }
 ```

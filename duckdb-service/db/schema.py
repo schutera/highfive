@@ -655,7 +655,8 @@ def init_db():
             # nest_index 1) walking empty → undetermined → sealed across June.
             # The `snip_filename`s match the bundled demo JPEGs that
             # `image-service` copies into the shared volume on boot
-            # (image-service/demo_snips/), so the modal renders real crops.
+            # (image-service/demo_snips/), so the time-lapse grid renders real
+            # crops when the global scrubber walks across these captures.
             # Idempotent on its own row count. `record_detections` is the normal
             # writer (ADR-001); these are demo rows written directly at seed time
             # like the heartbeat gap above. Keep filenames in sync with

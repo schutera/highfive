@@ -190,20 +190,27 @@ def test_invalid_module_id_is_400(client):
     assert client.get("/detections?module_id=not-a-mac").status_code == 400
 
 
-# ---- /detections/timeline — per-nest history for the phase-3 time-lapse (#166) ----
+# ---- /detections/history — full per-capture history for the phase-3 global
+# time-lapse (#166): every nest of every capture, chronological ----
 
 
-def _timeline(client, bee_type: str, nest_index: int):
-    return client.get(
-        f"/detections/timeline?module_id={TEST_MAC}"
-        f"&bee_type={bee_type}&nest_index={nest_index}"
-    )
+def _history(client):
+    return client.get(f"/detections/history?module_id={TEST_MAC}")
 
 
-def test_timeline_returns_every_capture_oldest_first(client):
-    """The time-lapse needs all captures for one nest, chronological — the inverse
-    of the latest-capture fold. Seed three captures and assert all three frames
-    come back in detected_at order (CLAUDE.md: assert behaviour, not envelope)."""
+def test_history_returns_every_capture_oldest_first(client):
+    """The global time-lapse needs every capture's every nest, chronological —
+    the inverse of the latest-capture fold. Seed three captures and assert all
+    three frames come back oldest-first (CLAUDE.md: assert behaviour, not
+    envelope).
+
+    Note: ``record_detections`` stamps ``detected_at`` at second resolution, so
+    three captures recorded in the same test-second tie on the primary key and
+    the deterministic order here is actually the ``filename`` secondary sort
+    (``d1`` < ``d2`` < ``d3``). In production each capture is days apart so the
+    ``detected_at ASC`` primary key dominates (the schema.py demo seed uses
+    distinct dates); this test pins the *stable, oldest-first* contract, which is
+    what the UI's frame grouping depends on."""
     for cap, state, snip in (
         ("d1.jpg", "empty", "d1-leafcutter-1.jpg"),
         ("d2.jpg", "undetermined", "d2-leafcutter-1.jpg"),
@@ -217,7 +224,7 @@ def test_timeline_returns_every_capture_oldest_first(client):
                 "detections": [_detection("leafcutter", 1, state, snip)],
             },
         )
-    resp = _timeline(client, "leafcutter", 1)
+    resp = _history(client)
     assert resp.status_code == 200
     dets = resp.get_json()["detections"]
     assert [d["snip_filename"] for d in dets] == [
@@ -228,8 +235,9 @@ def test_timeline_returns_every_capture_oldest_first(client):
     assert [d["state"] for d in dets] == ["empty", "undetermined", "sealed"]
 
 
-def test_timeline_scopes_to_the_requested_nest(client):
-    """Only the asked-for (bee_type, nest_index) frames — sibling nests excluded."""
+def test_history_includes_all_nests_of_each_capture(client):
+    """Unlike the per-nest timeline, history returns *every* nest of a capture so
+    the grid can render all holes for the selected frame at once."""
     client.post(
         "/record_detections",
         json={
@@ -242,54 +250,44 @@ def test_timeline_scopes_to_the_requested_nest(client):
             ],
         },
     )
-    dets = _timeline(client, "leafcutter", 1).get_json()["detections"]
-    assert len(dets) == 1
-    assert dets[0]["snip_filename"] == "cap-leafcutter-1.jpg"
+    dets = _history(client).get_json()["detections"]
+    assert len(dets) == 3
+    assert {(d["bee_type"], d["nest_index"]) for d in dets} == {
+        ("leafcutter", 1),
+        ("leafcutter", 2),
+        ("resin", 1),
+    }
+    # All rows belong to the single seeded capture.
+    assert {d["filename"] for d in dets} == {"cap.jpg"}
 
 
-def test_timeline_dedups_a_reuploaded_capture(client):
-    """A network-retry re-records the same capture (append-only). Each capture must
-    appear once in the timeline, not twice — one frame per filename."""
+def test_history_dedups_a_reuploaded_capture(client):
+    """A network-retry re-records the same capture (append-only). Each
+    (filename, bee_type, nest_index) must appear once, not twice."""
     payload = {
         "module_id": TEST_MAC,
         "filename": "retry.jpg",
-        "detections": [_detection("leafcutter", 1, "sealed", "retry-leafcutter-1.jpg")],
+        "detections": [
+            _detection("leafcutter", 1, "sealed", "retry-leafcutter-1.jpg"),
+            _detection("leafcutter", 2, "empty", "retry-leafcutter-2.jpg"),
+        ],
     }
     client.post("/record_detections", json=payload)
     client.post("/record_detections", json=payload)
-    dets = _timeline(client, "leafcutter", 1).get_json()["detections"]
-    assert len(dets) == 1
+    dets = _history(client).get_json()["detections"]
+    assert len(dets) == 2
+    assert sorted(d["nest_index"] for d in dets) == [1, 2]
 
 
-def test_timeline_empty_nest_returns_empty_list(client):
-    resp = _timeline(client, "leafcutter", 1)
+def test_history_empty_module_returns_empty_list(client):
+    resp = _history(client)
     assert resp.status_code == 200
     assert resp.get_json()["detections"] == []
 
 
-def test_timeline_requires_all_params(client):
-    assert client.get(f"/detections/timeline?module_id={TEST_MAC}").status_code == 400
-    assert (
-        client.get(
-            f"/detections/timeline?module_id={TEST_MAC}&bee_type=leafcutter"
-        ).status_code
-        == 400
-    )
+def test_history_requires_module_id(client):
+    assert client.get("/detections/history").status_code == 400
 
 
-def test_timeline_non_integer_nest_index_is_400(client):
-    assert (
-        client.get(
-            f"/detections/timeline?module_id={TEST_MAC}&bee_type=leafcutter&nest_index=x"
-        ).status_code
-        == 400
-    )
-
-
-def test_timeline_invalid_module_id_is_400(client):
-    assert (
-        client.get(
-            "/detections/timeline?module_id=not-a-mac&bee_type=leafcutter&nest_index=1"
-        ).status_code
-        == 400
-    )
+def test_history_invalid_module_id_is_400(client):
+    assert client.get("/detections/history?module_id=not-a-mac").status_code == 400

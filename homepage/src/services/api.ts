@@ -358,26 +358,33 @@ class ApiService {
     return `${this.baseUrl}/images/${encodeURIComponent(filename)}`;
   }
 
-  /**
-   * Fetch a module's latest per-nest hole-detection snips (#165). Maps to
-   * `GET /api/modules/:id/snips`; reads are public so no credential is
-   * required, but `credentials: 'include'` is harmless and matches the sibling
-   * read calls. Returns one entry per detected nest hole (latest per nest);
-   * empty array when the module has no detections yet.
-   */
-  async getSnips(moduleId: string): Promise<NestSnip[]> {
-    const response = await fetch(`${this.baseUrl}/modules/${encodeURIComponent(moduleId)}/snips`, {
-      headers: this.getHeaders(),
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error(`Failed to fetch snips for module ${moduleId}`);
-    const body = (await response.json()) as { snips?: NestSnip[] };
-    return body.snips ?? [];
-  }
-
   /** Resolve a snip filename to its public image URL (mirrors getImageUrl). */
   getSnipUrl(snipFilename: string): string {
     return `${this.baseUrl}/snips/${encodeURIComponent(snipFilename)}`;
+  }
+
+  /**
+   * Fetch a module's full per-capture snip history, oldest first (#165 grid +
+   * #166 phase-3 global time-lapse). Maps to `GET /api/modules/:id/snips/history`.
+   * Reads are public so no credential is required, but `credentials: 'include'`
+   * is harmless and matches the sibling read calls. Returns every nest of every
+   * capture flattened; the caller (`NestSnipGrid`) groups by `sourceFilename`
+   * into per-capture frames so one slider can scrub all holes across days at
+   * once, opening on the newest (the block's current state). Empty array when
+   * the module has no detections yet. (Supersedes the former latest-capture-only
+   * `getSnips`/`GET /api/modules/:id/snips` read for this surface; that backend
+   * route still exists as #165 API surface but has no homepage caller.)
+   */
+  async getSnipHistory(moduleId: string): Promise<NestSnip[]> {
+    const response = await fetch(
+      `${this.baseUrl}/modules/${encodeURIComponent(moduleId)}/snips/history`,
+      { headers: this.getHeaders(), credentials: 'include' },
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to fetch snip history for module ${moduleId}`);
+    }
+    const body = (await response.json()) as { snips?: NestSnip[] };
+    return body.snips ?? [];
   }
 
   async healthCheck(): Promise<{ status: string; timestamp: string }> {

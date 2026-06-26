@@ -188,3 +188,106 @@ def test_read_empty_module_returns_empty_list(client):
 
 def test_invalid_module_id_is_400(client):
     assert client.get("/detections?module_id=not-a-mac").status_code == 400
+
+
+# ---- /detections/history — full per-capture history for the phase-3 global
+# time-lapse (#166): every nest of every capture, chronological ----
+
+
+def _history(client):
+    return client.get(f"/detections/history?module_id={TEST_MAC}")
+
+
+def test_history_returns_every_capture_oldest_first(client):
+    """The global time-lapse needs every capture's every nest, chronological —
+    the inverse of the latest-capture fold. Seed three captures and assert all
+    three frames come back oldest-first (CLAUDE.md: assert behaviour, not
+    envelope).
+
+    Note: ``record_detections`` stamps ``detected_at`` at second resolution, so
+    three captures recorded in the same test-second tie on the primary key and
+    the deterministic order here is actually the ``filename`` secondary sort
+    (``d1`` < ``d2`` < ``d3``). In production each capture is days apart so the
+    ``detected_at ASC`` primary key dominates (the schema.py demo seed uses
+    distinct dates); this test pins the *stable, oldest-first* contract, which is
+    what the UI's frame grouping depends on."""
+    for cap, state, snip in (
+        ("d1.jpg", "empty", "d1-leafcutter-1.jpg"),
+        ("d2.jpg", "undetermined", "d2-leafcutter-1.jpg"),
+        ("d3.jpg", "sealed", "d3-leafcutter-1.jpg"),
+    ):
+        client.post(
+            "/record_detections",
+            json={
+                "module_id": TEST_MAC,
+                "filename": cap,
+                "detections": [_detection("leafcutter", 1, state, snip)],
+            },
+        )
+    resp = _history(client)
+    assert resp.status_code == 200
+    dets = resp.get_json()["detections"]
+    assert [d["snip_filename"] for d in dets] == [
+        "d1-leafcutter-1.jpg",
+        "d2-leafcutter-1.jpg",
+        "d3-leafcutter-1.jpg",
+    ]
+    assert [d["state"] for d in dets] == ["empty", "undetermined", "sealed"]
+
+
+def test_history_includes_all_nests_of_each_capture(client):
+    """Unlike the per-nest timeline, history returns *every* nest of a capture so
+    the grid can render all holes for the selected frame at once."""
+    client.post(
+        "/record_detections",
+        json={
+            "module_id": TEST_MAC,
+            "filename": "cap.jpg",
+            "detections": [
+                _detection("leafcutter", 1, "sealed", "cap-leafcutter-1.jpg"),
+                _detection("leafcutter", 2, "empty", "cap-leafcutter-2.jpg"),
+                _detection("resin", 1, "sealed", "cap-resin-1.jpg"),
+            ],
+        },
+    )
+    dets = _history(client).get_json()["detections"]
+    assert len(dets) == 3
+    assert {(d["bee_type"], d["nest_index"]) for d in dets} == {
+        ("leafcutter", 1),
+        ("leafcutter", 2),
+        ("resin", 1),
+    }
+    # All rows belong to the single seeded capture.
+    assert {d["filename"] for d in dets} == {"cap.jpg"}
+
+
+def test_history_dedups_a_reuploaded_capture(client):
+    """A network-retry re-records the same capture (append-only). Each
+    (filename, bee_type, nest_index) must appear once, not twice."""
+    payload = {
+        "module_id": TEST_MAC,
+        "filename": "retry.jpg",
+        "detections": [
+            _detection("leafcutter", 1, "sealed", "retry-leafcutter-1.jpg"),
+            _detection("leafcutter", 2, "empty", "retry-leafcutter-2.jpg"),
+        ],
+    }
+    client.post("/record_detections", json=payload)
+    client.post("/record_detections", json=payload)
+    dets = _history(client).get_json()["detections"]
+    assert len(dets) == 2
+    assert sorted(d["nest_index"] for d in dets) == [1, 2]
+
+
+def test_history_empty_module_returns_empty_list(client):
+    resp = _history(client)
+    assert resp.status_code == 200
+    assert resp.get_json()["detections"] == []
+
+
+def test_history_requires_module_id(client):
+    assert client.get("/detections/history").status_code == 400
+
+
+def test_history_invalid_module_id_is_400(client):
+    assert client.get("/detections/history?module_id=not-a-mac").status_code == 400

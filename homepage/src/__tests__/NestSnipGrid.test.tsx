@@ -1,20 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import type { NestSnip } from '@highfive/contracts';
 
 import { LanguageProvider } from '../i18n/LanguageContext';
 
-// NestSnipGrid renders a module's latest per-nest hole snips (#165) as a grid:
-// one row per bee type, each cell a cropped close-up with an empty/sealed
-// badge. The fixture mirrors the exact NestSnip wire shape (CLAUDE.md "mount
-// with a realistic fixture" rule — the shape is the contract under test).
+// NestSnipGrid renders a module's per-nest hole snips (#165) as a grid — one row
+// per bee type, each cell a cropped close-up with a badge — plus a single global
+// time-lapse scrubber (#166 phase 3) that, when dragged, swaps ALL holes to the
+// chosen capture's crops at once. The fixture mirrors the exact NestSnip wire
+// shape across multiple captures (CLAUDE.md "mount with a realistic fixture"
+// rule — the shape is the contract under test). The backend returns the flat
+// history oldest-first; the grid groups it by `sourceFilename` into frames.
 
-let nextSnips: NestSnip[] | null = [];
+let nextHistory: NestSnip[] | null = [];
 
 vi.mock('../services/api', () => ({
   api: {
-    getSnips: vi.fn(() =>
-      nextSnips ? Promise.resolve(nextSnips) : Promise.reject(new Error('snips unavailable')),
+    getSnipHistory: vi.fn(() =>
+      nextHistory ? Promise.resolve(nextHistory) : Promise.reject(new Error('history unavailable')),
     ),
     getSnipUrl: vi.fn((f: string) => `http://localhost:3002/api/snips/${encodeURIComponent(f)}`),
   },
@@ -23,6 +26,8 @@ vi.mock('../services/api', () => ({
 import NestSnipGrid from '../components/NestSnipGrid';
 
 const snip = (
+  capture: string,
+  detectedAt: string,
   beeType: NestSnip['beeType'],
   nestIndex: number,
   state: NestSnip['state'],
@@ -31,10 +36,10 @@ const snip = (
   nestIndex,
   state,
   confidence: 0.9,
-  snipFilename: `cap-${beeType}-${nestIndex}.jpg`,
+  snipFilename: `${capture}-${beeType}-${nestIndex}.jpg`,
   bbox: [0.1, 0.2, 0.3, 0.3],
-  sourceFilename: 'cap.jpg',
-  detectedAt: '2026-06-11 10:30:00',
+  sourceFilename: `${capture}.jpg`,
+  detectedAt,
 });
 
 function renderGrid() {
@@ -46,46 +51,86 @@ function renderGrid() {
 }
 
 beforeEach(() => {
-  nextSnips = [];
+  nextHistory = [];
 });
 
 describe('NestSnipGrid', () => {
-  it('renders a snip image and a sealed/empty badge per hole', async () => {
-    nextSnips = [snip('leafcutter', 1, 'sealed'), snip('leafcutter', 2, 'empty')];
+  it('opens on the newest capture and renders its holes with badges', async () => {
+    nextHistory = [
+      snip('cap1', '2026-06-01 12:00:00', 'leafcutter', 1, 'empty'),
+      snip('cap2', '2026-06-05 12:00:00', 'leafcutter', 1, 'sealed'),
+    ];
     renderGrid();
 
-    // Each snip's <img> resolves through getSnipUrl.
-    await waitFor(() => {
-      const imgs = screen.getAllByRole('img');
-      expect(imgs).toHaveLength(2);
-    });
-    const imgs = screen.getAllByRole('img') as HTMLImageElement[];
-    expect(imgs[0].src).toContain('/api/snips/cap-leafcutter-1.jpg');
-
-    // Badges reflect the real states (one sealed, one empty).
+    // Default frame is the newest capture (cap2, sealed) — the block's current state.
+    const img = (await screen.findByTestId('snip-frame')) as HTMLImageElement;
+    expect(img.src).toContain('/api/snips/cap2-leafcutter-1.jpg');
     expect(screen.getByText('Sealed')).toBeInTheDocument();
-    expect(screen.getByText('Empty')).toBeInTheDocument();
+    // Frame counter + capture date reflect the newest frame (2 of 2).
+    expect(screen.getByText('Capture 2 of 2')).toBeInTheDocument();
+    expect(screen.getByTestId('snip-capture-date').textContent).toMatch(/2026/);
+  });
+
+  it('scrubbing the global slider swaps every hole to the chosen capture at once', async () => {
+    // Two holes per capture so we can prove the slider moves ALL of them, not one.
+    nextHistory = [
+      snip('cap1', '2026-06-01 12:00:00', 'leafcutter', 1, 'empty'),
+      snip('cap1', '2026-06-01 12:00:00', 'resin', 1, 'empty'),
+      snip('cap2', '2026-06-05 12:00:00', 'leafcutter', 1, 'sealed'),
+      snip('cap2', '2026-06-05 12:00:00', 'resin', 1, 'sealed'),
+    ];
+    renderGrid();
+
+    await waitFor(() => expect(screen.getAllByTestId('snip-frame')).toHaveLength(2));
+    // Newest frame: both holes are cap2.
+    let imgs = screen.getAllByTestId('snip-frame') as HTMLImageElement[];
+    expect(imgs.every((i) => i.src.includes('/api/snips/cap2-'))).toBe(true);
+
+    // Two captures → slider range 0..1. Scrub to the oldest.
+    const scrubber = screen.getByTestId('snip-scrubber') as HTMLInputElement;
+    expect(scrubber.max).toBe('1');
+    fireEvent.change(scrubber, { target: { value: '0' } });
+
+    await waitFor(() => {
+      imgs = screen.getAllByTestId('snip-frame') as HTMLImageElement[];
+      expect(imgs.every((i) => i.src.includes('/api/snips/cap1-'))).toBe(true);
+    });
+    // Both badges followed to the oldest (empty) frame.
+    expect(screen.getAllByText('Empty')).toHaveLength(2);
+    expect(screen.getByText('Capture 1 of 2')).toBeInTheDocument();
+  });
+
+  it('hides the scrubber and shows a single-frame note when only one capture exists', async () => {
+    nextHistory = [snip('only', '2026-06-05 12:00:00', 'leafcutter', 1, 'sealed')];
+    renderGrid();
+
+    await screen.findByTestId('snip-frame');
+    expect(screen.queryByTestId('snip-scrubber')).not.toBeInTheDocument();
+    expect(screen.getByText(/only one capture so far/i)).toBeInTheDocument();
   });
 
   it('renders a neutral "Detected" badge for the localize-only undetermined state', async () => {
     // The learned detector (ADR-027) emits `undetermined` — located but
     // empty/sealed deferred. The badge must read neutral, never guess sealed.
-    nextSnips = [snip('leafcutter', 1, 'undetermined')];
+    nextHistory = [snip('cap', '2026-06-05 12:00:00', 'leafcutter', 1, 'undetermined')];
     renderGrid();
 
-    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(1));
+    await screen.findByTestId('snip-frame');
     expect(screen.getByText('Detected')).toBeInTheDocument();
     expect(screen.queryByText('Sealed')).not.toBeInTheDocument();
     expect(screen.queryByText('Empty')).not.toBeInTheDocument();
   });
 
   it('groups by bee type in ascending-diameter order', async () => {
-    // Provide out-of-order types; the grid must order rows by BEE_TYPES
-    // (blackmasked < resin < leafcutter < orchard) regardless of input order.
-    nextSnips = [snip('orchard', 1, 'sealed'), snip('blackmasked', 1, 'empty')];
+    // Provide out-of-order types in one capture; the grid must order rows by
+    // BEE_TYPES (blackmasked < resin < leafcutter < orchard) regardless of input.
+    nextHistory = [
+      snip('cap', '2026-06-05 12:00:00', 'orchard', 1, 'sealed'),
+      snip('cap', '2026-06-05 12:00:00', 'blackmasked', 1, 'empty'),
+    ];
     renderGrid();
 
-    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId('snip-frame')).toHaveLength(2));
     // The size labels (2 mm = blackmasked, 9 mm = orchard) appear; the
     // smallest-diameter row renders before the largest in DOM order.
     const sizes = screen.getAllByText(/mm$/).map((el) => el.textContent);
@@ -93,7 +138,7 @@ describe('NestSnipGrid', () => {
   });
 
   it('renders nothing when the module has no detections', async () => {
-    nextSnips = [];
+    nextHistory = [];
     const { container } = renderGrid();
     await waitFor(() => {
       // Skeleton clears, then the empty-state early-return leaves no card.
@@ -103,7 +148,7 @@ describe('NestSnipGrid', () => {
   });
 
   it('degrades silently on fetch failure (never throws to the parent)', async () => {
-    nextSnips = null; // makes getSnips reject
+    nextHistory = null; // makes getSnipHistory reject
     const { container } = renderGrid();
     await waitFor(() => {
       expect(container.querySelector('.hf-skeleton')).toBeNull();

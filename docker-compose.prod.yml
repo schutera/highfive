@@ -83,6 +83,11 @@ services:
       # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       - LOG_DIR=/data/logs/image
+      # Explicitly off in prod: image-service copies the #166 demo snips into
+      # the shared volume only when this is 'true'. Unset already defaults off
+      # (app.py `_seed_demo_snips`), but make it explicit so prod never ships
+      # demo crops — mirrors duckdb-service's SEED_DATA=false below.
+      - SEED_DATA=false
     volumes:
       - duckdb_data:/data
     restart: unless-stopped

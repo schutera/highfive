@@ -152,5 +152,27 @@ of those layers (each independently validates the state enum).
 > latching a stale crop from an older capture. Within a capture, `nest_index` is _positional_
 > (left-to-right inside a diameter-row), not a durable physical-tube identity: "nest 3" need not be
 > the same hole across captures. That is fine for the current-state grid but is a known limitation
-> for the planned per-nest time-lapse (#166), which will need a stable nest identity (e.g. tracking
+> for the time-lapse (#166), which needs a stable nest identity (e.g. tracking
 > by position, not just re-indexing each frame).
+
+### Global per-module time-lapse (#166 phase 3, feature 1)
+
+`NestSnipGrid` fetches the module's full per-capture history and renders one global slider beneath
+the grid; dragging it swaps **all** holes at once to the selected capture's crops. The read is the
+inverse of the grid fold: `duckdb-service GET /detections/history` returns **every nest of every
+capture** for a module, oldest first (deduped to one row per `(filename, bee_type, nest_index)`),
+surfaced by `backend GET /api/modules/:id/snips/history` and `api.getSnipHistory(...)`. The homepage
+buckets the flat list by `sourceFilename` into per-capture frames. `nest_detections` is append-only,
+so the history is already there — this is a read endpoint + a slider, no schema change.
+
+Identity caveat (above) applies: each capture-frame groups holes by `(bee_type, nest_index)`, the
+best identity available today. When the per-row hole count is stable across captures a given grid
+cell tracks the same physical hole; when it drifts, a cell may show a neighbour. Position-based
+tracking would harden this and is the natural follow-up.
+
+Because real uploads never run in dev/CI, `nest_detections` is **seeded** there: five captures of
+Garten 12's leafcutter nest 1 walking `empty → undetermined → sealed`
+(`duckdb-service/db/schema.py`), paired with bundled demo crops in `image-service/demo_snips/` that
+`image-service` copies into the shared snip volume on boot when `SEED_DATA=true`. Keep the seeded
+`snip_filename`s in sync with the JPEGs. The Playwright spec `tests/ui/tests/snip-timelapse.spec.ts`
+asserts the scrubber swaps the real rendered crop end-to-end.

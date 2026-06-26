@@ -8,6 +8,7 @@ import type {
   HeartbeatGap,
   NestSnip,
   NestSnipsResponse,
+  NestSnipHistoryResponse,
 } from '@highfive/contracts';
 import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
@@ -480,6 +481,35 @@ interface ApiDetection {
   detected_at: string;
 }
 
+// Validate each row's shape AND the bee-type/state enums, dropping anything
+// malformed rather than forwarding a drifted shape typed as valid (CLAUDE.md
+// wire-shape rule). A bad row becomes "no snip", never a `{beeType: undefined}`
+// reaching the UI. Shared by the grid (`/snips`) and time-lapse
+// (`/snips/history`) reads so both folds map the duckdb shape identically.
+const isValidDetection = (d: ApiDetection): boolean =>
+  d != null &&
+  (SNIP_BEE_TYPES as readonly string[]).includes(d.bee_type) &&
+  (SNIP_STATES as readonly string[]).includes(d.state) &&
+  typeof d.snip_filename === 'string' &&
+  typeof d.nest_index === 'number' &&
+  typeof d.confidence === 'number' &&
+  Array.isArray(d.bbox) &&
+  d.bbox.length === 4;
+
+// Annotate against the contract so the camelCase mapping is checked at compile
+// time on the producer side too (ADR-004), not just the consumer's.
+const toNestSnips = (raw: ApiDetection[]): NestSnip[] =>
+  raw.filter(isValidDetection).map((d) => ({
+    beeType: d.bee_type as SnipBeeType,
+    nestIndex: d.nest_index,
+    state: d.state as SnipState,
+    confidence: d.confidence,
+    snipFilename: d.snip_filename,
+    bbox: d.bbox,
+    sourceFilename: d.filename,
+    detectedAt: d.detected_at,
+  }));
+
 app.get('/api/modules/:id/snips', async (req, res) => {
   const id = tryParseModuleId(req.params.id);
   if (id === null) {
@@ -499,35 +529,45 @@ app.get('/api/modules/:id/snips', async (req, res) => {
     }
     const body = (await upstream.json()) as { detections?: unknown };
     const raw = Array.isArray(body.detections) ? (body.detections as ApiDetection[]) : [];
-    // Validate each row's shape AND the bee-type/state enums, dropping anything
-    // malformed rather than forwarding a drifted shape typed as valid
-    // (CLAUDE.md wire-shape rule). A bad row becomes "no snip", never a
-    // `{beeType: undefined}` reaching the UI.
-    const isValid = (d: ApiDetection): boolean =>
-      d != null &&
-      (SNIP_BEE_TYPES as readonly string[]).includes(d.bee_type) &&
-      (SNIP_STATES as readonly string[]).includes(d.state) &&
-      typeof d.snip_filename === 'string' &&
-      typeof d.nest_index === 'number' &&
-      typeof d.confidence === 'number' &&
-      Array.isArray(d.bbox) &&
-      d.bbox.length === 4;
-    // Annotate against the contract so the camelCase mapping is checked at
-    // compile time on the producer side too (ADR-004), not just the consumer's.
-    const snips: NestSnip[] = raw.filter(isValid).map((d) => ({
-      beeType: d.bee_type as SnipBeeType,
-      nestIndex: d.nest_index,
-      state: d.state as SnipState,
-      confidence: d.confidence,
-      snipFilename: d.snip_filename,
-      bbox: d.bbox,
-      sourceFilename: d.filename,
-      detectedAt: d.detected_at,
-    }));
-    const payload: NestSnipsResponse = { snips };
+    const payload: NestSnipsResponse = { snips: toNestSnips(raw) };
     res.json(payload);
   } catch (error) {
     console.error('[GET /api/modules/:id/snips]', { id, error: String(error) });
+    res.status(502).json({ error: 'duckdb-service unreachable' });
+  }
+});
+
+// Global per-module time-lapse: every nest of every capture (#166 phase 3).
+// Proxies duckdb-service `GET /detections/history` and maps to `NestSnip[]`
+// (oldest first) so the UI can group by capture and scrub all holes across days
+// with one slider. Public like `/snips`.
+app.get('/api/modules/:id/snips/history', async (req, res) => {
+  const id = tryParseModuleId(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: 'invalid module id format' });
+    return;
+  }
+  try {
+    const qs = new URLSearchParams({ module_id: id });
+    const upstream = await fetch(`${DUCKDB_URL}/detections/history?${qs.toString()}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!upstream.ok) {
+      const errBody = (await upstream.json().catch(() => ({
+        error: `upstream returned ${upstream.status}`,
+      }))) as Record<string, unknown>;
+      res.status(upstream.status).json(errBody);
+      return;
+    }
+    const body = (await upstream.json()) as { detections?: unknown };
+    const raw = Array.isArray(body.detections) ? (body.detections as ApiDetection[]) : [];
+    const payload: NestSnipHistoryResponse = { snips: toNestSnips(raw) };
+    res.json(payload);
+  } catch (error) {
+    console.error('[GET /api/modules/:id/snips/history]', {
+      id,
+      error: String(error),
+    });
     res.status(502).json({ error: 'duckdb-service unreachable' });
   }
 });

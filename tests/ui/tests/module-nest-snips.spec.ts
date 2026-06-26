@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
-import type { NestSnipsResponse } from '@highfive/contracts';
+import type { NestSnipHistoryResponse } from '@highfive/contracts';
 
 // Per-nest hole-detection snip grid in the public ModulePanel (#165) —
 // CLAUDE.md rule #4: a view rendering wire-shape data gets a Playwright spec
 // against the production-built homepage + real backend. NestSnipGrid.test.tsx
 // pins the component against a mocked NestSnip[]; only this layer proves the
 // real chain — image-service HoleDetector crops a snip on /upload →
-// duckdb-service /detections → backend /snips proxy → nginx → <img> pixels —
-// actually renders, which jsdom can never do.
+// duckdb-service /detections/history → backend /snips/history proxy → nginx →
+// <img> pixels — actually renders, which jsdom can never do.
 //
 // Reuses the admin-gallery seed: seed_ui_fixtures.py uploads a real ESP capture
 // (dev-tools/real_captures/block_tungsten_640.jpg) as GALLERY_MAC's newest
@@ -20,12 +20,16 @@ const GALLERY_MAC = 'ff2222222222';
 
 test.describe('module panel nest snips', () => {
   test('renders the per-nest snip grid with decoded snip pixels', async ({ page }) => {
-    // 1) Wire round-trip: the backend must return real detections for the
-    //    seeded module. If the {snips} envelope or the detection write drifted,
-    //    this fails before any DOM work.
-    const resp = await page.request.get(`http://localhost:4002/api/modules/${GALLERY_MAC}/snips`);
+    // 1) Wire round-trip against the exact endpoint the grid consumes
+    //    (`/snips/history`, every nest of every capture). If the {snips}
+    //    envelope or the detection write drifted, this fails before any DOM
+    //    work. GALLERY_MAC has a single real capture, so history == the grid's
+    //    one frame.
+    const resp = await page.request.get(
+      `http://localhost:4002/api/modules/${GALLERY_MAC}/snips/history`,
+    );
     expect(resp.ok()).toBeTruthy();
-    const body = (await resp.json()) as NestSnipsResponse;
+    const body = (await resp.json()) as NestSnipHistoryResponse;
     expect(body.snips.length).toBeGreaterThan(0);
     const first = body.snips[0];
     // The learned detector localizes but defers empty/sealed → `undetermined`.

@@ -5,7 +5,9 @@
 Accepted. First instance: the public dashboard "Latest captures" gallery (#154), which was
 shipped, then reverted ([PR #176](https://github.com/schutera/highfive/pull/176)) because
 showing un-vetted ESP32-CAM photos publicly is risky until segmentation guarantees only bee
-nests are visible — and is now reintroduced disabled behind the flag this ADR describes.
+nests are visible — and was reintroduced disabled behind the flag this ADR describes. (That
+gallery was later removed in favour of the #165/#166 hole-detection snip grid + time-lapse,
+which the same flag now gates; the build-time-flag mechanism this ADR establishes is unchanged.)
 
 ## Context
 
@@ -29,7 +31,9 @@ single module, [`homepage/src/lib/featureFlags.ts`](../../homepage/src/lib/featu
 which exports one `const` per flag (`=== 'true'`). Unset or any non-`'true'` value reads as
 **off** — the safe default. Components gate UI on the exported const; the flag lives only at
 the mount site, not threaded through the feature's own code. First flag:
-`VITE_ENABLE_DASHBOARD_IMAGES` gating `LatestCaptures` in `ModulePanel.tsx`. Off in the
+`VITE_ENABLE_DASHBOARD_IMAGES`, which gates the per-module imagery in `ModulePanel.tsx`
+(originally `LatestCaptures` #154; now the `NestSnipGrid` snip grid + time-lapse, #165/#166).
+Off in the
 production image; the dev `docker-compose.yml` and the UI-test stack
 (`tests/ui/docker-compose.ui.yml`) set it `true`, and `homepage/vitest.config.ts` defines it
 `true` so jsdom suites exercise the gated path.

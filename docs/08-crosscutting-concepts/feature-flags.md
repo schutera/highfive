@@ -11,14 +11,14 @@ page is the practical "how do I use flags here" reference that spans services.
 There is no single flag framework. A flag is a plain environment variable read
 through one small helper, and which helper depends on where the gated code runs.
 
-|                            | **Homepage build-time flag**                                                                                                   | **Backend runtime gate**                                                                                                                  |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Layer                      | Homepage (Vite SPA)                                                                                                            | Any Python/Node service                                                                                                                   |
-| Read via                   | `import.meta.env.VITE_*`, through [`homepage/src/lib/featureFlags.ts`](../../homepage/src/lib/featureFlags.ts)'s `flagEnabled` | `os.getenv(...)` / `process.env.*` at request/startup time                                                                                |
-| When evaluated             | **Build time** — Vite inlines the value into the bundle                                                                        | **Runtime** — read live from the process env                                                                                              |
-| Flip by                    | Fresh `vite build` / homepage image rebuild **+ redeploy**                                                                     | Restart the service with a new env value                                                                                                  |
-| Default direction          | **Off** (ship a new feature dark)                                                                                              | Usually **on** (operational kill-switch)                                                                                                  |
-| First / canonical instance | `VITE_ENABLE_DASHBOARD_IMAGES` → `LatestCaptures` in `ModulePanel.tsx`                                                         | `WEATHER_WORKER_ENABLED` → the duckdb-service weather worker ([ADR-017](../09-architecture-decisions/adr-017-external-weather-source.md)) |
+|                            | **Homepage build-time flag**                                                                                                                  | **Backend runtime gate**                                                                                                                  |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Layer                      | Homepage (Vite SPA)                                                                                                                           | Any Python/Node service                                                                                                                   |
+| Read via                   | `import.meta.env.VITE_*`, through [`homepage/src/lib/featureFlags.ts`](../../homepage/src/lib/featureFlags.ts)'s `flagEnabled`                | `os.getenv(...)` / `process.env.*` at request/startup time                                                                                |
+| When evaluated             | **Build time** — Vite inlines the value into the bundle                                                                                       | **Runtime** — read live from the process env                                                                                              |
+| Flip by                    | Fresh `vite build` / homepage image rebuild **+ redeploy**                                                                                    | Restart the service with a new env value                                                                                                  |
+| Default direction          | **Off** (ship a new feature dark)                                                                                                             | Usually **on** (operational kill-switch)                                                                                                  |
+| First / canonical instance | `VITE_ENABLE_DASHBOARD_IMAGES` → `NestSnipGrid` in `ModulePanel.tsx` (orig. `LatestCaptures` #154, since replaced by the #165/#166 snip grid) | `WEATHER_WORKER_ENABLED` → the duckdb-service weather worker ([ADR-017](../09-architecture-decisions/adr-017-external-weather-source.md)) |
 
 **Decision rule.** Gating UI on the homepage → build-time `VITE_*` flag. Gating
 server-side behaviour (a worker, an endpoint's side effect, a code path in a
@@ -47,7 +47,7 @@ channel** — the only place to inject config is the build.
    a feature to `main` _disabled_ and turn it on later — never the reverse.
 3. **Gate at the mount site only.** The component the flag controls stays
    flag-unaware; the gating `const && <Component/>` lives where it mounts (e.g.
-   `ModulePanel.tsx` gates `<LatestCaptures>`). Do not thread the flag through
+   `ModulePanel.tsx` gates `<NestSnipGrid>`). Do not thread the flag through
    the feature's own code.
 4. **The gated code still ships in the bundle.** It is gated, not tree-shaken
    out. That is fine — the homepage holds no secrets

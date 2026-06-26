@@ -650,4 +650,60 @@ def init_db():
                 )
                 print("✅ Seeded heartbeat gap for module 000000000005")
 
+            # Seed a per-nest detection history for the #166 time-lapse: five
+            # captures of ONE leafcutter hole (module 000000000002 / Garten 12,
+            # nest_index 1) walking empty → undetermined → sealed across June.
+            # The `snip_filename`s match the bundled demo JPEGs that
+            # `image-service` copies into the shared volume on boot
+            # (image-service/demo_snips/), so the time-lapse grid renders real
+            # crops when the global scrubber walks across these captures.
+            # Idempotent on its own row count. `record_detections` is the normal
+            # writer (ADR-001); these are demo rows written directly at seed time
+            # like the heartbeat gap above. Keep filenames in sync with
+            # image-service/demo_snips/.
+            detections_seeded = con.execute(
+                "SELECT COUNT(*) FROM nest_detections WHERE module_id = '000000000002'"
+            ).fetchone()[0]
+            if detections_seeded == 0:
+                # (date, state) — one capture per row; the demo snip + source
+                # capture filenames are derived from the date below.
+                timeline = [
+                    ("2026-06-01", "empty"),
+                    ("2026-06-08", "empty"),
+                    ("2026-06-15", "undetermined"),
+                    ("2026-06-22", "sealed"),
+                    ("2026-06-26", "sealed"),
+                ]
+                detection_rows = [
+                    (
+                        "000000000002",
+                        f"demo-garten12-{date}.jpg",  # source capture
+                        "leafcutter",
+                        1,  # nest_index
+                        0.42,
+                        0.30,
+                        0.16,
+                        0.16,  # bbox x,y,w,h (normalized)
+                        state,
+                        0.92,  # confidence
+                        f"demo-garten12-leaf1-{date}.jpg",  # snip crop
+                        f"{date} 12:00:00",  # detected_at (UTC)
+                    )
+                    for date, state in timeline
+                ]
+                con.executemany(
+                    """
+                    INSERT INTO nest_detections
+                        (module_id, filename, bee_type, nest_index,
+                         bbox_x, bbox_y, bbox_w, bbox_h,
+                         state, confidence, snip_filename, detected_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    detection_rows,
+                )
+                print(
+                    f"✅ Seeded {len(detection_rows)} nest detections for "
+                    "module 000000000002 (#166 time-lapse demo)"
+                )
+
         con.close()

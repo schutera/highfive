@@ -288,6 +288,17 @@ export interface NestSnipsResponse {
   snips: NestSnip[];
 }
 
+// Wire-shape returned by `backend GET /api/modules/:id/snips/history`, which
+// proxies `duckdb-service GET /detections/history`. The phase-3 global
+// time-lapse (#166): unlike `NestSnipsResponse` (one row per nest from the
+// *latest* capture), this returns *every* nest of *every* capture, oldest
+// first, so the UI can group by capture and scrub all holes across days at
+// once with one slider. Same `NestSnip` element shape; the consumer buckets by
+// `sourceFilename` (one frame per capture) and orders frames by `detectedAt`.
+export interface NestSnipHistoryResponse {
+  snips: NestSnip[];
+}
+
 // ---- Telemetry sidecar envelope ----
 //
 // Wire-shape returned by `image-service /modules/<mac>/logs` (proxied

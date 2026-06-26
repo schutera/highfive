@@ -30,15 +30,20 @@ the upload pipeline (edge → server) and the dashboard read flow.
 6. Opening a module's detail panel — **only when the build-time feature flag
    `VITE_ENABLE_DASHBOARD_IMAGES` is `true`** (default off in prod; see
    [ADR-022](../09-architecture-decisions/adr-022-build-time-feature-flags.md))
-   — additionally fetches
-   `GET /api/images?module_id=<id>&limit=6&offset=0` (public read, proxied
-   to `image-service /images`) and renders a newest-first "Latest captures"
-   carousel (#154) — two 4:3 cards visible, chevron arrows paging older
-   images (further `offset` pages fetched on demand), click for a full-size
-   lightbox; bytes come from `GET /api/images/:filename`. A failed image
-   fetch degrades to "no gallery" — it never tears down the panel. With the
-   flag off, the panel shows nests / status / telemetry only and makes no
-   image fetch.
+   — renders the per-nest hole-detection snip grid (#165 / #166); the
+   full-module "Latest captures" carousel (#154) that previously sat above it
+   was removed in favour of the per-hole time-lapse below (the `LatestCaptures`
+   component was deleted; admin image management keeps its own gallery in
+   `AdminPage.tsx`).
+   With the flag off, the panel shows nests / status / telemetry only and makes
+   no image fetch.
+7. `NestSnipGrid` fetches the module's full per-capture history via
+   `GET /api/modules/:id/snips/history` (every nest of every capture, oldest
+   first), groups it by capture, and opens on the newest. A single **global
+   time-lapse slider** beneath the grid scrubs the whole block across days:
+   dragging it swaps all holes at once to the chosen capture's crops and updates
+   the shown capture date/time. Public read; a failed fetch degrades to "no
+   grid" and never tears down the panel.
 
 No caching layer; each browser poll re-fetches. Partial failures
 degrade gracefully (some fields empty) rather than 500ing.

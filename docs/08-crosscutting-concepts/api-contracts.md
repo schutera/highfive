@@ -468,6 +468,14 @@ export interface NestSnip {
 export interface NestSnipsResponse {
   snips: NestSnip[];
 }
+
+// #166 global time-lapse: every nest of EVERY capture, oldest first, served by
+// `GET /api/modules/:id/snips/history`. Same NestSnip element shape as the grid
+// read; the homepage buckets the flat list by `sourceFilename` into per-capture
+// frames so one slider scrubs all holes at once.
+export interface NestSnipHistoryResponse {
+  snips: NestSnip[];
+}
 ```
 
 Two non-obvious contract details:

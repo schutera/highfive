@@ -125,6 +125,16 @@ backfills the ring from disk on restart so the panel shows pre-restart history:
 `docker compose down -v` clears these along with `duckdb_data`. Unset `LOG_DIR`
 to fall back to the in-memory-only ring (pre-ADR-023 behaviour).
 
+### Demo nest snips for the time-lapse (#166)
+
+`SEED_DATA: 'true'` is set on **both** `duckdb-service` (which seeds the
+`nest_detections` rows) **and** `image-service` (which, on boot, copies the
+bundled `image-service/demo_snips/*.jpg` into the shared snip volume) so the
+per-nest time-lapse has real crops to scrub on a fresh dev stack. The copy is
+idempotent and skips any snip already on the volume, so it never clobbers real
+uploads. `docker-compose.prod.yml` sets `SEED_DATA=false`, so production copies
+nothing.
+
 During development it may be necessary to reset the database, for example
 when **primary key conflicts** occur due to previously inserted test data.
 

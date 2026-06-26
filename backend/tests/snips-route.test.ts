@@ -105,6 +105,68 @@ describe('GET /api/modules/:id/snips', () => {
   });
 });
 
+describe('GET /api/modules/:id/snips/history', () => {
+  const HISTORY = `/api/modules/${VALID_ID}/snips/history`;
+
+  it('maps the upstream per-capture history to NestSnip[] oldest-first', async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        detections: [
+          {
+            ...detection('leafcutter', 1, 'empty'),
+            filename: 'd1.jpg',
+            detected_at: '2026-06-01 10:00:00',
+            snip_filename: 'd1-leafcutter-1.jpg',
+          },
+          {
+            ...detection('resin', 1, 'sealed'),
+            filename: 'd1.jpg',
+            detected_at: '2026-06-01 10:00:00',
+            snip_filename: 'd1-resin-1.jpg',
+          },
+          {
+            ...detection('leafcutter', 1, 'sealed'),
+            filename: 'd2.jpg',
+            detected_at: '2026-06-03 10:00:00',
+            snip_filename: 'd2-leafcutter-1.jpg',
+          },
+        ],
+      }),
+    });
+
+    const res = await request(app).get(HISTORY);
+    expect(res.status).toBe(200);
+    // Order preserved (upstream sorts oldest-first); every nest of every
+    // capture is forwarded so the UI can group by capture.
+    expect(res.body.snips.map((s: { snipFilename: string }) => s.snipFilename)).toEqual([
+      'd1-leafcutter-1.jpg',
+      'd1-resin-1.jpg',
+      'd2-leafcutter-1.jpg',
+    ]);
+    // The upstream query is scoped to the module only (no per-nest filter).
+    const [url] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(url)).toContain('/detections/history?');
+    expect(String(url)).toContain(`module_id=${VALID_ID}`);
+  });
+
+  it('returns 400 on a malformed module id without calling upstream', async () => {
+    const res = await request(app).get('/api/modules/not-a-mac/snips/history');
+    expect(res.status).toBe(400);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns 502 when duckdb-service is unreachable', async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('ECONNREFUSED'),
+    );
+    const res = await request(app).get(HISTORY);
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/unreachable/i);
+  });
+});
+
 describe('GET /api/snips/:filename', () => {
   it('proxies the snip bytes from image-service with its content type', async () => {
     const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0x00]);

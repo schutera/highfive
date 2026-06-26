@@ -372,11 +372,12 @@ reported `found=1`. Bench-proven on COM13 (AI-Thinker, ESP32-D0WD-V3):
 
 ### Seeded "JPEGs" are undecodable random bytes — a pixels-rendered assertion can never pass against default fixtures (#154 phase 1)
 
-**What happened.** The new `module-latest-capture.spec.ts` asserted the
-ModulePanel "Latest capture" `<img>` actually decodes
-(`complete && naturalWidth > 0` — the one thing jsdom structurally cannot
-prove). It timed out on every run: the card rendered, the `src` was
-right, the bytes came back `200` — and `naturalWidth` stayed `0` forever.
+**What happened.** A Playwright spec (`module-latest-capture.spec.ts`, since
+removed along with the "Latest captures" gallery it covered) asserted the
+ModulePanel `<img>` actually decodes (`complete && naturalWidth > 0` — the one
+thing jsdom structurally cannot prove). It timed out on every run: the card
+rendered, the `src` was right, the bytes came back `200` — and `naturalWidth`
+stayed `0` forever.
 
 **Why it happened.** `tools/mock_esp.py::_make_fake_image` uploads
 pseudo-random bytes wrapped in JPEG SOI/EOI markers. The upload pipeline
@@ -388,17 +389,18 @@ knowledge existed but lived in one spec's comment, not in the fixture
 docs, so the next spec author (this one) re-paid for it.
 
 **How to avoid it next time.** If a spec must prove pixels decode, seed a
-real JPEG for that fixture — `seed_ui_fixtures.py::seed_admin_gallery_images`
-now uploads `dev-tools/mock_fully_filled.jpg` as the gallery module's
-newest capture for exactly this. Never assert image _loading_ against
-default mock-ESP uploads. Rules + the re-seed-pollution gotcha (re-running
-the seed on a reused stack accumulates uploads and breaks exact-count
-specs) are documented where spec authors will look:
-`tests/ui/README.md` → "Seeded image bytes are NOT decodable".
-(The carousel this proves is gated behind `VITE_ENABLE_DASHBOARD_IMAGES`,
-default off — [ADR-022](../09-architecture-decisions/adr-022-build-time-feature-flags.md);
-the UI-test stack builds the homepage flag-on so `module-latest-capture.spec.ts`
-exercises it.)
+real JPEG for that fixture — `seed_ui_fixtures.py` uploads
+`dev-tools/real_captures/block_tungsten_640.jpg` as the gallery module's
+newest capture for exactly this (today consumed by `module-nest-snips.spec.ts`
+and `snip-timelapse.spec.ts`, which carry the same `naturalWidth > 0` poll).
+Never assert image _loading_ against default mock-ESP uploads. Rules + the
+re-seed-pollution gotcha (re-running the seed on a reused stack accumulates
+uploads and breaks exact-count specs) are documented where spec authors will
+look: `tests/ui/README.md` → "Seeded image bytes are NOT decodable".
+(The per-module imagery this seed feeds is gated behind
+`VITE_ENABLE_DASHBOARD_IMAGES`, default off —
+[ADR-022](../09-architecture-decisions/adr-022-build-time-feature-flags.md); the
+UI-test stack builds the homepage flag-on so the surviving snip specs exercise it.)
 
 ### A documented "this is unaffected" claim cost a debug session — Docker Desktop's Windows forwarder stalls ESP **uploads** too (#154 bench session)
 

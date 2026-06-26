@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import random
+import shutil
 import time
 from queue import Empty
 
@@ -96,6 +97,37 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # garden/house background, so snips are served publicly without auth.
 SNIP_FOLDER = os.path.join(UPLOAD_FOLDER, "snips")
 os.makedirs(SNIP_FOLDER, exist_ok=True)
+
+# Bundled demo snips that pair with the seeded `nest_detections` rows in
+# `duckdb-service/db/schema.py` so the #166 per-nest time-lapse has frames to
+# scrub on a freshly-seeded dev/CI stack (real uploads never run there). Copied
+# into the shared volume only when SEED_DATA is on — prod never reaches this.
+_DEMO_SNIP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo_snips")
+
+
+def _seed_demo_snips() -> None:
+    """Copy bundled demo snips into SNIP_FOLDER (idempotent — skip if present).
+
+    Gated on SEED_DATA to match the duckdb seed; only `.jpg` files are copied so
+    the folder's README/generator never leak into the served volume. A missing
+    or already-populated target is a no-op, never fatal — a demo-asset hiccup
+    must not stop the image service from booting.
+    """
+    if os.getenv("SEED_DATA", "").lower() != "true" or not os.path.isdir(_DEMO_SNIP_DIR):
+        return
+    for name in os.listdir(_DEMO_SNIP_DIR):
+        if not name.lower().endswith(".jpg"):
+            continue
+        dest = os.path.join(SNIP_FOLDER, name)
+        if os.path.exists(dest):
+            continue
+        try:
+            shutil.copy2(os.path.join(_DEMO_SNIP_DIR, name), dest)
+        except OSError as exc:  # pragma: no cover - defensive, demo-only path
+            logging.warning("could not seed demo snip %s: %s", name, exc)
+
+
+_seed_demo_snips()
 
 DUCKDB_SERVICE_URL = os.getenv("DUCKDB_SERVICE_URL", "http://duckdb-service:8000")
 duckdb_service = DuckDBService()

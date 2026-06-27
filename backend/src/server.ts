@@ -1,7 +1,8 @@
 import 'dotenv/config';
+import { setTimeout as delay } from 'node:timers/promises';
 import { app } from './app';
 import { getApiKey } from './auth';
-import { duckdbHealth } from './duckdbClient';
+import { DUCKDB_URL, duckdbHealth, duckdbUrlFromDefault } from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
 import { installLogRing, initLogPersistence, writeStdout } from './logRing';
@@ -25,12 +26,43 @@ if (portUnsetWarning) {
   );
 }
 
+if (duckdbUrlFromDefault) {
+  log.warn(
+    `[startup] DUCKDB_SERVICE_URL unset — defaulting to ${DUCKDB_URL}. ` +
+      `Set it explicitly in production (pm2: ecosystem.config.js; ` +
+      `compose: DUCKDB_SERVICE_URL=http://duckdb-service:8000).`,
+  );
+}
+
+// The API and duckdb-service are started together (pm2/compose), so a single
+// health probe at boot races the service binding its port: it logs a
+// misleading "not reachable" that then sits at the top of the admin log panel
+// (#171) for the whole process lifetime. Retry briefly before deciding. The
+// check is advisory — we start serving regardless of the result.
+const DUCKDB_HEALTH_BOOT_RETRIES = 10;
+const DUCKDB_HEALTH_BOOT_RETRY_DELAY_MS = 500;
+
 async function bootstrap() {
-  try {
-    const health = await duckdbHealth();
+  let health: { ok: boolean; db?: string } | undefined;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= DUCKDB_HEALTH_BOOT_RETRIES; attempt++) {
+    try {
+      health = await duckdbHealth();
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < DUCKDB_HEALTH_BOOT_RETRIES) {
+        await delay(DUCKDB_HEALTH_BOOT_RETRY_DELAY_MS);
+      }
+    }
+  }
+  if (health) {
     log.info(`🗄 DuckDB service reachable: ${JSON.stringify(health)}`);
-  } catch (err) {
-    log.warn(`⚠ DuckDB service not reachable: ${String(err)}`);
+  } else {
+    log.warn(
+      `⚠ DuckDB service not reachable after ${DUCKDB_HEALTH_BOOT_RETRIES} attempts ` +
+        `(${DUCKDB_URL}): ${String(lastErr)}`,
+    );
   }
 
   app.listen(PORT, () => {

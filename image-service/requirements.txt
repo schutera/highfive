@@ -1,6 +1,9 @@
 Flask==3.1.2
 requests==2.32.5
-pydantic==2.12.5
+# pydantic floated to a lower bound (not ==) so the 3.10–3.14 CI matrix resolves
+# a pydantic-core wheel for every interpreter — 2.12.5's pinned pydantic-core has
+# no cp314 wheel. See ADR-028.
+pydantic>=2.12.5
 # Hole detection (#165, ADR-027): the learned YOLO26n-seg model runs as ONNX
 # through onnxruntime — deliberately lean (no torch/ultralytics, which are the
 # dev-only training stack). The model is baked into the image at
@@ -8,5 +11,10 @@ pydantic==2.12.5
 # export_onnx.py. headless OpenCV (no GUI/X11 deps) does the letterbox + crop and
 # numpy the box math; headless keeps the image slim and avoids libGL.
 opencv-python-headless==4.10.0.84
-numpy==1.26.4
-onnxruntime==1.27.0
+# numpy / onnxruntime floated to lower bounds (not ==) so the 3.10–3.14 CI matrix
+# resolves a per-interpreter wheel: no single version of either ships both a
+# cp310 and a cp314 wheel (numpy cp310 ≤ 2.2.6, cp314 ≥ 2.4.0; onnxruntime cp310
+# ≤ 1.23.2, cp314 ≥ 1.24). pip picks the newest compatible wheel per Python
+# version. This moves prod off numpy 1.26 → 2.x; see ADR-028.
+numpy>=2.0.0
+onnxruntime>=1.23.2

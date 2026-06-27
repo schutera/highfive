@@ -130,6 +130,30 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### CI tested only Python 3.11 while prod ran 3.10 — a 3.11-only `datetime.UTC` crashed both services on deploy (#180, #192)
+
+**What happened.** Commit `8938899` added `from datetime import UTC` / `datetime.now(UTC)`
+to `services/log_ring.py` (the file is duplicated in `duckdb-service` and `image-service`).
+`datetime.UTC` exists only on Python 3.11+. `log_ring.install()` runs at **import time** in
+`app.py`, and the production host runs **Python 3.10**, so deploying `main` raised
+`ImportError` and crashed both Python services before they could serve traffic. CI was all
+green — every Python lane ran on 3.11. #191 swapped `UTC` → `timezone.utc` to unbreak prod.
+
+**Why it happened.** A single-interpreter CI lane cannot see a version-specific API. CI
+pinned 3.11; prod ran 3.10; nothing exercised the floor. The naïve fix — a 3.10–3.14 matrix —
+was blocked by exact-pinned native deps: no single `numpy` ships both a cp310 and a cp314
+wheel (cp310 ≤ 2.2.6, cp314 ≥ 2.4.0), and `onnxruntime==1.27.0` has no cp310 wheel at all.
+
+**How to avoid it next time.** Test the Python services on the **whole** supported range, not
+one version — `duckdb-unit` and `image-unit` now run a `3.10–3.14` matrix (`fail-fast: false`),
+so a reintroduced 3.11-ism fails the 3.10 cell at PR time. Where exact pins can't span the
+matrix, float just those deps to a `>=` lower bound and let pip resolve a per-interpreter wheel
+(`numpy>=2.0.0`, `onnxruntime>=1.23.2`, `pydantic>=2.12.5`); keep everything else pinned. The
+trade-off (prod moves to numpy 2.x; looser reproducibility on the floated deps) is recorded in
+[ADR-028](../09-architecture-decisions/adr-028-python-version-matrix-floated-pins.md). General
+rule: for any `datetime`/stdlib API, prefer the form that works on the oldest supported runtime
+(`datetime.now(timezone.utc)`, not `datetime.now(UTC)`).
+
 ### `opencv-python-headless` still needs `libglib2.0-0`; and `circle.txt` was stale (#165)
 
 **What happened.** Two gotchas surfaced while adding hole detection (#165).

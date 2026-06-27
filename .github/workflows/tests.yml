@@ -179,14 +179,23 @@ jobs:
     name: DuckDB service unit tests (pytest)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Matrix the full prod-and-forward Python range. The prod host runs 3.10
+    # while CI historically ran only 3.11 — that gap shipped a 3.11-only
+    # `datetime.UTC` import that crashed both Python services at import time on
+    # deploy (#180, fixed by #191). 3.10 is the floor (prod), 3.14 the ceiling.
+    # fail-fast: false so one version's failure doesn't mask the others.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: duckdb-service/requirements-dev.txt
 
@@ -202,14 +211,23 @@ jobs:
     name: Image service unit tests (pytest)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Same 3.10–3.14 matrix as duckdb-unit (the log_ring.py that broke is
+    # duplicated in both services). image-service's native deps (numpy,
+    # onnxruntime) are floated to `>=` in requirements.txt precisely so this
+    # matrix can resolve a per-interpreter wheel — no single pinned version
+    # spans cp310…cp314. See ADR-028.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: image-service/requirements-dev.txt
 

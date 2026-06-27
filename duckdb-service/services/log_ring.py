@@ -33,7 +33,7 @@ import sys
 import threading
 import time
 from collections import deque
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 
 _MAX_RING_ENTRIES = 2000
@@ -68,7 +68,7 @@ _subscribers: "set[queue.Queue]" = set()
 
 def _now_iso() -> str:
     # Millisecond precision, 'Z' suffix — matches the LogEntry contract.
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _push(level: str, msg: str) -> dict:
@@ -167,7 +167,7 @@ class _PruningTimedHandler(TimedRotatingFileHandler):
             self.stream.close()
             self.stream = None
         base = self.baseFilename
-        stamp = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
         dfn = f"{base}.{stamp}"
         idx = 1
         while os.path.exists(dfn):  # multiple rolls within the same second

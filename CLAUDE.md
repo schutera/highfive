@@ -74,13 +74,13 @@ To ship new ESP32-CAM firmware to the field, follow the runbook — do **not** i
 
 Ground truth, in execution order:
 
-- **The checklist** — [`firmware-release.md` → Release checklist](docs/07-deployment-view/firmware-release.md#release-checklist): bump both `ESP32-CAM/VERSION` + `ESP32-CAM/SEQUENCE` → `bash ESP32-CAM/build.sh` (needs `GEO_API_KEY`) → rebuild the **frontend image** (the artifacts are gitignored, so `git pull` doesn't carry them) → commit on `main` + annotated `prod-<codename>` tag → verify `curl https://highfive.schutera.com/firmware.json`.
+- **The checklist** — [`firmware-release.md` → Release checklist](docs/07-deployment-view/firmware-release.md#release-checklist): bump both `ESP32-CAM/VERSION` + `ESP32-CAM/SEQUENCE` → `bash ESP32-CAM/build.sh` (needs `GEO_API_KEY`) → rebuild the **frontend image** (the artifacts are gitignored, so `git pull` doesn't carry them) → commit on `main`, **promote to `production`** (`git push origin <sha>:production`), annotated `prod-<codename>` tag on the deployed commit → verify `curl https://highfive.schutera.com/firmware.json`.
 - **Why `SEQUENCE` is the gate** — [`ADR-008` → Sequence + allow_downgrade addendum](docs/09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83) and [`ESP32-CAM/lib/ota_version/ota_version.h`](ESP32-CAM/lib/ota_version/ota_version.h).
 - **The build/publish script** — [`ESP32-CAM/build.sh`](ESP32-CAM/build.sh) (writes the 3 artifacts + manifest into `homepage/public/`).
 - **Runtime fetch/flash/rollback** — [`docs/06-runtime-view/ota-update-flow.md`](docs/06-runtime-view/ota-update-flow.md).
 - **The trap to avoid** — [chapter 11 → "Merging firmware source is not a release"](docs/11-risks-and-technical-debt/README.md#merging-firmware-source-is-not-a-release--the-sequence-bump-is-the-release-150-132).
 
-Firmware OTA is cut on `main` + `prod-*` tags; the `production` branch is the Docker-services deploy track only ([branch & tag model](docs/07-deployment-view/firmware-release.md#git-branch--tag-model)).
+Since #152 ([ADR-030](docs/09-architecture-decisions/adr-030-production-as-gated-release-branch.md)), **both** the web services **and** firmware OTA deploy from the single gated `production` branch: `main` is the integration line, and a release is a fast-forward of `production` onto a chosen `main` commit (`git push origin <sha>:production`). `prod-*` tags are cut on `production`. The on-host `scripts/deploy.sh` timer (`BRANCH=production`) pulls it and auto-publishes firmware changes ([branch & tag model](docs/07-deployment-view/firmware-release.md#git-branch--tag-model)).
 
 ## Documentation map (arc42)
 

@@ -1,7 +1,8 @@
 # Production Deployment (Docker Compose + host-Nginx)
 
-Deploy HiveHive to production from the `production` branch using
-`docker-compose.prod.yml` plus a host-level Nginx that terminates TLS
+Deploy HiveHive to production from the `production` branch — the gated
+release branch, fast-forwarded from `main` when a release is cut (#152) —
+using `docker-compose.prod.yml` plus a host-level Nginx that terminates TLS
 for both `highfive.schutera.com` (frontend) and
 `api.highfive.schutera.com` (backend). All four services
 (`backend`, `frontend`, `image-service`, `duckdb-service`) run in a
@@ -12,13 +13,24 @@ For a non-Docker production option (Nginx + PM2 on bare metal), see
 [production-runbook.md](production-runbook.md). For dev-laptop setup,
 see [docker-compose.md](docker-compose.md).
 
-> **This doc covers the web services only.** Shipping new **ESP32-CAM
-> firmware** to the field is a separate track — cut on `main` and marked
-> by `prod-<codename>` tags, not deployed from this branch. See
-> [firmware-release.md](firmware-release.md). ⚠️ The `production` branch
-> this guide clones is currently behind `main` while the live services
-> run `main`-only code; verify your actual services deploy source before
-> relying on it — [chapter 11 → "`production` branch drifted"](../11-risks-and-technical-debt/README.md#production-branch-drifted-from-the-deployed-services-undocumented-deploy-source).
+> **This doc covers the web services (Docker Compose path).** Both the web
+> services **and** the ESP32-CAM firmware OTA now ship from the `production`
+> branch (#152): `main` is the integration line, and a release is a
+> fast-forward of `production` onto a chosen `main` commit
+> (`git push origin <sha>:production`). On this Docker path the host then
+> `git pull`s `production` and re-runs `docker compose -f docker-compose.prod.yml
+> up -d --build`. The firmware-specific mechanics (SEQUENCE gate, build,
+> manifest) live in [firmware-release.md](firmware-release.md); the
+> branch/promotion model is recorded in
+> [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md).
+>
+> ⚠️ **Which runtime is live?** The in-repo on-host automation
+> (`scripts/deploy.sh` + the `highfive-deploy` systemd timer) is the
+> **bare-metal PM2 path** — it `npm`/`vite`-builds, `pm2 reload`s, and copies
+> firmware artifacts into a host directory; it issues **no** `docker` commands.
+> So the timer-driven automation belongs to
+> [production-runbook.md](production-runbook.md), not this Docker doc. Confirm
+> which runtime your host actually runs before relying on either deploy action.
 
 ## Topology at a glance
 
@@ -439,6 +451,52 @@ docker compose -f docker-compose.prod.yml --env-file .env.production logs --tail
 docker volume inspect highfive_duckdb_data
 docker compose -f docker-compose.prod.yml exec duckdb-service ls -lah /data
 ```
+
+## Releasing: the gated `production` branch
+
+`production` is the **single release branch** for both the web services and the
+firmware OTA (#152, [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md)).
+`main` is the continuous-integration line; nothing deploys directly from it. A
+release is a deliberate **fast-forward of `production` onto a chosen `main`
+commit** — `main` may run ahead of what is live.
+
+**Cut a release** (from a maintainer's clone, not the host):
+
+```bash
+git fetch origin
+# promote the latest reviewed main (origin/main, just fetched) to production —
+# fast-forward only. Substitute an explicit reviewed SHA for origin/main to gate
+# the release to a specific commit.
+git push origin origin/main:production
+```
+
+Then the host deploys it:
+
+- **Docker path (this doc):** `git pull` on the host and re-run
+  `docker compose -f docker-compose.prod.yml up -d --build`.
+- **Bare-metal PM2 path:** the `scripts/deploy.sh` systemd timer notices
+  `origin/production` advanced, `--ff-only`-pulls it, rebuilds only the changed
+  services (`npm`/`vite` + `pm2 reload`), health-checks, and — for
+  firmware-source changes — publishes the OTA and cuts the `prod-<codename>`
+  tag on `production`. See [production-runbook.md](production-runbook.md) and
+  [firmware-release.md](firmware-release.md).
+
+**One-time cutover** (run once, on the host, when adopting this model — the
+host previously tracked `main`). After `origin/production` has been reset to
+match `main` (see [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md)
+for the reconciliation):
+
+```bash
+cd /var/www/highfive            # or /opt/highfive, wherever the live checkout is
+git fetch origin
+git checkout production
+git reset --hard origin/production   # PM2 host: the deploy timer now pulls production (BRANCH=production). Docker hosts pull manually.
+# verify services answer
+curl -fsS http://127.0.0.1:3001/api/health
+curl -fsS https://highfive.schutera.com/firmware.json
+```
+
+After the cutover the deploy source is `origin/production`; nothing else changes.
 
 ## Known gaps
 

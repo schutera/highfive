@@ -4,7 +4,7 @@
 #          sudo systemctl enable --now highfive-deploy.timer
 # Watch:   journalctl -u highfive-deploy.service -f
 [Unit]
-Description=HiveHive auto-deploy (pull main, rebuild changed services, health-check, rollback, test-gated firmware OTA)
+Description=HiveHive auto-deploy (pull production, rebuild changed services, health-check, rollback, test-gated firmware OTA)
 After=network-online.target
 Wants=network-online.target
 

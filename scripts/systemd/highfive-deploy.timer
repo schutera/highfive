@@ -1,7 +1,7 @@
 # Fires highfive-deploy.service ~every 2 minutes. OnUnitInactiveSec measures from
 # the previous run's COMPLETION, so a long build never queues overlapping ticks
-# (flock in deploy.sh is the second guard). The cheap "anything new on main?"
-# check exits in milliseconds when main is unchanged.
+# (flock in deploy.sh is the second guard). The cheap "anything new on
+# production?" check exits in milliseconds when production is unchanged.
 [Unit]
 Description=Run highfive-deploy every 2 minutes
 

@@ -7,14 +7,18 @@ Accepted
 ## Context
 
 The two Python services (`duckdb-service`, `image-service`) were CI-tested on a
-single interpreter, Python 3.11, while the production host runs Python 3.10. That
-mismatch is invisible until a version-specific API slips through: commit `8938899`
-(via #180) added `from datetime import UTC` to `services/log_ring.py` (duplicated in
-both services). `datetime.UTC` exists only on 3.11+, and `log_ring.install()` runs at
-import time in `app.py`, so deploying `main` to the 3.10 host raised `ImportError`
-before either service could serve traffic. #191 fixed the symptom; nothing in CI would
-have caught it. We want the pytest lanes to run on the whole supported range — 3.10
-(prod floor) through 3.14 (forward ceiling).
+single interpreter, Python 3.11. The repo specifies its actual runtime
+**inconsistently** — the service Dockerfiles build `python:3.12-slim`, the deployment
+docs say 3.11, and the #180 incident crashed on a 3.10 host — so no single version is
+authoritative, and pinning CI to any one of them hides version-specific breakage in
+the others. Commit `8938899` (via #180) added `from datetime import UTC` to
+`services/log_ring.py` (duplicated in both services). `datetime.UTC` exists only on
+3.11+, and `log_ring.install()` runs at import time in `app.py`, so deploying `main`
+raised `ImportError` before either service could serve traffic — an ImportError on
+that symbol is itself proof the runtime was < 3.11. #191 addressed the symptom;
+nothing in CI would have caught it. We want the pytest lanes to run on the whole
+plausible range — a conservative **3.10 floor** through a **3.14 forward ceiling** —
+rather than betting on one version the repo can't even agree on.
 
 The obstacle is wheel availability for the exact-pinned native dependencies. No single
 release of `numpy` ships both a cp310 and a cp314 wheel (cp310 ≤ 2.2.6, cp314 ≥ 2.4.0),
@@ -51,3 +55,13 @@ real wheel.
   matrix, and only those — the rest of the lock surface stays exact. If drift ever bites, the
   fix is to raise the lower bound or add a `<` ceiling, not to re-pin and lose the matrix.
 - **No new CI jobs.** The job count stays nine; each pytest job fans into five version cells.
+- **A non-skipping guard backs the float.** `image-service/tests/test_native_runtime.py`
+  asserts `hole_detection._RUNTIME_AVAILABLE is True` and never `importorskip`s, so a
+  floated wheel that installs-but-won't-import on a cell turns it **red** instead of
+  silently skipping the detection tests green — the matrix would otherwise give false
+  confidence for exactly the deps it was added to de-risk.
+- **This branch folds in #191.** PR #191 makes the identical `UTC` → `timezone.utc`
+  swap in both `log_ring.py` copies; this branch carries it too, so the new 3.10 cells
+  pass instead of failing on the still-unfixed import. Whichever lands second is a
+  no-op / trivial conflict on those lines — the integrator should rebase or close one
+  against the other.

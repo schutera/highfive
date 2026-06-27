@@ -1,7 +1,12 @@
 [tool.ruff]
 # Match Black’s defaults for line length
 line-length = 88
-target-version = "py312"
+# Pin to the matrix floor (ADR-028), NOT a higher version: with the `UP`
+# (pyupgrade) rule enabled below, a `py311`+ target lets `ruff check --fix`
+# rewrite `datetime.now(timezone.utc)` → `datetime.now(UTC)` — reintroducing
+# the exact 3.11-only API that crashed prod (#180). py310 keeps lint honest
+# with what CI now tests.
+target-version = "py310"
 exclude = ["venv", ".venv", "build", "dist", ".git"]
 
 # Enable common rule sets

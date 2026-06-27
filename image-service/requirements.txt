@@ -9,4 +9,6 @@ pydantic==2.12.5
 # numpy the box math; headless keeps the image slim and avoids libGL.
 opencv-python-headless==4.10.0.84
 numpy==1.26.4
-onnxruntime==1.27.0
+# 1.23.2 is the highest onnxruntime with a CPython 3.10 wheel; the prod host runs
+# Python 3.10 (see PR #191 / the 3.10 ceiling). Bump once the host is on 3.11+.
+onnxruntime==1.23.2

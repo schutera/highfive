@@ -14,7 +14,7 @@ opencv-python-headless==4.10.0.84
 # numpy / onnxruntime floated to lower bounds (not ==) so the 3.10–3.14 CI matrix
 # resolves a per-interpreter wheel: no single version of either ships both a
 # cp310 and a cp314 wheel (numpy cp310 ≤ 2.2.6, cp314 ≥ 2.4.0; onnxruntime cp310
-# ≤ 1.23.2, cp314 ≥ 1.24). pip picks the newest compatible wheel per Python
+# ≤ 1.23.2, cp314 ≥ 1.24.1). pip picks the newest compatible wheel per Python
 # version. This moves prod off numpy 1.26 → 2.x; see ADR-028.
 numpy>=2.0.0
 onnxruntime>=1.23.2

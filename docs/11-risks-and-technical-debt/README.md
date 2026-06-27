@@ -142,8 +142,9 @@ every Python lane ran on 3.11. #191 addressed the symptom (`UTC` → `timezone.u
 
 **Why it happened.** A single-interpreter CI lane cannot see a version-specific API — and
 there was no single "correct" interpreter to test, because the repo specifies its runtime
-**inconsistently**: the service Dockerfiles build `python:3.12-slim`, the deploy docs say
-3.11, and the host that crashed ran 3.10. Three answers, agreement on none, so any one-version
+**inconsistently**: the container path builds and runs `python:3.12-slim` (the only
+Dockerfile), the deploy-docs prose still says 3.11, and the bare-metal PM2 host that crashed
+ran 3.10. Three answers, agreement on none, so any one-version
 lane is a guess. The naïve fix — a 3.10–3.14 matrix — was then blocked by exact-pinned native
 deps: no single `numpy` ships both a cp310 and a cp314 wheel (cp310 ≤ 2.2.6, cp314 ≥ 2.4.0),
 and `onnxruntime==1.27.0` has no cp310 wheel at all. And the first cut of that matrix was a

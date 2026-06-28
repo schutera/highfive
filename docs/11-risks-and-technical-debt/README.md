@@ -163,7 +163,7 @@ stack actually imported, so a broken wheel turns a cell red, not yellow; a matri
 (`py310`)** so the `UP` (pyupgrade) rule can't rewrite `datetime.now(timezone.utc)` back to the
 3.11-only `datetime.now(UTC)` on a dev box. Trade-off (prod moves to numpy 2.x; looser
 reproducibility on the floated deps) is in
-[ADR-028](../09-architecture-decisions/adr-028-python-version-matrix-floated-pins.md). And
+[ADR-029](../09-architecture-decisions/adr-029-python-version-matrix-floated-pins.md). And
 reconcile the runtime: the repo should pin its Python version in **one** authoritative place
 (Dockerfiles, docs, and the host should agree) rather than drift across three. General rule: for
 any `datetime`/stdlib API, prefer the form that works on the oldest supported runtime

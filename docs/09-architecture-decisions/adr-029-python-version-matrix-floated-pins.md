@@ -1,4 +1,4 @@
-# ADR-028: Python services CI-tested across 3.10–3.14; native deps floated to `>=` bounds
+# ADR-029: Python services CI-tested across 3.10–3.14; native deps floated to `>=` bounds
 
 ## Status
 
@@ -51,7 +51,7 @@ real wheel.
   numpy-2.0 breaking-change surface, so the bump is low-risk — but it is a real prod change,
   which is why it is recorded here rather than buried in a CI tweak. That "low-risk" rests on
   the existing `tests/test_hole_detection.py` inference assertions, which run the real model
-  end-to-end once the import succeeds (the new guard test only proves the stack *imports*); the
+  end-to-end once the import succeeds (the new guard test only proves the stack _imports_); the
   box-math behaviour under numpy 2.x is covered there, not assumed.
 - **Reproducibility is slightly looser for the floated deps.** Exact pins guarantee an
   identical install everywhere; a `>=` bound lets the resolved version drift forward as new

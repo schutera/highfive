@@ -3,6 +3,6 @@ APScheduler==3.10.4
 duckdb==1.4.4
 # pydantic floated to a lower bound (not ==) so the 3.10–3.14 CI matrix resolves
 # a pydantic-core wheel for every interpreter — 2.12.5's pinned pydantic-core has
-# no cp314 wheel. duckdb 1.4.4 already ships cp310–cp314. See ADR-028.
+# no cp314 wheel. duckdb 1.4.4 already ships cp310–cp314. See ADR-029.
 pydantic>=2.12.5
 requests==2.32.3

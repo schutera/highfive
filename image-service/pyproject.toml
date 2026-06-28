@@ -1,7 +1,7 @@
 [tool.ruff]
 # Match Black’s defaults for line length
 line-length = 88
-# Pin to the matrix floor (ADR-028), NOT a higher version: this config enables
+# Pin to the matrix floor (ADR-029), NOT a higher version: this config enables
 # the `UP` (pyupgrade) rule below, and on a `py311`+ target `ruff check --fix`
 # rewrites `datetime.now(timezone.utc)` → `datetime.now(UTC)` — reintroducing
 # the exact 3.11-only API that crashed prod (#180). ruff is NOT run in CI, so

@@ -46,7 +46,7 @@ live frame — so it can be re-run over the whole image history
   image in the Admin view** — not a new public-facing artifact. The existing
   per-nest snip crops ([ADR-026](adr-026-hole-detection-snips.md)) remain the
   public, no-auth mechanism (a crop leaks no garden/house background, #154); any
-  *new* detection visualization (boxes / masks / labels over the full frame)
+  _new_ detection visualization (boxes / masks / labels over the full frame)
   belongs in the **authenticated Admin view** as an overlay, where showing the
   full capture is acceptable.
 

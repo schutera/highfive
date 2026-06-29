@@ -24,6 +24,7 @@ setup, see [docker-compose.md](docker-compose.md).
 
 - Linux server (Ubuntu 22.04+ recommended)
 - Node.js 22.12+ installed — matches `engines.node` in `backend/package.json` and `homepage/package.json`; Ubuntu 22.04's default-apt `nodejs` is too old, use [NodeSource](https://github.com/nodesource/distributions) or `nvm install 22`
+- Python **3.10** floor for the two Python services (run on the system `python3` under PM2) — the single source of truth is `/.python-version` (=`3.10`); CI tests the 3.10–3.14 range and the container path pins `python:3.10-slim`, so host and container agree (ADR-029, #197). Code stays 3.10-compatible (`datetime.now(timezone.utc)`, never the 3.11-only `datetime.UTC` that crashed deploy in #180)
 - Nginx installed
 - PM2 installed globally: `npm install -g pm2`
 - Git access to the repository

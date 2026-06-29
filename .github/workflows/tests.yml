@@ -1,6 +1,6 @@
 # CI test workflow.
 #
-# Nine parallel jobs:
+# Ten parallel jobs:
 #
 #   esp-native      → host-side Unity tests for the pure C++ helpers
 #                     under ESP32-CAM/lib/. Fast (~1 min cold).
@@ -25,6 +25,11 @@
 #                     and verifies each one resolves to a non-blank line
 #                     of the current source. Fast (<10 s).
 #
+#   python-version-consistency
+#                   → asserts the Dockerfiles, ruff floor, and pytest
+#                     matrices all match /.python-version (the single
+#                     source of truth). Guards the #180 root cause. Fast.
+#
 #   e2e-pipeline    → boots the four-service docker compose, drives it
 #                     with the Python mock ESP, asserts the upload chain
 #                     works end-to-end. Slower (~5 min cold).
@@ -34,6 +39,14 @@
 #                     real Chromium through the SPA. Pins the chapter-11
 #                     regressions (envelope drift, side-list filter) that
 #                     jsdom + mocks could not catch. Slowest (~6 min cold).
+#
+# Note on Python versions in this file: only the `duckdb-unit` /
+# `image-unit` matrices (3.10–3.14) exercise the *service runtime*. The
+# `Set up Python 3.11` steps in esp-native / esp-firmware / e2e-pipeline /
+# ui-playwright configure the *host runner's* tooling (PlatformIO, the
+# pytest driver, Playwright seed scripts) — not the services, which run
+# 3.10-slim per /.python-version (#197). Don't read those 3.11s as the
+# runtime floor.
 #
 # Triggers on PRs to main and on push to main (badge stays green there)
 # and on push to the chore/test-harness branch so the workflow validates
@@ -180,15 +193,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Matrix the full supported Python range. CI historically ran only 3.11,
-    # but the repo specifies its Python runtime inconsistently: the container
-    # path builds and runs `python:3.12-slim` (the only Dockerfile), the deploy
-    # docs prose still says 3.11, and the bare-metal PM2 host that crashed
-    # (#180) ran 3.10 — an ImportError on `datetime.UTC` (added in 3.11) proves
-    # that runtime was < 3.11. So we pin the test to no single version:
-    # 3.10 is a conservative floor, 3.14 the forward ceiling. The 3.11-only
+    # while the repo named its runtime three disagreeing ways — the container
+    # path built `python:3.12-slim`, the deploy docs said 3.11, and the
+    # bare-metal PM2 host that crashed (#180) ran 3.10. That drift was
+    # reconciled to a single 3.10 floor in #197 (both Dockerfiles now pin
+    # `python:3.10-slim`, /.python-version is the source of truth, and
+    # `make check-python-version` guards it). The matrix stays because a
+    # single-version lane can't see a version-specific API: the 3.11-only
     # `datetime.UTC` slipped through precisely because CI tested one version
-    # (#180; rationale + floated pins in ADR-029). fail-fast: false so one
-    # version's failure doesn't mask the others.
+    # (#180; rationale + floated pins in ADR-029). 3.10 is the conservative
+    # floor, 3.14 the forward ceiling. fail-fast: false so one version's
+    # failure doesn't mask the others.
+    #
+    # Keep this an explicit list, NOT `python-version-file: .python-version`:
+    # that file is the *floor*, and reading it here would cap every cell to
+    # 3.10 and silently defeat the forward-compat matrix (#197).
     strategy:
       fail-fast: false
       matrix:
@@ -220,7 +239,9 @@ jobs:
     # duplicated in both services). image-service's native deps (numpy,
     # onnxruntime) are floated to `>=` in requirements.txt precisely so this
     # matrix can resolve a per-interpreter wheel — no single pinned version
-    # spans cp310…cp314. See ADR-029.
+    # spans cp310…cp314. See ADR-029. As with duckdb-unit, keep this an
+    # explicit list — `python-version-file: .python-version` would cap every
+    # cell to the 3.10 floor and defeat the matrix (#197).
     strategy:
       fail-fast: false
       matrix:
@@ -281,6 +302,24 @@ jobs:
         # See docs/11-risks-and-technical-debt/ "Drift sweep is not a
         # substitute for a CI check".
         run: bash scripts/check-doc-citations.sh
+
+  python-version-consistency:
+    name: Python-version consistency gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run check-python-version.sh
+        # Asserts the Dockerfiles, image-service ruff floor, and the
+        # duckdb-unit/image-unit pytest matrices all match the single
+        # source of truth in /.python-version. The runtime drifting
+        # across three surfaces was the root cause of #180 (a 3.11-only
+        # datetime.UTC that crashed both Python services on deploy).
+        # See ADR-029 and docs/11-risks-and-technical-debt/ "CI tested
+        # only Python 3.11".
+        run: bash scripts/check-python-version.sh
 
   e2e-pipeline:
     name: End-to-end pipeline test

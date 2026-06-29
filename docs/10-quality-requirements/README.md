@@ -105,5 +105,5 @@ default `make test` target.
 
 ## CI
 
-Nine parallel jobs gate every PR — see [ci-gates.md](ci-gates.md).
+Ten parallel jobs gate every PR — see [ci-gates.md](ci-gates.md).
 All must be green to merge.

@@ -16,8 +16,8 @@ Mark each suite that was run locally and passed. Leave unchecked if not applicab
 - [ ] ESP32-CAM native (`pio test -e native`)
 - [ ] End-to-end (`pytest tests/e2e`)
 - [ ] Backend unit (Node 22 + TS)
-- [ ] image-service unit (Python 3.11)
-- [ ] duckdb-service unit (Python 3.11)
+- [ ] image-service unit (pytest, Python 3.10–3.14 matrix)
+- [ ] duckdb-service unit (pytest, Python 3.10–3.14 matrix)
 - [ ] Homepage unit (React 19 + Vite)
 - [ ] Manual / hardware-in-the-loop verification (describe below)
 

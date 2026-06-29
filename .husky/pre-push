@@ -25,3 +25,9 @@ bash scripts/check-stale-display-name-rule.sh || exit 1
 # issue #18. See docs/11-risks-and-technical-debt/README.md
 # "Third-party API keys belong in build-time macros, not source".
 bash scripts/check-no-hardcoded-api-keys.sh || exit 1
+
+# Catch the Python runtime version drifting apart again across the
+# Dockerfiles, ruff floor, and CI matrices — the root cause of #180.
+# /.python-version is the single source of truth. See
+# docs/11-risks-and-technical-debt/README.md "CI tested only Python 3.11".
+bash scripts/check-python-version.sh || exit 1

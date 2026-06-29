@@ -12,8 +12,8 @@ HiveHive monitors wild-bee nesting activity. ESP32-CAM modules upload images to 
 | ---------------- | ------------------------------- | -------------- | ----------------- |
 | `homepage`       | React 19 + Vite + TS + Tailwind | `5173:5173`    | `homepage/`       |
 | `backend`        | Node 22 + Express + TS          | `3002:3002`    | `backend/`        |
-| `image-service`  | Python 3.11 + Flask             | `8000:4444`    | `image-service/`  |
-| `duckdb-service` | Python 3.11 + Flask + DuckDB    | `8002:8000`    | `duckdb-service/` |
+| `image-service`  | Python 3.10 + Flask             | `8000:4444`    | `image-service/`  |
+| `duckdb-service` | Python 3.10 + Flask + DuckDB    | `8002:8000`    | `duckdb-service/` |
 | `ESP32-CAM`      | C++17 + Arduino + PlatformIO    | n/a (edge)     | `ESP32-CAM/`      |
 
 Internal calls use Docker service names (e.g. `http://duckdb-service:8000`), **not** `localhost`. The DuckDB file lives in the named volume `duckdb_data`, mounted at `/data` in both `image-service` and `duckdb-service`. Detailed map and per-service files: [`docs/05-building-block-view/`](docs/05-building-block-view/README.md).

@@ -164,10 +164,15 @@ stack actually imported, so a broken wheel turns a cell red, not yellow; a matri
 3.11-only `datetime.now(UTC)` on a dev box. Trade-off (prod moves to numpy 2.x; looser
 reproducibility on the floated deps) is in
 [ADR-029](../09-architecture-decisions/adr-029-python-version-matrix-floated-pins.md). And
-reconcile the runtime: the repo should pin its Python version in **one** authoritative place
-(Dockerfiles, docs, and the host should agree) rather than drift across three. General rule: for
-any `datetime`/stdlib API, prefer the form that works on the oldest supported runtime
-(`datetime.now(timezone.utc)`, not `datetime.now(UTC)`).
+reconcile the runtime so it is named in **one** authoritative place rather than drifting across
+three — **done in #197**: `/.python-version` (=`3.10`) is now the single source of truth that the
+Dockerfiles (`python:3.10-slim`), the deploy/constraints docs, the ruff floor (`py310`), and the
+CI matrix floors are all checked against (they stay hand-written literals — the guard compares,
+it does not generate), and `scripts/check-python-version.sh`
+(`make check-python-version`, run in pre-push + the `python-version-consistency` CI job) fails the
+build if any surface drifts back apart. General rule: for any `datetime`/stdlib API, prefer the
+form that works on the oldest supported runtime (`datetime.now(timezone.utc)`, not
+`datetime.now(UTC)`).
 
 ### `opencv-python-headless` still needs `libglib2.0-0`; and `circle.txt` was stale (#165)
 

@@ -1,8 +1,8 @@
 ---
 name: Bug report
 about: Report a defect so we can fix it
-title: "[bug] "
-labels: ["bug", "triage"]
+title: '[bug] '
+labels: ['bug', 'triage']
 assignees: []
 ---
 
@@ -24,7 +24,7 @@ assignees: []
 
 - Service affected: <!-- esp32-cam / backend / image-service / duckdb-service / homepage / tests-e2e -->
 - Version / commit SHA:
-- OS / runtime: <!-- e.g. Ubuntu 24.04, Node 22.x, Python 3.11, PlatformIO core, browser + version -->
+- OS / runtime: <!-- e.g. Ubuntu 24.04, Node 22.x, Python 3.10, PlatformIO core, browser + version -->
 - Deployment: <!-- local docker-compose / staging / production / device hardware -->
 
 ## Logs / screenshots

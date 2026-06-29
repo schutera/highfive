@@ -12,8 +12,8 @@ The system consists of four services:
 
 - **backend** — Node 22 + Express + TypeScript API
 - **homepage** — React 19 + Vite + TypeScript frontend
-- **image-service** — Python 3.11 + Flask image ingestion / classification
-- **duckdb-service** — Python 3.11 + Flask database service (sole writer of `app.duckdb`)
+- **image-service** — Python 3.10 + Flask image ingestion / classification
+- **duckdb-service** — Python 3.10 + Flask database service (sole writer of `app.duckdb`)
 
 All services are orchestrated using **Docker Compose** on the shared
 bridge network `net`.

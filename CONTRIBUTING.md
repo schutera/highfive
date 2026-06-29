@@ -113,17 +113,19 @@ cd ESP32-CAM && python -m platformio run -e esp32cam
 
 ### CI
 
-`.github/workflows/tests.yml` runs eight parallel jobs on every PR to
+`.github/workflows/tests.yml` runs ten parallel jobs on every PR to
 `main` and on push to `main`:
 
 - `esp-native` — host unit tests for `ESP32-CAM/lib/*`
 - `esp-firmware` — cross-compile firmware (consumes `secrets.GEO_API_KEY`; pre-build guard hard-fails on push-to-main if the secret is missing)
 - `backend-unit` — vitest + supertest tests for the Node/Express backend
-- `duckdb-unit` — pytest tests for `duckdb-service`
-- `image-unit` — pytest tests for `image-service`
+- `duckdb-unit` — pytest tests for `duckdb-service` (Python 3.10–3.14 matrix)
+- `image-unit` — pytest tests for `image-service` (Python 3.10–3.14 matrix)
 - `homepage-unit` — vitest + jsdom smoke tests for the React homepage
 - `doc-citations` — verifies `path:line` references in `docs/` and `CLAUDE.md` still resolve
+- `python-version-consistency` — asserts the Dockerfiles, ruff floor, and pytest matrices all match `/.python-version` (#197)
 - `e2e-pipeline` — boots the four-service docker-compose stack and drives it with the mock ESP
+- `ui-playwright` — boots the stack plus a production-built homepage and drives real Chromium through the SPA
 
 The badge on `README.md` is wired to this workflow.
 
@@ -175,8 +177,10 @@ The body (optional, separated by a blank line) explains _why_, not _what_.
 - Backend: TypeScript, ES modules. Run `npm run dev` from `backend/`.
 - Frontend: TypeScript + React 19 + Vite + Tailwind. Run `npm run dev`
   from `homepage/` (port 5173).
-- Python services: Flask, Python 3.11. Per-service `requirements.txt` +
-  `requirements-dev.txt`.
+- Python services: Flask, Python 3.10 floor (the single source of truth is
+  `/.python-version`; CI tests the 3.10–3.14 range per [ADR-029](docs/09-architecture-decisions/adr-029-python-version-matrix-floated-pins.md)).
+  Keep code 3.10-compatible — `datetime.now(timezone.utc)`, never `datetime.UTC`.
+  Per-service `requirements.txt` + `requirements-dev.txt`.
 - ESP32-CAM: C++17, builds via PlatformIO `esp32cam` env. Pure helpers
   belong under `ESP32-CAM/lib/<name>/` so they can be unit-tested
   natively.

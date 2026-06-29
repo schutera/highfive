@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys
+.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version
 
 help:
 	@echo "HiveHive — available make targets"
@@ -26,6 +26,8 @@ help:
 	@echo "                          Catch the deprecated 'displayName ?? name' rule re-emerging outside its allow-list (PR 1)"
 	@echo "  make check-no-hardcoded-api-keys"
 	@echo "                          Catch a hardcoded Google API key literal in source (issue #18)"
+	@echo "  make check-python-version"
+	@echo "                          Verify Dockerfiles, ruff floor + CI matrices match /.python-version (#197)"
 	@echo ""
 	@echo "Prerequisites:"
 	@echo "  firmware    →   arduino-cli with esp32:esp32 core installed"
@@ -122,3 +124,7 @@ check-stale-display-name-rule:
 check-no-hardcoded-api-keys:
 	@echo ">>> bash scripts/check-no-hardcoded-api-keys.sh"
 	@bash scripts/check-no-hardcoded-api-keys.sh
+
+check-python-version:
+	@echo ">>> bash scripts/check-python-version.sh"
+	@bash scripts/check-python-version.sh

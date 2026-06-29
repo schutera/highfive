@@ -58,7 +58,9 @@ real wheel.
   wheels publish. We accept this only for the deps that cannot be single-pinned across the
   matrix, and only those — the rest of the lock surface stays exact. If drift ever bites, the
   fix is to raise the lower bound or add a `<` ceiling, not to re-pin and lose the matrix.
-- **No new CI jobs.** The job count stays nine; each pytest job fans into five version cells.
+- **No new CI jobs in #195.** That change kept the job count at nine, each pytest job fanning into
+  five version cells. (#197 later added a tenth, the `python-version-consistency` gate — see the
+  reconciliation addendum below.)
 - **The ruff floor is image-service-only, by design.** `image-service/pyproject.toml` opts into
   the `UP` (pyupgrade) rule, so its `target-version` must be pinned to `py310` or a local
   `ruff --fix` would rewrite `timezone.utc` back to the 3.11-only `UTC`. `duckdb-service` has no
@@ -74,3 +76,14 @@ real wheel.
   pass instead of failing on the still-unfixed import. Whichever lands second is a
   no-op / trivial conflict on those lines — the integrator should rebase or close one
   against the other.
+- **The runtime drift this ADR flagged is now reconciled (#197).** The Context above
+  describes the "three answers, agreement on none" state; that is resolved. `/.python-version`
+  (=`3.10`) is the single source of truth, and every surface is checked against it (the surfaces
+  stay hand-written literals — the guard compares them to the file, it does not generate them):
+  both `Dockerfile.dev`s pin `python:3.10-slim` (was `3.12-slim`, so the container path now matches
+  the bare-metal PM2 host), the deploy/constraints/building-block docs name 3.10, the ruff floor
+  stays `py310`, and the `duckdb-unit` / `image-unit` matrix floors stay `'3.10'`. The matrix
+  remains the forward-compat ceiling (3.10–3.14) — 3.10 is the floor we _ship_, not a cap on what
+  the code must tolerate. A `scripts/check-python-version.sh` guard (`make check-python-version`,
+  wired into pre-push and a `python-version-consistency` CI job) fails the build if any of those
+  surfaces drifts from `/.python-version`, so the three-way split cannot silently reopen.

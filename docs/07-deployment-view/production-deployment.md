@@ -160,6 +160,12 @@ docker images | grep highfive
 Expected: `highfive-backend`, `highfive-frontend`, `highfive-image-service`,
 `highfive-duckdb-service`.
 
+The two Python images build from `python:3.10-slim` — the floor declared in
+`/.python-version` and kept in sync across the Dockerfiles, ruff floor, and CI
+matrices by `make check-python-version` (ADR-029, #197). The separate bare-metal
+PM2 track documents its matching host `python3` in
+[production-runbook.md](production-runbook.md).
+
 ### Step 5: Start Services
 
 ```bash

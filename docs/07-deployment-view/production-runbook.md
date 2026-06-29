@@ -2,7 +2,7 @@
 
 > ⚠️ **Non-recommended legacy path.** This runbook covers only the
 > Node backend (PM2) and the static frontend (Nginx-served). It does
-> **not** cover the *initial* bare-metal provisioning of `image-service`
+> **not** cover the _initial_ bare-metal provisioning of `image-service`
 > and `duckdb-service` (each needs its own pm2/systemd unit, shared
 > filesystem volume, and reverse-proxy plumbing) — though ongoing
 > **redeploys** of those Python services (dependency install + reload) are
@@ -237,7 +237,10 @@ pm2 startup
 > (auto-deploy driver — pulls `main`, installs deps, rebuilds only what changed,
 > reloads the affected pm2 apps, health-checks, rolls back on failure; the
 > `highfive-deploy.timer` may be inactive). The manual steps below mirror what it
-> does — use them for a hand-deploy or to recover.
+> does — use them for a hand-deploy or to recover. **Caveat:** a rollback restores
+> the git tree and Node build artifacts, but a `pip install` that _upgraded_ a
+> shared dependency (e.g. `numpy` → 2.x) is **not** reverted — pip upgrades are
+> forward-only across a rollback.
 
 The live PM2 stack is **four** apps, not just the backend: `highfive-api`
 (Node, cluster), `duckdb-service` and `image-service` (Python, run on the
@@ -254,11 +257,12 @@ git pull --ff-only origin main
 npm ci
 
 # 2) Python deps — install into the SAME system python3 pm2 runs the services
-#    with (no venv). duckdb-service deps are all pure / cp310-ok. image-service
-#    adds the hole-detection deps (opencv-python-headless, numpy, onnxruntime);
-#    the host is Python 3.10, so onnxruntime is pinned to 1.23.2 (max cp310
-#    wheel). image-service BOOTS without these (detection degrades to no-op,
-#    ADR-028), so this step is only needed to ACTIVATE server-side detection.
+#    with (no venv). Native deps whose wheel windows can't span the 3.10–3.14 CI
+#    matrix are floated to >= bounds (numpy>=2.0.0, onnxruntime>=1.23.2,
+#    pydantic>=2.12.5), so pip resolves a per-interpreter wheel — on this 3.10
+#    host that's onnxruntime 1.23.2 / numpy 2.x (ADR-029). image-service BOOTS
+#    without the hole-detection deps (detection degrades to a no-op, ADR-028),
+#    which is why the pip step is non-fatal in scripts/deploy.sh.
 python3 -m pip install -r duckdb-service/requirements.txt
 python3 -m pip install -r image-service/requirements.txt
 
@@ -274,10 +278,17 @@ curl -fsS http://127.0.0.1:4444/health         # image-service
 curl -fsS -o /dev/null https://highfive.schutera.com/ && echo "homepage ok"
 ```
 
-**Python 3.10 ceiling.** The host's `python3` is 3.10, so the services must stay
-3.10-compatible (no `from datetime import UTC`, which is 3.11+) and `onnxruntime`
-stays pinned to `1.23.2` (the highest version with a CPython 3.10 wheel). All
-AI/ML inference is server-side — the ESP runs no models
+**Python 3.10 floor (not a pin).** The host's `python3` is 3.10, so the services
+must stay 3.10-compatible (no `from datetime import UTC`, which is 3.11+). The CI
+matrix runs them across **3.10–3.14**, so native deps whose wheel windows can't
+span that range are floated to `>=` lower bounds rather than `==`-pinned —
+`numpy>=2.0.0`, `onnxruntime>=1.23.2` (image-service) and `pydantic>=2.12.5` (both
+services). pip then resolves the newest interpreter-compatible wheel per host: on
+this 3.10 box that's `onnxruntime` 1.23.2 (its highest cp310 wheel) and `numpy`
+2.x. Rationale and trade-offs (prod moves to numpy 2.x; looser reproducibility on
+the floated deps) are in
+[ADR-029](../09-architecture-decisions/adr-029-python-version-matrix-floated-pins.md).
+All AI/ML inference is server-side — the ESP runs no models
 ([ADR-028](../09-architecture-decisions/adr-028-ml-inference-server-side-only.md)).
 
 ## Verification

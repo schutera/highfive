@@ -657,33 +657,47 @@ now spell out that `version != my_version` is a hard AND condition and
 that "differ" means differ from every codename still alive in the field,
 not just the last release.
 
-### `production` branch drifted from the deployed services (undocumented deploy source)
+### `production` branch drifted from the deployed services (RESOLVED #152)
 
 **What happened.** While auditing the OTA-release docs, `origin/production`
 — the branch
 [`production-deployment.md`](../07-deployment-view/production-deployment.md)
-names as the prod services source — was found sitting far behind `main`
-with a divergent history, while the **live** services clearly run
+named as the prod services source — was found sitting far behind `main`
+with a divergent history, while the **live** services clearly ran
 `main`-only code: e.g. the #142 admin-session endpoints
 (`POST /api/admin/login`) respond in production, and that commit is on
-`main` but not on `production`. So the documented deploy source does not
-match what is actually deployed.
+`main` but not on `production`. So the documented deploy source did not
+match what was actually deployed.
 
-**Why it happened.** Two deploy tracks share the repo — firmware OTA (cut
-on `main` + `prod-*` tags) and the Docker services (documented as
-deployed from `production`). The services track was evidently re-pointed
-at `main` (or deployed ad hoc) without updating the `production` branch
-or the doc, so the branch became a stale artifact that still reads as
-authoritative.
+**Why it happened — the deeper cause.** `main` and `production` shared
+**no common git ancestor at all**: `main`'s history had been
+squashed/rebuilt (its root is an orphan commit from 2026-05-21, `#124`),
+while `production` still rooted at the original 2025-06-24 "Initial
+commit". With unrelated histories, `production` could **never** be
+fast-forwarded or cleanly merged from `main` — so once the services track
+was quietly re-pointed at `main`, the `production` branch had no mechanism
+to catch up and silently rotted into a stale artifact that still read as
+authoritative. A branch you cannot fast-forward is a branch that will
+drift; the rebuild that disconnected the histories is what made the drift
+inevitable rather than merely likely.
 
-**How to avoid it next time.** Pick and document one services deploy
-source. If services now deploy from `main`, update
-[`production-deployment.md`](../07-deployment-view/production-deployment.md)
-and retire the `production` branch; if `production` is still intended,
-fast-forward it on every services deploy. Until reconciled, do not trust
-the `production` branch as a picture of prod. Firmware OTA is unaffected
-(it lives on `main` + `prod-*` tags) — see
-[`firmware-release.md` → Git: branch & tag model](../07-deployment-view/firmware-release.md#git-branch--tag-model).
+**Resolution (#152, [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md)).**
+Adopted `production` as the single **gated release branch** for both web
+services and firmware OTA. The unrelated-history split was reconciled by
+archiving the old branch (tag `archive/production-2026-05-02`, still
+pointing at `bf8b314`) and force-resetting `production` to `main`'s tip —
+after which the two share history and every future promotion is a clean
+fast-forward. `scripts/deploy.sh` now tracks `production`
+(`BRANCH=production`), and the deploy docs describe the
+promote-then-auto-deploy flow.
+
+**How to avoid the class of bug next time.** A long-lived deploy branch
+must remain a fast-forward descendant of the integration line — if a
+history rewrite (squash, filter, re-root) ever disconnects them, **either
+reconcile immediately or retire the orphaned branch**; never leave a
+branch that is documented as authoritative but is structurally incapable
+of catching up. When repointing the live deploy source, update the branch,
+the docs, and `scripts/deploy.sh` in the same change.
 
 ### Production API key shipped in the public JS bundle; the `/admin` gate authenticated nothing (issue #142)
 

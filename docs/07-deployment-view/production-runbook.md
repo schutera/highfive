@@ -231,6 +231,14 @@ pm2 startup
 
 ## Updates & Redeployment
 
+The `production` branch is the **gated release branch** (#152): `main` is the
+integration line, and a release is a fast-forward of `production` onto a chosen
+`main` commit — `git push origin <main-sha>:production` from a maintainer's
+clone. The host only ever **pulls** `production`. (This bare-metal PM2 path is
+exactly what `scripts/deploy.sh` automates on a 2-minute systemd timer —
+`npm`/`vite` build + `pm2 reload`, no Docker; the manual sequence below is the
+equivalent done by hand.)
+
 To deploy updates from the production branch:
 
 ```bash

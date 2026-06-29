@@ -14,9 +14,9 @@ and the design rationale in
 A module flashes itself only when the published manifest's `sequence`
 is **strictly greater** than the sequence baked into the running
 binary (see [the comparator](#how-a-module-decides-to-flash)). Merging
-firmware _source_ to `main` changes nothing on the field: until a build
-with a higher `SEQUENCE` is published, every module keeps running what
-it has. Bumping `VERSION` (the bee-name label) alone is **not** enough —
+firmware _source_ to `main` — or even promoting it to `production` —
+changes nothing on the field: until a build with a higher `SEQUENCE` is
+published, every module keeps running what it has. Bumping `VERSION` (the bee-name label) alone is **not** enough —
 the label differing is necessary but not sufficient. This silent no-op
 has shipped twice; see
 [chapter 11 → "Merging firmware source is not a release"](../11-risks-and-technical-debt/README.md#merging-firmware-source-is-not-a-release--the-sequence-bump-is-the-release-150-132).
@@ -31,7 +31,7 @@ flowchart TD
     D --> E["Rebuild the frontend image<br/>(Vite copies public/ → dist/ → nginx html)"]
     E --> F["host-Nginx serves /firmware.json<br/>+ /firmware.app.bin"]
     F --> G["Module's next daily reboot:<br/>GET /firmware.json → seq higher? →<br/>GET /firmware.app.bin → flash → reboot"]
-    A --> H["Commit bump on main<br/>+ tag prod-&lt;codename&gt; (release ledger)"]
+    A --> H["Commit bump on main<br/>→ promote to production (ff)<br/>+ tag prod-&lt;codename&gt; (release ledger)"]
 ```
 
 ## Release checklist
@@ -140,7 +140,7 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    > `127.0.0.1:8081`, not a host static path
    > ([production-deployment.md → OTA firmware artifacts](production-deployment.md));
    > and (2) you are rebuilding the checkout your services actually deploy
-   > from, which is itself unsettled (see
+   > from — the `production` branch checkout on the host (see
    > [Git: branch & tag model](#git-branch--tag-model)). **If (1) is
    > false** — `public/` is served from a host static path or a bind-mount
    > rather than baked into the image — then the publish _action_ changes:
@@ -157,20 +157,26 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    `app_md5` matches step 2's output (the binary the fleet will fetch).
 
 5. **Record the release in git.** Commit the `VERSION` / `SEQUENCE` bump
-   to `main`, then tag it:
+   to `main`, promote it to `production` (the gated release branch, #152),
+   then tag the deployed commit:
 
    ```bash
    git add ESP32-CAM/VERSION ESP32-CAM/SEQUENCE
    git commit -m "chore(esp): bump firmware to <codename> / sequence <N> — <why>"
-   git tag -a prod-<codename> -m "deploy: firmware OTA <codename> / sequence <N> (app_md5 <...>). <go-ahead / bench-test / rollback status>."
-   git push origin main --follow-tags
+   git tag -a prod-<codename> -m "deploy: firmware OTA <codename> / sequence <N> (app_md5 <...>). <go-ahead / bench-test / rollback status>."   # tags HEAD = this bump commit
+   git push origin main
+   git push origin main:production        # promote (fast-forward) — same commit the tag points at
+   git push origin prod-<codename>
    ```
 
    The annotated `prod-<codename>` tag is the **release ledger** — the
    human record of "this commit's VERSION/SEQUENCE was built and
-   published to the OTA server." The binaries are not in git, so the
+   published to the OTA server" — and it sits on `production`, the branch
+   the fleet actually deploys from. The binaries are not in git, so the
    `app_md5` in the tag note is what pins the release to a specific
-   build. See [Git: branch & tag model](#git-branch--tag-model).
+   build. (When the on-host `scripts/deploy.sh` auto-publishes a firmware
+   change instead, it performs this commit + `production` push + tag
+   itself.) See [Git: branch & tag model](#git-branch--tag-model).
 
 6. **Confirm the fleet picks it up.** Modules check `/firmware.json` on
    **every boot, including the daily reboot** ([ADR-007](../09-architecture-decisions/adr-007-esp-reliability-breaker-and-daily-reboot.md)),
@@ -212,24 +218,29 @@ true **iff**:
 
 ## Git: branch & tag model
 
-Two deployment tracks share the repo and are easy to conflate:
+Both deployment tracks share **one release branch — `production`** (#152,
+[ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md)).
+`main` is the continuous-integration line; a release is a **fast-forward of
+`production` onto a chosen `main` commit** (`git push origin <sha>:production`).
+`main` may run ahead of what is live.
 
-| Track                                                                  | Source of truth                                                                                      | "Deploy" action                                                                                      |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Firmware OTA** (this doc)                                            | `ESP32-CAM/VERSION` + `ESP32-CAM/SEQUENCE` on **`main`**, marked by `prod-<codename>` annotated tags | `build.sh` → stage artifacts → rebuild frontend image. **Does not involve the `production` branch.** |
-| **Web services** (backend / frontend / image-service / duckdb-service) | the **`production` branch** per [production-deployment.md](production-deployment.md)                 | `git pull` on the host → `docker compose -f docker-compose.prod.yml up -d --build`                   |
+| Track                                                                  | Source of truth                                                                                                                   | "Deploy" action                                                                                       |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Firmware OTA** (this doc)                                            | `ESP32-CAM/VERSION` + `ESP32-CAM/SEQUENCE` on **`production`** (promoted from `main`), marked by `prod-<codename>` annotated tags | `build.sh` → publish the 3 artifacts to the live frontend (host-nginx dir on the PM2 path / rebuild frontend image on Docker) — auto via `scripts/deploy.sh` on the PM2 host |
+| **Web services** (backend / frontend / image-service / duckdb-service) | the **`production` branch** per [production-deployment.md](production-deployment.md)                                               | host pulls `production` (`--ff-only`) → rebuild changed services (`docker compose up -d --build`, or `npm`/`vite` + `pm2 reload` on the PM2 path via `scripts/deploy.sh`) |
 
-Firmware releases are cut on `main` and pinned by `prod-*` tags; the
-binaries themselves are gitignored and pinned by `app_md5` in the tag
-note. The `production` branch is a **separate** concern (the Docker
-services) and the firmware OTA path never touches it.
+The firmware bump lands on `main`, is promoted to `production`, and the release
+is pinned there by a `prod-*` tag; the binaries themselves are gitignored and
+pinned by `app_md5` in the tag note. Because both tracks now ride `production`,
+a single `git push origin <sha>:production` is what makes a service change **and**
+a firmware bump go live together.
 
-> **Known drift (verify before relying on it).** `origin/production` is
-> currently far behind `main`, yet the live services run `main`-only
-> code (e.g. the #142 admin-session endpoints respond in prod). Whether
-> services are now deployed from `main` or the `production` branch is
-> stale needs operator confirmation — see
-> [chapter 11 → "`production` branch drifted from the deployed services"](../11-risks-and-technical-debt/README.md#production-branch-drifted-from-the-deployed-services-undocumented-deploy-source).
+> **History note.** Before #152, `origin/production` had drifted far behind
+> `main` (and shared no common ancestor — `main`'s history had been rebuilt) while
+> the live services actually deployed from `main`. The branch was reconciled by
+> archiving the old history (`archive/production-2026-05-02`) and force-resetting
+> `production` to `main`, after which all promotions are clean fast-forwards. See
+> [chapter 11 → "`production` branch drifted from the deployed services"](../11-risks-and-technical-debt/README.md#production-branch-drifted-from-the-deployed-services-resolved-152).
 
 ## Rollback
 

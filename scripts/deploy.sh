@@ -2,7 +2,8 @@
 # =============================================================================
 # scripts/deploy.sh — HiveHive auto-deploy driver
 #
-# Run by the highfive-deploy.timer systemd unit (every 2 min). Pulls origin/main,
+# Run by the highfive-deploy.timer systemd unit (every 2 min). Pulls
+# origin/production (the gated release branch — see BRANCH below and #152),
 # rebuilds ONLY what changed, reloads the affected pm2 services, health-checks,
 # and rolls back to the previous version on any failure. For firmware-source
 # changes it auto-bumps SEQUENCE + codename and publishes the OTA (test-gated:
@@ -10,8 +11,8 @@
 # current firmware). Sends a Discord notification on every real deploy.
 #
 # Design notes:
-#   * Idempotent + timer-safe: flock-guarded, exits SILENTLY when main is
-#     unchanged (the 99% case — no Discord spam).
+#   * Idempotent + timer-safe: flock-guarded, exits SILENTLY when production
+#     is unchanged (the 99% case — no Discord spam).
 #   * "Fail gracefully": services are built BEFORE anything live is touched and
 #     only reloaded after a green build; a post-reload health failure rolls the
 #     working tree + build artifacts back to PREV_SHA and reloads again, so the
@@ -35,7 +36,11 @@ LOCK="/tmp/highfive-deploy.lock"
 LOGDIR="$REPO/logs"
 AUTOLOG="$LOGDIR/auto-deploy.log"
 DEPLOYLOG="$LOGDIR/deploy.log"
-BRANCH="main"
+# Services + firmware deploy from the gated `production` branch (#152). `main` is
+# the integration line; a release is `git push origin <sha>:production` (a
+# fast-forward), which this timer then deploys. Firmware OTA bumps + prod-* tags
+# ride this branch too — see docs/07-deployment-view/firmware-release.md.
+BRANCH="production"
 
 DUCKDB_BASE="http://127.0.0.1:8000"
 IMAGE_BASE="http://127.0.0.1:4444"
@@ -176,9 +181,9 @@ publish_firmware() {
     -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
   PREV_SHA="$(git rev-parse HEAD)"   # a later step must never git-reset away a live OTA
   if git push --quiet origin "$BRANCH" && git tag -a "prod-$new_ver" -m "auto OTA $new_ver/seq$new_seq" && git push --quiet origin "prod-$new_ver"; then
-    notify firmware "FLEET OTA PUBLISHED: $new_ver / seq$new_seq" "Forward-only, NO field rollback. app_size $m_size. Devices flip on next daily reboot. Tag prod-$new_ver."
+    notify firmware "FLEET OTA PUBLISHED: $new_ver / seq$new_seq" "Forward-only, NO field rollback. app_size $m_size. Devices flip on next daily reboot. Tag prod-$new_ver. NOTE: bump committed to $BRANCH only — MERGE it back to main now (git checkout main; git merge origin/$BRANCH; git push origin main) or the next promotion won't fast-forward. See ADR-028 (a cherry-pick will NOT work)."
   else
-    notify firmware "FLEET OTA PUBLISHED (bump push FAILED)" "$new_ver/seq$new_seq is LIVE in the manifest, but pushing the bump to main failed — main is out of sync, reconcile by hand."
+    notify firmware "FLEET OTA PUBLISHED (bump push FAILED)" "$new_ver/seq$new_seq is LIVE in the manifest, but pushing the bump to $BRANCH failed — $BRANCH is out of sync, reconcile by hand (and merge the bump back to main)."
   fi
   echo "published $new_ver/seq$new_seq"
 }
@@ -211,7 +216,7 @@ main() {
   author="$(git log -1 --pretty='%an' "$REMOTE_SHA")"
 
   if ! git pull --ff-only --quiet origin "$BRANCH"; then
-    notify fail "Deploy BLOCKED — main not fast-forwardable" "origin/$BRANCH diverged from local. Manual intervention needed."
+    notify fail "Deploy BLOCKED — $BRANCH not fast-forwardable" "origin/$BRANCH diverged from local. A release must be a fast-forward of production onto a main commit; reconcile by hand."
     exit 1
   fi
   CHANGED="$(git diff --name-only "$PREV_SHA..HEAD")"

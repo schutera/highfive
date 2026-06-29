@@ -2,9 +2,11 @@
 
 > ⚠️ **Non-recommended legacy path.** This runbook covers only the
 > Node backend (PM2) and the static frontend (Nginx-served). It does
-> **not** describe how to deploy `image-service` and `duckdb-service`
-> on bare metal — those would each need their own systemd service,
-> shared filesystem volume, and reverse-proxy plumbing. The supported
+> **not** cover the _initial_ bare-metal provisioning of `image-service`
+> and `duckdb-service` (each needs its own pm2/systemd unit, shared
+> filesystem volume, and reverse-proxy plumbing) — though ongoing
+> **redeploys** of those Python services (dependency install + reload) are
+> covered under [Updates & Redeployment](#updates--redeployment). The supported
 > production path is **Docker Compose + host-Nginx**:
 > [production-deployment.md](production-deployment.md). Use this PM2
 > runbook only if Docker is not an option on the target host; expect
@@ -231,29 +233,63 @@ pm2 startup
 
 ## Updates & Redeployment
 
-To deploy updates from the production branch:
+> The host normally self-deploys via [`scripts/deploy.sh`](../../scripts/deploy.sh)
+> (auto-deploy driver — pulls `main`, installs deps, rebuilds only what changed,
+> reloads the affected pm2 apps, health-checks, rolls back on failure; the
+> `highfive-deploy.timer` may be inactive). The manual steps below mirror what it
+> does — use them for a hand-deploy or to recover. **Caveat:** a rollback restores
+> the git tree and Node build artifacts, but a `pip install` that _upgraded_ a
+> shared dependency (e.g. `numpy` → 2.x) is **not** reverted — pip upgrades are
+> forward-only across a rollback.
+
+The live PM2 stack is **four** apps, not just the backend: `highfive-api`
+(Node, cluster), `duckdb-service` and `image-service` (Python, run on the
+**system `python3` — no venv**), plus the Nginx-served `homepage/dist`.
 
 ```bash
 cd /var/www/highfive
+git pull --ff-only origin main
 
-# Pull latest changes
-git pull origin production
+# 1) Node deps — npm WORKSPACES monorepo, so install from the ROOT. A new
+#    backend/homepage dep lands in the ROOT package-lock.json; a per-package
+#    `npm --prefix <pkg> ci` misses it (that broke a deploy on
+#    rotating-file-stream, #178). Safe to skip if no package*.json changed.
+npm ci
 
-# Rebuild backend
-cd backend
-npm install --production
-npm run build
-cd ..
+# 2) Python deps — install into the SAME system python3 pm2 runs the services
+#    with (no venv). Native deps whose wheel windows can't span the 3.10–3.14 CI
+#    matrix are floated to >= bounds (numpy>=2.0.0, onnxruntime>=1.23.2,
+#    pydantic>=2.12.5), so pip resolves a per-interpreter wheel — on this 3.10
+#    host that's onnxruntime 1.23.2 / numpy 2.x (ADR-029). image-service BOOTS
+#    without the hole-detection deps (detection degrades to a no-op, ADR-028),
+#    which is why the pip step is non-fatal in scripts/deploy.sh.
+python3 -m pip install -r duckdb-service/requirements.txt
+python3 -m pip install -r image-service/requirements.txt
 
-# Rebuild frontend
-cd homepage
-npm install --production
-VITE_API_URL=https://highfive.schutera.com/api npm run build
-cd ..
+# 3) Build the Node side (contracts is source-only — no build step)
+npm --prefix backend run build
+( cd homepage && VITE_API_URL=https://highfive.schutera.com/api npm run build )
 
-# Restart backend
-pm2 restart highfive-api
+# 4) Reload (zero-downtime for the api cluster) and health-check
+pm2 reload highfive-api duckdb-service image-service
+curl -fsS http://127.0.0.1:3001/api/health     # backend
+curl -fsS http://127.0.0.1:8000/health         # duckdb-service
+curl -fsS http://127.0.0.1:4444/health         # image-service
+curl -fsS -o /dev/null https://highfive.schutera.com/ && echo "homepage ok"
 ```
+
+**Python 3.10 floor (not a pin).** The host's `python3` is 3.10, so the services
+must stay 3.10-compatible (no `from datetime import UTC`, which is 3.11+). The CI
+matrix runs them across **3.10–3.14**, so native deps whose wheel windows can't
+span that range are floated to `>=` lower bounds rather than `==`-pinned —
+`numpy>=2.0.0`, `onnxruntime>=1.23.2` (image-service) and `pydantic>=2.12.5` (both
+services). pip then resolves the newest interpreter-compatible wheel per host: on
+this 3.10 box that's `onnxruntime` 1.23.2 (its highest cp310 wheel) and `numpy`
+2.x. Rationale and trade-offs (prod moves to numpy 2.x; looser reproducibility on
+the floated deps) are in
+[ADR-029](../09-architecture-decisions/adr-029-python-version-matrix-floated-pins.md).
+All AI/ML inference is server-side — the ESP runs no models
+([ADR-028](../09-architecture-decisions/adr-028-ml-inference-server-side-only.md)).
 
 ## Verification
 

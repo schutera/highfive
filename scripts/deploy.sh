@@ -224,18 +224,41 @@ main() {
   local actions="" HOMEPAGE_REBUILT=0
 
   # ---- build phase (no live mutation) ---------------------------------------
+  # Workspaces monorepo (contracts/backend/homepage share ONE root lockfile): a
+  # new backend/homepage dependency changes the ROOT `package-lock.json`, not
+  # `<pkg>/package-lock.json`, so reinstall from the root — BEFORE the builds, or
+  # `tsc`/`vite` compile against missing deps and roll back (hit this with
+  # rotating-file-stream, #178). `npm ci` at root installs every workspace.
+  if changed_match '^package-lock\.json$|^(backend|homepage|contracts)/package\.json$'; then
+    log "npm deps changed — root npm ci (workspaces)"
+    npm ci >/dev/null 2>&1 || rollback "root npm ci failed"
+  fi
   if changed_match '^backend/|^contracts/'; then
     log "building backend"
-    changed_match '^backend/package-lock\.json$' && npm --prefix backend ci >/dev/null 2>&1
     npm --prefix backend run build >/dev/null 2>&1 || rollback "backend build (tsc) failed"
     actions+="backend "; RELOADED+="highfive-api "
   fi
   if changed_match '^homepage/|^contracts/'; then
     log "building homepage -> dist.new"
-    changed_match '^homepage/package-lock\.json$' && npm --prefix homepage ci >/dev/null 2>&1
     ( cd homepage && npx tsc && npx vite build --outDir dist.new ) >/dev/null 2>&1 || rollback "homepage build failed"
     [ -f "$REPO/homepage/dist.new/index.html" ] || rollback "homepage dist.new missing index.html"
     HOMEPAGE_REBUILT=1; actions+="homepage "
+  fi
+  # Python services run under pm2 on the system `python3` (no venv) — install new
+  # deps into it BEFORE reload. NON-FATAL: a resolver miss (e.g. an onnxruntime
+  # with no wheel for this Python) must not block the deploy; the post-reload
+  # health check is the real gate (services degrade gracefully on a missing
+  # OPTIONAL dep, while a genuinely-required missing module crashes the reload →
+  # health fails → rollback).
+  if changed_match '^duckdb-service/requirements\.txt$'; then
+    log "duckdb-service deps changed — pip install"
+    python3 -m pip install -r duckdb-service/requirements.txt >/dev/null 2>&1 \
+      || log "WARN: duckdb-service pip install had failures (health check will gate)"
+  fi
+  if changed_match '^image-service/requirements\.txt$'; then
+    log "image-service deps changed — pip install"
+    python3 -m pip install -r image-service/requirements.txt >/dev/null 2>&1 \
+      || log "WARN: image-service pip install had failures (health check will gate)"
   fi
   changed_match '^duckdb-service/' && { RELOADED+="duckdb-service "; actions+="duckdb-service "; }
   changed_match '^image-service/'  && { RELOADED+="image-service ";  actions+="image-service "; }

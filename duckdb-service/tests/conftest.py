@@ -47,6 +47,7 @@ def _purge_service_modules() -> None:
         "routes._bucketing",
         "routes",
         "services.discord",
+        "services.silence_watcher",
         "services.weather_worker",
         "services",
         "db.schema",

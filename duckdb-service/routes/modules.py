@@ -547,7 +547,8 @@ def record_image():
             # `TZ=Europe/Berlin` on the container in prod would put
             # writes 1-2 hours past the reader's window upper bound.
             # The schema's `DEFAULT CURRENT_TIMESTAMP` carries the same
-            # naive-local risk; chapter-11 entry to follow.
+            # naive-local risk; see chapter 11 "Silence watcher compared
+            # UTC-naive rows against a container-local clock".
             now_utc = (
                 datetime.now(timezone.utc)
                 .replace(tzinfo=None)

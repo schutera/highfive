@@ -9,7 +9,7 @@ heartbeat. Whichever is freshest wins. (Pre-#97 split this read
 see chapter 11 "updated_at semantic overload".)
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from db.connection import lock, get_conn
 from services.discord import send_discord_message
@@ -30,7 +30,17 @@ def _fmt_age(seconds: float) -> str:
 
 
 def check_silence():
-    now = datetime.now()
+    # UTC, NOT naive-local. Every timestamp this loop compares against is
+    # stamped UTC-naive by its writer (`received_at` in routes/heartbeats.py,
+    # `record_image`'s `uploaded_at`), so the clock must be UTC-naive too.
+    # Naive-local `datetime.now()` agrees only because the python:3.x-slim
+    # image defaults to UTC; a TZ=Europe/Berlin container would inflate every
+    # age by 1-2 h against SILENCE_THRESHOLD_S and fire false "down" alerts
+    # (and skew the re-alert spacing and `last_silence_alert_at` writes below
+    # the same way). See `record_image` in routes/modules.py and chapter 11
+    # "Silence watcher compared UTC-naive rows against a container-local
+    # clock".
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     silence_alerts = []
     recovery_alerts = []
 

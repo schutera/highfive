@@ -130,6 +130,53 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### Silence watcher compared UTC-naive rows against a container-local clock (the "chapter-11 entry to follow" promised in `record_image`)
+
+**What happened.** `duckdb-service/services/silence_watcher.py`'s
+`check_silence` (the 15-minute APScheduler job behind the Discord
+module-down / module-back alerts) computed every liveness age from
+naive-local `datetime.now()`, while the timestamps it compares
+against are deliberately stamped UTC-naive by their writers
+(`routes/heartbeats.py`'s `received_at`, `record_image`'s
+`uploaded_at`). The two clocks agree only because the
+`python:3.x-slim` base image defaults to UTC. A prod-ops
+`TZ=Europe/Berlin` override on the container would inflate every
+age by 1-2 h against the 3 h `SILENCE_THRESHOLD_S` and fire a false
+"down" alert for every healthy module heard from more than 1-2 h
+ago (a TZ behind UTC would instead suppress real outage alerts by
+the same margin). The re-alert spacing against `REALERT_INTERVAL_S`
+and the `last_silence_alert_at` write-back skew the same way. Found
+latent; no TZ-flipped container has been staged.
+
+**Why it happened.** This is the reader-side twin of the
+"`image_uploads.uploaded_at` stamped in container-local time" entry
+below. That incident fixed the writer and prescribed grepping the
+*writers* for bare `datetime.now()` when adding a timezone-aware
+reader; nobody swept the existing *readers* that do timestamp
+arithmetic against the UTC-naive columns. The silence watcher
+pre-dated the UTC discipline and kept its naive-local clock.
+`record_image`'s in-source comment flagged the residual risk and
+promised a "chapter-11 entry to follow"; this entry closes that
+promise.
+
+**How to avoid it next time.** The UTC-naive discipline cuts both
+ways: any bare `datetime.now()` that feeds arithmetic against DB
+timestamps is wrong by default in this codebase, whether it writes
+the column or reads it. When fixing one side of a writer/reader
+pair, grep the other side in the same PR
+(`grep -rn "datetime.now()" duckdb-service/` and check each hit for
+a `tz` argument). The fix mirrors the writers:
+`datetime.now(timezone.utc).replace(tzinfo=None)` (not
+`datetime.now(UTC)`; the 3.10 floor forbids it, see the CI-matrix
+entry below). The regression is pinned by
+`tests/test_silence_watcher.py`, which flips the process TZ to a
+fixed UTC+2 zone via `time.tzset()` and asserts a module seen 1.5 h
+ago stays quiet. Still-open follow-ups, deliberately not in the fix
+PR: `add_module`'s `last_seen_at = NOW()` (DuckDB session-local)
+and the schema's `DEFAULT CURRENT_TIMESTAMP` columns are the
+remaining container-local timestamp sources to audit if a
+TZ-flipped container is ever staged.
+
 ### CI tested only Python 3.11, but the repo names its runtime three different ways — a 3.11-only `datetime.UTC` crashed both services on deploy (#180, #192)
 
 **What happened.** Commit `8938899` added `from datetime import UTC` / `datetime.now(UTC)`

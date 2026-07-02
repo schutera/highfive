@@ -18,8 +18,8 @@ The watcher needs three things:
 1. **Liveness state for every module.** It computes the freshest of
    `module_configs.last_seen_at`, the latest `image_uploads.uploaded_at`
    per module, and the latest `module_heartbeats.received_at` per
-   module. The `SELECT` block is at `silence_watcher.py:38-52`; the
-   per-row liveness max is at `silence_watcher.py:60-65`. Pre-PR-B
+   module. Both the three-signal `SELECT` block and the per-row
+   liveness max live in `silence_watcher.py`'s `check_silence`. Pre-PR-B
    (issue #97), `module_configs.updated_at` did double duty as both
    row-metadata and liveness signal; the watcher now reads the
    dedicated `last_seen_at` column.
@@ -27,7 +27,7 @@ The watcher needs three things:
    re-fire for `REALERT_INTERVAL_S` seconds"** — done with a single
    nullable `last_silence_alert_at TIMESTAMP` column on
    `module_configs` (`duckdb-service/db/schema.py:26`). Set on alert
-   (`silence_watcher.py:73`), cleared on recovery (`silence_watcher.py:83`).
+   and cleared on recovery inside `silence_watcher.py`'s `check_silence`.
    No separate alerts table.
 3. **A periodic trigger.** It runs as a background thread inside
    `duckdb-service`'s Flask process.

@@ -165,7 +165,7 @@ containment (`services/paths.py`'s `safe_child_path`) before touching
 the filesystem — on writes and deletes, not just reads (where the
 framework happens to protect you). When a client value is also an
 identity key, normalize it once at the boundary
-(`sanitize_upload_filename` + `dedupe_filename`) and thread the
+(`sanitize_upload_filename` + `reserve_filename`) and thread the
 **stored** value through every consumer; grep for the raw value's
 other uses before calling it done.
 

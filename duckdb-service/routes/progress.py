@@ -62,9 +62,16 @@ def get_progress():
     limit_raw = request.args.get("limit")
     limit = None
     if limit_raw is not None:
-        if not limit_raw.isdigit() or int(limit_raw) < 1:
+        # try/except, not isdigit(): str.isdigit() accepts Unicode
+        # superscripts ("³") that int() then rejects — which would be
+        # exactly the malformed-input 500 this route change eliminates.
+        try:
+            limit = int(limit_raw)
+        except ValueError:
             return jsonify({"error": "'limit' must be a positive integer"}), 400
-        limit = min(int(limit_raw), _LIMIT_CAP)
+        if limit < 1:
+            return jsonify({"error": "'limit' must be a positive integer"}), 400
+        limit = min(limit, _LIMIT_CAP)
 
     clause = f" WHERE {' AND '.join(where)}" if where else ""
     if limit is None:

@@ -311,6 +311,9 @@ def test_get_progress_invalid_limit_returns_400(client):
     assert client.get("/progress?limit=0").status_code == 400
     assert client.get("/progress?limit=-3").status_code == 400
     assert client.get("/progress?limit=abc").status_code == 400
+    # Unicode superscript: isdigit()-True but int()-invalid — must be a
+    # clean 400, not a 500 (review-caught).
+    assert client.get("/progress?limit=³").status_code == 400
 
 
 def test_get_progress_unfiltered_stays_legacy_shaped(client, fresh_db):

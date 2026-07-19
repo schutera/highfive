@@ -139,11 +139,6 @@ const waitlistLimiter = new SlidingWindowLimiter(3, 60 * 60 * 1000);
 
 app.post('/api/waitlist', async (req, res) => {
   try {
-    const ip = req.ip ?? 'unknown';
-    if (!waitlistLimiter.allow(ip)) {
-      res.status(429).json({ error: 'Too many signups from your network — try again later' });
-      return;
-    }
     const { name, email } = req.body ?? {};
     const cleanName = typeof name === 'string' ? name.trim() : '';
     const cleanEmail = typeof email === 'string' ? email.trim() : '';
@@ -160,6 +155,16 @@ app.post('/api/waitlist', async (req, res) => {
     if (!DISCORD_WEBHOOK_URL) {
       console.warn('Waitlist signup received but DISCORD_WEBHOOK_URL is not set');
       res.status(503).json({ error: 'Waitlist temporarily unavailable' });
+      return;
+    }
+
+    // Budget is consumed only by submissions that actually reach the
+    // Discord relay (review-caught): a validation typo or a webhook
+    // outage must not lock a legitimate signer out for an hour, and
+    // those requests are no flood risk — they never hit the channel.
+    const ip = req.ip ?? 'unknown';
+    if (!waitlistLimiter.allow(ip)) {
+      res.status(429).json({ error: 'Too many signups from your network — try again later' });
       return;
     }
 

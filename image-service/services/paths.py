@@ -7,7 +7,7 @@ Two trust-boundary rules enforced here:
    `send_from_directory` already gives the read paths).
 2. A client-supplied upload filename is normalized to one safe path
    component and deduplicated instead of silently overwriting an
-   existing capture (`sanitize_upload_filename` + `dedupe_filename`).
+   existing capture (`sanitize_upload_filename` + `reserve_filename`).
 
 Fleet grammar (see `ESP32-CAM/client.cpp`'s `createFileName`):
 ``esp_capture_YYYYMMDD_hhmmss.jpg`` or, without NTP time,
@@ -60,22 +60,35 @@ def sanitize_upload_filename(raw: str | None, *, fallback: str = "upload.jpg") -
     return name
 
 
-def dedupe_filename(directory: str, filename: str) -> str:
-    """Return a name that does not collide in ``directory``.
+def reserve_filename(directory: str, filename: str) -> str:
+    """Atomically reserve a non-colliding name in ``directory``.
 
     On collision appends ``-1``, ``-2``, … before the extension. Fleet
     filenames carry no module identity (second-resolution timestamps
     only), so two modules capturing in the same second used to silently
-    overwrite each other — dedup turns that into two files.
+    overwrite each other — reservation turns that into two files.
+
+    Atomic on purpose: the name is claimed by creating an empty
+    placeholder with ``O_CREAT | O_EXCL`` (the caller's subsequent save
+    overwrites it). A check-then-write dedupe would race under the
+    threaded Flask server — two concurrent uploads could both see "no
+    collision" and clobber each other, which is exactly the scenario
+    this exists to prevent (review-caught).
     """
-    if not os.path.exists(os.path.join(directory, filename)):
-        return filename
     stem, dot, ext = filename.rpartition(".")
     if not dot:
         stem, ext = filename, ""
-    n = 1
+    candidate = filename
+    n = 0
     while True:
-        candidate = f"{stem}-{n}.{ext}" if dot else f"{stem}-{n}"
-        if not os.path.exists(os.path.join(directory, candidate)):
-            return candidate
-        n += 1
+        try:
+            fd = os.open(
+                os.path.join(directory, candidate),
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            )
+        except FileExistsError:
+            n += 1
+            candidate = f"{stem}-{n}.{ext}" if dot else f"{stem}-{n}"
+            continue
+        os.close(fd)
+        return candidate

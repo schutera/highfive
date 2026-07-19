@@ -15,7 +15,7 @@ Behavior is preserved exactly from the original inline `/upload` handler:
 - Sidecar shape: written via `LogSidecarEnvelope` (unchanged).
 - Discord message format: identical to the original.
 - Filenames written to the upload volume are the client's name after
-  `services.paths.sanitize_upload_filename` + `dedupe_filename`
+  `services.paths.sanitize_upload_filename` + `reserve_filename`
   (2026-07 audit, for #202): a no-op for every fleet-grammar name, but
   hostile names are normalized and a colliding name gets a `-N` suffix
   instead of silently overwriting an existing capture. The stored name
@@ -34,7 +34,7 @@ from typing import Any
 from requests import RequestException
 
 from services.hole_detection import BEE_TYPE_WIRE_TO_DB, DetectionResult, HoleDetector
-from services.paths import dedupe_filename, sanitize_upload_filename
+from services.paths import reserve_filename, sanitize_upload_filename
 from services.sidecar import LogSidecarEnvelope
 
 # Type-only hint for the werkzeug FileStorage. Importing werkzeug here is
@@ -137,7 +137,7 @@ class UploadPipeline:
         must use it, never the raw ``req.image.filename``.
         """
         stored_filename = sanitize_upload_filename(req.image.filename)
-        stored_filename = dedupe_filename(self.upload_folder, stored_filename)
+        stored_filename = reserve_filename(self.upload_folder, stored_filename)
         file_path = os.path.join(self.upload_folder, stored_filename)
         req.image.save(file_path)
         return file_path, stored_filename

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from services.paths import dedupe_filename, safe_child_path, sanitize_upload_filename
+from services.paths import reserve_filename, safe_child_path, sanitize_upload_filename
 
 # ------------------------- safe_child_path -------------------------
 
@@ -76,20 +76,24 @@ def test_overlong_name_keeps_tail_and_extension():
     assert got.endswith(".jpg")
 
 
-# -------------------------- dedupe_filename --------------------------
+# -------------------------- reserve_filename --------------------------
 
 
-def test_no_collision_returns_name(tmp_path: Path):
-    assert dedupe_filename(str(tmp_path), "x.jpg") == "x.jpg"
+def test_no_collision_returns_name_and_reserves_it(tmp_path: Path):
+    assert reserve_filename(str(tmp_path), "x.jpg") == "x.jpg"
+    # Reservation is atomic-by-creation: the placeholder now exists, so a
+    # concurrent reserver can never resolve to the same name.
+    assert (tmp_path / "x.jpg").exists()
 
 
 def test_collision_appends_suffix_before_extension(tmp_path: Path):
     (tmp_path / "x.jpg").write_bytes(b"1")
-    assert dedupe_filename(str(tmp_path), "x.jpg") == "x-1.jpg"
-    (tmp_path / "x-1.jpg").write_bytes(b"2")
-    assert dedupe_filename(str(tmp_path), "x.jpg") == "x-2.jpg"
+    assert reserve_filename(str(tmp_path), "x.jpg") == "x-1.jpg"
+    # The x-1.jpg placeholder was created by the reservation itself, so
+    # the next reserver skips straight to -2 without any caller write.
+    assert reserve_filename(str(tmp_path), "x.jpg") == "x-2.jpg"
 
 
 def test_collision_without_extension(tmp_path: Path):
     (tmp_path / "noext").write_bytes(b"1")
-    assert dedupe_filename(str(tmp_path), "noext") == "noext-1"
+    assert reserve_filename(str(tmp_path), "noext") == "noext-1"

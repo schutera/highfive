@@ -145,7 +145,7 @@ sequenceDiagram
    - Saves the JPEG to the shared `duckdb_data` volume. The stored
      filename is the client's name after
      `image-service/services/paths.py`'s `sanitize_upload_filename` +
-     `dedupe_filename` (2026-07 audit, for #202): byte-identical for
+     `reserve_filename` (2026-07 audit, for #202): byte-identical for
      every fleet-grammar name (`esp_capture_…jpg`), but traversal /
      hostile names are normalized, and a colliding name gets a `-N`
      suffix instead of overwriting — fleet filenames carry no module

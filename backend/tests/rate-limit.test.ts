@@ -1,9 +1,13 @@
 // SlidingWindowLimiter + waitlist rate limit (2026-07 audit, for #206).
+//
+// The app is imported DYNAMICALLY in the route tests so
+// DISCORD_WEBHOOK_URL can be set first — app.ts reads it at module load,
+// and the limiter deliberately consumes budget only for submissions that
+// reach the Discord relay.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import request from 'supertest';
 import { SlidingWindowLimiter } from '../src/rateLimit';
-import { app } from '../src/app';
 
 describe('SlidingWindowLimiter', () => {
   it('allows under budget, blocks over, and slides the window', () => {
@@ -35,17 +39,37 @@ describe('SlidingWindowLimiter', () => {
 });
 
 describe('POST /api/waitlist rate limit', () => {
-  it('429s the 4th submission in the window from one IP', async () => {
-    // The limiter runs before validation and before the Discord-webhook
-    // check, so budget is consumed even though DISCORD_WEBHOOK_URL is
-    // unset in tests (those submissions get 503).
-    const payload = { name: 'Test Bee', email: 'bee@example.com' };
-    for (let i = 0; i < 3; i++) {
-      const res = await request(app).post('/api/waitlist').send(payload);
-      expect(res.status).toBe(503); // webhook unset — but budget consumed
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.DISCORD_WEBHOOK_URL;
+  });
+
+  it('429s the 4th relayed submission; failures do not burn budget', async () => {
+    process.env.DISCORD_WEBHOOK_URL = 'https://discord.example.invalid/webhook';
+    const relay = vi.fn().mockResolvedValue({ ok: true, text: async () => '' });
+    vi.stubGlobal('fetch', relay);
+    const { app } = await import('../src/app');
+
+    const valid = { name: 'Test Bee', email: 'bee@example.com' };
+
+    // Validation failures must NOT consume budget (review-caught: three
+    // email typos used to lock a legitimate signer out for an hour).
+    for (let i = 0; i < 5; i++) {
+      const res = await request(app).post('/api/waitlist').send({ name: 'X', email: 'nope' });
+      expect(res.status).toBe(400);
     }
-    const limited = await request(app).post('/api/waitlist').send(payload);
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(app).post('/api/waitlist').send(valid);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ok: true });
+    }
+    expect(relay).toHaveBeenCalledTimes(3);
+
+    const limited = await request(app).post('/api/waitlist').send(valid);
     expect(limited.status).toBe(429);
     expect(limited.body.error).toMatch(/too many signups/i);
+    // The throttled submission never reached Discord.
+    expect(relay).toHaveBeenCalledTimes(3);
   });
 });

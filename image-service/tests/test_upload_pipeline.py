@@ -434,10 +434,14 @@ def test_pipeline_colliding_filenames_do_not_overwrite(tmp_path: Path):
 
     name = "esp_capture_20260719_120000.jpg"
     first = pipeline.run(
-        UploadRequest(mac=TEST_MAC_1, battery=80, image=_FakeImage(name, b"AA"), logs_raw=None)
+        UploadRequest(
+            mac=TEST_MAC_1, battery=80, image=_FakeImage(name, b"AA"), logs_raw=None
+        )
     )
     second = pipeline.run(
-        UploadRequest(mac=TEST_MAC_2, battery=70, image=_FakeImage(name, b"BB"), logs_raw=None)
+        UploadRequest(
+            mac=TEST_MAC_2, battery=70, image=_FakeImage(name, b"BB"), logs_raw=None
+        )
     )
 
     assert first.filename == name
@@ -471,3 +475,24 @@ def test_pipeline_hostile_filename_is_sanitized_everywhere(tmp_path: Path):
     sidecar = json.loads((tmp_path / "evil.jpg.log.json").read_text())
     assert sidecar["image"] == "evil.jpg"
     assert [f for (_mac, f) in duckdb.record_image_calls] == ["evil.jpg"]
+
+
+def test_pipeline_failed_save_releases_the_reserved_name(tmp_path: Path):
+    """A failed image.save must unlink the reservation placeholder so the
+    directory is left exactly as found (review-caught)."""
+
+    class _ExplodingImage:
+        filename = "esp_capture_20260719_120000.jpg"
+
+        def save(self, path: str) -> None:
+            raise OSError("disk full")
+
+    pipeline = _make_pipeline(tmp_path, _FakeDuckDB(progress_count=5))
+    req = UploadRequest(
+        mac=TEST_MAC_1, battery=50, image=_ExplodingImage(), logs_raw=None
+    )
+    try:
+        pipeline.run(req)
+    except OSError:
+        pass
+    assert list(tmp_path.iterdir()) == [], "no placeholder ghost may remain"

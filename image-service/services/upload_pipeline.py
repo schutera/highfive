@@ -137,9 +137,20 @@ class UploadPipeline:
         must use it, never the raw ``req.image.filename``.
         """
         stored_filename = sanitize_upload_filename(req.image.filename)
+        # NOTE: reserve_filename CREATES an empty placeholder on disk (its
+        # atomicity mechanism) — the save below overwrites it. Release the
+        # claim if the save fails, so a disk-full/truncated upload leaves
+        # the directory exactly as it found it.
         stored_filename = reserve_filename(self.upload_folder, stored_filename)
         file_path = os.path.join(self.upload_folder, stored_filename)
-        req.image.save(file_path)
+        try:
+            req.image.save(file_path)
+        except BaseException:
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+            raise
         return file_path, stored_filename
 
     def _record_image_upload(self, mac: str, filename: str) -> None:

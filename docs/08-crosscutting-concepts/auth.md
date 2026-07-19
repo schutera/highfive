@@ -59,6 +59,27 @@ and negative-case the two values cut from the safelist during
 review (`'dev'`, `'testing'`) so a future re-add must update the
 tests in lockstep.
 
+**The Flask services carry the same guard (2026-07 audit, #204).**
+Both `duckdb-service` and `image-service` resolve the same
+key-or-dev-fallback for their admin-gated `/logs` endpoints, and both
+now refuse to boot in production with the fallback: each service's
+`services/prod_guard.py` (twin copies, like `log_ring.py`) raises at
+app import when production is declared but `HIGHFIVE_API_KEY` is
+unset, blank, or the dev fallback in any casing. Because there is no
+`NODE_ENV` for Python and modern Flask dropped `FLASK_ENV`,
+production is declared explicitly via **`HIGHFIVE_ENV=production`**:
+
+- `docker-compose.prod.yml` sets it for both Flask services (this is
+  the supported deploy path — the `:?` interpolation on
+  `HIGHFIVE_API_KEY` already fail-fasts there, so the in-service guard
+  is the backstop for other permutations).
+- **PM2/bare-metal operators must set `HIGHFIVE_ENV=production` in the
+  server-side process config** for `duckdb-service` and
+  `image-service` (the pm2 apps `scripts/deploy.sh` reloads). Without
+  the marker the guard is a no-op — the off-ramp semantics match the
+  backend's `NODE_ENV=development` off-ramp: an explicit operator
+  choice, not a silent default.
+
 ## Admin session (cookie)
 
 Defined in [`backend/src/session.ts`](../../backend/src/session.ts).

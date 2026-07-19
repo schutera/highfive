@@ -24,6 +24,7 @@ from services.discord import send_discord_message
 from services.duckdb import DuckDBService
 from services.hole_detection import HoleDetector
 from services.paths import safe_child_path
+from services.prod_guard import require_prod_key
 from services.upload_throttle import DEFAULT_MAX_PER_HOUR, UploadThrottle
 from services.log_ring import get_recent as _get_recent_logs
 from services.log_ring import init_persistence as init_log_persistence
@@ -56,6 +57,10 @@ logging.getLogger("werkzeug").setLevel(logging.ERROR)
 # under `python app.py`, so the structured ingestion path has a real
 # production caller (not just the tee fallback). Never log secrets here.
 log_event("info", "📷 image-service starting")
+
+# Refuse to boot a declared-production process on the public dev-key
+# fallback — mirrors backend/src/auth.ts (2026-07 audit, for #204).
+require_prod_key()
 
 app = Flask(__name__)
 

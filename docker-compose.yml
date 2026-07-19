@@ -94,7 +94,12 @@ services:
       context: ./duckdb-service
       dockerfile: Dockerfile.dev
     ports:
-      - '0.0.0.0:8002:8000'
+      # Loopback bind (2026-07 audit, for #203): duckdb-service is the sole
+      # DB writer with unauthenticated internal endpoints — prod already
+      # binds 127.0.0.1 (docker-compose.prod.yml); dev matches so a laptop
+      # on café/office Wi-Fi doesn't serve /new_module etc. to the LAN.
+      # In-cluster callers use the service name and are unaffected.
+      - '127.0.0.1:8002:8000'
     volumes:
       - duckdb_data:/data
     env_file:

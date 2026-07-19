@@ -83,9 +83,19 @@ After startup the services are available on the following ports:
 | Homepage       | `5173` | React + Vite frontend        |
 | Backend API    | `3002` | Express + TS backend         |
 | Image Service  | `8000` | Image ingestion and analysis |
-| DuckDB Service | `8002` | Database API                 |
+| DuckDB Service | `8002` | Database API (loopback only) |
 
 The web-interface itself is reachable under: http://localhost:5173
+
+> **DuckDB Service binds to `127.0.0.1` only** (2026-07 audit, for
+> #203, matching prod): it is the sole DB writer and its internal
+> endpoints (`/new_module`, `/heartbeat`, `DELETE /modules/:id`, …)
+> are unauthenticated by design, so the dev stack must not serve them
+> to the LAN. Reach it from the host via `http://127.0.0.1:8002`;
+> other containers use `http://duckdb-service:8000` (service name) and
+> are unaffected. If you need an ESP on your LAN to reach the **dev**
+> stack, that flow talks to image-service (`:8000`) and the backend
+> (`:3002`), never to duckdb-service directly.
 
 > **Backend port — 3002 by default.** `backend/src/server.ts` reads
 > the `PORT` env var through `backend/src/port.ts`'s `resolvePort()`,

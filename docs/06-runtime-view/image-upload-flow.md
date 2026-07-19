@@ -134,6 +134,14 @@ sequenceDiagram
    [`ESP32-CAM/client.cpp`'s `postImage`](../../ESP32-CAM/client.cpp).
 
 2. **Image-service ingestion.**
+   - **Bounds first (2026-07 audit, for #203):** requests over the 5 MB
+     `MAX_CONTENT_LENGTH` ceiling are rejected 413 before the handler
+     runs (no legitimate frame approaches it), and a per-module rate
+     guard (`services/upload_throttle.py`, default 30/hour) causes
+     over-budget uploads to be **accepted-and-discarded with a 200** —
+     deliberately not a 429, because any non-2xx feeds the firmware's
+     5-failure circuit breaker (`ESP32-CAM/client.cpp`) and would
+     reboot a module mid-storm. Discards are logged; nothing persists.
    - Saves the JPEG to the shared `duckdb_data` volume. The stored
      filename is the client's name after
      `image-service/services/paths.py`'s `sanitize_upload_filename` +

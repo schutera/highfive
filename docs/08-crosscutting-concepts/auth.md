@@ -340,9 +340,19 @@ keeps onboarding to one secret while preserving the gating semantics.
   build, or the production origin otherwise). Not
   defence-in-depth; a compromised LAN device can spoof uploads.
   Acceptable for the current threat model (single-tenant, hobbyist
-  deployment); revisit if multi-tenancy is added.
+  deployment); revisit if multi-tenancy is added. Since the 2026-07
+  audit (for #203) the endpoint is **bounded, not authenticated**: a
+  5 MB request-size ceiling (`MAX_CONTENT_LENGTH`, env-overridable via
+  `MAX_UPLOAD_BYTES`) and a per-module rate guard
+  (`services/upload_throttle.py`, default 30/hour via
+  `UPLOAD_THROTTLE_PER_HOUR`, 0 disables). Over-budget uploads are
+  **accepted and discarded with a 200**, never a 429 — a non-2xx
+  counts toward the firmware's upload-failure circuit breaker and
+  would reboot a storming module, amplifying the storm.
 - All `duckdb-service` routes — assumed to be reachable only from
-  inside the Docker `net` bridge. Don't expose this port to LAN.
+  inside the Docker `net` bridge. Don't expose this port to LAN:
+  both compose files bind the host mapping to `127.0.0.1:8002`
+  (dev matched to prod in the 2026-07 audit, for #203).
 
 ## Captive-portal credential handling
 

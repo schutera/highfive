@@ -428,3 +428,65 @@ def test_upload_survives_heartbeat_failure(client, upload_env, monkeypatch):
         content_type="multipart/form-data",
     )
     assert resp.status_code == 200
+
+
+# ---------------- size cap + rate guard (2026-07 audit, for #203) ----------------
+
+
+def test_upload_oversize_body_returns_413_and_persists_nothing(
+    app, client, tmp_upload_dir: Path, upload_env
+):
+    app.app.config["MAX_CONTENT_LENGTH"] = 1024  # shrink for the test
+    form = _make_form(include_image=False)
+    form["image"] = (io.BytesIO(b"X" * 4096), "big.jpg")
+    resp = client.post(
+        "/upload",
+        data=form,
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 413
+    assert resp.get_json()["error"] == "Request body too large"
+    assert list(tmp_upload_dir.glob("*.jpg")) == [], "nothing may be persisted"
+
+
+def test_upload_over_throttle_discards_with_200(
+    app, client, tmp_upload_dir: Path, upload_env
+):
+    """Accept-and-discard, deliberately NOT 429: a non-2xx would count
+    toward the firmware's 5-failure circuit breaker (client.cpp) and
+    reboot a storming module, making the storm worse."""
+    app.upload_throttle.max_per_window = 1
+
+    first = client.post(
+        "/upload", data=_make_form(), content_type="multipart/form-data"
+    )
+    assert first.status_code == 200
+    persisted_after_first = sorted(p.name for p in tmp_upload_dir.glob("*"))
+
+    second = client.post(
+        "/upload", data=_make_form(), content_type="multipart/form-data"
+    )
+    assert second.status_code == 200
+    assert second.get_json()["message"] == "Upload rate exceeded — discarded"
+    assert (
+        sorted(p.name for p in tmp_upload_dir.glob("*")) == persisted_after_first
+    ), "a discarded upload must not persist anything"
+
+
+def test_upload_throttle_is_per_mac(app, client, tmp_upload_dir: Path, upload_env):
+    app.upload_throttle.max_per_window = 1
+    assert (
+        client.post(
+            "/upload", data=_make_form(), content_type="multipart/form-data"
+        ).status_code
+        == 200
+    )
+    other = client.post(
+        "/upload",
+        data=_make_form(mac="ccddeeff0011"),
+        content_type="multipart/form-data",
+    )
+    assert other.status_code == 200
+    assert "message" not in (other.get_json() or {}) or other.get_json().get(
+        "message"
+    ) != "Upload rate exceeded — discarded"

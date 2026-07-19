@@ -24,6 +24,7 @@ from services.discord import send_discord_message
 from services.duckdb import DuckDBService
 from services.hole_detection import HoleDetector
 from services.paths import safe_child_path
+from services.upload_throttle import DEFAULT_MAX_PER_HOUR, UploadThrottle
 from services.log_ring import get_recent as _get_recent_logs
 from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
@@ -57,6 +58,24 @@ logging.getLogger("werkzeug").setLevel(logging.ERROR)
 log_event("info", "📷 image-service starting")
 
 app = Flask(__name__)
+
+# Request-size ceiling (2026-07 audit, for #203). Real ESP32-CAM frames
+# are VGA JPEGs well under 200 KB plus a small telemetry sidecar; 5 MB
+# leaves an order-of-magnitude headroom while stopping a hostile client
+# from streaming gigabytes into the shared /data volume. Werkzeug
+# enforces this before the handler runs; the 413 handler below keeps
+# the response JSON. A 413 is a non-2xx and counts toward the
+# firmware's upload-failure circuit breaker — acceptable, because no
+# legitimate firmware frame can ever trip it.
+app.config["MAX_CONTENT_LENGTH"] = int(
+    os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024))
+)
+
+
+@app.errorhandler(413)
+def _too_large(_e):
+    log_event("warn", "upload rejected: request exceeded MAX_CONTENT_LENGTH")
+    return jsonify({"error": "Request body too large"}), 413
 
 
 def _status_level(code: int) -> str:
@@ -168,6 +187,14 @@ def _send_discord(content: str) -> None:
     have the pipeline pick up the replacement at call time."""
     send_discord_message(content)
 
+
+# Per-module upload rate guard (for #203). Env-overridable; 0 disables.
+# See the accept-and-discard rationale at the /upload call site.
+upload_throttle = UploadThrottle(
+    max_per_window=int(
+        os.getenv("UPLOAD_THROTTLE_PER_HOUR", str(DEFAULT_MAX_PER_HOUR))
+    )
+)
 
 upload_pipeline = UploadPipeline(
     upload_folder=UPLOAD_FOLDER,
@@ -287,6 +314,21 @@ def upload_image():
         canonical_mac = ModuleId.model_validate(mac).root
     except ValidationError:
         return jsonify({"error": "invalid mac format"}), 400
+
+    # Rate guard (2026-07 audit, for #203). Deliberately accept-and-discard
+    # with a 200, NOT a 429: any non-2xx counts toward the firmware's
+    # 5-consecutive-failure circuit breaker (ESP32-CAM/client.cpp →
+    # ESP.restart()), so refusing with an error would reboot a module
+    # that's already in a capture storm and make the storm worse. The
+    # device-side storm cap is capture_gate (ADR-024); this is the
+    # server-side backstop against runaway or non-fleet clients.
+    if not upload_throttle.allow(canonical_mac, time.time()):
+        log_event(
+            "warn",
+            f"upload throttled for mac={canonical_mac} — discarded (over "
+            f"{upload_throttle.max_per_window}/h)",
+        )
+        return jsonify({"message": "Upload rate exceeded — discarded"}), 200
 
     result = upload_pipeline.run(
         UploadRequest(

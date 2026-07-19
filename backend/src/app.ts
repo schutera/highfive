@@ -12,6 +12,7 @@ import type {
 } from '@highfive/contracts';
 import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
+import { SlidingWindowLimiter } from './rateLimit';
 import { accessLog } from './accessLog';
 import { getRecentEntries } from './logRing';
 import { streamBackendRing, writeSseHeaders } from './logStream';
@@ -125,9 +126,24 @@ app.get('/api/snips/:filename', async (req, res) => {
   }
 });
 
-// Public waitlist signup — forwards to Discord webhook
+// Public waitlist signup — forwards to Discord webhook.
+//
+// Rate-limited per IP (2026-07 audit, for #206): this is an anonymous
+// relay into the operator's Discord alert channel — unthrottled, one
+// client could flood it and drown real silence-watcher alerts. 3/hour
+// is generous for a human signing up and a hard wall for a script.
+// Separate limiter instance from the login path: different semantics
+// (every submission consumes budget, not just failures) and no shared
+// buckets between concerns.
+const waitlistLimiter = new SlidingWindowLimiter(3, 60 * 60 * 1000);
+
 app.post('/api/waitlist', async (req, res) => {
   try {
+    const ip = req.ip ?? 'unknown';
+    if (!waitlistLimiter.allow(ip)) {
+      res.status(429).json({ error: 'Too many signups from your network — try again later' });
+      return;
+    }
     const { name, email } = req.body ?? {};
     const cleanName = typeof name === 'string' ? name.trim() : '';
     const cleanEmail = typeof email === 'string' ? email.trim() : '';

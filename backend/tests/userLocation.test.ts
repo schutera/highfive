@@ -3,6 +3,7 @@ import {
   isPrivateOrLoopbackIp,
   lookupUserLocation,
   _resetUserLocationCache,
+  _userLocationCacheSize,
 } from '../src/userLocation';
 
 beforeEach(() => {
@@ -153,5 +154,35 @@ describe('lookupUserLocation', () => {
     expect(
       String((fetchFn as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]),
     ).toContain('8.8.8.8');
+  });
+});
+
+describe('cache bound (2026-07 audit, for #206)', () => {
+  it('never grows past the cap under a distinct-IP flood', async () => {
+    _resetUserLocationCache();
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ latitude: 47.8, longitude: 9.6 }),
+    }) as unknown as typeof fetch;
+
+    // Public, routable, all distinct: 203.0.113.0/24 + 198.51.100.0/24
+    // (TEST-NET ranges) give plenty of unique keys.
+    const ips: string[] = [];
+    for (let a = 0; a < 30; a++) {
+      for (let b = 0; b < 200; b++) {
+        ips.push(`203.${a}.113.${b % 250}`);
+      }
+    }
+    for (const ip of ips.slice(0, 5600)) {
+      await lookupUserLocation(ip, fetchFn);
+    }
+
+    // 5600 distinct inserts against a 5000-entry cap: the map must have
+    // evicted rather than grown, and further inserts must still work.
+    expect(_userLocationCacheSize()).toBeLessThanOrEqual(5000);
+    const again = await lookupUserLocation('198.51.100.7', fetchFn);
+    expect(again.source).toBe('miss');
+    _resetUserLocationCache();
   });
 });

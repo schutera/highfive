@@ -246,6 +246,7 @@ const translations = {
       successText:
         'Thanks for signing up. We’ll be in touch as soon as Hive Modules are available.',
       errorGeneric: 'Something went wrong. Please try again.',
+      rateLimited: 'Too many signups from your network — please try again later.',
       privacy: 'We’ll only use your email to notify you about Hive Module availability.',
     },
 
@@ -710,6 +711,8 @@ const translations = {
       successText:
         'Danke f\u00FCr deine Anmeldung. Wir melden uns, sobald die Hive-Module verf\u00FCgbar sind.',
       errorGeneric: 'Etwas ist schiefgelaufen. Bitte versuche es erneut.',
+      rateLimited:
+        'Zu viele Anmeldungen aus deinem Netzwerk \u2014 bitte versuche es sp\u00E4ter erneut.',
       privacy:
         'Wir verwenden deine E-Mail nur, um dich \u00FCber die Verf\u00FCgbarkeit zu informieren.',
     },

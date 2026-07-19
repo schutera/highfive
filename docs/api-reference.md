@@ -710,6 +710,27 @@ and
 [weather-worker-flow.md](06-runtime-view/weather-worker-flow.md)
 for the rationale and the live-worker counterpart.
 
+## 1.9 Waitlist signup (public)
+
+```
+POST /api/waitlist
+Content-Type: application/json
+Body: { "name": "Test Bee", "email": "bee@example.com" }
+```
+
+Public, no auth — forwards the signup to the operator's Discord
+webhook. Returns `{ "ok": true }` on success.
+
+Status codes:
+
+- **400** — missing/overlong name, or invalid email.
+- **429** — per-IP rate limit exceeded (3 signups per hour per IP,
+  2026-07 audit, for #206 — the endpoint is an anonymous relay into
+  the operator's alert channel and must not be floodable). The
+  homepage shows a translated retry-later message.
+- **503** — `DISCORD_WEBHOOK_URL` not configured server-side.
+- **502** — Discord rejected the webhook call.
+
 <br>
 
 # 2. Image Service API

@@ -77,6 +77,9 @@ services:
       # time-lapse has frames to scrub — pairs with the duckdb `nest_detections`
       # seed, which is gated on the same flag. Prod sets this false.
       SEED_DATA: 'true'
+      # Optional: Discord alert on first image per module. Empty disables
+      # sending — no baked-in default (2026-07 audit, for #201).
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
     volumes:
       - duckdb_data:/data
     restart: unless-stopped
@@ -101,6 +104,10 @@ services:
       # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       LOG_DIR: /data/logs/duckdb
+      # Optional: Discord alerts (registration, first image, silence watcher).
+      # Empty disables sending — there is deliberately no baked-in default
+      # (2026-07 audit, for #201: a webhook URL is a bearer credential).
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       # Dev-only: register /firmware.json + /firmware.app.bin proxy to
       # homepage:5173 so the ESP can fetch OTA artifacts in dev. In
       # prod, host-nginx serves these directly from homepage static.

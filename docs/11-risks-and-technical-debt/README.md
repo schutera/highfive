@@ -54,6 +54,18 @@ fixed in commit `778c9b1`. Don't reintroduce them.
   the env var is the dev fallback (case-insensitively). The operator
   cannot ship the dev key as the prod gate without the backend crashing
   at startup. See [02-constraints](../02-constraints/README.md).
+- **Discord webhook URL** — was committed as the in-source
+  `DISCORD_WEBHOOK_URL` default in **both** copies of
+  `services/discord.py` (`duckdb-service` and `image-service`). Found
+  in the 2026-07 audit (issue #201): a webhook URL is a bearer
+  credential — anyone holding it can post to the operator's alert
+  channel. The webhook was rotated; the default is now `""` (empty =
+  notifications disabled) and the value flows only through the
+  `DISCORD_WEBHOOK_URL` env var (`docker-compose*.yml`).
+  `scripts/check-no-hardcoded-api-keys.sh` now also matches
+  `discord.com/api/webhooks/<id>` literals so the class can't recur.
+  The old URL remains in git history and must stay revoked. See
+  [auth.md → "Third-party credentials: Discord webhook"](../08-crosscutting-concepts/auth.md#third-party-credentials-discord-webhook).
 - **WiFi password printed plaintext to Serial** — was unconditionally
   logged at the top of `setupWifiConnection` in `ESP32-CAM/esp_init.cpp`.
   Now gated behind `-DDEBUG_WIFI` and redacted by default (issue #41,

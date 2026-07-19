@@ -270,6 +270,31 @@ is being staged):
    map view are unaffected (the saved geolocation from first boot
    persists in module config).
 
+## Third-party credentials: Discord webhook
+
+Both Python services can post operator alerts to Discord —
+`duckdb-service/services/discord.py` (module registration, first
+image, silence-watcher module-down alerts per ADR-005) and
+`image-service/services/discord.py` (its own copy of the notifier).
+A Discord webhook URL is a **bearer credential**: anyone holding it
+can post arbitrary messages to the channel, so it is handled like a
+secret even though it grants no read access.
+
+- **Source of the value:** the `DISCORD_WEBHOOK_URL` env var only,
+  wired through `docker-compose.yml` / `docker-compose.prod.yml`
+  (optional — empty or unset disables sending; both `send_discord_*`
+  helpers skip cleanly and log the skip).
+- **Never in source.** A live webhook URL was committed as the
+  in-source default of both notifier modules and rotated in the
+  2026-07 audit (issue #201; lesson recorded in
+  [chapter 11 → "Hardcoded secrets"](../11-risks-and-technical-debt/README.md#hardcoded-secrets)).
+  `scripts/check-no-hardcoded-api-keys.sh` (pre-push) now fails on
+  any `discord.com/api/webhooks/<id>` literal.
+- **Rotation:** Discord → Server Settings → Integrations → Webhooks →
+  delete + recreate, then update the env value on the host. Rotation
+  is the only real mitigation for a leak — git history keeps the old
+  literal forever.
+
 ## Server logs: secrets must never be logged (ADR-023)
 
 The admin **Server Logs** panel tails each service's own log ring

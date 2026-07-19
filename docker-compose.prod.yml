@@ -88,6 +88,9 @@ services:
       # (app.py `_seed_demo_snips`), but make it explicit so prod never ships
       # demo crops — mirrors duckdb-service's SEED_DATA=false below.
       - SEED_DATA=false
+      # Optional: Discord alert on first image per module. Empty disables
+      # sending — no baked-in default (2026-07 audit, for #201).
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
       - duckdb_data:/data
     restart: unless-stopped
@@ -121,6 +124,9 @@ services:
       # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       - LOG_DIR=/data/logs/duckdb
+      # Optional: Discord alerts (registration, first image, silence watcher).
+      # Empty disables sending — no baked-in default (2026-07 audit, for #201).
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
       - duckdb_data:/data
     restart: unless-stopped

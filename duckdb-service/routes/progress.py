@@ -1,23 +1,100 @@
 from datetime import date
 from uuid import uuid4
 from flask import Blueprint, jsonify, request
+from pydantic import ValidationError
 
 from db.repository import query_all, write_transaction
+from models.module_id import ModuleId
 from models.progress import ClassificationOutput, BEE_TYPE_MAP, TARGET_NESTS_PER_TYPE
 
 progress_bp = Blueprint("progress", __name__)
 
+# Safety valve, not pagination: callers pass `limit` to bound a worst-case
+# response; the query keeps the MOST RECENT rows and the response stays
+# date-ascending (see the ordering note below). 2026-07 audit, for #205.
+_LIMIT_CAP = 100_000
+
+
+def _parse_iso_date(raw: str, field: str):
+    try:
+        return date.fromisoformat(raw), None
+    except ValueError:
+        return None, (
+            jsonify({"error": f"'{field}' is not a valid ISO date (YYYY-MM-DD)"}),
+            400,
+        )
+
 
 @progress_bp.get("/progress")
 def get_progress():
-    progress = query_all("SELECT * FROM daily_progress")
+    """List daily_progress rows, optionally filtered (for #205).
+
+    Query params (all optional; unfiltered call = legacy full table):
+      * ``module_id`` — canonical or legacy MAC form; filters via nest_data.
+      * ``since`` / ``until`` — inclusive ISO date bounds on ``date``.
+      * ``limit`` — keep only the most recent N rows (capped).
+
+    Ordering contract: rows are returned **date-ascending** (ties broken
+    by nest_id). This is load-bearing — `backend/src/database.ts`'s
+    `totalHatches` roll-up reads each nest's LAST array element as the
+    latest row, so `limit` trims the oldest rows, never the newest.
+    """
+    where, params = [], []
+
+    module_raw = request.args.get("module_id")
+    if module_raw is not None:
+        try:
+            module_id = ModuleId.model_validate(module_raw).root
+        except ValidationError:
+            return jsonify({"error": "invalid module_id format"}), 400
+        where.append("nest_id IN (SELECT nest_id FROM nest_data WHERE module_id = ?)")
+        params.append(module_id)
+
+    for field, op in (("since", ">="), ("until", "<=")):
+        raw = request.args.get(field)
+        if raw is not None:
+            parsed, err = _parse_iso_date(raw, field)
+            if err:
+                return err
+            where.append(f"date {op} ?")
+            params.append(parsed.isoformat())
+
+    limit_raw = request.args.get("limit")
+    limit = None
+    if limit_raw is not None:
+        if not limit_raw.isdigit() or int(limit_raw) < 1:
+            return jsonify({"error": "'limit' must be a positive integer"}), 400
+        limit = min(int(limit_raw), _LIMIT_CAP)
+
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
+    if limit is None:
+        sql = f"SELECT * FROM daily_progress{clause} ORDER BY date ASC, nest_id"
+    else:
+        # Keep the most recent rows, then restore ascending order.
+        sql = (
+            "SELECT * FROM ("
+            f"SELECT * FROM daily_progress{clause} "
+            "ORDER BY date DESC, nest_id LIMIT ?"
+            ") ORDER BY date ASC, nest_id"
+        )
+        params.append(limit)
+
+    progress = query_all(sql, tuple(params))
     return jsonify(progress=progress), 200
 
 
 @progress_bp.post("/add_progress_for_module")
 def add_progress_for_module():
-    json_data = request.get_json()
-    payload = ClassificationOutput(**json_data)
+    # Clean 400s on malformed input (for #205) — this route predated the
+    # validation idiom its siblings use (see routes/measurements.py); a
+    # non-JSON or schema-violating body used to raise straight to a 500.
+    json_data = request.get_json(silent=True)
+    if not isinstance(json_data, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+    try:
+        payload = ClassificationOutput(**json_data)
+    except ValidationError:
+        return jsonify({"error": "invalid classification payload"}), 400
     # Pydantic ``RootModel`` exposes the underlying str via ``.root``.
     module_id = payload.module_id.root
     today = date.today().isoformat()

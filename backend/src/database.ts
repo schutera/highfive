@@ -226,7 +226,13 @@ export class ModuleReadModel {
       [
         fetchJsonOk(`${DUCKDB_URL}/modules`),
         fetchJsonOk(`${DUCKDB_URL}/nests`),
-        fetchJsonOk(`${DUCKDB_URL}/progress`),
+        // `limit` is a safety valve, not pagination (for #205): duckdb keeps
+        // the MOST RECENT rows and returns them date-ascending, so the
+        // `dailyProgress[length-1]`-is-latest invariant the totalHatches
+        // roll-up depends on survives even when the cap ever bites. Today the
+        // table is far below the cap — behaviour is unchanged; the worst case
+        // (a years-old deployment) degrades by dropping the OLDEST rows.
+        fetchJsonOk(`${DUCKDB_URL}/progress?limit=100000`),
         fetchJsonOk(`${DUCKDB_URL}/heartbeats_summary`),
       ],
     );

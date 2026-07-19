@@ -531,6 +531,18 @@ Fixed in commit `778c9b1`. Comments in `database.ts`
 ("Backend name!") had asserted the typos were canonical. No contract
 test covered the read.
 
+### `GET /progress` ordering is part of the contract (for #205)
+
+Rows come back **date-ascending** (ties by `nest_id`), and the
+optional `limit` param trims the **oldest** rows first. Both halves
+are load-bearing: `backend/src/database.ts`'s `totalHatches` roll-up
+reads each nest's last array element as "the latest row". A change to
+the ordering (or a limit that trims newest-first) silently zeroes or
+staleifies dashboard totals — the test
+`duckdb-service/tests/test_progress.py`'s
+`test_get_progress_limit_keeps_most_recent_and_stays_ascending` pins
+this.
+
 ### TS interface duplication (resolved)
 
 Resolved on 2026-04-26 by introducing the `@highfive/contracts`

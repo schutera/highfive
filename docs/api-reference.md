@@ -950,6 +950,21 @@ GET /progress
 `progress_id` and `hatched` are spelled correctly (a recent fix
 corrected legacy `progess_id` / `hateched`).
 
+Optional query params (2026-07 audit, for #205; unfiltered call is
+unchanged legacy behaviour):
+
+| Param       | Meaning                                                                      |
+| ----------- | ---------------------------------------------------------------------------- |
+| `module_id` | Only rows for this module's nests (canonical or legacy colon MAC form).      |
+| `since`     | Inclusive ISO-date lower bound (`YYYY-MM-DD`) on `date`.                     |
+| `until`     | Inclusive ISO-date upper bound.                                              |
+| `limit`     | Keep only the most recent N rows (capped at 100000). Trims **oldest** first. |
+
+Invalid params return `400`. **Ordering contract:** rows come back
+date-ascending (ties by `nest_id`) — consumers may rely on the last
+element per nest being the latest row (the backend's `totalHatches`
+roll-up does).
+
 ## 3.6 Add classification result
 
 ```
@@ -968,7 +983,9 @@ Content-Type: application/json
 ```
 
 Returns `{ "success": true }`. Missing nests are auto-created. Progress
-rows are inserted with the current date. The legacy typo `modul_id` is
+rows are inserted with the current date. A non-JSON body or a payload
+that fails validation returns a clean `400` (for #205 — this route
+previously 500'd on malformed input). The legacy typo `modul_id` is
 still accepted via `AliasChoices` on
 `duckdb-service/models/progress.py`'s `ClassificationOutput` as a
 deprecation window — see

@@ -80,14 +80,18 @@ def test_classification_output_accepts_module_id() -> None:
     assert out.module_id.root == "aabbccddeeff"
 
 
-def test_classification_output_accepts_legacy_modul_id_typo() -> None:
-    """Legacy field name ``modul_id`` must still work via ``AliasChoices``."""
+def test_classification_output_rejects_legacy_modul_id_typo() -> None:
+    """Deprecation window CLOSED (2026-07 audit, for #207): the legacy
+    ``modul_id`` field name now fails validation."""
+    import pytest
+    from pydantic import ValidationError
+
     from models.progress import ClassificationOutput
 
-    out = ClassificationOutput.model_validate(
-        {
-            "modul_id": "aabbccddeeff",
-            "classification": {"leafcutter_bee": {"0": 0.5}},
-        }
-    )
-    assert out.module_id.root == "aabbccddeeff"
+    with pytest.raises(ValidationError):
+        ClassificationOutput.model_validate(
+            {
+                "modul_id": "aabbccddeeff",
+                "classification": {"leafcutter_bee": {"0": 0.5}},
+            }
+        )

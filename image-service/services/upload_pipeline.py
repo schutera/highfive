@@ -191,10 +191,9 @@ class UploadPipeline:
     def _record_progress(self, mac: str, classification: dict) -> None:
         """POST classification results to duckdb-service. Silently tolerates failures.
 
-        Wire field is the canonical ``module_id``; duckdb-service still
-        accepts the legacy ``modul_id`` typo via Pydantic ``AliasChoices``
-        as a deprecation alias, removable once nothing in the tree
-        references it.
+        Wire field is the canonical ``module_id``. (The legacy
+        ``modul_id`` typo alias on the duckdb side was removed in the
+        2026-07 audit, for #207 — the typo now fails validation there.)
         """
         payload = {"module_id": mac, "classification": classification}
         try:

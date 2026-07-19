@@ -233,10 +233,8 @@ shared volume locally; only the DB writes are HTTP. See
 ## Field-name drift to watch
 
 The `POST /add_progress_for_module` payload carries the canonical
-`module_id` on the wire. The legacy typo `modul_id` (missing "e") is
-still accepted by `duckdb-service/models/progress.py`'s
-`ClassificationOutput` via Pydantic `AliasChoices` as a deprecation
-window for any in-flight callers that still emit the old key; new
-emitters must use `module_id`. The alias will be removed once
-nothing in the tree references it — see
+`module_id` on the wire. The legacy typo `modul_id` (missing "e") was
+accepted as a deprecation alias until the window closed in the
+2026-07 audit (for #207); the typo now fails validation with a clean
+400 — see
 [08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md).

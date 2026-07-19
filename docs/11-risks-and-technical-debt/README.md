@@ -21,13 +21,14 @@ Highlights worth knowing about even if you're not assigned:
 ## Field-name drift
 
 The canonical wire field on `POST /add_progress_for_module` is
-`module_id`. The legacy typo `modul_id` (missing "e") is still
-**accepted** by `duckdb-service/models/progress.py`'s
-`ClassificationOutput` via Pydantic `AliasChoices` as a deprecation
-alias; `image-service`'s `UploadPipeline._record_progress` emits the
-canonical name. The alias is removable once nothing in or out of the
-tree references it — don't regress emitters back to `modul_id`. Full
-discussion:
+`module_id`. The legacy typo `modul_id` (missing "e") was accepted by
+`duckdb-service/models/progress.py`'s `ClassificationOutput` via
+Pydantic `AliasChoices` as a deprecation alias; the window was
+**closed in the 2026-07 audit (for #207)** after a full-tree sweep
+found no emitter (the Postman fixture in `dev-tools/` was the last
+holdout and was corrected). The typo now fails validation with a
+clean 400 — don't reintroduce the alias, and don't regress emitters
+back to `modul_id`. Full discussion:
 [../08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md).
 
 The `progess_id` / `hateched` typos in `backend/database.ts` were

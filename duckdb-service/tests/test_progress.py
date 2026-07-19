@@ -136,16 +136,17 @@ def test_add_progress_for_module_creates_nests_and_rows(client, fresh_db):
     assert resin_sealed == [0, 100, 100, 0]
 
 
-def test_add_progress_accepts_legacy_modul_id_typo(client, fresh_db):
-    """The legacy ``modul_id`` field name must still work (deprecation alias)."""
+def test_add_progress_rejects_legacy_modul_id_typo(client, fresh_db):
+    """Deprecation window CLOSED (2026-07 audit, for #207): the legacy
+    ``modul_id`` typo is no longer accepted — clean 400, no write."""
     _seed_module(fresh_db, TEST_MAC_1)
     payload = {
         "modul_id": TEST_MAC_1,  # legacy typo'd name
         "classification": {"leafcutter_bee": {"0": 0.5}},
     }
     resp = client.post("/add_progress_for_module", json=payload)
-    assert resp.status_code == 200
-    assert resp.get_json() == {"success": True}
+    assert resp.status_code == 400
+    assert _query(fresh_db, "SELECT * FROM daily_progress") == []
 
 
 def test_add_progress_skips_unknown_bee_type(client, fresh_db):

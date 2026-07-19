@@ -1006,11 +1006,10 @@ Content-Type: application/json
 Returns `{ "success": true }`. Missing nests are auto-created. Progress
 rows are inserted with the current date. A non-JSON body or a payload
 that fails validation returns a clean `400` (for #205 — this route
-previously 500'd on malformed input). The legacy typo `modul_id` is
-still accepted via `AliasChoices` on
-`duckdb-service/models/progress.py`'s `ClassificationOutput` as a
-deprecation window — see
-[08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md).
+previously 500'd on malformed input). The legacy typo `modul_id` was a
+deprecation alias until the window closed in the 2026-07 audit (for
+#207); it now fails validation → 400 — see
+[08-crosscutting-concepts/api-contracts.md](08-crosscutting-concepts/api-contracts.md).
 
 ## 3.7 Telemetry heartbeat
 

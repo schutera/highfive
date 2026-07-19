@@ -142,6 +142,32 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### The delete path trusted a client filename the read path didn't — and fleet filenames were silently clobbering each other (2026-07 audit, #202)
+
+**What happened:** `image-service`'s `delete_image` joined the
+URL-supplied `<path:filename>` straight into `os.remove` — a `../`
+name could delete outside the upload folder. The read paths were safe
+only because `send_from_directory` does its own containment; nobody
+had given the write/delete side the same guard. Separately, the upload
+pipeline persisted images under the raw client filename: the fleet's
+`esp_capture_YYYYMMDD_hhmmss.jpg` grammar carries **no module
+identity**, so two modules capturing in the same second produced the
+same name and the second upload silently overwrote the first — data
+loss, no error, no log.
+
+**Why:** the filename was doing double duty as both untrusted client
+input and the identity key across disk, `image_uploads` row, sidecar,
+and snip derivation, and no single owner enforced its hygiene.
+
+**How to avoid next time:** any client-supplied path component gets
+containment (`services/paths.py`'s `safe_child_path`) before touching
+the filesystem — on writes and deletes, not just reads (where the
+framework happens to protect you). When a client value is also an
+identity key, normalize it once at the boundary
+(`sanitize_upload_filename` + `dedupe_filename`) and thread the
+**stored** value through every consumer; grep for the raw value's
+other uses before calling it done.
+
 ### CI tested only Python 3.11, but the repo names its runtime three different ways — a 3.11-only `datetime.UTC` crashed both services on deploy (#180, #192)
 
 **What happened.** Commit `8938899` added `from datetime import UTC` / `datetime.now(UTC)`

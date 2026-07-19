@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
 from services.hole_detection import HoleDetector
+from services.paths import safe_child_path
 from services.log_ring import get_recent as _get_recent_logs
 from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
@@ -389,8 +390,15 @@ def delete_image(filename):
         status. A retry by the caller sees a consistent file+row pair
         instead of an orphaned row pointing at a deleted file.
       * Network/timeout exception → 502, file untouched.
+      * Traversal / non-basename filename → 400, nothing touched
+        (2026-07 audit, for #202 — the read paths get containment from
+        `send_from_directory`; the delete path must enforce its own).
     """
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    if "/" in filename or "\\" in filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    file_path = safe_child_path(UPLOAD_FOLDER, filename)
+    if file_path is None:
+        return jsonify({"error": "Invalid filename"}), 400
     try:
         resp = http_requests.delete(
             f"{DUCKDB_SERVICE_URL}/image_uploads/{filename}", timeout=5
@@ -424,9 +432,13 @@ def delete_image(filename):
 
 @app.get("/images/<path:filename>")
 def serve_image(filename):
-    """Serve an image file from the upload folder."""
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
-    if not os.path.isfile(file_path):
+    """Serve an image file from the upload folder.
+
+    `send_from_directory` already refuses traversal; the pre-check goes
+    through the same containment helper so a hostile name 404s without
+    ever probing paths outside the folder (for #202)."""
+    file_path = safe_child_path(UPLOAD_FOLDER, filename)
+    if file_path is None or not os.path.isfile(file_path):
         return jsonify({"error": "Image not found"}), 404
     return send_from_directory(UPLOAD_FOLDER, filename)
 
@@ -439,8 +451,8 @@ def serve_snip(filename):
     prefix) keeps the public backend proxy a clean ``/api/snips/:filename``
     without a slash-in-param. Snips are public by design — the crop removes all
     background, so no auth is required (issue #154)."""
-    file_path = os.path.join(SNIP_FOLDER, filename)
-    if not os.path.isfile(file_path):
+    file_path = safe_child_path(SNIP_FOLDER, filename)
+    if file_path is None or not os.path.isfile(file_path):
         return jsonify({"error": "Snip not found"}), 404
     return send_from_directory(SNIP_FOLDER, filename)
 

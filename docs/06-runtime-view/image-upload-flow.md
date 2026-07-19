@@ -134,7 +134,16 @@ sequenceDiagram
    [`ESP32-CAM/client.cpp`'s `postImage`](../../ESP32-CAM/client.cpp).
 
 2. **Image-service ingestion.**
-   - Saves the JPEG to the shared `duckdb_data` volume.
+   - Saves the JPEG to the shared `duckdb_data` volume. The stored
+     filename is the client's name after
+     `image-service/services/paths.py`'s `sanitize_upload_filename` +
+     `dedupe_filename` (2026-07 audit, for #202): byte-identical for
+     every fleet-grammar name (`esp_capture_…jpg`), but traversal /
+     hostile names are normalized, and a colliding name gets a `-N`
+     suffix instead of overwriting — fleet filenames carry no module
+     identity, so two modules capturing in the same second used to
+     silently clobber each other. The **stored** name is what flows to
+     the DB row, sidecar, snips, Discord ping, and response.
    - Records the upload row via duckdb-service (see step 3).
    - If `logs` is parseable, writes a `<image>.log.json` sidecar next
      to the image as a `LogSidecarEnvelope` (`mac`, `received_at`,

@@ -143,3 +143,37 @@ def test_delete_network_exception_returns_502_and_leaves_file(
     captured = capsys.readouterr().out
     assert "[delete_image] duckdb-service unreachable" in captured
     assert "connect timeout" in captured
+
+
+# ------------------- containment (2026-07 audit, for #202) -------------------
+
+
+def test_delete_traversal_filename_returns_400_and_touches_nothing(
+    app, client, tmp_upload_dir, monkeypatch
+):
+    """A `../` filename must never reach duckdb-service or os.remove."""
+    outside = tmp_upload_dir.parent / "victim.jpg"
+    outside.write_bytes(b"precious")
+    calls = _patch_duckdb_delete(app, monkeypatch, _Resp(200))
+
+    resp = client.delete("/images/..%2Fvictim.jpg")
+
+    assert resp.status_code == 400
+    assert outside.exists(), "traversal must not delete outside the upload folder"
+    assert calls == [], "duckdb-service must not be consulted for a hostile name"
+
+
+def test_delete_absolute_path_returns_400(app, client, monkeypatch):
+    """Werkzeug 308-normalizes the double slash away; the surviving
+    slash-bearing name must still be rejected by the handler."""
+    calls = _patch_duckdb_delete(app, monkeypatch, _Resp(200))
+    resp = client.delete("/images/%2Fetc%2Fpasswd", follow_redirects=True)
+    assert resp.status_code == 400
+    assert calls == []
+
+
+def test_delete_backslash_filename_returns_400(app, client, monkeypatch):
+    calls = _patch_duckdb_delete(app, monkeypatch, _Resp(200))
+    resp = client.delete("/images/..%5C..%5Cvictim.jpg")
+    assert resp.status_code == 400
+    assert calls == []

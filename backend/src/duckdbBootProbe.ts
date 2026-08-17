@@ -211,10 +211,17 @@ export async function reportDuckdbHealth({
   log: { info: (msg: string) => void; warn: (msg: string) => void };
   duckdbUrl: string;
   recoveryDelayMs?: number;
-  probeOptions?: Partial<BootProbeOptions>;
+  /**
+   * `health` is deliberately excluded: it is supplied once above and used for
+   * BOTH the probe and the recovery re-check. Allowing it here would let a
+   * caller silently probe one endpoint and re-check another — and `Partial`
+   * would additionally permit `health: undefined`, turning every attempt into
+   * a caught TypeError reported to the operator as the cause of the outage.
+   */
+  probeOptions?: Omit<BootProbeOptions, 'health'>;
   recheckSleep?: (ms: number) => Promise<unknown>;
 }): Promise<void> {
-  const outcome = await probeDuckdbHealth({ health, ...probeOptions });
+  const outcome = await probeDuckdbHealth({ ...probeOptions, health });
   if (outcome.reachable) {
     log.info(`🗄 DuckDB service reachable: ${JSON.stringify(outcome.health)}`);
     return;
@@ -233,10 +240,18 @@ export async function reportDuckdbHealth({
   // burns up to 15 s of that window, so sleeping the full amount here would
   // put a line saying "60s after boot" at t≈75 s.
   const remainingDelay = Math.max(0, recoveryDelayMs - outcome.elapsedMs);
-  const seconds = Math.round(recoveryDelayMs / 1000);
+  // Derive the reported figure from the wait actually performed, never from
+  // the nominal constant. If recoveryDelayMs ever drops below the probe's
+  // elapsed time, remainingDelay clamps to 0 — and a `seconds` computed from
+  // the constant would go straight back to misstating its own timing, which is
+  // the bug this function was extracted to pin.
+  const seconds = Math.round((outcome.elapsedMs + remainingDelay) / 1000);
   const recovered = await recheckDuckdbHealth({
     health,
     delayMs: remainingDelay,
+    // Keep the re-check's per-attempt ceiling consistent with the probe's when
+    // a caller overrode it; otherwise recheckDuckdbHealth's own default wins.
+    ...(probeOptions?.timeoutMs !== undefined ? { timeoutMs: probeOptions.timeoutMs } : {}),
     ...(recheckSleep ? { sleep: recheckSleep } : {}),
   });
 

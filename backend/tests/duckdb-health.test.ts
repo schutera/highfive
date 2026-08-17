@@ -26,9 +26,9 @@ function jsonResponse(body: unknown, status = 200) {
 
 describe('duckdbHealth', () => {
   it('returns the parsed body when duckdb reports ok', async () => {
-    stubFetch(() => jsonResponse({ ok: true, db: '/data/hive.duckdb' }));
+    stubFetch(() => jsonResponse({ ok: true, db: '/data/app.duckdb' }));
 
-    await expect(duckdbHealth(2000)).resolves.toEqual({ ok: true, db: '/data/hive.duckdb' });
+    await expect(duckdbHealth(2000)).resolves.toEqual({ ok: true, db: '/data/app.duckdb' });
   });
 
   it('requests /health on the configured base URL', async () => {
@@ -75,7 +75,7 @@ describe('duckdbHealth', () => {
   it('rejects a 200 that carries ok:false instead of calling it reachable', async () => {
     // "Listening but not serving" (e.g. the DB file failed to open) is exactly
     // the false-green the boot probe exists to remove — a 200 is not enough.
-    stubFetch(() => jsonResponse({ ok: false, db: '/data/hive.duckdb' }));
+    stubFetch(() => jsonResponse({ ok: false, db: '/data/app.duckdb' }));
 
     await expect(duckdbHealth(2000)).rejects.toThrow(/reported not-ok/);
   });

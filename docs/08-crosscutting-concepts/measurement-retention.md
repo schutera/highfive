@@ -24,7 +24,7 @@ Volume is small.
 - 5 modules × 24 measurements/day × 1 metric (`battery_pct`) ≈ 120
   rows/day = ~44k rows/year.
 - Each row is `VARCHAR(20) + TIMESTAMP + VARCHAR(40) + DOUBLE +
-VARCHAR(40)` ≈ 110 bytes uncompressed, ≈ 30 bytes after DuckDB's
+  VARCHAR(40)` ≈ 110 bytes uncompressed, ≈ 30 bytes after DuckDB's
   columnar dictionary encoding.
 - 44k rows/year × ~30 bytes ≈ **1.3 MB/year** per metric on a 5-module
   deployment.
@@ -47,8 +47,8 @@ Trigger a retention or downsample policy when **any one** of:
 
 - The `app.duckdb` file exceeds 500 MB (`du -sh`), AND the
   `measurements` table is the dominant contributor (`SELECT
-table_name, estimated_size FROM duckdb_tables() ORDER BY
-estimated_size DESC`).
+  table_name, estimated_size FROM duckdb_tables() ORDER BY
+  estimated_size DESC`).
 - The bucketed read at `interval=hourly` and `days=90` (the maximum
   the API permits) crosses ~200 ms p95 on the production deployment.
   The activity_timeseries endpoint hits a comparable scan and currently
@@ -107,12 +107,12 @@ always go to `measurements_daily`, `hourly` reads only see the rolling
 
 ### Decision matrix
 
-| Trigger                                                   | Recommended pattern                                  |
-| --------------------------------------------------------- | ---------------------------------------------------- |
-| File size > 500 MB, no consumer needs >30 days hourly     | Pattern 1, 90 d                                      |
-| File size > 500 MB, consumer needs year-over-year context | Pattern 2, daily                                     |
-| Read latency, not file size                               | Pattern 2, daily                                     |
-| Producer typo backfilled millions of bad rows             | one-shot `DELETE WHERE source = '...'`, then revisit |
+| Trigger                                                    | Recommended pattern |
+| ---------------------------------------------------------- | ------------------- |
+| File size > 500 MB, no consumer needs >30 days hourly      | Pattern 1, 90 d     |
+| File size > 500 MB, consumer needs year-over-year context  | Pattern 2, daily    |
+| Read latency, not file size                                | Pattern 2, daily    |
+| Producer typo backfilled millions of bad rows              | one-shot `DELETE WHERE source = '...'`, then revisit |
 
 The retention job should NOT touch `source='esp-heartbeat-backfill'`
 rows by default — they're the operator's "old data is irreplaceable"

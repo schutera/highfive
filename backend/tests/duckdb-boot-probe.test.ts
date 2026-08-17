@@ -62,13 +62,13 @@ function failingAfter(
 describe('probeDuckdbHealth', () => {
   it('returns reachable on the first attempt when duckdb answers', async () => {
     const clock = fakeClock();
-    const health = vi.fn().mockResolvedValue({ ok: true, db: '/data/hive.duckdb' });
+    const health = vi.fn().mockResolvedValue({ ok: true, db: '/data/app.duckdb' });
 
     const outcome = await probeDuckdbHealth({ health, now: clock.now, sleep: clock.sleep });
 
     expect(outcome).toMatchObject({
       reachable: true,
-      health: { ok: true, db: '/data/hive.duckdb' },
+      health: { ok: true, db: '/data/app.duckdb' },
       attempts: 1,
     });
     expect(health).toHaveBeenCalledTimes(1);
@@ -85,7 +85,7 @@ describe('probeDuckdbHealth', () => {
       .fn()
       .mockRejectedValueOnce(new Error('ECONNREFUSED'))
       .mockRejectedValueOnce(new Error('ECONNREFUSED'))
-      .mockResolvedValue({ ok: true, db: '/data/hive.duckdb' });
+      .mockResolvedValue({ ok: true, db: '/data/app.duckdb' });
 
     const outcome = await probeDuckdbHealth({ health, now: clock.now, sleep: clock.sleep });
 
@@ -293,11 +293,11 @@ describe('recheckDuckdbHealth', () => {
     // Without this, the boot WARN stands uncorrected in the admin panel until
     // 2000 newer entries evict it — the ring does not clear it on recovery.
     const sleep = vi.fn().mockResolvedValue(undefined);
-    const health = vi.fn().mockResolvedValue({ ok: true, db: '/data/hive.duckdb' });
+    const health = vi.fn().mockResolvedValue({ ok: true, db: '/data/app.duckdb' });
 
     await expect(recheckDuckdbHealth({ health, sleep })).resolves.toEqual({
       ok: true,
-      db: '/data/hive.duckdb',
+      db: '/data/app.duckdb',
     });
     expect(sleep).toHaveBeenCalledWith(DUCKDB_RECOVERY_RECHECK_MS);
   });
@@ -342,7 +342,7 @@ describe('reportDuckdbHealth', () => {
 
   it('logs a single reachable line and does NOT re-check when duckdb answers', async () => {
     const log = fakeLog();
-    const health = vi.fn().mockResolvedValue({ ok: true, db: '/data/hive.duckdb' });
+    const health = vi.fn().mockResolvedValue({ ok: true, db: '/data/app.duckdb' });
 
     await reportDuckdbHealth({ health, log, duckdbUrl: URL_ });
 
@@ -379,7 +379,7 @@ describe('reportDuckdbHealth', () => {
     const health = vi
       .fn()
       .mockRejectedValueOnce(new Error('ECONNREFUSED'))
-      .mockResolvedValue({ ok: true, db: '/data/hive.duckdb' });
+      .mockResolvedValue({ ok: true, db: '/data/app.duckdb' });
 
     await reportDuckdbHealth({
       health,

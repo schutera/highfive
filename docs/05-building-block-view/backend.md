@@ -11,7 +11,7 @@ auth-gated JSON API. Stateless read-through projection on top of
 | `backend/src/auth.ts`            | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
 | `backend/src/duckdbClient.ts`    | Typed HTTP client for `duckdb-service`                                       |
 | `backend/src/duckdbBootProbe.ts` | Advisory boot-time reachability probe (retry loop, deadline-budgeted)        |
-| `backend/tests/*.test.ts`        | Vitest + supertest, 256 tests across 30 files                                |
+| `backend/tests/*.test.ts`        | Vitest + supertest, 262 tests across 30 files                                |
 
 ## Endpoints
 
@@ -77,10 +77,11 @@ and the superseded-in-part
   service burns the full 2 s timeout. The old `10 × 500 ms` therefore
   meant ~4.5 s in one shape and ~25 s in the other. Both are pinned in
   `backend/tests/duckdb-boot-probe.test.ts`.
-- If the probe gives up, the backend re-checks **once, 60 s after boot**
-  (the probe's own elapsed time is subtracted from that wait, so the
-  follow-up lands at 60 s and not at 75 s) and logs either a recovery
-  line or an explicit "still unreachable — no further boot checks".
+- If the probe gives up, the backend re-checks **once, beginning 60 s
+  after boot** (the probe's own elapsed time is subtracted from that
+  wait, so the follow-up starts at 60 s rather than 75 s; it answers up
+  to one attempt-timeout later) and logs either a recovery line or an
+  explicit "still unreachable — no further boot checks".
   Without it, a boot-time warning stands uncorrected in the admin Server
   Logs panel (#171) even after the service recovers: the ring evicts it
   only once 2000 newer entries push it out

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DUCKDB_URL, resolveDuckdbUrl } from '../src/duckdbClient';
+import { DEFAULT_DUCKDB_URL, redactUrlCredentials, resolveDuckdbUrl } from '../src/duckdbClient';
 
 // Pure-function tests for the DUCKDB_SERVICE_URL-resolution helper, mirroring
 // tests/port-default.test.ts. The previous inline
@@ -143,5 +143,47 @@ describe('resolveDuckdbUrl', () => {
     // 8002:8000, so 8000 would be the in-container port and wrong for a
     // host-run backend. See duckdbClient.ts's header comment.
     expect(DEFAULT_DUCKDB_URL).toBe('http://127.0.0.1:8002');
+  });
+});
+
+describe('redactUrlCredentials', () => {
+  // A rejected DUCKDB_SERVICE_URL is echoed into the startup warning, which
+  // lands in the log ring — persisted to disk (ADR-023) and rendered in the
+  // admin panel. log.ts's SECURITY note is explicit that the ring must not
+  // hold secrets even in dev, so this helper is the thing standing between a
+  // typo'd credential URL and a durable plaintext copy of the password.
+
+  it('redacts userinfo in a normal URL', () => {
+    expect(redactUrlCredentials('http://user:pass@duckdb-service:8000')).toBe(
+      'http://***@duckdb-service:8000',
+    );
+  });
+
+  it('redacts userinfo when the scheme is omitted', () => {
+    // The likeliest env-file typo of all, and the case a `//…@`-anchored
+    // regex silently misses — there is no `//` to anchor on. A miss here
+    // writes the password to disk verbatim.
+    expect(redactUrlCredentials('user:pass@duckdb-service:8000')).toBe('***@duckdb-service:8000');
+  });
+
+  it('redacts the whole userinfo when the password itself contains @', () => {
+    // Splitting on the FIRST @ leaves the password tail in the log.
+    expect(redactUrlCredentials('ftp://user:p@sswOrd@host:8000')).toBe('ftp://***@host:8000');
+  });
+
+  it('leaves a credential-free URL untouched', () => {
+    expect(redactUrlCredentials('http://duckdb-service:8000')).toBe('http://duckdb-service:8000');
+    expect(redactUrlCredentials('not a url')).toBe('not a url');
+  });
+
+  it('does not mistake an @ in the path for a credential', () => {
+    // False positives mangle the very value the operator needs to read to
+    // spot their typo.
+    expect(redactUrlCredentials('http://host:8000/path@weird')).toBe('http://host:8000/path@weird');
+  });
+
+  it('passes through undefined and empty without throwing', () => {
+    expect(redactUrlCredentials(undefined)).toBeUndefined();
+    expect(redactUrlCredentials('')).toBe('');
   });
 });

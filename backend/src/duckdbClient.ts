@@ -66,18 +66,37 @@ export function resolveDuckdbUrl(envValue: string | undefined): {
 }
 
 /**
- * Replace any `user:pass@` userinfo in a URL-ish string with `***@`.
+ * Replace any userinfo (`user:pass@`) in a URL-ish string with `***@`.
  *
  * Used before echoing a rejected `DUCKDB_SERVICE_URL` into the startup
  * warning: that line lands in the log ring, which ADR-023 persists to disk and
  * the admin panel renders, and log.ts's SECURITY note is explicit that the
- * ring must not hold secrets even in dev. Operating on the raw string rather
- * than a parsed URL is deliberate — the values reaching this path are exactly
- * the ones `new URL()` refused.
+ * ring must not hold secrets even in dev.
+ *
+ * Operating on the raw string rather than a parsed URL is deliberate — the
+ * values reaching this path are exactly the ones `new URL()` refused, so there
+ * is nothing to parse. That is also why this cannot be a simple `//…@` regex:
+ *
+ *   - the **scheme-less** `user:pass@host:8000` has no `//` at all, and it is
+ *     the likeliest env-file typo (see `resolveDuckdbUrl`), so anchoring on
+ *     `//` misses the single most probable case;
+ *   - a password may itself contain `@` (`user:p@ss@host`), so the split must
+ *     be on the LAST `@` of the authority, not the first.
+ *
+ * An `@` after the authority (e.g. in a path) is left alone — it is not a
+ * credential.
  */
 export function redactUrlCredentials(value: string | undefined): string | undefined {
   if (!value) return value;
-  return value.replace(/\/\/[^/@\s]*@/g, '//***@');
+  const scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.exec(value)?.[0] ?? '';
+  const rest = value.slice(scheme.length);
+  // The authority ends at the first path / query / fragment delimiter.
+  const authorityEnd = rest.search(/[/?#]/);
+  const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
+  const tail = authorityEnd === -1 ? '' : rest.slice(authorityEnd);
+  const at = authority.lastIndexOf('@');
+  if (at === -1) return value;
+  return `${scheme}***@${authority.slice(at + 1)}${tail}`;
 }
 
 const resolved = resolveDuckdbUrl(process.env.DUCKDB_SERVICE_URL);

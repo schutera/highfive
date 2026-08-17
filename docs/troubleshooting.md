@@ -198,7 +198,8 @@ for a review claim, or to bisect a real failure — take the worker pool out of
 the picture:
 
 ```powershell
-cd <repo>\backend; npx vitest run --no-file-parallelism --pool=forks
+$repo = "C:\Users\you\VSCode\highfive"
+cd $repo\backend; npx vitest run --no-file-parallelism --pool=forks
 ```
 
 That configuration has been stable across repeated runs. **Do not "fix" this
@@ -210,7 +211,7 @@ count**, not just the absence of red. Compare against the actual number of
 spec files rather than a number memorised from a doc:
 
 ```powershell
-(Get-ChildItem <repo>\backend\tests -Filter *.test.ts).Count
+(Get-ChildItem $repo\backend\tests -Filter *.test.ts).Count
 ```
 
 ---

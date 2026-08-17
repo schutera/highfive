@@ -130,6 +130,52 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### A markdown formatter rewrites emphasis, and this repo writes identifiers in prose — `prettier --write docs/` silently destroyed `RTC_NOINIT` (PR #193)
+
+**What happened.** A blanket `npx prettier --write docs/ …` — run to format two
+files the branch legitimately touched — reformatted every markdown file under
+`docs/`, including chapters the branch had nothing to do with. In
+`docs/06-runtime-view/esp-reliability.md` it turned
+
+```
+Because RTC_NOINIT survives software resets … Noting only on a _successful_ upload
+```
+
+into
+
+```
+Because RTC*NOINIT survives software resets … Noting only on a \_successful* upload
+```
+
+The identifier `RTC_NOINIT` no longer exists in the file (so it is
+**ungreppable** — and CLAUDE.md's own bench-gotcha section tells you to grep for
+exactly it), and because intraword `*` opens emphasis in CommonMark, the whole
+paragraph renders as one italic run. It reached `main`-bound review invisibly:
+the diff looked like whitespace churn in an unrelated chapter, which is the
+least-read part of any diff.
+
+**Why it happened.** Prettier's markdown printer normalises emphasis delimiters
+(`_x_` → `*x*`). Underscores in bare identifiers are indistinguishable from
+emphasis delimiters to that printer, so it pairs the `_` inside `RTC_NOINIT`
+with the next `_` in the paragraph and re-emits both as `*`. This repo's docs
+are unusually dense with bare snake_case in prose — `RTC_NOINIT`, `hb_failure`,
+`capture_gate`, `date_trunc`, `module_configs` — so the hazard is broad, not
+freak. `.lintstagedrc.json`'s `*.{…,md,…}` → `prettier --write` glob means any
+commit touching any doc can trip it.
+
+**How to avoid it next time.**
+
+- **`docs/**/\*.md` is in `.prettierignore`.** Do not remove it to "fix
+  formatting"; the formatter is not safe on this prose.
+- **Never run a formatter across a directory to fix the files you edited.**
+  Name the files: `npx prettier --write path/to/the/two/files.md`. Scope creep
+  in a formatter run is invisible in review precisely because it looks boring.
+- **Wrap identifiers in backticks in prose.** `` `RTC_NOINIT` `` is immune to
+  emphasis parsing and greppable; bare `RTC_NOINIT` is neither guaranteed.
+- **When a diff touches a file your change has no business touching, read it —
+  don't wave it through as whitespace.** That is the review step that caught
+  this one, four rounds in.
+
 ### An advisory boot probe placed in front of `app.listen` turned a cosmetic log warning into a real outage — and a bare `fetch()` would have kept the backend from ever starting (PR #193)
 
 **What happened.** The backend's boot-time `duckdbHealth()` probe was a

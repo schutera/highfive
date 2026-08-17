@@ -1,12 +1,14 @@
 import 'dotenv/config';
 import { app } from './app';
 import { getApiKey } from './auth';
+import { reportDuckdbHealth } from './duckdbBootProbe';
 import {
-  DUCKDB_RECOVERY_RECHECK_MS,
-  probeDuckdbHealth,
-  recheckDuckdbHealth,
-} from './duckdbBootProbe';
-import { DEFAULT_DUCKDB_URL, DUCKDB_URL, duckdbHealth, duckdbUrlReason } from './duckdbClient';
+  DEFAULT_DUCKDB_URL,
+  DUCKDB_URL,
+  duckdbHealth,
+  duckdbUrlReason,
+  redactUrlCredentials,
+} from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
 import { installLogRing, initLogPersistence, writeStdout } from './logRing';
@@ -37,51 +39,19 @@ if (duckdbUrlReason !== 'ok') {
   const detail =
     duckdbUrlReason === 'unset'
       ? 'unset or blank'
-      : `set to an unusable value (${JSON.stringify(process.env.DUCKDB_SERVICE_URL)}) — ` +
-        `it must be an absolute http(s) URL, e.g. http://duckdb-service:8000`;
+      : // Echo the rejected value so the operator can see their typo — but
+        // through the redactor: this line lands in the ring, which ADR-023
+        // persists to disk and the admin panel renders, and log.ts's SECURITY
+        // note is explicit that the ring must not hold secrets even in dev.
+        // A malformed `ftp://user:pass@host` reaches exactly this branch.
+        `set to an unusable value (${JSON.stringify(
+          redactUrlCredentials(process.env.DUCKDB_SERVICE_URL),
+        )}) — it must be an absolute http(s) URL, e.g. http://duckdb-service:8000`;
   log.warn(
     `[startup] DUCKDB_SERVICE_URL ${detail} — falling back to ${DEFAULT_DUCKDB_URL}. ` +
       `Set it explicitly in production (pm2: ecosystem.config.js; ` +
       `compose: DUCKDB_SERVICE_URL=http://duckdb-service:8000).`,
   );
-}
-
-/**
- * Run the advisory duckdb reachability probe and log its verdict.
- *
- * The loop itself lives in duckdbBootProbe.ts (importable without binding a
- * socket); this wrapper owns the logging side effect. It must never be awaited
- * ahead of `app.listen` — see the call site.
- */
-async function reportDuckdbHealth() {
-  const outcome = await probeDuckdbHealth({ health: duckdbHealth });
-  if (outcome.reachable) {
-    log.info(`🗄 DuckDB service reachable: ${JSON.stringify(outcome.health)}`);
-    return;
-  }
-  // Elapsed, not just attempts: attempt count is the unit this probe
-  // deliberately stopped budgeting in, since one attempt costs ~6ms against a
-  // refused port and a full 2s against a hung one.
-  log.warn(
-    `⚠ DuckDB service not reachable after ${outcome.attempts} attempts / ` +
-      `${outcome.elapsedMs}ms (${DUCKDB_URL}): ${String(outcome.error)}`,
-  );
-
-  // Look once more later, so the warning above cannot stand uncorrected in
-  // the admin log panel for the rest of the process lifetime when duckdb
-  // simply came up late. See recheckDuckdbHealth's docstring.
-  const recovered = await recheckDuckdbHealth({ health: duckdbHealth });
-  if (recovered) {
-    log.info(
-      `🗄 DuckDB service recovered ${DUCKDB_RECOVERY_RECHECK_MS / 1000}s after boot: ` +
-        `${JSON.stringify(recovered)} — the warning above is stale.`,
-    );
-  } else {
-    log.warn(
-      `⚠ DuckDB service still unreachable ${DUCKDB_RECOVERY_RECHECK_MS / 1000}s after boot ` +
-        `(${DUCKDB_URL}). No further boot checks — request paths surface live errors.`,
-    );
-  }
 }
 
 function bootstrap() {
@@ -109,9 +79,9 @@ function bootstrap() {
   // Fire-and-forget, and deliberately NOT awaited: the probe is advisory, so
   // gating the bind on it would connection-refuse every route — /api/health
   // included — for the whole retry window whenever duckdb is slow or down.
-  // `probeDuckdbHealth` captures all errors into its outcome, so the .catch is
-  // for the genuinely-impossible case only; swallowing silently would hide it.
-  reportDuckdbHealth().catch((err) => {
+  // `reportDuckdbHealth` captures all errors internally, so the .catch is for
+  // the genuinely-impossible case only; swallowing silently would hide it.
+  reportDuckdbHealth({ health: duckdbHealth, log, duckdbUrl: DUCKDB_URL }).catch((err) => {
     log.warn(`⚠ DuckDB boot probe failed unexpectedly: ${String(err)}`);
   });
 }

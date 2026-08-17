@@ -65,6 +65,21 @@ export function resolveDuckdbUrl(envValue: string | undefined): {
   return { url: trimmed.replace(/\/+$/, ''), reason: 'ok' };
 }
 
+/**
+ * Replace any `user:pass@` userinfo in a URL-ish string with `***@`.
+ *
+ * Used before echoing a rejected `DUCKDB_SERVICE_URL` into the startup
+ * warning: that line lands in the log ring, which ADR-023 persists to disk and
+ * the admin panel renders, and log.ts's SECURITY note is explicit that the
+ * ring must not hold secrets even in dev. Operating on the raw string rather
+ * than a parsed URL is deliberate — the values reaching this path are exactly
+ * the ones `new URL()` refused.
+ */
+export function redactUrlCredentials(value: string | undefined): string | undefined {
+  if (!value) return value;
+  return value.replace(/\/\/[^/@\s]*@/g, '//***@');
+}
+
 const resolved = resolveDuckdbUrl(process.env.DUCKDB_SERVICE_URL);
 
 export const DUCKDB_URL = resolved.url;

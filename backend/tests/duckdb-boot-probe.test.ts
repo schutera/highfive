@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   DUCKDB_BOOT_PROBE_DEADLINE_MS,
+  DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS,
   DUCKDB_BOOT_PROBE_RETRY_DELAY_MS,
   DUCKDB_BOOT_PROBE_TIMEOUT_MS,
   DUCKDB_RECOVERY_RECHECK_MS,
   probeDuckdbHealth,
   recheckDuckdbHealth,
+  reportDuckdbHealth,
 } from '../src/duckdbBootProbe';
 
 // The boot probe is the part of PR #193 that actually carries risk: it decides
@@ -115,7 +117,7 @@ describe('probeDuckdbHealth', () => {
   // attempt count: the same "10 attempts" means 4.5s in one shape and 25s in
   // the other. Both are pinned so a future edit can't silently pick one.
 
-  it('shape 1 — refused port (~6ms/attempt): spends the deadline on ~26 attempts', async () => {
+  it('shape 1 — refused port (~6ms/attempt): spends the deadline on ~30 attempts', async () => {
     const clock = fakeClock();
     // ~6ms measured on loopback; ~70ms across the docker bridge.
     const health = failingAfter(clock, 6);
@@ -150,7 +152,13 @@ describe('probeDuckdbHealth', () => {
   it('treats the deadline as a true ceiling, clamping the final attempt', async () => {
     // Regression guard: with the break-check before the sleep, an unclamped
     // final attempt could start just under the deadline and then run a full
-    // timeoutMs past it (~17s against a stated 15s budget).
+    // timeoutMs past it.
+    //
+    // The parameters matter. deadlineMs must NOT be a multiple of
+    // (timeoutMs + retryDelayMs), or the loop lands exactly on the deadline
+    // and an unclamped build passes anyway — which is what an earlier version
+    // of this test did, making it detect nothing. At 4000: unclamped runs
+    // 2000+500+2000 = 4500 (fails); clamped runs 2000+500+1500 = 4000 (passes).
     const clock = fakeClock();
     const seen: number[] = [];
     const health = vi.fn(async (timeoutMs: number) => {
@@ -163,14 +171,50 @@ describe('probeDuckdbHealth', () => {
       health,
       now: clock.now,
       sleep: clock.sleep,
-      deadlineMs: 5_000,
+      deadlineMs: 4_000,
       timeoutMs: 2_000,
       retryDelayMs: 500,
     });
 
-    expect(outcome.elapsedMs).toBeLessThanOrEqual(5_000);
-    // No attempt may be granted more than the budget still remaining.
-    expect(Math.max(...seen)).toBeLessThanOrEqual(2_000);
+    expect(outcome.elapsedMs).toBeLessThanOrEqual(4_000);
+    // The final attempt must have been granted strictly less than the full
+    // ceiling — i.e. actually clamped, not merely under the nominal maximum.
+    expect(seen[seen.length - 1]).toBeLessThan(2_000);
+  });
+
+  it('never starts an attempt too small to be meaningful, so the real error survives', async () => {
+    // Measured pathology this closes: the clamp granted a final attempt as
+    // little as 1ms, which guarantees an abort. That synthetic TimeoutError
+    // became `lastError` and so the operator-facing message, overwriting the
+    // real ECONNREFUSED — a boot line blaming a timeout for a refused port,
+    // the exact misdiagnosis this branch exists to delete.
+    const clock = fakeClock();
+    const granted: number[] = [];
+    const health = vi.fn(async (timeoutMs: number) => {
+      granted.push(timeoutMs);
+      const cost = Math.min(6, timeoutMs);
+      clock.advance(cost);
+      // A too-small budget aborts before the connection is even refused.
+      throw new Error(cost < 6 ? 'TimeoutError(synthetic)' : 'ECONNREFUSED');
+    });
+
+    const outcome = await probeDuckdbHealth({
+      health,
+      now: clock.now,
+      sleep: clock.sleep,
+      // Chosen so the budget does NOT divide evenly by the retry delay,
+      // leaving a ragged remainder — the condition that produced the 1ms
+      // attempt in the measured run.
+      deadlineMs: 5_061,
+      retryDelayMs: 500,
+    });
+
+    expect(Math.min(...granted)).toBeGreaterThanOrEqual(DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS);
+    expect(outcome.reachable).toBe(false);
+    if (outcome.reachable) throw new Error('unreachable');
+    // The operator must be told what actually happened.
+    expect(String(outcome.error)).toContain('ECONNREFUSED');
+    expect(String(outcome.error)).not.toContain('synthetic');
   });
 
   it('makes exactly one attempt when the deadline is already spent', async () => {
@@ -273,5 +317,151 @@ describe('recheckDuckdbHealth', () => {
 
     expect(health).toHaveBeenCalledTimes(1);
     expect(sleep).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('reportDuckdbHealth', () => {
+  // These four strings are what an operator actually reads in the admin
+  // Server Logs panel, and they are the reason this function was pulled out of
+  // server.ts: server.ts calls bootstrap() at module scope, so nothing in it
+  // can be imported by a test — which is precisely how a log line claiming
+  // "60s after boot" while firing at t≈75s survived a review round.
+
+  function fakeLog() {
+    const info: string[] = [];
+    const warn: string[] = [];
+    return {
+      info: (m: string) => info.push(m),
+      warn: (m: string) => warn.push(m),
+      info_: info,
+      warn_: warn,
+    };
+  }
+
+  const URL_ = 'http://duckdb-service:8000';
+
+  it('logs a single reachable line and does NOT re-check when duckdb answers', async () => {
+    const log = fakeLog();
+    const health = vi.fn().mockResolvedValue({ ok: true, db: '/data/hive.duckdb' });
+
+    await reportDuckdbHealth({ health, log, duckdbUrl: URL_ });
+
+    expect(log.info_).toHaveLength(1);
+    expect(log.info_[0]).toContain('DuckDB service reachable');
+    expect(log.warn_).toHaveLength(0);
+    // A healthy boot must not schedule a 60s follow-up.
+    expect(health).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns with attempts AND elapsed when the probe gives up', async () => {
+    const log = fakeLog();
+    const health = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+
+    await reportDuckdbHealth({
+      health,
+      log,
+      duckdbUrl: URL_,
+      probeOptions: { deadlineMs: 0 },
+      recoveryDelayMs: 0,
+    });
+
+    expect(log.warn_[0]).toContain('not reachable');
+    expect(log.warn_[0]).toContain('ECONNREFUSED');
+    expect(log.warn_[0]).toContain(URL_);
+    // Elapsed is the unit the deadline redesign switched to; attempts alone
+    // is the number the same change argued was meaningless.
+    expect(log.warn_[0]).toMatch(/\d+ attempts/);
+    expect(log.warn_[0]).toMatch(/\d+ms/);
+  });
+
+  it('supersedes the stale warning with a recovery line when duckdb comes back', async () => {
+    const log = fakeLog();
+    const health = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockResolvedValue({ ok: true, db: '/data/hive.duckdb' });
+
+    await reportDuckdbHealth({
+      health,
+      log,
+      duckdbUrl: URL_,
+      probeOptions: { deadlineMs: 0 },
+      recoveryDelayMs: 0,
+    });
+
+    expect(log.warn_).toHaveLength(1);
+    expect(log.info_).toHaveLength(1);
+    expect(log.info_[0]).toContain('recovered');
+    // The operator must be told the earlier line no longer applies.
+    expect(log.info_[0]).toContain('stale');
+  });
+
+  it('logs an explicitly terminal line when duckdb is still down at the re-check', async () => {
+    const log = fakeLog();
+    const health = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+
+    await reportDuckdbHealth({
+      health,
+      log,
+      duckdbUrl: URL_,
+      probeOptions: { deadlineMs: 0 },
+      recoveryDelayMs: 0,
+    });
+
+    expect(log.warn_).toHaveLength(2);
+    // "No further boot checks" matters: silence afterwards must not be
+    // mistaken for "we are still watching".
+    expect(log.warn_[1]).toContain('still unreachable');
+    expect(log.warn_[1]).toContain('No further boot checks');
+  });
+
+  it('subtracts the probe time so the re-check lands the stated interval after BOOT', async () => {
+    // The bug this pins: the probe burns up to 15s of the window, so sleeping
+    // the full 60s afterwards put a line reading "60s after boot" at t≈75s —
+    // a boot log line misstating its own timing, in a change whose thesis is
+    // that exactly that is the bug.
+    const clock = fakeClock();
+    const slept: number[] = [];
+    const health = failingAfter(clock, DUCKDB_BOOT_PROBE_TIMEOUT_MS, 'TimeoutError');
+    const log = fakeLog();
+
+    await reportDuckdbHealth({
+      health,
+      log,
+      duckdbUrl: URL_,
+      probeOptions: { now: clock.now, sleep: clock.sleep },
+      recheckSleep: async (ms: number) => {
+        slept.push(ms);
+        clock.advance(ms);
+      },
+    });
+
+    const probeElapsed = Number(/(\d+)ms/.exec(log.warn_[0])![1]);
+    expect(probeElapsed).toBeGreaterThan(0);
+    // The re-check must BEGIN exactly the advertised interval after boot —
+    // probe time + follow-up sleep == 60s. Sleeping the full 60s after a 15s
+    // probe would put it at 75s while the log line still said 60s.
+    expect(probeElapsed + slept[0]).toBe(DUCKDB_RECOVERY_RECHECK_MS);
+    // It concludes a little later, bounded by one attempt's own ceiling. The
+    // log wording says "re-checked 60s after boot" (when it was made), not
+    // "at 60s" (when it answered), so this slack is described, not hidden.
+    expect(clock.elapsed).toBeLessThanOrEqual(
+      DUCKDB_RECOVERY_RECHECK_MS + DUCKDB_BOOT_PROBE_TIMEOUT_MS,
+    );
+  });
+
+  it('never rejects, even if the health check throws a non-Error', async () => {
+    const log = fakeLog();
+    const health = vi.fn().mockRejectedValue('a bare string');
+
+    await expect(
+      reportDuckdbHealth({
+        health,
+        log,
+        duckdbUrl: URL_,
+        probeOptions: { deadlineMs: 0 },
+        recoveryDelayMs: 0,
+      }),
+    ).resolves.toBeUndefined();
   });
 });

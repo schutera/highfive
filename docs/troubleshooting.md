@@ -198,15 +198,20 @@ for a review claim, or to bisect a real failure — take the worker pool out of
 the picture:
 
 ```powershell
-cd c:\Users\wienh\VSCode\highfive\backend; npx vitest run --no-file-parallelism --pool=forks
+cd <repo>\backend; npx vitest run --no-file-parallelism --pool=forks
 ```
 
 That configuration has been stable across repeated runs. **Do not "fix" this
 by adding retries or by trimming the suite** — the underlying run is sound,
-and a green count that came from a retry hides the real signal. Note also
-that a partial run is easy to misread as success: check the **file count**,
-not just the absence of red. As of this writing the expected totals are
-`30 files / 249 tests`.
+and a green count that came from a retry hides the real signal.
+
+Note also that a partial run is easy to misread as success: check the **file
+count**, not just the absence of red. Compare against the actual number of
+spec files rather than a number memorised from a doc:
+
+```powershell
+(Get-ChildItem <repo>\backend\tests -Filter *.test.ts).Count
+```
 
 ---
 

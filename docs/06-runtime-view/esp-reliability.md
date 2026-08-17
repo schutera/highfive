@@ -261,12 +261,12 @@ After the `setup()` NTP sync, `captureGateShouldCapture(time(nullptr),
 kBootCaptureWindowSec)` decides whether to take the boot capture; on a
 successful boot upload, `captureGateNote()` records the wall-clock epoch in a
 magic-guarded `RTC_NOINIT_ATTR` slot (same storage class as the breadcrumb and
-the `hb_failure` streak). Because RTC_NOINIT survives software resets but is
+the `hb_failure` streak). Because RTC*NOINIT survives software resets but is
 **wiped on power-on**, a reboot loop (chain of software resets) gets throttled
 to ≤1 boot image per 30 min window, while a genuine power-cycle/redeploy always
 images. The gate **fails open** (captures) when NTP hasn't synced, when no
 anchor exists, or when the clock moves backwards; `captureGateNote` never
-persists a pre-NTP bogus epoch. Noting only on a _successful_ upload bounds the
+persists a pre-NTP bogus epoch. Noting only on a \_successful* upload bounds the
 **server-visible** image rate — a failed upload makes no spam and re-arms the
 gate. Both call sites are in
 [`ESP32-CAM/ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino) (grep `captureGate`);

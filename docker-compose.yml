@@ -138,15 +138,19 @@ services:
         ]
       # 2s, not 15s: `backend` and `image-service` both gate on this
       # healthcheck, so the first probe's latency is a tax on every
-      # `docker compose up`. At 15s the stack idled ~6-15s (depending on
-      # Docker version's start_interval support) waiting to be told about a
-      # service that was already serving. tests/ui/docker-compose.ui.yml
-      # already uses 2s for exactly this reason.
+      # `docker compose up` — at 15s the stack idled several seconds waiting
+      # to be told about a service that was already serving.
+      # tests/ui/docker-compose.ui.yml already uses 2s for the same reason.
+      # (docker-compose.prod.yml keeps 15s on purpose: prod boots once and
+      # pays the steady-state probe cost forever.)
       interval: 2s
       timeout: 5s
-      # 5 consecutive post-start failures (~10s) before unhealthy. Failures
-      # during start_period don't count toward this, so the cold start still
-      # gets its full 10s of grace.
+      # 5 consecutive post-start failures before unhealthy. Failures during
+      # start_period don't count, so the cold start keeps its full 10s grace.
+      # Time-to-unhealthy depends on how the check fails: ~10s when it fails
+      # fast, up to 5x(timeout+interval) = ~35s against a hung service that
+      # holds the connection open. Same "an attempt does not have one cost"
+      # trap the boot probe budgets around.
       retries: 5
       start_period: 10s
     networks:

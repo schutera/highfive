@@ -1,15 +1,19 @@
 // Boot-time duckdb-service reachability probe, split out from server.ts so
 // tests can import it without triggering server.ts's bootstrap() (which binds
 // a socket). Same convention as port.ts's split — a helper that encodes a real
-// decision lives where it can be exercised in isolation.
+// decision lives where it can be exercised in isolation. That includes the
+// *reporting* (`reportDuckdbHealth` below), not just the retry maths: the
+// operator-facing strings are where the last two bugs in this file lived.
 //
-// Why the probe exists: on the PM2 host the API and duckdb-service are started
-// together with no ordering, so a one-shot health check races the service
+// Why the probe exists: an off-compose host (the PM2 runbook) has no
+// orchestrator to gate on, so start ordering is whatever the operator
+// arranged — and a one-shot health check can easily race duckdb-service
 // binding its port. The resulting spurious "⚠ DuckDB service not reachable"
 // then sits in the admin log panel (#171) long after the service is fine,
-// reading like a live outage. All four compose stacks in this repo instead
-// gate the backend declaratively on `service_healthy`, so this retry earns its
-// keep only on the (non-recommended) bare-metal path.
+// reading like a live outage. (#193's author observed the two processes
+// starting ~1s apart on the production PM2 box.) All four compose stacks in
+// this repo instead gate the backend declaratively on `service_healthy`, so
+// this retry earns its keep only on that non-recommended bare-metal path.
 //
 // The probe is ADVISORY. It reports a result; it never gates app.listen. See
 // server.ts — putting the retry loop in front of the bind turned a cosmetic
@@ -35,9 +39,8 @@ import type { DuckdbHealthResult } from './duckdbClient';
  *
  * Note this is SHORTER than the old 10-attempt loop in the stopped-service
  * shape (15 s vs ~25 s). That is intended: the probe's job is to out-wait a
- * startup race measured in *seconds* on the PM2 host, not to wait out a
- * genuinely down service — nothing useful happens in the extra 10 s, and the
- * boot verdict lands sooner.
+ * startup race measured in *seconds*, not to wait out a genuinely down
+ * service — nothing useful happens in the extra 10 s.
  */
 export const DUCKDB_BOOT_PROBE_DEADLINE_MS = 15_000;
 
@@ -50,6 +53,28 @@ export const DUCKDB_BOOT_PROBE_RETRY_DELAY_MS = 500;
  * the entire deadline on a single attempt and report nothing useful.
  */
 export const DUCKDB_BOOT_PROBE_TIMEOUT_MS = 2_000;
+
+/**
+ * Smallest budget worth starting an attempt with.
+ *
+ * Without this floor, the deadline clamp happily granted a final attempt
+ * whatever scrap of time remained — measured as low as **1 ms**, which
+ * guarantees an abort. That synthetic `TimeoutError` then became `lastError`
+ * and so the operator-facing message, overwriting the real `ECONNREFUSED`:
+ * a boot line saying "aborted due to timeout" about a refused port, which is
+ * the exact misdiagnosis this whole change exists to delete. The odds scale
+ * with attempt cost (~1% on loopback, ~12% across the docker bridge), so it
+ * is a routine event, not a corner case.
+ */
+export const DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS = 50;
+
+/**
+ * Structural backstop against a non-terminating loop. Unreachable at the
+ * shipped constants (the deadline stops things ~30 attempts in); it exists so
+ * that a future zero-cost `health` + `retryDelayMs: 0` combination cannot spin
+ * forever.
+ */
+export const DUCKDB_BOOT_PROBE_MAX_ATTEMPTS = 1_000;
 
 export type BootProbeOutcome =
   | { reachable: true; health: DuckdbHealthResult; attempts: number; elapsedMs: number }
@@ -65,6 +90,7 @@ export interface BootProbeOptions {
   deadlineMs?: number;
   retryDelayMs?: number;
   timeoutMs?: number;
+  minAttemptMs?: number;
 }
 
 /**
@@ -75,9 +101,13 @@ export interface BootProbeOptions {
  * the outcome rather than logging it — the caller owns the side effect,
  * mirroring port.ts's `resolvePort`.
  *
- * `deadlineMs` is a true ceiling: the last attempt's timeout is clamped to the
- * remaining budget, so the probe cannot start an attempt at `deadline - ε` and
- * then run a further `timeoutMs` past it.
+ * `deadlineMs` is a true ceiling for every attempt **after the first**: later
+ * attempts are clamped to the remaining budget, and one that cannot be given
+ * at least `minAttemptMs` is not started at all. The *first* attempt is
+ * deliberately exempt and always gets the full `timeoutMs` — reporting
+ * "unreachable" without ever asking would be a lie — so with the pathological
+ * config `deadlineMs < timeoutMs` the probe can outlast its stated deadline by
+ * design. Not reachable at the shipped constants (15000 > 2000).
  */
 export async function probeDuckdbHealth({
   health,
@@ -89,39 +119,39 @@ export async function probeDuckdbHealth({
   deadlineMs = DUCKDB_BOOT_PROBE_DEADLINE_MS,
   retryDelayMs = DUCKDB_BOOT_PROBE_RETRY_DELAY_MS,
   timeoutMs = DUCKDB_BOOT_PROBE_TIMEOUT_MS,
+  minAttemptMs = DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS,
 }: BootProbeOptions): Promise<BootProbeOutcome> {
   const startedAt = now();
   const deadline = startedAt + deadlineMs;
   let attempts = 0;
   let lastError: unknown;
 
-  // do/while: always make at least one attempt, even with a zero deadline —
-  // reporting "unreachable" without ever asking would be a lie.
-  do {
-    attempts++;
-    // Clamp so the final attempt cannot overshoot the stated deadline. Floor
-    // at 1ms: AbortSignal.timeout(0) fires immediately, which would turn the
-    // last attempt into a guaranteed synthetic failure.
+  for (;;) {
     const remaining = deadline - now();
-    const attemptTimeout = attempts === 1 ? timeoutMs : Math.max(1, Math.min(timeoutMs, remaining));
+    // Always make one attempt, even with a spent deadline. Later attempts need
+    // a budget worth having — see DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS.
+    if (attempts > 0 && remaining < minAttemptMs) break;
+    if (attempts >= DUCKDB_BOOT_PROBE_MAX_ATTEMPTS) break;
+
+    attempts++;
+    const attemptTimeout = attempts === 1 ? timeoutMs : Math.min(timeoutMs, remaining);
     try {
-      const health_ = await health(attemptTimeout);
-      return { reachable: true, health: health_, attempts, elapsedMs: now() - startedAt };
+      const result = await health(attemptTimeout);
+      return { reachable: true, health: result, attempts, elapsedMs: now() - startedAt };
     } catch (err) {
       lastError = err;
     }
-    // Don't sleep past the deadline just to fail on the far side of it. With
-    // retryDelayMs=0 this still terminates: the loop guard below re-checks the
-    // clock, and each attempt costs at least its own fetch.
+
+    // Don't sleep past the deadline just to fail on the far side of it.
     if (now() + retryDelayMs >= deadline) break;
     await sleep(retryDelayMs);
-  } while (now() < deadline);
+  }
 
   return { reachable: false, error: lastError, attempts, elapsedMs: now() - startedAt };
 }
 
 /**
- * How long after a failed boot probe to look once more.
+ * How long AFTER BOOT (not after the probe gives up) to look once more.
  *
  * Without this, a backend that boots while duckdb is down leaves a scary WARN
  * near the top of the admin Server Logs panel that is never superseded — the
@@ -150,10 +180,78 @@ export async function recheckDuckdbHealth({
   delayMs?: number;
   timeoutMs?: number;
 }): Promise<DuckdbHealthResult | null> {
-  await sleep(delayMs);
+  if (delayMs > 0) await sleep(delayMs);
   try {
     return await health(timeoutMs);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Run the boot probe and emit the operator-facing verdict, following up with a
+ * recovery re-check if it failed.
+ *
+ * Lives here rather than in server.ts so the four strings it can emit are
+ * testable — server.ts calls `bootstrap()` at module scope and so cannot be
+ * imported by a test. The previous revision left this glue in server.ts, and
+ * that is exactly where the "60s after boot" timing bug survived review.
+ *
+ * Never rejects; the caller fires and forgets after `app.listen`.
+ */
+export async function reportDuckdbHealth({
+  health,
+  log,
+  duckdbUrl,
+  recoveryDelayMs = DUCKDB_RECOVERY_RECHECK_MS,
+  probeOptions,
+  recheckSleep,
+}: {
+  health: (timeoutMs: number) => Promise<DuckdbHealthResult>;
+  log: { info: (msg: string) => void; warn: (msg: string) => void };
+  duckdbUrl: string;
+  recoveryDelayMs?: number;
+  probeOptions?: Partial<BootProbeOptions>;
+  recheckSleep?: (ms: number) => Promise<unknown>;
+}): Promise<void> {
+  const outcome = await probeDuckdbHealth({ health, ...probeOptions });
+  if (outcome.reachable) {
+    log.info(`🗄 DuckDB service reachable: ${JSON.stringify(outcome.health)}`);
+    return;
+  }
+
+  // Elapsed, not just attempts: attempt count is the unit this probe
+  // deliberately stopped budgeting in, since one attempt costs ~6 ms against a
+  // refused port and a full 2 s against a hung one.
+  log.warn(
+    `⚠ DuckDB service not reachable after ${outcome.attempts} attempts / ` +
+      `${outcome.elapsedMs}ms (${duckdbUrl}): ${String(outcome.error)}`,
+  );
+
+  // Subtract what the probe already spent so the follow-up really lands
+  // `recoveryDelayMs` after BOOT, matching what the log line claims. The probe
+  // burns up to 15 s of that window, so sleeping the full amount here would
+  // put a line saying "60s after boot" at t≈75 s.
+  const remainingDelay = Math.max(0, recoveryDelayMs - outcome.elapsedMs);
+  const seconds = Math.round(recoveryDelayMs / 1000);
+  const recovered = await recheckDuckdbHealth({
+    health,
+    delayMs: remainingDelay,
+    ...(recheckSleep ? { sleep: recheckSleep } : {}),
+  });
+
+  // "re-checked Ns after boot" describes when the check was MADE. It answers a
+  // moment later (bounded by one attempt's ceiling), so the wording is
+  // deliberately about the check, not the log timestamp.
+  if (recovered) {
+    log.info(
+      `🗄 DuckDB service recovered — re-checked ${seconds}s after boot: ` +
+        `${JSON.stringify(recovered)}. The warning above is stale.`,
+    );
+  } else {
+    log.warn(
+      `⚠ DuckDB service still unreachable when re-checked ${seconds}s after boot ` +
+        `(${duckdbUrl}). No further boot checks — request paths surface live errors.`,
+    );
   }
 }

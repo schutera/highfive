@@ -115,7 +115,7 @@ firmware. Full reasoning + invariants live in
 Since #148 Phase 3, the `esp_ota_mark_app_valid_cancel_rollback()` IDF call
 **still fires only at end-of-`setup()`** (after camera init — see the "earned
 stage placement" rule below), but it is now **gated on the slot being proven**.
-The first 2xx boot/loop heartbeat clears the `unproven` flag (it does *not*
+The first 2xx boot/loop heartbeat clears the `unproven` flag (it does _not_
 mark-valid early — that would be permanent and would defeat the camera-panic
 rollback); the end-of-`setup()` block then marks valid for any proven slot. A
 new-`fwVersion` heartbeat appears on the server (and the dashboard's

@@ -445,7 +445,7 @@ surviving `setup()`:
   "every stage that can panic has succeeded" mark-valid placement (the
   "Auto-rollback for bricked binaries" bullet under **Enables** above). (An
   earlier draft of this PR called
-  mark-valid on the boot heartbeat, *before* camera init; senior-review flagged
+  mark-valid on the boot heartbeat, _before_ camera init; senior-review flagged
   it as a P0 reintroduction of the brick-on-camera-panic hazard.)
 - A new counter `ota/nc_boots` counts consecutive boots of an unproven slot
   that did **not** validate. The liveness watchdog (Phase 3 item 2) reboots a
@@ -470,15 +470,15 @@ than `HF_OTA_MAX_NOCONTACT_BOOTS` × the reboot interval with **zero** successfu
 contacts; the revert is to the previously-good slot and is recoverable by the
 next OTA. The 6–8 h window makes a transient outage an unlikely cause.
 
-**Migration note.** The first #148 image is flashed by *pre-*#148 firmware,
+**Migration note.** The first #148 image is flashed by _pre-_#148 firmware,
 whose `httpOtaCheckAndApply` does not set `unproven` — so that first image boots
 `unproven = 0` and is validated the old way (survives `setup()`). The
-contact-gated protection takes effect for the *next* OTA, which is cut by #148
+contact-gated protection takes effect for the _next_ OTA, which is cut by #148
 firmware. No bricking risk in either direction; downgrades clear `unproven` on
 rollback.
 
 **Why no new `abort()` site (respects invariant #1).** An earlier sketch made
 the liveness watchdog `abort()` (→ `ESP_RST_PANIC`) on an unproven slot so the
 faulty counter would catch it. The shipped design instead counts unproven boots
-in `nc_boots` regardless of *why* they rebooted, so the watchdog stays a clean
+in `nc_boots` regardless of _why_ they rebooted, so the watchdog stays a clean
 `ESP.restart()` and no `ESP.restart()`-vs-`abort()` invariant is touched.

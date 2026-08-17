@@ -170,6 +170,105 @@ identity key, normalize it once at the boundary
 (`sanitize_upload_filename` + `reserve_filename`) and thread the
 **stored** value through every consumer; grep for the raw value's
 other uses before calling it done.
+### Hardening dev to "match prod" removed the compensating mechanism prod has and dev doesn't — the loopback bind that broke every ESP on the bench (2026-07 audit, #203 / PR #222)
+
+**What happened.** The audit noticed `duckdb-service` has unauthenticated
+internal endpoints (`/new_module`, `/heartbeat`, `DELETE /modules/:id`) and
+that `docker-compose.prod.yml` binds its host mapping to `127.0.0.1:8002`.
+Reasonable conclusion: dev should match. `docker-compose.yml` was changed to
+`127.0.0.1:8002:8000` too.
+
+That silently broke **every ESP32-CAM on a dev bench**.
+`ESP32-CAM/extra_scripts.py` bakes
+`HF_INIT_URL_DEFAULT = http://<DEV_SERVER_HOST>:8002/new_module` into every
+LAN-dev firmware build — and `HF_DEV_BUILD=1` hard-fails without
+`DEV_SERVER_HOST`, so it is the _only_ supported dev firmware path.
+`esp_init.cpp`'s `initNewModuleOnServer` registers against that URL, and
+`client.cpp`'s `sendHeartbeat` reuses it "purely as the carrier of host+port".
+Both are LAN → host:8002. After the change a module registers nowhere and
+heartbeats stop, with no error anywhere on the server side — the packets simply
+never arrive.
+
+Worse, the same commit added a doc asserting the opposite: _"If you need an ESP
+on your LAN to reach the dev stack, that flow talks to image-service and the
+backend, never to duckdb-service directly."_ The firmware says otherwise, and
+so does `docker-compose.prod.yml`'s own comment, which calls `/new_module` and
+`/heartbeat` "the only two ESP firmware paths that hit duckdb-service directly".
+
+**Why it happened.** Prod is loopback-bound **because host-Nginx proxies those
+two paths**. The bind is half of a two-part arrangement; dev has no Nginx, so
+copying the visible half removed the access route and supplied no replacement.
+"Make dev match prod" is only safe when prod's compensating mechanism exists in
+dev too — and that mechanism is usually the part that isn't in the file you're
+editing.
+
+**How to avoid it next time.**
+
+- **Before restricting an interface, grep for who dials it — including
+  firmware.** `grep -rn "8002" ESP32-CAM/` would have ended this in one step.
+  Server-side callers are easy to enumerate; a baked-in URL on a device that
+  isn't in the repo's runtime is exactly what a code search forgets.
+- **A port binding is an access-control decision with a topology dependency.**
+  Write the dependency down next to the binding, as
+  `docker-compose.prod.yml` already did. The comment that saved this was one
+  file away from the change that broke it.
+- **Dev and prod may legitimately differ.** The correct end state here is
+  asymmetric — loopback in prod, LAN-published in dev, with "treat the dev
+  stack as trusted-LAN-only" stated in the security doc. Forcing symmetry was
+  the error, not the asymmetry.
+- **After a revert, grep for the sentences that described the old behaviour.**
+  The revert fixed the compose file and one doc, and left a contradicting
+  claim in `auth.md` — the security document's own enumeration of
+  unauthenticated surfaces — for a second review round to catch.
+  `make check-citations` proves a citation resolves; nothing proves a sentence
+  is still true.
+
+### A security control wired into `docker-compose.prod.yml` is inert on the host that actually deploys (2026-07 audit, #201 / #204 / PR #222)
+
+**What happened.** Two controls shipped as no-ops in production. The #204 boot
+guard (`services/prod_guard.py`, refusing to start when `HIGHFIVE_API_KEY` is
+the public dev fallback) triggers only when `HIGHFIVE_ENV=production` is set —
+and that variable existed in exactly one place, `docker-compose.prod.yml`. The
+#201 change removed a hardcoded Discord webhook and wired `DISCORD_WEBHOOK_URL`
+through the same file.
+
+But the live host runs `scripts/deploy.sh`, which `pm2 reload`s apps whose
+environment comes from an `ecosystem.config.js` that is **gitignored** and
+documented only as a heredoc inside `production-runbook.md`. Neither variable
+was added there. So `require_prod_key()` returned at its first `if` and never
+fired, and `send_discord_message` degraded to a `print()` — silently disabling
+the **ADR-005 silence watcher**, the operator's primary signal that a field
+module has gone quiet. A security PR's net effect on the deployed system was to
+turn off monitoring.
+
+The same review round found the follow-up fix half-wrong too: the supported
+_Docker_ production path (`.env.production.example`,
+`production-deployment.md`) also gained no `DISCORD_WEBHOOK_URL` entry, because
+the fix was written against the PM2 path the reviewer had named.
+
+**Why it happened.** This repo has **three** deployment topologies — dev
+compose, prod compose, bare-metal PM2 — plus `.deploy.env`, which
+`scripts/deploy.sh` sources and pushes in via `pm2 reload --update-env`. That
+is four possible sources for the same variable, and no document maps them. A
+change lands in whichever one the author had open.
+
+**How to avoid it next time.**
+
+- **Ask "which file does the deploying process read?" before "which file
+  declares production?"** `scripts/deploy.sh` is on a 2-minute timer; whatever
+  it pushes wins over anything else on the next tick.
+- **A control that is opt-in via an env var is off by default.** That is a
+  legitimate design (it mirrors the backend's `NODE_ENV` off-ramp), but it
+  means shipping the control is not the same as enabling it — the deploy
+  documentation change is part of the fix, not follow-up work.
+- **When a hardcoded default is removed for good reason, find what silently
+  depended on it.** The webhook literal was a real credential in a public repo
+  and had to go; the thing that quietly relied on it working with zero
+  configuration was the alerting path nobody would notice failing.
+- **Fix all deployment paths in the same pass**, or state explicitly which ones
+  are still exposed. Fixing the path the reviewer mentioned is how the second
+  half of this stayed broken for another round.
+
 ### A secret-redactor is only as good as its wiring — 13 green tests on the helper, and the password still reached the disk (PR #193)
 
 **What happened.** A `DUCKDB_SERVICE_URL` carrying basic-auth credentials had

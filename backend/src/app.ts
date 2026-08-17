@@ -158,10 +158,16 @@ app.post('/api/waitlist', async (req, res) => {
       return;
     }
 
-    // Budget is consumed only by submissions that actually reach the
-    // Discord relay (review-caught): a validation typo or a webhook
-    // outage must not lock a legitimate signer out for an hour, and
-    // those requests are no flood risk — they never hit the channel.
+    // Budget is consumed by submissions that pass validation, i.e. AFTER the
+    // shape checks above but BEFORE the relay. So a validation typo costs
+    // nothing (it never reaches here), while a submission that reaches the
+    // relay costs budget whether or not Discord actually accepts it.
+    //
+    // That second half is deliberate, not an oversight: refunding on webhook
+    // failure would let a flooder farm unlimited relay attempts for as long as
+    // Discord is failing. The cost is that a genuine outage can spend a
+    // legitimate signer's hourly budget — acceptable, because during an outage
+    // nothing reaches the channel anyway, so the signup is lost either way.
     const ip = req.ip ?? 'unknown';
     if (!waitlistLimiter.allow(ip)) {
       res.status(429).json({ error: 'Too many signups from your network — try again later' });

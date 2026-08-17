@@ -103,6 +103,23 @@ compose interpolation rejects a missing or empty secret. Fix
 `.env.production` and re-run. (The homepage bundle carries no secret since
 #142, so there is no `VITE_API_KEY` to set.)
 
+> **Also set `DISCORD_WEBHOOK_URL`, even though nothing fails without it.**
+> It is interpolated as `${DISCORD_WEBHOOK_URL:-}` (blank-tolerant), not
+> `:?` — so a stack with it unset boots perfectly and then **runs with the
+> ADR-005 silence watcher effectively disabled**: `send_discord_message`
+> degrades to a `print()`, and a field module that stops reporting produces
+> no alert. That is the operator's primary field-failure signal, so an unset
+> webhook is a silent monitoring outage rather than a missing nicety.
+>
+> The value used to be hardcoded in both Python services and worked with no
+> configuration; the 2026-07 audit (#201) removed it because a live webhook
+> credential sat in a public repo. Verify after deploy:
+>
+> ```bash
+> docker compose -f docker-compose.prod.yml --env-file .env.production \
+>   exec duckdb-service python -c "import os; print('webhook set:', bool(os.getenv('DISCORD_WEBHOOK_URL')))"
+> ```
+
 ## Detailed Steps
 
 ### Step 1: Create Swap Space

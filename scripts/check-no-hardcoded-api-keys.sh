@@ -67,7 +67,12 @@ fi
 # Python services — found and rotated in the 2026-07 audit (for #201).
 # The `[0-9]` anchor means prose mentions of the path shape without an
 # actual channel id (docs, this script) don't match.
-webhook_pattern='discord\.com/api/webhooks/[0-9]'
+#
+# `discord(app)?\.com` — the legacy `discordapp.com` host still works and is
+# still handed out by older integrations, so a webhook pasted from one would
+# have slipped past a `discord\.com`-only pattern. Verified by probe: the
+# narrower pattern returned OK on a planted discordapp.com literal.
+webhook_pattern='discord(app)?\.com/api/webhooks/[0-9]'
 
 webhook_hits=$(git grep -nIE "$webhook_pattern" -- . "${skip_args[@]}" 2>/dev/null || true)
 

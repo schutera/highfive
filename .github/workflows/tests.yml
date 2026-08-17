@@ -327,6 +327,27 @@ jobs:
         # preinstalled on ubuntu-latest runners.
         run: shellcheck -S info scripts/*.sh ESP32-CAM/build.sh
 
+  duckdb-bind-claims:
+    name: DuckDB bind/docs consistency gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run check-duckdb-bind-claims.sh
+        # dev and prod bind duckdb-service's host port DIFFERENTLY on purpose:
+        # prod is loopback-only because host-Nginx proxies /new_module and
+        # /heartbeat, and dev must stay LAN-reachable because the LAN-dev
+        # firmware posts straight at http://<DEV_SERVER_HOST>:8002 with no
+        # proxy in front. The 2026-07 audit (#203) "hardened" dev to match
+        # prod and silently broke ESP registration + heartbeat on every
+        # bench, shipping docs that asserted the ESP never talks to
+        # duckdb-service directly. The revert then left a contradicting
+        # sentence in auth.md for a second review round to find. See
+        # docs/11-risks-and-technical-debt/ "Hardening dev to match prod".
+        run: bash scripts/check-duckdb-bind-claims.sh
+
   python-version-consistency:
     name: Python-version consistency gate
     runs-on: ubuntu-latest

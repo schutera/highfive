@@ -724,10 +724,13 @@ webhook. Returns `{ "ok": true }` on success.
 Status codes:
 
 - **400** — missing/overlong name, or invalid email.
-- **429** — per-IP rate limit exceeded (3 _relayed_ signups per hour
-  per IP, 2026-07 audit, for #206 — the endpoint is an anonymous relay
-  into the operator's alert channel and must not be floodable).
-  Validation failures and webhook outages do not consume budget. The
+- **429** — per-IP rate limit exceeded (3 signups per hour per IP,
+  2026-07 audit, for #206 — the endpoint is an anonymous relay into the
+  operator's alert channel and must not be floodable). Budget is
+  consumed by submissions that pass validation: a **400 costs nothing**,
+  but a submission that reaches the relay costs budget even if Discord
+  then fails (**502**/**503**) — refunding on failure would let a
+  flooder farm unlimited relay attempts while Discord is down. The
   homepage shows a translated retry-later message.
 - **503** — `DISCORD_WEBHOOK_URL` not configured server-side.
 - **502** — Discord rejected the webhook call.

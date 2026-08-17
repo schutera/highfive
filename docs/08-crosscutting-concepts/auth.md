@@ -383,10 +383,27 @@ keeps onboarding to one secret while preserving the gating semantics.
   location shares an address, so a naive per-IP cap throttles
   legitimate ingestion. Tracked in
   [#224](https://github.com/schutera/highfive/issues/224).
-- All `duckdb-service` routes — assumed to be reachable only from
-  inside the Docker `net` bridge. Don't expose this port to LAN:
-  both compose files bind the host mapping to `127.0.0.1:8002`
-  (dev matched to prod in the 2026-07 audit, for #203).
+- All `duckdb-service` routes — unauthenticated by design, on the
+  assumption that only in-bridge callers reach them. **That assumption
+  holds in production and NOT in dev**, and the difference is
+  deliberate:
+  - **Prod** (`docker-compose.prod.yml`) binds the host mapping to
+    `127.0.0.1:8002`. Host-Nginx proxies exactly the two paths the
+    fleet needs (`/new_module`, `/heartbeat`); nothing else is
+    reachable off-box.
+  - **Dev** (`docker-compose.yml`) publishes `8002` on all interfaces,
+    because there is no Nginx in the dev stack and the LAN-dev firmware
+    posts registration and heartbeat straight at
+    `http://<DEV_SERVER_HOST>:8002` (baked by
+    `ESP32-CAM/extra_scripts.py`). A loopback bind there leaves a
+    module with no route in at all. The 2026-07 audit (#203) briefly
+    matched dev to prod and broke exactly that.
+
+  So **treat a running dev stack as trusted-LAN-only** — it serves
+  `DELETE /modules/:id` and friends to anyone on the same network. On
+  an untrusted network, drop the `8002` port mapping and accept that no
+  ESP can register while it is gone. See
+  [docker-compose.md → Startup ordering](../07-deployment-view/docker-compose.md).
 
 ## Captive-portal credential handling
 

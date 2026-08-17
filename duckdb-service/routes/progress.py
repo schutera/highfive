@@ -16,7 +16,10 @@ _LIMIT_CAP = 100_000
 
 
 def _parse_iso_date(raw: str, field: str):
-    """Parse strictly `YYYY-MM-DD` — the format the error message promises.
+    """Parse `YYYY-MM-DD` identically on every Python in the CI matrix.
+
+    (Zero-padding is not enforced — `2026-7-9` is accepted — but it is
+    accepted the same way on 3.10 and on 3.14, which is the point.)
 
     Deliberately `strptime` and not `date.fromisoformat`: fromisoformat
     widened in 3.11 to accept the basic form (`20260719`) and ISO week dates

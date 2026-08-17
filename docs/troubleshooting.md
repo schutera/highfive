@@ -207,7 +207,8 @@ ruff --version
 For a one-off commit without changing your profile, from Git Bash:
 
 ```bash
-export PATH="$PATH:/c/Users/wienh/AppData/Local/Programs/Python/Python312/Scripts"
+# Adjust the Python version/prefix to match your install:
+export PATH="$PATH:$(cygpath -u "$LOCALAPPDATA")/Programs/Python/Python312/Scripts"
 git commit -F your-message.txt
 ```
 

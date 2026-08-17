@@ -111,6 +111,24 @@ The DuckDB database is stored in the Docker volume:
 This volume is shared between the **image service** and the
 **DuckDB service** to persist the database and images across container restarts.
 
+### Startup ordering
+
+`backend` and `image-service` both declare
+`depends_on: duckdb-service: {condition: service_healthy}`, so compose holds
+them until duckdb-service's healthcheck passes rather than merely until its
+container starts. duckdb-service budgets `start_period: 10s` for Flask +
+DuckDB's `init_db()`; without the gate the dependants come up alongside it and
+their first calls land on a port nothing is listening on yet. For the backend
+that surfaced as a spurious `⚠ DuckDB service not reachable` at boot which then
+lingered in the admin Server Logs panel (#171), reading like a live outage long
+after the service was fine.
+
+The backend _also_ retries the probe in-process
+(`backend/src/duckdbBootProbe.ts`). That is not redundancy for this file's
+benefit — it covers the **PM2 host**, which has no orchestrator to gate on and
+starts `highfive-api` and `duckdb-service` within a second of each other. See
+[production-runbook.md](production-runbook.md).
+
 ### Server log persistence (#178 / ADR-023)
 
 Each service also persists its admin **Server Logs** ring to disk (JSONL, daily

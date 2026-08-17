@@ -73,6 +73,47 @@ describe('resolveDuckdbUrl', () => {
     });
   });
 
+  // ----- malformed URLs: default 8002, with warning -----
+  //
+  // `resolvePort` rejects '3002junk' because a docstring promising
+  // warn-on-misconfig has to actually validate. Same standard here: these
+  // shapes used to pass clean and then die with an opaque `Invalid URL` at
+  // every hop instead of once, loudly, at boot.
+
+  it('returns the default when the scheme is missing', () => {
+    // The likeliest env-file typo, and the one a bare `new URL()` check misses:
+    // 'duckdb-service:8000' PARSES, with protocol 'duckdb-service:'. Only the
+    // http(s) check catches it.
+    expect(resolveDuckdbUrl('duckdb-service:8000')).toEqual({
+      url: DEFAULT_DUCKDB_URL,
+      fromDefault: true,
+    });
+  });
+
+  it('returns the default when the value is not a URL at all', () => {
+    expect(resolveDuckdbUrl('not a url')).toEqual({
+      url: DEFAULT_DUCKDB_URL,
+      fromDefault: true,
+    });
+  });
+
+  it('returns the default for a non-http(s) scheme', () => {
+    // file:// parses fine and would make every fetch fail obscurely.
+    expect(resolveDuckdbUrl('file:///data/hive.duckdb')).toEqual({
+      url: DEFAULT_DUCKDB_URL,
+      fromDefault: true,
+    });
+  });
+
+  it('accepts https, not just http', () => {
+    // A TLS-terminating sidecar is a legitimate deployment; the validation
+    // must not narrow what operators are allowed to configure.
+    expect(resolveDuckdbUrl('https://duckdb.internal:8443')).toEqual({
+      url: 'https://duckdb.internal:8443',
+      fromDefault: false,
+    });
+  });
+
   // ----- the default itself -----
 
   it('defaults to the documented docker host-port mapping', () => {

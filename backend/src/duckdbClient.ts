@@ -2,52 +2,79 @@
 // The default below is the docker host-port mapping (8002:8000) for a backend
 // running on the host against a composed duckdb-service. A bare-metal/pm2
 // deploy (duckdb-service on :8000 directly) MUST set the env var explicitly —
-// see ecosystem.config.js.
+// see the ecosystem.config.js template in
+// docs/07-deployment-view/production-runbook.md.
 export const DEFAULT_DUCKDB_URL = 'http://127.0.0.1:8002';
 
 /**
  * Resolve the duckdb-service base URL from the env-string and signal whether
- * the caller should warn that we fell back to the default.
+ * the caller should warn about an unset / malformed `DUCKDB_SERVICE_URL`.
  *
  * Pure function — caller owns the side effect (log.warn), mirroring port.ts's
  * `resolvePort` so the resolution logic stays unit-testable without env
  * juggling or module-cache resets.
  *
- * `||`-style fallback (not `??`) is deliberate: a blank `DUCKDB_SERVICE_URL=`
- * in a compose `env_file` used to become the literal fetch base, so every hop
- * failed with an opaque URL-parse error. Blank is a misconfiguration, not an
- * intent to override — it takes the default *and* the warning.
+ * Rejects three shapes, all of which used to sail through and then die with an
+ * opaque `Invalid URL` at *every* hop instead of once, loudly, at boot:
+ *
+ *   - unset            → the ordinary "operator didn't configure it" case
+ *   - blank / spaces   → `DUCKDB_SERVICE_URL=` in a compose env_file became
+ *                        the literal fetch base under the previous `??`
+ *   - not an http(s) URL → `duckdb-service:8000` (scheme omitted) parses as a
+ *                        URL with protocol `duckdb-service:`, so a bare
+ *                        `new URL()` check is not enough
+ *
+ * This mirrors `resolvePort` rejecting `3002junk`: a docstring that promises
+ * warn-on-misconfiguration has to actually validate, or "bind the prefix and
+ * stay quiet" creeps back in.
  */
 export function resolveDuckdbUrl(envValue: string | undefined): {
   url: string;
   fromDefault: boolean;
 } {
   const trimmed = envValue?.trim();
-  return trimmed
-    ? { url: trimmed, fromDefault: false }
-    : { url: DEFAULT_DUCKDB_URL, fromDefault: true };
+  if (!trimmed) return { url: DEFAULT_DUCKDB_URL, fromDefault: true };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { url: DEFAULT_DUCKDB_URL, fromDefault: true };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { url: DEFAULT_DUCKDB_URL, fromDefault: true };
+  }
+  return { url: trimmed, fromDefault: false };
 }
 
 const resolved = resolveDuckdbUrl(process.env.DUCKDB_SERVICE_URL);
 
 export const DUCKDB_URL = resolved.url;
 
-/** True when DUCKDB_SERVICE_URL was unset/blank and we fell back to the default. */
+/**
+ * True when `DUCKDB_SERVICE_URL` was unset, blank, or not a usable http(s)
+ * URL, and we fell back to the default.
+ */
 export const duckdbUrlFromDefault = resolved.fromDefault;
 
 /**
- * Fetch ceiling for the health probe. Matches the `AbortSignal.timeout(15000)`
- * that every other `DUCKDB_URL` hop in app.ts uses, so no fetch in the proxy
- * chain is unbounded.
+ * `timeoutMs` is required, not defaulted: callers have genuinely different
+ * budgets (the boot probe wants ~2 s so it can retry, a request path wants
+ * more), and a default here would just be a number nobody chose.
+ *
+ * NOTE for anyone extending this file: most `DUCKDB_URL` hops in app.ts and
+ * *all four* in database.ts's `fetchJsonOk` are still unbounded `fetch()`
+ * calls — only the two `/detections*` hops (app.ts's `/api/modules/:id/detections`
+ * and `/api/detections/history`) carry `AbortSignal.timeout(15000)`. Node's
+ * fetch has NO default timeout, so those hops hang forever against an
+ * accepting-but-silent upstream. Tracked separately; do not read this
+ * function's signal as evidence the proxy chain is covered.
  */
-export const DUCKDB_HEALTH_TIMEOUT_MS = 15000;
-
-export async function duckdbHealth(
-  timeoutMs: number = DUCKDB_HEALTH_TIMEOUT_MS,
-): Promise<{ ok: boolean; db?: string }> {
+export async function duckdbHealth(timeoutMs: number): Promise<{ ok: boolean; db?: string }> {
   // Without the abort signal, a duckdb host that accepts the TCP connection
-  // but never answers (hung, not refused) blocks this await forever — and
-  // with it every caller, including the boot probe's retry loop.
+  // but never answers (hung, not refused) blocks this await forever — and with
+  // it every caller, including the boot probe's retry loop, which is how the
+  // backend ends up never binding its port at all.
   const res = await fetch(`${DUCKDB_URL}/health`, {
     signal: AbortSignal.timeout(timeoutMs),
   });

@@ -130,6 +130,70 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### An advisory boot probe placed in front of `app.listen` turned a cosmetic log warning into a real outage — and a bare `fetch()` would have kept the backend from ever starting (PR #193)
+
+**What happened.** The backend's boot-time `duckdbHealth()` probe was a
+one-shot check that raced `duckdb-service` binding its port, so a healthy
+stack logged `⚠ DuckDB service not reachable` on most restarts. That single
+stale line then sat near the top of the admin Server Logs panel (#171),
+reading like a live outage. The first fix wrapped the probe in a
+`10 × 500 ms` retry loop — but left it **before** `app.listen`. Result: with
+duckdb genuinely down, every route including `/api/health` connection-refused
+for the whole ~4.5 s loop. A cosmetic problem had been traded for an
+availability regression, and CI was green throughout because the happy path
+resolves on attempt 1.
+
+Worse, `duckdbHealth()` used a bare `fetch()`. Node's `fetch` has **no default
+timeout**, so against a host that accepts the TCP connection but never answers
+(hung, not refused — a stuck DuckDB query, a half-open NAT mapping) the first
+attempt never settles: the loop never advances, `app.listen` is never reached,
+and the backend never comes up **at all**. Reproduced on the bench with a
+`net.createServer(() => {})` blackhole; the process sat there indefinitely.
+
+**Why it happened.** Two failure shapes wearing the same disguise. (1) An
+"advisory" check is only advisory if nothing waits on it — putting `await` in
+front of the bind silently promotes it to a startup dependency, and the code
+still _reads_ advisory because the comment says so. (2) Retry loops are written
+against the failure you're imagining (a service that will be up shortly), not
+the one that hurts (a service that answers the SYN and nothing else). A
+refused port fails in ~1 ms, so the loop looks fast in testing; a hung port
+fails never.
+
+A third-order trap: the retry budget was expressed as an **attempt count**.
+Because the real failure mode is instant refusal, `10 × 500 ms` is not a 10-attempt
+window — it is 4.5 s of sleeping, less than half the 10 s `start_period`
+duckdb-service's own healthcheck budgets for its cold start. The budget you
+write is not the budget you get when failures are free.
+
+**How to avoid it next time.**
+
+- **Bind the port first.** Anything advisory — health probes, cache warms,
+  telemetry registration — is fire-and-forget _after_ `app.listen`. If it must
+  gate startup, it isn't advisory; say so and own the downtime.
+- **Every `fetch()` in this repo gets an `AbortSignal.timeout(...)`.** There is
+  no default. Audit with
+  `grep -rn -A3 "await fetch(" backend/src/` — note a bare
+  `| grep -v AbortSignal` **over-reports**, because most calls span lines and
+  carry the signal in the options object below. As of this writing only 3 of
+  the 17 `fetch` calls in `backend/src/app.ts` are bounded (the `/images` list
+  hop and the two `/detections*` hops); `backend/src/database.ts`'s
+  `fetchJsonOk` — the read-model fan-out, four hops on the hot path — is not.
+  Tracked separately; do not read one bounded call as evidence the chain is
+  covered.
+- **Budget retries by wall-clock deadline, not attempt count**, whenever the
+  failure can be instant. `backend/src/duckdbBootProbe.ts` does this, and
+  `backend/tests/duckdb-boot-probe.test.ts` pins it with a fake clock.
+- **Prefer the orchestrator over an application-level retry when you have one.**
+  `depends_on: {condition: service_healthy}` solved this declaratively for
+  compose; the in-process retry exists for the PM2 host, which has no
+  orchestrator. Doing both is fine — but write down _which_ path each one
+  covers, or the next reader will delete one as redundant.
+- **A boot path that no test has ever executed is not tested.** The retry loop
+  lived in `server.ts`, which calls `bootstrap()` at module scope and so cannot
+  be imported by a test. `port.ts` already existed to solve exactly this;
+  the convention was applied to the trivial helper and skipped for the risky
+  one. Extract the logic, then pin it.
+
 ### CI tested only Python 3.11, but the repo names its runtime three different ways — a 3.11-only `datetime.UTC` crashed both services on deploy (#180, #192)
 
 **What happened.** Commit `8938899` added `from datetime import UTC` / `datetime.now(UTC)`

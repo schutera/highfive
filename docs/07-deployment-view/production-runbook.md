@@ -190,7 +190,22 @@ module.exports = {
       exec_mode: 'cluster',
       env: {
         NODE_ENV: 'production',
-        PORT: 3001
+        PORT: 3001,
+        // Both service URLs MUST be set here, pointing at wherever YOU ran
+        // duckdb-service and image-service on this host (this runbook does
+        // not deploy them — see the banner at the top). The values below
+        // assume each runs natively on its own listen port. Neither backend
+        // fallback works off-compose: DUCKDB_SERVICE_URL falls back to
+        // 127.0.0.1:8002, which is the *docker host-port mapping* and has
+        // nothing listening behind it here, and IMAGE_SERVICE_URL falls back
+        // to a Docker service name that does not resolve at all. Omitting
+        // IMAGE_SERVICE_URL is a documented outage — see chapter 11, "Admin
+        // 'failed to load images'". The backend logs a [startup] warning
+        // when DUCKDB_SERVICE_URL falls back; check the boot lines after
+        // every deploy, and remember `pm2 restart` ignores edits to this
+        // block unless you pass --update-env.
+        DUCKDB_SERVICE_URL: 'http://127.0.0.1:8000',
+        IMAGE_SERVICE_URL: 'http://127.0.0.1:4444'
       },
       error_file: './logs/err.log',
       out_file: './logs/out.log',

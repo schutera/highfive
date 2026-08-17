@@ -1,7 +1,7 @@
 import 'dotenv/config';
-import { setTimeout as delay } from 'node:timers/promises';
 import { app } from './app';
 import { getApiKey } from './auth';
+import { probeDuckdbHealth } from './duckdbBootProbe';
 import { DUCKDB_URL, duckdbHealth, duckdbUrlFromDefault } from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
@@ -34,44 +34,21 @@ if (duckdbUrlFromDefault) {
   );
 }
 
-// The API and duckdb-service are started together (pm2/compose), so a single
-// health probe at boot races the service binding its port: it logs a
-// misleading "not reachable" that then sits at the top of the admin log panel
-// (#171) for the whole process lifetime. Retry briefly before deciding.
-const DUCKDB_HEALTH_BOOT_RETRIES = 10;
-const DUCKDB_HEALTH_BOOT_RETRY_DELAY_MS = 500;
-// Shorter than duckdbClient's 15s default: this probe runs up to 10x, and a
-// hung (accepting-but-silent) duckdb host would otherwise stretch the boot
-// diagnosis to 150s before the warning appears. 2s x 10 + delays caps it ~25s.
-const DUCKDB_HEALTH_BOOT_TIMEOUT_MS = 2000;
-
 /**
- * Advisory boot probe. Runs *after* `app.listen` and never blocks it: the
- * result only decides which line lands in the log ring, so making
- * `/api/health` connection-refuse for the duration of the retry loop would
- * trade a cosmetic log problem for a real availability regression
- * (PR #193 review, P1).
+ * Run the advisory duckdb reachability probe and log its verdict.
+ *
+ * The loop itself lives in duckdbBootProbe.ts (importable without binding a
+ * socket); this wrapper owns the logging side effect. It must never be awaited
+ * ahead of `app.listen` — see the call site.
  */
-async function probeDuckdbHealth() {
-  let health: { ok: boolean; db?: string } | undefined;
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= DUCKDB_HEALTH_BOOT_RETRIES; attempt++) {
-    try {
-      health = await duckdbHealth(DUCKDB_HEALTH_BOOT_TIMEOUT_MS);
-      break;
-    } catch (err) {
-      lastErr = err;
-      if (attempt < DUCKDB_HEALTH_BOOT_RETRIES) {
-        await delay(DUCKDB_HEALTH_BOOT_RETRY_DELAY_MS);
-      }
-    }
-  }
-  if (health) {
-    log.info(`🗄 DuckDB service reachable: ${JSON.stringify(health)}`);
+async function reportDuckdbHealth() {
+  const outcome = await probeDuckdbHealth({ health: duckdbHealth });
+  if (outcome.reachable) {
+    log.info(`🗄 DuckDB service reachable: ${JSON.stringify(outcome.health)}`);
   } else {
     log.warn(
-      `⚠ DuckDB service not reachable after ${DUCKDB_HEALTH_BOOT_RETRIES} attempts ` +
-        `(${DUCKDB_URL}): ${String(lastErr)}`,
+      `⚠ DuckDB service not reachable after ${outcome.attempts} attempts ` +
+        `(${DUCKDB_URL}): ${String(outcome.error)}`,
     );
   }
 }
@@ -98,10 +75,14 @@ function bootstrap() {
     }
   });
 
-  // Fire-and-forget: `probeDuckdbHealth` swallows every error internally, so
-  // there is nothing to await and no rejection to handle. Kicked off after
-  // listen() so the socket is already bound when the first retry sleeps.
-  void probeDuckdbHealth();
+  // Fire-and-forget, and deliberately NOT awaited: the probe is advisory, so
+  // gating the bind on it would connection-refuse every route — /api/health
+  // included — for the whole retry window whenever duckdb is slow or down.
+  // `probeDuckdbHealth` captures all errors into its outcome, so the .catch is
+  // for the genuinely-impossible case only; swallowing silently would hide it.
+  reportDuckdbHealth().catch((err) => {
+    log.warn(`⚠ DuckDB boot probe failed unexpectedly: ${String(err)}`);
+  });
 }
 
 bootstrap();

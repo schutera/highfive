@@ -37,17 +37,27 @@ if (duckdbUrlFromDefault) {
 // The API and duckdb-service are started together (pm2/compose), so a single
 // health probe at boot races the service binding its port: it logs a
 // misleading "not reachable" that then sits at the top of the admin log panel
-// (#171) for the whole process lifetime. Retry briefly before deciding. The
-// check is advisory — we start serving regardless of the result.
+// (#171) for the whole process lifetime. Retry briefly before deciding.
 const DUCKDB_HEALTH_BOOT_RETRIES = 10;
 const DUCKDB_HEALTH_BOOT_RETRY_DELAY_MS = 500;
+// Shorter than duckdbClient's 15s default: this probe runs up to 10x, and a
+// hung (accepting-but-silent) duckdb host would otherwise stretch the boot
+// diagnosis to 150s before the warning appears. 2s x 10 + delays caps it ~25s.
+const DUCKDB_HEALTH_BOOT_TIMEOUT_MS = 2000;
 
-async function bootstrap() {
+/**
+ * Advisory boot probe. Runs *after* `app.listen` and never blocks it: the
+ * result only decides which line lands in the log ring, so making
+ * `/api/health` connection-refuse for the duration of the retry loop would
+ * trade a cosmetic log problem for a real availability regression
+ * (PR #193 review, P1).
+ */
+async function probeDuckdbHealth() {
   let health: { ok: boolean; db?: string } | undefined;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= DUCKDB_HEALTH_BOOT_RETRIES; attempt++) {
     try {
-      health = await duckdbHealth();
+      health = await duckdbHealth(DUCKDB_HEALTH_BOOT_TIMEOUT_MS);
       break;
     } catch (err) {
       lastErr = err;
@@ -64,7 +74,9 @@ async function bootstrap() {
         `(${DUCKDB_URL}): ${String(lastErr)}`,
     );
   }
+}
 
+function bootstrap() {
   app.listen(PORT, () => {
     // Don't say "http://localhost" — the process binds all interfaces and on
     // prod is reached via nginx, so the localhost prefix is misleading in the
@@ -85,6 +97,11 @@ async function bootstrap() {
       writeStdout(`   Or machine credential: X-Admin-Key: ${getApiKey()}\n`);
     }
   });
+
+  // Fire-and-forget: `probeDuckdbHealth` swallows every error internally, so
+  // there is nothing to await and no rejection to handle. Kicked off after
+  // listen() so the socket is already bound when the first retry sleeps.
+  void probeDuckdbHealth();
 }
 
 bootstrap();

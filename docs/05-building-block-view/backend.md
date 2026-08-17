@@ -56,9 +56,14 @@ and the superseded-in-part
 
 ## Operational notes
 
-- `backend` retries `duckdb-service` on startup with exponential
-  backoff and starts empty if the DB is unreachable; it does not
-  block.
+- `backend` probes `duckdb-service` at startup with 10 fixed-interval
+  (500 ms) retries, each capped by a 2 s fetch timeout. The probe is
+  advisory and runs **after** `app.listen`, so it never delays the port
+  binding; the API serves regardless of the outcome. The retries exist
+  because the API and `duckdb-service` start together (pm2/compose) and a
+  one-shot probe races the service binding its port — the resulting
+  spurious "not reachable" then sits in the log ring (#171) for the whole
+  process lifetime. See `backend/src/server.ts`'s `probeDuckdbHealth`.
 - Internal URL: `http://duckdb-service:8000` (Docker service name,
   never `localhost`).
 - Internal URL for the admin proxy:

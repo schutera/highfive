@@ -63,9 +63,11 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 
 ## Operational trade-offs (intentional, not debt)
 
-- **Backend re-fetches on every request.** Stateless projection. No
-  caching layer. Acceptable at the expected read volume; revisit if
-  multi-tenant.
+- **Backend holds only a 5 s snapshot cache.** Read-through projection
+  with a short TTL (`backend/src/database.ts`'s `ASSEMBLE_CACHE_TTL_MS`)
+  plus in-flight dedupe; anything older re-fetches, and a degraded
+  snapshot is never cached. Acceptable at the expected read volume;
+  revisit if multi-tenant.
 - **Stub empty/sealed classifier.** `stub_classify()` ships in
   production today. The learned detector already localizes holes for the
   snips (ADR-027) but defers empty/sealed; a learned classifier will fill
@@ -208,14 +210,22 @@ all.
 A third-order trap: the retry budget was expressed as an **attempt count**, and
 an attempt does not have one cost. Measured:
 
-| Failure shape                                   | Cost per attempt       | What `10 × 500 ms` really buys |
-| ----------------------------------------------- | ---------------------- | ------------------------------ |
-| Refused port, loopback                          | ~6 ms                  | ~4.5 s (all of it sleeping)    |
-| Refused port, across the docker bridge          | ~70 ms                 | ~5.2 s                         |
-| Stopped / hung service (accepts, never answers) | the full timeout (2 s) | ~25 s                          |
+| Failure shape                                   | Cost per attempt       | What 10 attempts cost at a 2 s cap |
+| ----------------------------------------------- | ---------------------- | ---------------------------------- |
+| Refused port, loopback                          | ~6 ms                  | ~4.5 s (all of it sleeping)        |
+| Refused port, across the docker bridge          | ~70 ms                 | ~5.2 s                             |
+| Stopped / hung service (accepts, never answers) | the full timeout (2 s) | ~25 s                              |
+
+The column is deliberately phrased as "at a 2 s cap" rather than "what the
+original loop bought": the `10 × 500 ms` version had **no** cap, so in the
+bottom row it did not cost 25 s — it never finished at all, which is the
+first failure above. 25 s is what those 10 attempts cost once the
+`AbortSignal` exists, and it is the figure the deadline had to improve on.
 
 Measured under the 15 s deadline that replaced it: a refused loopback port
-yields **30 attempts / 14806 ms**, a blackhole listener **6 attempts**.
+yields **30 attempts in ~14.7 s**, a blackhole listener **6 attempts**. (The
+arithmetic predicts ~14.68 s for the first; real runs land a little over from
+timer and GC slop.)
 
 Same loop, a 5× spread in wall-clock. In the refused shape the budget is under
 half the 10 s `start_period` duckdb-service's own healthcheck allows for its

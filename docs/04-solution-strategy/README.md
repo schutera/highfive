@@ -45,9 +45,11 @@ The container topology, shared volume, and inter-service URLs live in
 These were deliberate choices, not bugs. They're documented here so
 future contributors don't "fix" them without context.
 
-- **Backend re-fetches on every request.** `backend.ModuleReadModel`
-  is stateless: every `/api/modules*` call fans out to duckdb-service
-  via `Promise.allSettled`. Simple, partial-failure-tolerant, not
+- **Backend keeps no state beyond a 5 s snapshot cache.**
+  `backend.ModuleReadModel` fans `/api/modules*` out to duckdb-service
+  via `Promise.allSettled`, serving repeat calls inside the TTL from
+  memory (`backend/src/database.ts`'s `ASSEMBLE_CACHE_TTL_MS`) and
+  deduping concurrent ones. Simple, partial-failure-tolerant, not
   optimised for high QPS.
 - **Stub classifier ships in production.** `image-service` calls
   `stub_classify()` returning random 0/1 per (bee_type, nest index).

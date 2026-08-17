@@ -2,12 +2,15 @@ import 'dotenv/config';
 import { app } from './app';
 import { getApiKey } from './auth';
 import { reportDuckdbHealth } from './duckdbBootProbe';
+// DUCKDB_URL itself is deliberately NOT imported here: it can carry basic-auth
+// credentials, and every string this file builds ends up in the disk-persisted,
+// admin-readable log ring. DUCKDB_URL_SAFE is the only loggable form.
 import {
   DEFAULT_DUCKDB_URL,
-  DUCKDB_URL,
+  DUCKDB_URL_SAFE,
   duckdbHealth,
   duckdbUrlReason,
-  redactUrlCredentials,
+  redactCredentials,
 } from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
@@ -45,7 +48,7 @@ if (duckdbUrlReason !== 'ok') {
         // note is explicit that the ring must not hold secrets even in dev.
         // A malformed `ftp://user:pass@host` reaches exactly this branch.
         `set to an unusable value (${JSON.stringify(
-          redactUrlCredentials(process.env.DUCKDB_SERVICE_URL),
+          redactCredentials(process.env.DUCKDB_SERVICE_URL),
         )}) — it must be an absolute http(s) URL, e.g. http://duckdb-service:8000`;
   log.warn(
     `[startup] DUCKDB_SERVICE_URL ${detail} — falling back to ${DEFAULT_DUCKDB_URL}. ` +
@@ -81,7 +84,7 @@ function bootstrap() {
   // included — for the whole retry window whenever duckdb is slow or down.
   // `reportDuckdbHealth` captures all errors internally, so the .catch is for
   // the genuinely-impossible case only; swallowing silently would hide it.
-  reportDuckdbHealth({ health: duckdbHealth, log, duckdbUrl: DUCKDB_URL }).catch((err) => {
+  reportDuckdbHealth({ health: duckdbHealth, log, duckdbUrl: DUCKDB_URL_SAFE }).catch((err) => {
     log.warn(`⚠ DuckDB boot probe failed unexpectedly: ${String(err)}`);
   });
 }

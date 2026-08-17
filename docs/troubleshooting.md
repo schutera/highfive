@@ -184,7 +184,7 @@ Expect only `200` (deleted) and `404` (already gone) — any `000`/`5xx` means t
 ### Backend vitest run reports fewer files than exist / `Error: Worker exited unexpectedly` (Windows)
 
 **Symptom.** `cd backend && npm test` finishes green but with a file short —
-e.g. `Test Files 29 passed (30)` and `247 passed (249)` — or fails outright
+e.g. `Test Files 29 passed (30)` — a whole file silently missing from the run — or fails outright
 with `Error: Worker exited unexpectedly`. Re-running passes with the full
 count. The missing file varies between runs.
 

@@ -20,7 +20,7 @@
 // log problem into a real availability regression (PR #193 review).
 
 import { setTimeout as delay } from 'node:timers/promises';
-import type { DuckdbHealthResult } from './duckdbClient';
+import { redactCredentials, type DuckdbHealthResult } from './duckdbClient';
 
 /**
  * Wall-clock budget for the whole probe, and a deliberate trade-off between
@@ -62,11 +62,17 @@ export const DUCKDB_BOOT_PROBE_TIMEOUT_MS = 2_000;
  * guarantees an abort. That synthetic `TimeoutError` then became `lastError`
  * and so the operator-facing message, overwriting the real `ECONNREFUSED`:
  * a boot line saying "aborted due to timeout" about a refused port, which is
- * the exact misdiagnosis this whole change exists to delete. The odds scale
- * with attempt cost (~1% on loopback, ~12% across the docker bridge), so it
- * is a routine event, not a corner case.
+ * the exact misdiagnosis this whole change exists to delete. The odds are
+ * roughly `cost / (cost + retryDelay)` — ~1% on loopback (6/506) but ~12%
+ * across the docker bridge (70/570) — so it is routine, not a corner case.
+ *
+ * 250 ms, not 50: the floor only helps if it exceeds a *successful-failure*
+ * attempt's cost, and a 50 ms floor still leaves the window
+ * `remaining ∈ [50, 70)` where a ~70 ms bridge attempt aborts early. 250 ms
+ * clears both measured costs with room to spare, and costs nothing — the
+ * retry-delay guard already stops the loop below ~500 ms remaining.
  */
-export const DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS = 50;
+export const DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS = 250;
 
 /**
  * Structural backstop against a non-terminating loop. Unreachable at the
@@ -209,6 +215,7 @@ export async function reportDuckdbHealth({
 }: {
   health: (timeoutMs: number) => Promise<DuckdbHealthResult>;
   log: { info: (msg: string) => void; warn: (msg: string) => void };
+  /** MUST be a credential-safe form — pass duckdbClient's `DUCKDB_URL_SAFE`. */
   duckdbUrl: string;
   recoveryDelayMs?: number;
   /**
@@ -230,9 +237,13 @@ export async function reportDuckdbHealth({
   // Elapsed, not just attempts: attempt count is the unit this probe
   // deliberately stopped budgeting in, since one attempt costs ~6 ms against a
   // refused port and a full 2 s against a hung one.
+  // The error text is redacted too, not just the URL: undici embeds the full
+  // request URL in its own message ("Request cannot be constructed from a URL
+  // that includes credentials: http://user:pass@host/health"), so passing a
+  // pre-redacted `duckdbUrl` alone still leaks the password one field over.
   log.warn(
     `⚠ DuckDB service not reachable after ${outcome.attempts} attempts / ` +
-      `${outcome.elapsedMs}ms (${duckdbUrl}): ${String(outcome.error)}`,
+      `${outcome.elapsedMs}ms (${duckdbUrl}): ${redactCredentials(String(outcome.error))}`,
   );
 
   // Subtract what the probe already spent so the follow-up really lands

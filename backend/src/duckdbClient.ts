@@ -66,42 +66,53 @@ export function resolveDuckdbUrl(envValue: string | undefined): {
 }
 
 /**
- * Replace any userinfo (`user:pass@`) in a URL-ish string with `***@`.
+ * Replace URL userinfo (`user:pass@`) with `***@`, anywhere in a string.
  *
- * Used before echoing a rejected `DUCKDB_SERVICE_URL` into the startup
- * warning: that line lands in the log ring, which ADR-023 persists to disk and
- * the admin panel renders, and log.ts's SECURITY note is explicit that the
- * ring must not hold secrets even in dev.
+ * The log ring is persisted to disk (ADR-023) and rendered in the admin panel,
+ * and log.ts's SECURITY note is explicit that it must not hold secrets even in
+ * dev. A `DUCKDB_SERVICE_URL` carrying basic-auth credentials is an ordinary
+ * thing for an operator to configure, so **every** log site that can echo that
+ * value — or an error derived from it — has to go through here.
  *
- * Operating on the raw string rather than a parsed URL is deliberate — the
- * values reaching this path are exactly the ones `new URL()` refused, so there
- * is nothing to parse. That is also why this cannot be a simple `//…@` regex:
+ * Takes arbitrary text, not just a bare URL, because undici embeds the full
+ * URL in its own error messages: a failed fetch produces `Request cannot be
+ * constructed from a URL that includes credentials: http://user:pass@host/…`,
+ * which leaks just as effectively as interpolating the URL ourselves.
  *
- *   - the **scheme-less** `user:pass@host:8000` has no `//` at all, and it is
- *     the likeliest env-file typo (see `resolveDuckdbUrl`), so anchoring on
- *     `//` misses the single most probable case;
- *   - a password may itself contain `@` (`user:p@ss@host`), so the split must
- *     be on the LAST `@` of the authority, not the first.
+ * Two passes, because no single anchor covers the shapes that actually occur:
  *
- * An `@` after the authority (e.g. in a path) is left alone — it is not a
- * credential.
+ *   1. `scheme://userinfo@` and protocol-relative `//userinfo@`. The `[^\s/?#]*`
+ *      is greedy, so a password containing `@` (`user:p@ss@host`) is consumed
+ *      whole rather than leaving the tail behind.
+ *   2. Bare `user:pass@host` with no `//` to anchor on — the scheme-omitted
+ *      typo `resolveDuckdbUrl` calls the likeliest of all, and the
+ *      single-slash `http:/user:pass@host` variant. Requiring a `:` inside the
+ *      userinfo keeps ordinary `@` in prose and in URL paths untouched.
+ *
+ * Deliberately fail-safe: it would rather redact something that wasn't a
+ * credential than let one through.
  */
-export function redactUrlCredentials(value: string | undefined): string | undefined {
-  if (!value) return value;
-  const scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.exec(value)?.[0] ?? '';
-  const rest = value.slice(scheme.length);
-  // The authority ends at the first path / query / fragment delimiter.
-  const authorityEnd = rest.search(/[/?#]/);
-  const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
-  const tail = authorityEnd === -1 ? '' : rest.slice(authorityEnd);
-  const at = authority.lastIndexOf('@');
-  if (at === -1) return value;
-  return `${scheme}***@${authority.slice(at + 1)}${tail}`;
+export function redactCredentials(text: string | undefined): string | undefined {
+  if (!text) return text;
+  return text
+    .replace(/((?:[a-zA-Z][a-zA-Z0-9+.-]*:)?\/\/)[^\s/?#]*@/g, '$1***@')
+    .replace(/[^\s/@]*:[^\s/@]*@/g, '***@');
 }
 
 const resolved = resolveDuckdbUrl(process.env.DUCKDB_SERVICE_URL);
 
 export const DUCKDB_URL = resolved.url;
+
+/**
+ * The **only** form of the duckdb URL that may be written to a log.
+ *
+ * `DUCKDB_URL` can legitimately carry basic-auth credentials, and asking each
+ * call site to remember to redact is exactly the decision that failed review:
+ * the malformed branch was redacted while the ordinary well-formed branch
+ * echoed the password verbatim into a disk-persisted, admin-readable ring.
+ * Interpolate this constant, never `DUCKDB_URL`, into any user-visible string.
+ */
+export const DUCKDB_URL_SAFE = redactCredentials(DUCKDB_URL) as string;
 
 /** Why DUCKDB_SERVICE_URL was rejected, or `ok`. Drives the startup warning. */
 export const duckdbUrlReason = resolved.reason;

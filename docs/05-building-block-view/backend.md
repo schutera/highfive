@@ -1,8 +1,9 @@
 # Backend (`backend/`)
 
 Node 22 + Express + TypeScript. Serves the React frontend with a typed,
-auth-gated JSON API. Stateless read-through projection on top of
-`duckdb-service`; no DB connection of its own.
+auth-gated JSON API. Read-through projection on top of `duckdb-service`
+(with a 5 s in-memory snapshot cache, see below); no DB connection of
+its own.
 
 | Path                             | Role                                                                         |
 | -------------------------------- | ---------------------------------------------------------------------------- |
@@ -11,7 +12,7 @@ auth-gated JSON API. Stateless read-through projection on top of
 | `backend/src/auth.ts`            | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
 | `backend/src/duckdbClient.ts`    | Typed HTTP client for `duckdb-service`                                       |
 | `backend/src/duckdbBootProbe.ts` | Advisory boot-time reachability probe (retry loop, deadline-budgeted)        |
-| `backend/tests/*.test.ts`        | Vitest + supertest, 262 tests across 30 files                                |
+| `backend/tests/*.test.ts`        | Vitest + supertest, 269 tests across 30 files                                |
 
 ## Endpoints
 

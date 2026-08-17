@@ -22,7 +22,8 @@ the upload pipeline (edge → server) and the dashboard read flow.
    These reads are public — no credential (#142 / ADR-019).
 3. `backend.ModuleReadModel` fans out to `duckdb-service` via
    `Promise.allSettled`:
-   - `GET /modules`, `GET /nests`, `GET /progress`
+   - `GET /modules`, `GET /nests`, `GET /progress`,
+     `GET /heartbeats_summary`
 4. `backend` normalises rows into `@highfive/contracts` DTOs and
    serves them.
 5. Frontend renders the map, module list, status, battery and nest
@@ -45,8 +46,12 @@ the upload pipeline (edge → server) and the dashboard read flow.
    the shown capture date/time. Public read; a failed fetch degrades to "no
    grid" and never tears down the panel.
 
-No caching layer; each browser poll re-fetches. Partial failures
-degrade gracefully (some fields empty) rather than 500ing.
+A 5 s in-memory snapshot cache sits in front of the fan-out
+(`backend/src/database.ts`'s `ASSEMBLE_CACHE_TTL_MS`), and concurrent
+callers are deduped, so a browser poll inside that window is served from
+memory. Only a fully-successful snapshot is cached. Partial failures
+degrade gracefully (some fields empty) rather than 500ing, and a
+degraded snapshot is deliberately not cached.
 
 ## Admin telemetry read flow
 

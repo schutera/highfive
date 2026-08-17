@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DUCKDB_URL, redactUrlCredentials, resolveDuckdbUrl } from '../src/duckdbClient';
+import { DEFAULT_DUCKDB_URL, redactCredentials, resolveDuckdbUrl } from '../src/duckdbClient';
 
 // Pure-function tests for the DUCKDB_SERVICE_URL-resolution helper, mirroring
 // tests/port-default.test.ts. The previous inline
@@ -146,7 +146,7 @@ describe('resolveDuckdbUrl', () => {
   });
 });
 
-describe('redactUrlCredentials', () => {
+describe('redactCredentials', () => {
   // A rejected DUCKDB_SERVICE_URL is echoed into the startup warning, which
   // lands in the log ring — persisted to disk (ADR-023) and rendered in the
   // admin panel. log.ts's SECURITY note is explicit that the ring must not
@@ -154,7 +154,7 @@ describe('redactUrlCredentials', () => {
   // typo'd credential URL and a durable plaintext copy of the password.
 
   it('redacts userinfo in a normal URL', () => {
-    expect(redactUrlCredentials('http://user:pass@duckdb-service:8000')).toBe(
+    expect(redactCredentials('http://user:pass@duckdb-service:8000')).toBe(
       'http://***@duckdb-service:8000',
     );
   });
@@ -163,27 +163,89 @@ describe('redactUrlCredentials', () => {
     // The likeliest env-file typo of all, and the case a `//…@`-anchored
     // regex silently misses — there is no `//` to anchor on. A miss here
     // writes the password to disk verbatim.
-    expect(redactUrlCredentials('user:pass@duckdb-service:8000')).toBe('***@duckdb-service:8000');
+    expect(redactCredentials('user:pass@duckdb-service:8000')).toBe('***@duckdb-service:8000');
   });
 
   it('redacts the whole userinfo when the password itself contains @', () => {
     // Splitting on the FIRST @ leaves the password tail in the log.
-    expect(redactUrlCredentials('ftp://user:p@sswOrd@host:8000')).toBe('ftp://***@host:8000');
+    expect(redactCredentials('ftp://user:p@sswOrd@host:8000')).toBe('ftp://***@host:8000');
   });
 
   it('leaves a credential-free URL untouched', () => {
-    expect(redactUrlCredentials('http://duckdb-service:8000')).toBe('http://duckdb-service:8000');
-    expect(redactUrlCredentials('not a url')).toBe('not a url');
+    expect(redactCredentials('http://duckdb-service:8000')).toBe('http://duckdb-service:8000');
+    expect(redactCredentials('not a url')).toBe('not a url');
   });
 
   it('does not mistake an @ in the path for a credential', () => {
     // False positives mangle the very value the operator needs to read to
     // spot their typo.
-    expect(redactUrlCredentials('http://host:8000/path@weird')).toBe('http://host:8000/path@weird');
+    expect(redactCredentials('http://host:8000/path@weird')).toBe('http://host:8000/path@weird');
   });
 
   it('passes through undefined and empty without throwing', () => {
-    expect(redactUrlCredentials(undefined)).toBeUndefined();
-    expect(redactUrlCredentials('')).toBe('');
+    expect(redactCredentials(undefined)).toBeUndefined();
+    expect(redactCredentials('')).toBe('');
+  });
+});
+
+describe('redactCredentials — the shapes that leaked before', () => {
+  // Each of these reached a log line with the password intact at some point
+  // during PR #193's review. The ring is persisted to disk (ADR-023) and
+  // rendered in the admin panel, so a miss here is a durable plaintext copy.
+
+  it('redacts a WELL-FORMED url carrying basic-auth credentials', () => {
+    // The one that mattered most: a valid URL is `reason: 'ok'`, so it never
+    // touched the malformed branch's redactor and went verbatim into the
+    // "not reachable" warning. Basic-auth is an ordinary thing to configure.
+    expect(redactCredentials('http://admin:hunter2@127.0.0.1:8000')).toBe(
+      'http://***@127.0.0.1:8000',
+    );
+  });
+
+  it('redacts credentials embedded in an error message', () => {
+    // undici puts the full URL in its own text, so redacting only the URL
+    // field still leaked the password one field over in the same line.
+    const err =
+      'TypeError: Request cannot be constructed from a URL that includes ' +
+      'credentials: http://admin:hunter2@127.0.0.1:9/health';
+    const out = redactCredentials(err)!;
+    expect(out).not.toContain('hunter2');
+    expect(out).toContain('***@127.0.0.1:9/health');
+  });
+
+  it('redacts despite leading whitespace (the caller passes an untrimmed env var)', () => {
+    // resolveDuckdbUrl trims before validating; server.ts handed the redactor
+    // the RAW value. A ^-anchored scheme match was defeated by one space.
+    expect(redactCredentials(' ftp://user:hunter2@host ')).toBe(' ftp://***@host ');
+  });
+
+  it('redacts a protocol-relative url', () => {
+    expect(redactCredentials('//user:hunter2@host')).toBe('//***@host');
+  });
+
+  it('redacts a single-slash scheme typo', () => {
+    // http:/… normalises to a valid URL in WHATWG, so this reaches the
+    // "well-formed" path and the unredacted log site.
+    expect(redactCredentials('http:/user:hunter2@host')).toBe('http:/***@host');
+  });
+
+  it('is idempotent — redacting twice does not corrupt the result', () => {
+    const once = redactCredentials('http://admin:hunter2@host:8000')!;
+    expect(redactCredentials(once)).toBe(once);
+  });
+
+  it('never leaves a password behind, across every shape at once', () => {
+    // Belt-and-braces sweep: whatever the shape, "hunter2" must not survive.
+    for (const v of [
+      'http://u:hunter2@h:1',
+      'u:hunter2@h:1',
+      '//u:hunter2@h:1',
+      'http:/u:hunter2@h:1',
+      'ftp://u:hunter2@h:1',
+      'http://u:p@hunter2@h:1',
+      '  https://u:hunter2@h:1/path?q=1  ',
+    ]) {
+      expect(redactCredentials(v)).not.toContain('hunter2');
+    }
   });
 });

@@ -12,10 +12,13 @@
 # Design notes:
 #   * Idempotent + timer-safe: flock-guarded, exits SILENTLY when main is
 #     unchanged (the 99% case — no Discord spam).
-#   * "Fail gracefully": services are built BEFORE anything live is touched and
-#     only reloaded after a green build; a post-reload health failure rolls the
-#     working tree + build artifacts back to PREV_SHA and reloads again, so the
-#     OLD version keeps running.
+#   * "Fail gracefully": services are built before being reloaded, and a
+#     post-reload health failure rolls the working tree + build artifacts back
+#     to PREV_SHA and reloads again, so the OLD version keeps running.
+#     CAVEAT: dependency installs are not artifact-swappable. `npm ci` wipes and
+#     reinstalls node_modules in place (rollback() reinstalls the previous
+#     lockfile), and `pip install` mutates the shared system site-packages and
+#     is NOT reverted on rollback — pip upgrades are forward-only.
 #   * Firmware is published LAST — only after the services are live and healthy,
 #     because it is the one irreversible step. A broken/failing build never
 #     reaches the field (old manifest stays served). Once a *good* manifest is
@@ -113,6 +116,22 @@ rollback() {
   [ -d "$REPO/backend/dist.bak" ] && { rm -rf "$REPO/backend/dist"; mv "$REPO/backend/dist.bak" "$REPO/backend/dist"; }
   [ -d "$REPO/homepage/dist.old" ] && { rm -rf "$REPO/homepage/dist"; mv "$REPO/homepage/dist.old" "$REPO/homepage/dist"; }
   git reset --hard "$PREV_SHA" >/dev/null 2>&1 || true
+  # `npm ci` DELETES node_modules before installing, and nothing else here puts
+  # it back. If the install is what failed, the tree above is restored but the
+  # dependencies are wiped or half-written — and the running cluster keeps
+  # answering from modules already resident in RAM, so the health check below
+  # PASSES and we would report "old version is running and healthy" while the
+  # host is armed to die on its next `pm2 restart` (which the documented
+  # ecosystem.config.js schedules on its own via max_memory_restart).
+  # Reinstall against the now-restored lockfile; if that fails too, this is not
+  # a clean rollback and must not be reported as one.
+  if [ "${NPM_CI_RAN:-0}" = "1" ]; then
+    log "rollback: reinstalling node_modules against $PREV_SHA's lockfile"
+    if ! HUSKY=0 npm ci >>"$AUTOLOG" 2>&1; then
+      notify fail "Deploy FAILED — rollback INCOMPLETE" "$reason"$'\n'"Tree restored to $PREV_SHA, but 'npm ci' also failed during rollback: node_modules is wiped or partial. The cluster is still serving from memory and WILL fail on its next restart. NEEDS A HUMAN."
+      exit 1
+    fi
+  fi
   reload_services "$RELOADED"
   if health_ok "$HEALTH_BACKEND"; then
     notify fail "Deploy FAILED — rolled back" "$reason"$'\n'"Restored $PREV_SHA; old version is running and healthy."
@@ -221,22 +240,39 @@ main() {
   rm -rf "$REPO/backend/dist.bak" "$REPO/homepage/dist.old" "$REPO/homepage/dist.new"
   [ -d "$REPO/backend/dist" ] && cp -a "$REPO/backend/dist" "$REPO/backend/dist.bak"
 
+  # NPM_CI_RAN / PIP_FAILED are read by rollback() and the final notification.
   local actions="" HOMEPAGE_REBUILT=0
+  NPM_CI_RAN=0
+  PIP_FAILED=""
 
-  # ---- build phase (no live mutation) ---------------------------------------
+  # ---- build phase -----------------------------------------------------------
+  # NOTE: not entirely free of live mutation any more — `npm ci` below wipes and
+  # reinstalls node_modules underneath the running cluster. It is still ordered
+  # before the builds and before any reload, and `rollback()` reinstalls, but
+  # the old "nothing live is touched until reload" invariant no longer holds
+  # here. See the header design note.
+  #
   # Workspaces monorepo (contracts/backend/homepage share ONE root lockfile): a
   # new backend/homepage dependency changes the ROOT `package-lock.json`, not
   # `<pkg>/package-lock.json`, so reinstall from the root — BEFORE the builds, or
   # `tsc`/`vite` compile against missing deps and roll back (hit this with
-  # rotating-file-stream, #178). `npm ci` at root installs every workspace.
-  # The root `package.json` is in the gate too: it declares the workspace list,
-  # so adding a workspace there without touching the lockfile would otherwise
-  # skip the install. Theoretical (a real dep change always touches the
-  # lockfile) but free, and its absence next to the three workspace manifests
-  # read as an oversight.
+  # rotating-file-stream, #178). `npm ci` at root installs every workspace. The
+  # root `package.json` is in the gate because it declares the workspace list.
+  #
+  # HUSKY=0: a root `npm ci` runs the root `prepare` script, which is `husky`.
+  # Installing hooks on the deploy host would point `core.hooksPath` at .husky,
+  # and this script's own `git commit` in publish_firmware would then fire
+  # pre-commit (lint-staged) — an unguarded call, so a hook failure kills the
+  # script via errexit after firmware.json is already live, leaving a dirty
+  # tree that bricks every subsequent tick on the dirty-tree check. Deploy
+  # hosts do not want developer hooks.
   if changed_match '^package(-lock)?\.json$|^(backend|homepage|contracts)/package\.json$'; then
     log "npm deps changed — root npm ci (workspaces)"
-    npm ci >/dev/null 2>&1 || rollback "root npm ci failed"
+    NPM_CI_RAN=1
+    # Output to the log, not /dev/null: this failure is FATAL and rolls back
+    # production, so "root npm ci failed" without the reason is the one message
+    # an operator cannot act on.
+    HUSKY=0 npm ci >>"$AUTOLOG" 2>&1 || rollback "root npm ci failed (see pip/npm output in $AUTOLOG)"
   fi
   if changed_match '^backend/|^contracts/'; then
     log "building backend"
@@ -250,21 +286,32 @@ main() {
     HOMEPAGE_REBUILT=1; actions+="homepage "
   fi
   # Python services run under pm2 on the system `python3` (no venv) — install new
-  # deps into it BEFORE reload. NON-FATAL: a resolver miss (e.g. an onnxruntime
-  # with no wheel for this Python) must not block the deploy; the post-reload
-  # health check is the real gate (services degrade gracefully on a missing
-  # OPTIONAL dep, while a genuinely-required missing module crashes the reload →
-  # health fails → rollback).
-  # pip output is teed into the deploy log rather than sent to /dev/null: the
-  # exact failure this step anticipates is "no matching distribution" for a
-  # wheel that doesn't exist on this interpreter, and that reason is only in
-  # pip's stderr. A bare "WARN: had failures" tells the operator nothing about
-  # the one case they need to act on.
+  # deps into it BEFORE reload.
+  #
+  # NON-FATAL, but NOT health-gated. A genuinely-required missing module crashes
+  # the reload → health fails → rollback, so that half is covered. The half that
+  # is NOT: image-service imports cv2/numpy/onnxruntime under a try/except
+  # (`services/hole_detection.py`'s `_RUNTIME_AVAILABLE`) and `/health` is a pure
+  # liveness probe that never touches them. So a missing OPTIONAL wheel — the
+  # exact case this non-fatal design exists for — leaves health green while hole
+  # detection is silently dead. The health check therefore cannot be the gate;
+  # instead the failure is recorded and surfaced in the final notification, so a
+  # degraded deploy can never report a clean "Deploy OK".
+  #
+  # pip output goes to the deploy log rather than /dev/null: the failure this
+  # anticipates is "no matching distribution" for a wheel that doesn't exist on
+  # this interpreter, and that reason exists only in pip's stderr.
   pip_install_service() {
     local svc="$1"
-    log "$svc deps changed — pip install"
+    # Log which interpreter we are actually installing into. The whole step
+    # assumes `python3` is the same interpreter pm2 launches the services with
+    # — unverifiable from this repo. If it is not, pip SUCCEEDS, installs into
+    # a site-packages nobody imports, and the fix is a silent no-op. Recording
+    # it turns that assumption into something an operator can check.
+    log "$svc deps changed — pip install into $(python3 -c 'import sys; print(sys.executable)' 2>/dev/null || echo 'python3 (unresolved)')"
     if ! python3 -m pip install -r "$svc/requirements.txt" >>"$AUTOLOG" 2>&1; then
-      log "WARN: $svc pip install had failures (see pip output above; health check will gate)"
+      log "WARN: $svc pip install had failures (see pip output in $AUTOLOG)"
+      PIP_FAILED+="$svc "
     fi
   }
   if changed_match '^duckdb-service/requirements\.txt$'; then pip_install_service duckdb-service; fi
@@ -310,6 +357,15 @@ main() {
   [ -z "$actions" ] && actions="(no service rebuild — docs/firmware/other)"
   printf '%s deployed auto (%s) -- %s; firmware=%s %s; %ds\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$new_sha" "$actions" "$fw_action" "$fw_note" "$dur" >> "$DEPLOYLOG"
+  # A pip failure is non-fatal but must NOT be reported as a clean deploy: the
+  # health checks cannot see a missing optional dependency (see pip_install_service),
+  # so this notification is the only place it surfaces.
+  if [ -n "$PIP_FAILED" ]; then
+    notify fail "Deploy DEGRADED (${dur}s)" \
+      "Range $PREV_SHA..$new_sha by $author"$'\n'"Rebuilt: $actions"$'\n'"Firmware: $fw_action $fw_note"$'\n\n'"pip install FAILED for: $PIP_FAILED"$'\n'"Services are up and healthy, but an optional dependency may be missing (e.g. hole detection disabled). See $AUTOLOG."$'\n\n'"$subjects"
+    log "deploy complete in ${dur}s — DEGRADED (pip: $PIP_FAILED)"
+    exit 0
+  fi
   notify success "Deploy OK (${dur}s)" "Range $PREV_SHA..$new_sha by $author"$'\n'"Rebuilt: $actions"$'\n'"Firmware: $fw_action $fw_note"$'\n\n'"$subjects"
   log "deploy complete in ${dur}s"
 }

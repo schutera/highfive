@@ -251,26 +251,45 @@ pm2 startup
 > The host normally self-deploys via [`scripts/deploy.sh`](../../scripts/deploy.sh)
 > (auto-deploy driver — pulls `main`, installs deps, rebuilds only what changed,
 > reloads the affected pm2 apps, health-checks, rolls back on failure; the
-> `highfive-deploy.timer` may be inactive). The manual steps below mirror what it
-> does — use them for a hand-deploy or to recover. **Caveat:** a rollback restores
-> the git tree and Node build artifacts, but a `pip install` that _upgraded_ a
-> shared dependency (e.g. `numpy` → 2.x) is **not** reverted — pip upgrades are
-> forward-only across a rollback.
+> `highfive-deploy.timer` may be inactive). The manual steps below are a
+> **simplified hand-deploy**, not a faithful replay — use them for a recovery.
+> They differ from the automated path in three ways that matter:
 >
-> When the automated deploy's pip step fails it logs a WARN and continues (the
-> health check is the real gate). **pip's own output is appended to
-> `logs/auto-deploy.log`**, so the actual reason — usually
-> `ERROR: No matching distribution found` for a wheel that doesn't exist on
-> this interpreter — is in that file next to the WARN line. Read it before
-> assuming the deploy was clean:
+> - **The manual homepage build passes `VITE_API_URL` explicitly; `deploy.sh`
+>   does not.** The automated build is a bare `npx vite build`, so it depends on
+>   a gitignored `homepage/.env.production` existing **on the host** — otherwise
+>   `homepage/src/services/api.ts` falls back to `http://localhost:3002/api` and
+>   ships a bundle pointing at localhost. `health_ok "$HEALTH_HOMEPAGE"` only
+>   checks that the HTML loads, so it cannot detect this. Verify the host file
+>   exists before relying on an automated homepage deploy.
+> - **`deploy.sh` stages the homepage to `dist.new` and swaps**; the manual step
+>   builds straight into the live `dist`, so the site is briefly half-built.
+> - **The manual path has no rollback.**
+>
+> **Caveat:** a rollback restores the git tree and Node build artifacts, and
+> reinstalls `node_modules` from the restored lockfile — but a `pip install`
+> that _upgraded_ a shared dependency (e.g. `numpy` → 2.x) is **not** reverted;
+> pip upgrades are forward-only across a rollback.
+>
+> When the automated deploy's pip step fails it logs a WARN, continues, and
+> sends a **"Deploy DEGRADED"** notification instead of "Deploy OK". The health
+> checks deliberately do **not** gate this: `image-service` imports its
+> hole-detection deps under a `try/except` and `/health` is a pure liveness
+> probe, so a missing optional wheel leaves health green while detection is
+> silently dead. **pip's own output is appended to `logs/auto-deploy.log`**, so
+> the actual reason — usually `ERROR: No matching distribution found` for a
+> wheel that doesn't exist on this interpreter — is in that file next to the
+> WARN line:
 >
 > ```bash
-> grep -n -B20 "pip install had failures" /var/www/highfive/logs/auto-deploy.log | tail -40
+> grep -n -B60 "pip install had failures" /var/www/highfive/logs/auto-deploy.log | tail -40
 > ```
 
-The live PM2 stack is **four** apps, not just the backend: `highfive-api`
-(Node, cluster), `duckdb-service` and `image-service` (Python, run on the
-**system `python3` — no venv**), plus the Nginx-served `homepage/dist`.
+The live PM2 stack is **three** apps, not just the backend: `highfive-api`
+(Node, cluster), plus `duckdb-service` and `image-service` (Python, run on the
+**system `python3` — no venv**, so they share one `site-packages`; keep the
+`requests` pin identical in both `requirements.txt` files). A fourth moving
+part, the Nginx-served `homepage/dist`, is static files rather than a pm2 app.
 
 ```bash
 cd /var/www/highfive

@@ -76,11 +76,45 @@ export function resolveDuckdbUrl(envValue: string | undefined): {
   if (parsed.username || parsed.password) {
     return { url: DEFAULT_DUCKDB_URL, reason: 'malformed' };
   }
-  // Strip trailing slashes: every call site builds `${DUCKDB_URL}/path`, so a
-  // trailing slash yields `//health`, `//modules`, … Werkzeug and nginx both
-  // merge duplicate slashes, so this survives — at the cost of a 308 per
-  // request and every logged upstream URL looking broken.
-  return { url: trimmed.replace(/\/+$/, ''), reason: 'ok' };
+  // Return the NORMALISED origin+path, not the raw string. Every call site
+  // builds `${DUCKDB_URL}/path`, so anything after the authority has to be
+  // dealt with here or it corrupts every request:
+  //   - a trailing slash yields `//health`, `//modules`, … (survives only
+  //     because Werkzeug and nginx merge duplicate slashes, at the cost of a
+  //     redirect per request and every logged URL looking broken)
+  //   - a query or fragment (`http://host:8000?x=1`) yields `…?x=1/health`,
+  //     which is the "sails through and dies at every hop instead of once,
+  //     loudly, at boot" shape this function exists to prevent.
+  return { url: (parsed.origin + parsed.pathname).replace(/\/+$/, ''), reason: 'ok' };
+}
+
+/**
+ * Compose the operator-facing `[startup]` warning for a rejected
+ * `DUCKDB_SERVICE_URL`.
+ *
+ * Lives here, not inline in server.ts, for one reason: server.ts calls
+ * `bootstrap()` at module scope and so cannot be imported by a test, and this
+ * string is **the last place a credential can still reach the log ring** (it
+ * echoes the raw env value back so the operator can see their typo). Both
+ * redaction bugs on this branch were wiring bugs, not regex bugs — an
+ * un-pinned call site is exactly how they happened.
+ */
+export function describeDuckdbUrlMisconfig(
+  reason: DuckdbUrlReason,
+  rawEnvValue: string | undefined,
+): string | null {
+  if (reason === 'ok') return null;
+  const detail =
+    reason === 'unset'
+      ? 'unset or blank'
+      : `set to an unusable value (${JSON.stringify(redactCredentials(rawEnvValue))}) — ` +
+        `it must be an absolute http(s) URL with no embedded credentials ` +
+        `(Node's fetch rejects those outright), e.g. http://duckdb-service:8000`;
+  return (
+    `[startup] DUCKDB_SERVICE_URL ${detail} — falling back to ${DEFAULT_DUCKDB_URL}. ` +
+    `Set it explicitly in production (pm2: ecosystem.config.js; ` +
+    `compose: DUCKDB_SERVICE_URL=http://duckdb-service:8000).`
+  );
 }
 
 /**

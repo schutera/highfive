@@ -132,6 +132,60 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### A secret-redactor is only as good as its wiring — 13 green tests on the helper, and the password still reached the disk (PR #193)
+
+**What happened.** A `DUCKDB_SERVICE_URL` carrying basic-auth credentials had
+its password written verbatim into the log ring — which ADR-023 persists to
+disk and the admin Server Logs panel renders — across **three** review rounds,
+each of which believed it had fixed the problem:
+
+1. Round 1 added `redactUrlCredentials` and wired it to the **malformed**
+   branch only. A well-formed `http://user:pass@host` resolves as `ok`, so it
+   never touched the redactor. The rare branch was protected; the common one
+   was not.
+2. Round 2 fixed the regex (it had missed scheme-less `user:pass@host`) and
+   shipped 6 helper tests. The wiring gap was untouched, so the leak remained.
+3. Round 3 redacted the URL in the boot warning — and the password still
+   appeared, because undici embeds the offending URL in **its own error
+   message** (`Request cannot be constructed from a URL that includes
+   credentials: http://user:pass@host/health`), which was interpolated into
+   the same line one field over.
+
+Throughout, every test passed. None of them tested a call site.
+
+**Why it happened.** Redaction is a **wiring** property, not a string-transform
+property, and unit tests on the transform cannot see wiring. Worse, the fix
+was scoped to whatever example the reviewer named each round, while a docstring
+asserted an invariant across the whole backend ("the **only** form that may be
+written to a log") that was enforced in two files out of four. **An invariant
+asserted in a comment and enforced in some of the code is worse than no
+invariant, because the next reader trusts the comment.**
+
+The real fix was one level up, and it was cheaper than any of the three
+attempts: Node's `fetch` **refuses** a URL containing credentials before any
+network I/O, so such a value was never going to work at all — it broke 100% of
+duckdb hops, not just the probe. `resolveDuckdbUrl` now rejects it as
+`malformed`. `DUCKDB_URL` is therefore credential-free *by construction*, every
+log site in `app.ts` and `database.ts` is safe with no per-site redaction, and a
+config that used to fail silently now fails loudly at boot.
+
+**How to avoid it next time.**
+
+- **Make the value safe, not the log statements.** If a secret can be in a
+  variable, the choke point is where the variable is *produced*. Redacting at
+  each call site is a decision that has to be re-made forever and only has to
+  be forgotten once.
+- **Test the call site, not the helper.** A redactor with 13 passing tests
+  leaked three times. The test that would have caught all three feeds a
+  credentialed value into the function that *logs*, and asserts the password is
+  absent from the output.
+- **Check whether the bad input is even legal.** Asking "can this value ever
+  work?" beat three rounds of "how do I hide it?" — and turned a silent
+  data-leak into a loud misconfiguration warning.
+- **When an error is logged, remember the error text may contain the input.**
+  `String(err)` from `fetch` embeds the URL. Redact the message, not just the
+  field you remembered to interpolate.
+
 ### A markdown formatter rewrites emphasis, and this repo writes identifiers in prose — `prettier --write docs/` silently destroyed `RTC_NOINIT` (PR #193)
 
 **What happened.** A blanket `npx prettier --write docs/ …` — run to format two

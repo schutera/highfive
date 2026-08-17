@@ -6,11 +6,11 @@ import { reportDuckdbHealth } from './duckdbBootProbe';
 // userinfo, so the constant can never hold a credential. The raw *env value*
 // still can, which is why the warning below redacts it.
 import {
-  DEFAULT_DUCKDB_URL,
   DUCKDB_URL,
+  describeDuckdbUrlMisconfig,
+  describeError,
   duckdbHealth,
   duckdbUrlReason,
-  redactCredentials,
 } from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
@@ -35,28 +35,13 @@ if (portUnsetWarning) {
   );
 }
 
-if (duckdbUrlReason !== 'ok') {
-  // Name the actual mistake. Saying "unset" to an operator who can see the
-  // variable set — which a single fromDefault boolean forces — is the same
-  // class of misleading boot warning this whole change exists to remove.
-  const detail =
-    duckdbUrlReason === 'unset'
-      ? 'unset or blank'
-      : // Echo the rejected value so the operator can see their typo — but
-        // through the redactor: this line lands in the ring, which ADR-023
-        // persists to disk and the admin panel renders, and log.ts's SECURITY
-        // note is explicit that the ring must not hold secrets even in dev.
-        // A malformed `ftp://user:pass@host` reaches exactly this branch.
-        `set to an unusable value (${JSON.stringify(
-          redactCredentials(process.env.DUCKDB_SERVICE_URL),
-        )}) — it must be an absolute http(s) URL with no embedded credentials ` +
-        `(Node's fetch rejects those outright), e.g. http://duckdb-service:8000`;
-  log.warn(
-    `[startup] DUCKDB_SERVICE_URL ${detail} — falling back to ${DEFAULT_DUCKDB_URL}. ` +
-      `Set it explicitly in production (pm2: ecosystem.config.js; ` +
-      `compose: DUCKDB_SERVICE_URL=http://duckdb-service:8000).`,
-  );
-}
+// Composed in duckdbClient so it can be unit-tested — this message echoes the
+// raw env value back and is the last place a credential can reach the ring.
+const duckdbUrlWarning = describeDuckdbUrlMisconfig(
+  duckdbUrlReason,
+  process.env.DUCKDB_SERVICE_URL,
+);
+if (duckdbUrlWarning) log.warn(duckdbUrlWarning);
 
 function bootstrap() {
   app.listen(PORT, () => {
@@ -86,7 +71,7 @@ function bootstrap() {
   // `reportDuckdbHealth` captures all errors internally, so the .catch is for
   // the genuinely-impossible case only; swallowing silently would hide it.
   reportDuckdbHealth({ health: duckdbHealth, log, duckdbUrl: DUCKDB_URL }).catch((err) => {
-    log.warn(`⚠ DuckDB boot probe failed unexpectedly: ${String(err)}`);
+    log.warn(`⚠ DuckDB boot probe failed unexpectedly: ${describeError(err)}`);
   });
 }
 

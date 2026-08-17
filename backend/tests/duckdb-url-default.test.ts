@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_DUCKDB_URL,
+  describeDuckdbUrlMisconfig,
   describeError,
   redactCredentials,
   resolveDuckdbUrl,
@@ -330,5 +331,68 @@ describe('describeError', () => {
   it('handles a non-Error rejection without throwing', () => {
     expect(describeError('a bare string')).toBe('a bare string');
     expect(describeError(undefined)).toBe('');
+  });
+});
+
+describe('describeDuckdbUrlMisconfig — the last credential-bearing log site', () => {
+  // This message echoes the RAW env value back so the operator can see their
+  // typo, which makes it the only remaining place a password can reach the
+  // ring (persisted to disk per ADR-023, rendered in the admin panel). It was
+  // extracted out of server.ts specifically so it could be pinned: server.ts
+  // calls bootstrap() at module scope and cannot be imported by a test, and
+  // BOTH redaction bugs on this branch were un-pinned wiring, not a bad regex.
+
+  it('returns null when the URL is fine, so no warning is logged', () => {
+    expect(describeDuckdbUrlMisconfig('ok', 'http://duckdb-service:8000')).toBeNull();
+  });
+
+  it('says "unset or blank" — not "malformed" — when nothing was configured', () => {
+    const msg = describeDuckdbUrlMisconfig('unset', undefined)!;
+    expect(msg).toContain('unset or blank');
+    expect(msg).toContain(DEFAULT_DUCKDB_URL);
+  });
+
+  it('says the value is SET but unusable, and shows it, when it is malformed', () => {
+    // Telling an operator their variable is "unset" when they can see it set
+    // is the misleading-boot-warning class this whole change exists to remove.
+    const msg = describeDuckdbUrlMisconfig('malformed', 'duckdb-service:8000')!;
+    expect(msg).toContain('unusable value');
+    expect(msg).toContain('duckdb-service:8000');
+    expect(msg).not.toContain('unset');
+  });
+
+  it('NEVER echoes a password, even though it echoes the value', () => {
+    const msg = describeDuckdbUrlMisconfig(
+      'malformed',
+      'http://admin:hunter2@duckdb-service:8000',
+    )!;
+    expect(msg).not.toContain('hunter2');
+    expect(msg).toContain('***@');
+  });
+
+  it('explains that credentials specifically are rejected', () => {
+    // A credentialed URL IS an absolute http URL, so "must be an absolute
+    // http(s) URL" alone would read as nonsense to whoever configured one.
+    const msg = describeDuckdbUrlMisconfig('malformed', 'http://u:p@h:8000')!;
+    expect(msg).toContain('no embedded credentials');
+  });
+});
+
+describe('resolveDuckdbUrl — normalises everything after the authority', () => {
+  it('drops a query string that would otherwise corrupt every path', () => {
+    // `${DUCKDB_URL}/health` on a query-carrying base yields `…?x=1/health`.
+    expect(resolveDuckdbUrl('http://duckdb-service:8000?x=1').url).toBe(
+      'http://duckdb-service:8000',
+    );
+  });
+
+  it('drops a fragment', () => {
+    expect(resolveDuckdbUrl('http://duckdb-service:8000#frag').url).toBe(
+      'http://duckdb-service:8000',
+    );
+  });
+
+  it('keeps a path prefix (a duckdb mounted under a sub-path is legitimate)', () => {
+    expect(resolveDuckdbUrl('http://gateway:8000/duckdb').url).toBe('http://gateway:8000/duckdb');
   });
 });

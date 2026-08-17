@@ -260,8 +260,19 @@ export async function reportDuckdbHealth({
   // the constant would go straight back to misstating its own timing, which is
   // the bug this function was extracted to pin.
   const seconds = Math.round((outcome.elapsedMs + remainingDelay) / 1000);
+  let recheckError: unknown;
   const recovered = await recheckDuckdbHealth({
-    health,
+    // Capture the late error too: duckdb may be down for a *different* reason
+    // at t=60s than at boot (refused → DNS → TLS), and a follow-up that says
+    // only "still unreachable" hides that.
+    health: async (timeoutMs) => {
+      try {
+        return await health(timeoutMs);
+      } catch (err) {
+        recheckError = err;
+        throw err;
+      }
+    },
     delayMs: remainingDelay,
     // Keep the re-check's per-attempt ceiling consistent with the probe's when
     // a caller overrode it; otherwise recheckDuckdbHealth's own default wins.
@@ -280,7 +291,8 @@ export async function reportDuckdbHealth({
   } else {
     log.warn(
       `⚠ DuckDB service still unreachable when re-checked ${seconds}s after boot ` +
-        `(${duckdbUrl}). No further boot checks — request paths surface live errors.`,
+        `(${duckdbUrl}): ${redactCredentials(describeError(recheckError))}. ` +
+        `No further boot checks — request paths surface live errors.`,
     );
   }
 }

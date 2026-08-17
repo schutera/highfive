@@ -117,7 +117,7 @@ describe('probeDuckdbHealth', () => {
   // attempt count: the same "10 attempts" means 4.5s in one shape and 25s in
   // the other. Both are pinned so a future edit can't silently pick one.
 
-  it('shape 1 — refused port (~6ms/attempt): spends the deadline on ~30 attempts', async () => {
+  it('shape 1 — refused port (~6ms/attempt): spends the deadline on ~30 attempts (29 on a real clock)', async () => {
     const clock = fakeClock();
     // ~6ms measured on loopback; ~70ms across the docker bridge.
     const health = failingAfter(clock, 6);

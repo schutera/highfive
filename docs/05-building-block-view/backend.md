@@ -12,7 +12,7 @@ its own.
 | `backend/src/auth.ts`            | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
 | `backend/src/duckdbClient.ts`    | Typed HTTP client for `duckdb-service`                                       |
 | `backend/src/duckdbBootProbe.ts` | Advisory boot-time reachability probe (retry loop, deadline-budgeted)        |
-| `backend/tests/*.test.ts`        | Vitest + supertest, 279 tests across 30 files                                |
+| `backend/tests/*.test.ts`        | Vitest + supertest, 287 tests across 30 files                                |
 
 ## Endpoints
 

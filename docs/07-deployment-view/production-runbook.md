@@ -256,6 +256,17 @@ pm2 startup
 > the git tree and Node build artifacts, but a `pip install` that _upgraded_ a
 > shared dependency (e.g. `numpy` → 2.x) is **not** reverted — pip upgrades are
 > forward-only across a rollback.
+>
+> When the automated deploy's pip step fails it logs a WARN and continues (the
+> health check is the real gate). **pip's own output is appended to
+> `logs/auto-deploy.log`**, so the actual reason — usually
+> `ERROR: No matching distribution found` for a wheel that doesn't exist on
+> this interpreter — is in that file next to the WARN line. Read it before
+> assuming the deploy was clean:
+>
+> ```bash
+> grep -n -B20 "pip install had failures" /var/www/highfive/logs/auto-deploy.log | tail -40
+> ```
 
 The live PM2 stack is **four** apps, not just the backend: `highfive-api`
 (Node, cluster), `duckdb-service` and `image-service` (Python, run on the

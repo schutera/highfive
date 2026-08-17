@@ -229,7 +229,12 @@ main() {
   # `<pkg>/package-lock.json`, so reinstall from the root — BEFORE the builds, or
   # `tsc`/`vite` compile against missing deps and roll back (hit this with
   # rotating-file-stream, #178). `npm ci` at root installs every workspace.
-  if changed_match '^package-lock\.json$|^(backend|homepage|contracts)/package\.json$'; then
+  # The root `package.json` is in the gate too: it declares the workspace list,
+  # so adding a workspace there without touching the lockfile would otherwise
+  # skip the install. Theoretical (a real dep change always touches the
+  # lockfile) but free, and its absence next to the three workspace manifests
+  # read as an oversight.
+  if changed_match '^package(-lock)?\.json$|^(backend|homepage|contracts)/package\.json$'; then
     log "npm deps changed — root npm ci (workspaces)"
     npm ci >/dev/null 2>&1 || rollback "root npm ci failed"
   fi
@@ -250,16 +255,20 @@ main() {
   # health check is the real gate (services degrade gracefully on a missing
   # OPTIONAL dep, while a genuinely-required missing module crashes the reload →
   # health fails → rollback).
-  if changed_match '^duckdb-service/requirements\.txt$'; then
-    log "duckdb-service deps changed — pip install"
-    python3 -m pip install -r duckdb-service/requirements.txt >/dev/null 2>&1 \
-      || log "WARN: duckdb-service pip install had failures (health check will gate)"
-  fi
-  if changed_match '^image-service/requirements\.txt$'; then
-    log "image-service deps changed — pip install"
-    python3 -m pip install -r image-service/requirements.txt >/dev/null 2>&1 \
-      || log "WARN: image-service pip install had failures (health check will gate)"
-  fi
+  # pip output is teed into the deploy log rather than sent to /dev/null: the
+  # exact failure this step anticipates is "no matching distribution" for a
+  # wheel that doesn't exist on this interpreter, and that reason is only in
+  # pip's stderr. A bare "WARN: had failures" tells the operator nothing about
+  # the one case they need to act on.
+  pip_install_service() {
+    local svc="$1"
+    log "$svc deps changed — pip install"
+    if ! python3 -m pip install -r "$svc/requirements.txt" >>"$AUTOLOG" 2>&1; then
+      log "WARN: $svc pip install had failures (see pip output above; health check will gate)"
+    fi
+  }
+  if changed_match '^duckdb-service/requirements\.txt$'; then pip_install_service duckdb-service; fi
+  if changed_match '^image-service/requirements\.txt$'; then pip_install_service image-service; fi
   changed_match '^duckdb-service/' && { RELOADED+="duckdb-service "; actions+="duckdb-service "; }
   changed_match '^image-service/'  && { RELOADED+="image-service ";  actions+="image-service "; }
 

@@ -23,16 +23,16 @@ from pydantic import ValidationError
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
 from services.hole_detection import HoleDetector
-from services.paths import safe_child_path
-from services.prod_guard import require_prod_key
-from services.upload_throttle import DEFAULT_MAX_PER_HOUR, UploadThrottle
 from services.log_ring import get_recent as _get_recent_logs
 from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
 from services.log_ring import log_event, subscribe, unsubscribe
 from services.module_id import ModuleId
+from services.paths import safe_child_path
+from services.prod_guard import require_prod_key
 from services.sidecar import LogSidecarEnvelope
 from services.upload_pipeline import UploadPipeline, UploadRequest
+from services.upload_throttle import DEFAULT_MAX_PER_HOUR, UploadThrottle
 
 # Tee stdout/stderr into the in-memory ring (#171) so the admin server-logs
 # endpoint can tail this service's output. Runs before the app serves traffic;
@@ -138,7 +138,9 @@ def _seed_demo_snips() -> None:
     or already-populated target is a no-op, never fatal — a demo-asset hiccup
     must not stop the image service from booting.
     """
-    if os.getenv("SEED_DATA", "").lower() != "true" or not os.path.isdir(_DEMO_SNIP_DIR):
+    if os.getenv("SEED_DATA", "").lower() != "true" or not os.path.isdir(
+        _DEMO_SNIP_DIR
+    ):
         return
     for name in os.listdir(_DEMO_SNIP_DIR):
         if not name.lower().endswith(".jpg"):
@@ -196,9 +198,7 @@ def _send_discord(content: str) -> None:
 # Per-module upload rate guard (for #203). Env-overridable; 0 disables.
 # See the accept-and-discard rationale at the /upload call site.
 upload_throttle = UploadThrottle(
-    max_per_window=int(
-        os.getenv("UPLOAD_THROTTLE_PER_HOUR", str(DEFAULT_MAX_PER_HOUR))
-    )
+    max_per_window=int(os.getenv("UPLOAD_THROTTLE_PER_HOUR", str(DEFAULT_MAX_PER_HOUR)))
 )
 
 upload_pipeline = UploadPipeline(
@@ -327,7 +327,10 @@ def upload_image():
     # that's already in a capture storm and make the storm worse. The
     # device-side storm cap is capture_gate (ADR-024); this is the
     # server-side backstop against runaway or non-fleet clients.
-    if not upload_throttle.allow(canonical_mac, time.time()):
+    # monotonic, not time.time(): an NTP step backwards would leave
+    # future-stamped events that never age out of the sliding window and
+    # would throttle a healthy module until wall-clock caught up.
+    if not upload_throttle.allow(canonical_mac, time.monotonic()):
         log_event(
             "warn",
             f"upload throttled for mac={canonical_mac} — discarded (over "

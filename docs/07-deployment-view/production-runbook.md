@@ -222,6 +222,61 @@ module.exports = {
 EOF
 ```
 
+#### Required environment for the two Python services
+
+This runbook does not provision `duckdb-service` / `image-service` (see the
+banner), but wherever you _did_ define their pm2 apps, these variables are
+**not optional** — two security controls are silent no-ops without them, and
+nothing fails loudly to tell you:
+
+| Variable                          | Why it must be set                                                                                                                                                                                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HIGHFIVE_ENV=production`         | The boot guard in `services/prod_guard.py` refuses to start when `HIGHFIVE_API_KEY` is unset, blank, or the public dev fallback — but **only when this marker is present**. There is no `NODE_ENV` for Python and modern Flask dropped `FLASK_ENV`. Omit it and both services will happily serve their admin `/logs` gate behind `hf_dev_key_2026`. |
+| `HIGHFIVE_API_KEY`                | Must match the backend's, for the #171 server-logs proxy.                                                                                                                                                                                                     |
+| `DISCORD_WEBHOOK_URL`             | The baked-in default was removed in the 2026-07 audit (#201). Unset means `send_discord_message` degrades to a `print()` nobody reads — which silently disables the **ADR-005 silence watcher's** module-down and recovery alerts, i.e. the primary field-failure signal.                                                                     |
+| `LOG_DIR`                         | Distinct per service (`/data/logs/duckdb`, `/data/logs/image`) so the two don't collide on one file (ADR-023).                                                                                                                                                |
+
+```js
+// Add to your ecosystem.config.js `apps: [ … ]` — adjust script/cwd to match
+// how these services were installed on this host.
+{
+  name: 'duckdb-service',
+  script: 'app.py',
+  interpreter: 'python3',      // MUST be the same python3 deploy.sh pip-installs into
+  cwd: '/var/www/highfive/duckdb-service',
+  env: {
+    HIGHFIVE_ENV: 'production',
+    HIGHFIVE_API_KEY: process.env.HIGHFIVE_API_KEY,
+    DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL,
+    LOG_DIR: '/data/logs/duckdb'
+  }
+},
+{
+  name: 'image-service',
+  script: 'app.py',
+  interpreter: 'python3',
+  cwd: '/var/www/highfive/image-service',
+  env: {
+    HIGHFIVE_ENV: 'production',
+    HIGHFIVE_API_KEY: process.env.HIGHFIVE_API_KEY,
+    DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL,
+    LOG_DIR: '/data/logs/image'
+  }
+}
+```
+
+Verify after any change — remember `pm2 restart` ignores edits to this file
+without `--update-env`:
+
+```bash
+pm2 env $(pm2 id duckdb-service | tr -d '[]') | grep -E "HIGHFIVE_ENV|DISCORD_WEBHOOK_URL"
+pm2 env $(pm2 id image-service  | tr -d '[]') | grep -E "HIGHFIVE_ENV|DISCORD_WEBHOOK_URL"
+```
+
+The guard is deliberately opt-in rather than default-on, matching the
+backend's `NODE_ENV=development` off-ramp: an explicit operator choice, not a
+silent default. That is exactly why it has to be written down here.
+
 ### 7. Build and Start Application
 
 ```bash

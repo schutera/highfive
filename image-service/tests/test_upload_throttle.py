@@ -49,3 +49,79 @@ def test_legitimate_fleet_cadence_never_throttled():
     # Worst hour of a reboot storm: capture_gate admits ~2/hour sustained;
     # give it 10 in one hour to be pessimistic.
     assert all(t.allow(mac, i * 360.0) for i in range(10))
+
+
+def test_mac_rotation_defeats_the_budget_this_is_the_documented_gap():
+    """Pins the LIMIT of this control, so nobody mistakes it for more.
+
+    The existing bounded-dict test performs exactly this attack and asserts
+    only that the tracking dict stays small — it demonstrates the hole while
+    appearing to test a defence. This asserts the hole itself, so if someone
+    later closes it (see #224) this test fails loudly and gets updated,
+    rather than the gap quietly persisting behind a green suite.
+    """
+    throttle = UploadThrottle(max_per_window=5, window_seconds=3600.0)
+
+    # One identity is bounded: 5 through, the 6th refused.
+    admitted_single = sum(
+        1 for _ in range(50) if throttle.allow("aabbccddeeff", 1000.0)
+    )
+    assert admitted_single == 5
+
+    # Rotating the (unauthenticated) MAC buys a fresh budget every time, so
+    # the same 50 requests all land. This is why auth.md says "rate-bounded
+    # per claimed identity", not "rate-bounded per caller".
+    admitted_rotating = sum(
+        1 for i in range(50) if throttle.allow(f"aabbccdd{i:04x}", 1000.0)
+    )
+    assert admitted_rotating == 50
+
+
+def test_concurrent_allow_does_not_raise_under_threads():
+    """app.py runs Flask with threaded=True, so `allow` is called in parallel.
+
+    SCOPE: this is a smoke test, not a proof. The race the lock guards
+    (check-then-popleft on a shared deque) could NOT be reproduced on CPython
+    3.12 even with sys.setswitchinterval(1e-9) and 16 contending threads — the
+    GIL makes the window extremely narrow, so this test passes with or without
+    the lock today. It earns its place on 3.13/3.14 free-threaded builds, which
+    the CI matrix already covers and where the GIL no longer hides the race.
+    Do not read a green run here as evidence the lock is unnecessary.
+    """
+    import threading
+
+    throttle = UploadThrottle(max_per_window=1000, window_seconds=0.5)
+    errors: list[BaseException] = []
+
+    def hammer(worker: int) -> None:
+        try:
+            for i in range(400):
+                # Shared keys (contention) plus per-worker keys (dict growth
+                # and pruning happening concurrently).
+                throttle.allow("shared-key", 1000.0 + i * 0.01)
+                throttle.allow(f"w{worker}-{i % 7}", 1000.0 + i * 0.01)
+        except BaseException as exc:  # pragma: no cover - only on regression
+            errors.append(exc)
+
+    threads = [threading.Thread(target=hammer, args=(w,)) for w in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"concurrent allow() raised: {errors!r}"
+
+
+def test_events_never_outlive_the_window_with_a_monotonic_clock():
+    """A monotonic clock never goes backwards, so entries always age out.
+
+    app.py passes time.monotonic() for exactly this reason: with wall-clock
+    time an NTP step backwards leaves future-stamped events that never fall
+    outside the window, silently throttling a healthy module.
+    """
+    throttle = UploadThrottle(max_per_window=2, window_seconds=100.0)
+    assert throttle.allow("mac", 1000.0) is True
+    assert throttle.allow("mac", 1000.0) is True
+    assert throttle.allow("mac", 1000.0) is False
+    # Past the window: budget is restored.
+    assert throttle.allow("mac", 1101.0) is True

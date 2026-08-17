@@ -362,14 +362,27 @@ keeps onboarding to one secret while preserving the gating semantics.
   defence-in-depth; a compromised LAN device can spoof uploads.
   Acceptable for the current threat model (single-tenant, hobbyist
   deployment); revisit if multi-tenancy is added. Since the 2026-07
-  audit (for #203) the endpoint is **bounded, not authenticated**: a
-  5 MB request-size ceiling (`MAX_CONTENT_LENGTH`, env-overridable via
-  `MAX_UPLOAD_BYTES`) and a per-module rate guard
+  audit (for #203) the endpoint carries two bounds: a 5 MB
+  request-size ceiling (`MAX_CONTENT_LENGTH`, env-overridable via
+  `MAX_UPLOAD_BYTES`) and a **per-module** rate guard
   (`services/upload_throttle.py`, default 30/hour via
   `UPLOAD_THROTTLE_PER_HOUR`, 0 disables). Over-budget uploads are
   **accepted and discarded with a 200**, never a 429 — a non-2xx
   counts toward the firmware's upload-failure circuit breaker and
   would reboot a storming module, amplifying the storm.
+
+  **Be precise about what that bounds.** The rate guard keys on the
+  client-supplied MAC, which is canonicalized but not authenticated, so
+  it bounds a **runaway or looping module** — the threat it was written
+  for — and not a hostile client, which can rotate MACs for a fresh
+  budget each time. The `_MAX_TRACKED` cap bounds the tracking dict,
+  not the writes. So `/upload` is _rate-bounded per claimed identity_,
+  not rate-bounded per caller. Closing that would need a budget keyed
+  on something a client cannot mint, and an IP-keyed one must be sized
+  for a whole site behind a single NAT egress — every module at a
+  location shares an address, so a naive per-IP cap throttles
+  legitimate ingestion. Tracked in
+  [#224](https://github.com/schutera/highfive/issues/224).
 - All `duckdb-service` routes — assumed to be reachable only from
   inside the Docker `net` bridge. Don't expose this port to LAN:
   both compose files bind the host mapping to `127.0.0.1:8002`

@@ -321,3 +321,27 @@ def test_get_progress_unfiltered_stays_legacy_shaped(client, fresh_db):
     rows = client.get("/progress").get_json()["progress"]
     assert len(rows) == 4
     assert [r["progress_id"] for r in rows] == ["p1", "p2", "p4", "p3"]
+
+
+def test_date_filters_reject_non_dashed_forms_identically_on_every_python(
+    client, fresh_db
+):
+    """`since`/`until` accept ONLY `YYYY-MM-DD`, on 3.10 through 3.14.
+
+    `date.fromisoformat` widened in 3.11 to accept the basic form
+    (`20260719`) and ISO week dates (`2026-W29-1`). Since CI runs a 3.10-3.14
+    matrix (ADR-029), using it would make the same query string 400 on 3.10
+    and 200 on 3.12 — an interpreter-dependent API contract. The route uses
+    strptime so the grammar is identical everywhere, and these assertions fail
+    on any Python if someone swaps it back.
+    """
+    for bad in ("20260719", "2026-W29-1", "2026-07-19T00:00:00", "not-a-date", ""):
+        resp = client.get(f"/progress?since={bad}")
+        assert resp.status_code == 400, (
+            f"{bad!r} should be rejected, got {resp.status_code}"
+        )
+        assert "YYYY-MM-DD" in resp.get_json()["error"]
+
+    # The documented form is still accepted.
+    assert client.get("/progress?since=2026-07-19").status_code == 200
+    assert client.get("/progress?until=2026-07-19").status_code == 200

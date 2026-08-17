@@ -105,12 +105,27 @@ services:
       context: ./duckdb-service
       dockerfile: Dockerfile.dev
     ports:
-      # Loopback bind (2026-07 audit, for #203): duckdb-service is the sole
-      # DB writer with unauthenticated internal endpoints — prod already
-      # binds 127.0.0.1 (docker-compose.prod.yml); dev matches so a laptop
-      # on café/office Wi-Fi doesn't serve /new_module etc. to the LAN.
-      # In-cluster callers use the service name and are unaffected.
-      - '127.0.0.1:8002:8000'
+      # DELIBERATELY NOT loopback-bound, unlike docker-compose.prod.yml.
+      #
+      # The 2026-07 audit (#203) briefly bound this to 127.0.0.1 to match
+      # prod. That breaks the hardware bench: `ESP32-CAM/extra_scripts.py`
+      # bakes `HF_INIT_URL_DEFAULT = http://<DEV_SERVER_HOST>:8002/new_module`
+      # into every LAN-dev firmware build (and `HF_DEV_BUILD=1` hard-fails
+      # without DEV_SERVER_HOST, so it is the only supported dev firmware
+      # path). `esp_init.cpp`'s initNewModuleOnServer registers against that
+      # URL and `client.cpp`'s sendHeartbeat reuses it "purely as the carrier
+      # of host+port" for /heartbeat. Both are LAN → host:8002.
+      #
+      # Prod can bind loopback because host-Nginx proxies exactly those two
+      # paths (see docker-compose.prod.yml's comment). Dev has no Nginx, so a
+      # loopback bind removes the ESP's only route in with no replacement:
+      # modules register nowhere and heartbeats silently stop.
+      #
+      # If you want the audit's protection on an untrusted network, stop the
+      # port publish entirely (`docker compose stop duckdb-service` is not it
+      # — remove this mapping) and accept that no ESP can register, or put a
+      # reverse proxy in front. Do not half-do it.
+      - '8002:8000'
     volumes:
       - duckdb_data:/data
     env_file:

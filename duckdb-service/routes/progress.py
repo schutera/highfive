@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from uuid import uuid4
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
@@ -16,8 +16,18 @@ _LIMIT_CAP = 100_000
 
 
 def _parse_iso_date(raw: str, field: str):
+    """Parse strictly `YYYY-MM-DD` — the format the error message promises.
+
+    Deliberately `strptime` and not `date.fromisoformat`: fromisoformat
+    widened in 3.11 to accept the basic form (`20260719`) and ISO week dates
+    (`2026-W29-1`). This repo's CI matrix spans 3.10-3.14 (ADR-029), so the
+    same query string would 400 on 3.10 and 200 on 3.12 — a behaviour
+    difference that depends on the interpreter, not the request, and that no
+    test would catch unless it happened to run on both. strptime's grammar is
+    identical across all five.
+    """
     try:
-        return date.fromisoformat(raw), None
+        return datetime.strptime(raw, "%Y-%m-%d").date(), None
     except ValueError:
         return None, (
             jsonify({"error": f"'{field}' is not a valid ISO date (YYYY-MM-DD)"}),

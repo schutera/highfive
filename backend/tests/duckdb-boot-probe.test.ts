@@ -465,3 +465,65 @@ describe('reportDuckdbHealth', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe('reportDuckdbHealth — the operator-facing warning is the deliverable', () => {
+  function collectLog() {
+    const info: string[] = [];
+    const warn: string[] = [];
+    return {
+      info: (m: string) => info.push(m),
+      warn: (m: string) => warn.push(m),
+      all: () => [...info, ...warn].join('\n'),
+    };
+  }
+
+  it('surfaces the CAUSE of a fetch failure, not just "fetch failed"', () => {
+    // The whole point of this warning is telling the operator why duckdb is
+    // unreachable. Node's fetch rejects with TypeError: fetch failed and puts
+    // the reason on .cause, so String(err) alone makes a refused port
+    // indistinguishable from a DNS typo. Fixture is the shape undici really
+    // produces, not a guessed `new Error('ECONNREFUSED')`.
+    const log = collectLog();
+    const health = vi.fn().mockRejectedValue(
+      new TypeError('fetch failed', {
+        cause: new Error('connect ECONNREFUSED 127.0.0.1:8002'),
+      }),
+    );
+
+    return reportDuckdbHealth({
+      health,
+      log,
+      duckdbUrl: 'http://duckdb-service:8000',
+      probeOptions: { deadlineMs: 0 },
+      recoveryDelayMs: 0,
+    }).then(() => {
+      expect(log.all()).toContain('ECONNREFUSED 127.0.0.1:8002');
+    });
+  });
+
+  it('keeps a credential out of the log even when the error text embeds one', async () => {
+    // Pins the WIRING, not the regex. The bug that shipped was a wiring bug:
+    // the redactor existed and was simply not attached to this path. Every
+    // helper test passed throughout.
+    const log = collectLog();
+    const health = vi
+      .fn()
+      .mockRejectedValue(
+        new TypeError(
+          'Request cannot be constructed from a URL that includes credentials: ' +
+            'http://admin:hunter2@127.0.0.1:8002/health',
+        ),
+      );
+
+    await reportDuckdbHealth({
+      health,
+      log,
+      duckdbUrl: 'http://127.0.0.1:8002',
+      probeOptions: { deadlineMs: 0 },
+      recoveryDelayMs: 0,
+    });
+
+    expect(log.all()).not.toContain('hunter2');
+    expect(log.all()).toContain('***@');
+  });
+});

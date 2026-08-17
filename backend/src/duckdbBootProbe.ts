@@ -20,7 +20,7 @@
 // log problem into a real availability regression (PR #193 review).
 
 import { setTimeout as delay } from 'node:timers/promises';
-import { redactCredentials, type DuckdbHealthResult } from './duckdbClient';
+import { describeError, redactCredentials, type DuckdbHealthResult } from './duckdbClient';
 
 /**
  * Wall-clock budget for the whole probe, and a deliberate trade-off between
@@ -28,8 +28,8 @@ import { redactCredentials, type DuckdbHealthResult } from './duckdbClient';
  *
  *   - **Refused port** (the race this exists for): each attempt fails fast —
  *     ~6 ms on loopback, ~70 ms across the docker bridge to a live container.
- *     Nearly the whole budget is the retry delay, so 15 s buys ~30 attempts
- *     (measured: 30 attempts / 14806 ms against a refused loopback port).
+ *     Nearly the whole budget is the retry delay, so 15 s buys ~29 attempts
+ *     (measured: 29 attempts / 14794 ms against a refused loopback port).
  *   - **Stopped / hung service**: each attempt burns its full `timeoutMs`, so
  *     15 s buys ~6 attempts.
  *
@@ -76,7 +76,7 @@ export const DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS = 250;
 
 /**
  * Structural backstop against a non-terminating loop. Unreachable at the
- * shipped constants (the deadline stops things ~30 attempts in); it exists so
+ * shipped constants (the deadline stops things ~29 attempts in); it exists so
  * that a future zero-cost `health` + `retryDelayMs: 0` combination cannot spin
  * forever.
  */
@@ -215,7 +215,10 @@ export async function reportDuckdbHealth({
 }: {
   health: (timeoutMs: number) => Promise<DuckdbHealthResult>;
   log: { info: (msg: string) => void; warn: (msg: string) => void };
-  /** MUST be a credential-safe form — pass duckdbClient's `DUCKDB_URL_SAFE`. */
+  /**
+   * Safe to log by construction: `resolveDuckdbUrl` rejects URLs carrying
+   * userinfo, so `DUCKDB_URL` cannot hold a credential.
+   */
   duckdbUrl: string;
   recoveryDelayMs?: number;
   /**
@@ -243,7 +246,7 @@ export async function reportDuckdbHealth({
   // pre-redacted `duckdbUrl` alone still leaks the password one field over.
   log.warn(
     `⚠ DuckDB service not reachable after ${outcome.attempts} attempts / ` +
-      `${outcome.elapsedMs}ms (${duckdbUrl}): ${redactCredentials(String(outcome.error))}`,
+      `${outcome.elapsedMs}ms (${duckdbUrl}): ${redactCredentials(describeError(outcome.error))}`,
   );
 
   // Subtract what the probe already spent so the follow-up really lands

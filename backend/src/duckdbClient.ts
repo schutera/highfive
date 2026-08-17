@@ -28,8 +28,8 @@ export type DuckdbUrlReason = 'ok' | 'unset' | 'malformed';
  * `resolvePort` so the resolution logic stays unit-testable without env
  * juggling or module-cache resets.
  *
- * Rejects three shapes, all of which used to sail through and then die with an
- * opaque `Invalid URL` at *every* hop instead of once, loudly, at boot:
+ * Rejects four shapes, all of which used to sail through and then die at
+ * *every* hop instead of once, loudly, at boot:
  *
  *   - unset            → the ordinary "operator didn't configure it" case
  *   - blank / spaces   → `DUCKDB_SERVICE_URL=` in a compose env_file became
@@ -37,6 +37,8 @@ export type DuckdbUrlReason = 'ok' | 'unset' | 'malformed';
  *   - not an http(s) URL → `duckdb-service:8000` (scheme omitted) PARSES, as a
  *                        URL with protocol `duckdb-service:`, so a bare
  *                        `new URL()` check is not enough
+ *   - carries userinfo → `http://user:pass@host` is rejected by Node's fetch
+ *                        before any I/O, so it breaks 100% of hops (see below)
  *
  * This mirrors `resolvePort` rejecting `3002junk`: a docstring that promises
  * warn-on-misconfiguration has to actually validate, or "bind the prefix and
@@ -58,6 +60,22 @@ export function resolveDuckdbUrl(envValue: string | undefined): {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { url: DEFAULT_DUCKDB_URL, reason: 'malformed' };
   }
+  // Reject embedded credentials. This is not a style preference: undici
+  // refuses such a URL *before any network I/O* —
+  //   TypeError: Request cannot be constructed from a URL that includes
+  //   credentials
+  // — so a credentialed DUCKDB_SERVICE_URL fails 100% of duckdb hops, every
+  // dashboard read included, not merely the boot probe. Reporting it as `ok`
+  // is exactly the silent-fatal-misconfig this function exists to prevent.
+  //
+  // Rejecting here is also what keeps credentials out of the logs *globally*:
+  // `DUCKDB_URL` is interpolated into error strings all over app.ts and
+  // database.ts, and those land in the disk-persisted, admin-readable ring.
+  // Redacting each of those call sites would be a per-site decision that one
+  // day gets forgotten; guaranteeing the value never carries a secret is not.
+  if (parsed.username || parsed.password) {
+    return { url: DEFAULT_DUCKDB_URL, reason: 'malformed' };
+  }
   // Strip trailing slashes: every call site builds `${DUCKDB_URL}/path`, so a
   // trailing slash yields `//health`, `//modules`, … Werkzeug and nginx both
   // merge duplicate slashes, so this survives — at the cost of a 308 per
@@ -70,14 +88,16 @@ export function resolveDuckdbUrl(envValue: string | undefined): {
  *
  * The log ring is persisted to disk (ADR-023) and rendered in the admin panel,
  * and log.ts's SECURITY note is explicit that it must not hold secrets even in
- * dev. A `DUCKDB_SERVICE_URL` carrying basic-auth credentials is an ordinary
- * thing for an operator to configure, so **every** log site that can echo that
- * value — or an error derived from it — has to go through here.
+ * dev.
  *
- * Takes arbitrary text, not just a bare URL, because undici embeds the full
- * URL in its own error messages: a failed fetch produces `Request cannot be
- * constructed from a URL that includes credentials: http://user:pass@host/…`,
- * which leaks just as effectively as interpolating the URL ourselves.
+ * Scope note: `resolveDuckdbUrl` now *rejects* a credentialed URL, so
+ * `DUCKDB_URL` itself can never carry one and ordinary log sites need no
+ * redaction. What still can is the **raw env value** echoed back in the
+ * startup warning — an operator who configures basic-auth gets told their
+ * value was refused, and that message must not repeat the password. Errors
+ * are also passed through here defensively, since undici embeds the offending
+ * URL in its own text (`Request cannot be constructed from a URL that includes
+ * credentials: http://user:pass@host/…`).
  *
  * Two passes, because no single anchor covers the shapes that actually occur:
  *
@@ -94,25 +114,54 @@ export function resolveDuckdbUrl(envValue: string | undefined): {
  */
 export function redactCredentials(text: string | undefined): string | undefined {
   if (!text) return text;
-  return text
-    .replace(/((?:[a-zA-Z][a-zA-Z0-9+.-]*:)?\/\/)[^\s/?#]*@/g, '$1***@')
-    .replace(/[^\s/@]*:[^\s/@]*@/g, '***@');
+  return (
+    text
+      .replace(/((?:[a-zA-Z][a-zA-Z0-9+.-]*:)?\/\/)[^\s/?#]*@/g, '$1***@')
+      // `\` is excluded so a Windows path in a stack trace
+      // (`…\node_modules\@scope\pkg`) isn't mistaken for userinfo.
+      .replace(/[^\s/\\@]*:[^\s/\\@]*@/g, '***@')
+  );
+}
+
+/**
+ * Stringify an error together with its `cause` chain.
+ *
+ * `String(err)` on a Node fetch failure yields the useless
+ * `TypeError: fetch failed` — the part an operator needs
+ * (`connect ECONNREFUSED 127.0.0.1:8002`, `getaddrinfo ENOTFOUND`,
+ * `certificate has expired`) lives on `err.cause`. For a boot warning whose
+ * entire job is telling someone *why* duckdb is unreachable, dropping the
+ * cause makes a refused port indistinguishable from a hostname typo.
+ *
+ * Walks `cause` and `AggregateError.errors`, with a seen-set so a cyclic chain
+ * cannot loop forever.
+ */
+export function describeError(err: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    parts.push(String(current));
+    const aggregate = (current as { errors?: unknown[] }).errors;
+    if (Array.isArray(aggregate) && aggregate.length > 0) {
+      parts.push(...aggregate.filter((e) => !seen.has(e)).map((e) => String(e)));
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return parts.join(' ← ');
 }
 
 const resolved = resolveDuckdbUrl(process.env.DUCKDB_SERVICE_URL);
 
-export const DUCKDB_URL = resolved.url;
-
 /**
- * The **only** form of the duckdb URL that may be written to a log.
- *
- * `DUCKDB_URL` can legitimately carry basic-auth credentials, and asking each
- * call site to remember to redact is exactly the decision that failed review:
- * the malformed branch was redacted while the ordinary well-formed branch
- * echoed the password verbatim into a disk-persisted, admin-readable ring.
- * Interpolate this constant, never `DUCKDB_URL`, into any user-visible string.
+ * Guaranteed credential-free: `resolveDuckdbUrl` rejects any URL carrying
+ * userinfo, so this is safe to interpolate into a log line. That guarantee is
+ * why there is no separate "safe" variant — one would have to be threaded
+ * through every call site in app.ts and database.ts, and a per-site "did I
+ * remember to redact this one" decision is precisely what fails.
  */
-export const DUCKDB_URL_SAFE = redactCredentials(DUCKDB_URL) as string;
+export const DUCKDB_URL = resolved.url;
 
 /** Why DUCKDB_SERVICE_URL was rejected, or `ok`. Drives the startup warning. */
 export const duckdbUrlReason = resolved.reason;

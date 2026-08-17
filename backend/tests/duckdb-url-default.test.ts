@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DUCKDB_URL, redactCredentials, resolveDuckdbUrl } from '../src/duckdbClient';
+import {
+  DEFAULT_DUCKDB_URL,
+  describeError,
+  redactCredentials,
+  resolveDuckdbUrl,
+} from '../src/duckdbClient';
 
 // Pure-function tests for the DUCKDB_SERVICE_URL-resolution helper, mirroring
 // tests/port-default.test.ts. The previous inline
@@ -247,5 +252,83 @@ describe('redactCredentials — the shapes that leaked before', () => {
     ]) {
       expect(redactCredentials(v)).not.toContain('hunter2');
     }
+  });
+});
+
+describe('resolveDuckdbUrl — embedded credentials are fatal, not fine', () => {
+  it("reports 'malformed' for a URL carrying userinfo", () => {
+    // Not a style preference: undici refuses such a URL BEFORE any network
+    // I/O ("Request cannot be constructed from a URL that includes
+    // credentials"), so this config fails 100% of duckdb hops — every
+    // dashboard read, not just the boot probe. Calling it 'ok' is the silent
+    // fatal misconfiguration this resolver exists to prevent.
+    expect(resolveDuckdbUrl('http://admin:hunter2@duckdb-service:8000')).toEqual({
+      url: DEFAULT_DUCKDB_URL,
+      reason: 'malformed',
+    });
+  });
+
+  it("reports 'malformed' for a username with no password", () => {
+    expect(resolveDuckdbUrl('http://admin@duckdb-service:8000')).toEqual({
+      url: DEFAULT_DUCKDB_URL,
+      reason: 'malformed',
+    });
+  });
+
+  it('guarantees DUCKDB_URL can never carry a credential', () => {
+    // This is the invariant that lets every log site in app.ts and
+    // database.ts interpolate DUCKDB_URL without redacting: the value simply
+    // cannot contain a secret. A per-site redaction decision is what fails.
+    for (const v of ['http://u:p@h:1', 'https://u:p@h:1', 'http://u@h:1', '  http://u:p@h:1  ']) {
+      expect(resolveDuckdbUrl(v).url).toBe(DEFAULT_DUCKDB_URL);
+      expect(resolveDuckdbUrl(v).url).not.toContain('@');
+    }
+  });
+});
+
+describe('describeError', () => {
+  it('surfaces the cause, which is where the real reason lives', () => {
+    // Verified against Node 24: fetch() to a refused port rejects with
+    // String(e) === 'TypeError: fetch failed' and the actual reason on
+    // e.cause. A boot warning printing only the former cannot distinguish a
+    // refused port from a hostname typo or an expired certificate — and
+    // telling the operator why duckdb is unreachable IS this warning's job.
+    const err = new TypeError('fetch failed', {
+      cause: new Error('connect ECONNREFUSED 127.0.0.1:8002'),
+    });
+
+    const out = describeError(err);
+
+    expect(out).toContain('fetch failed');
+    expect(out).toContain('ECONNREFUSED 127.0.0.1:8002');
+  });
+
+  it('walks a multi-level cause chain', () => {
+    const err = new Error('a', { cause: new Error('b', { cause: new Error('c') }) });
+    expect(describeError(err)).toBe('Error: a ← Error: b ← Error: c');
+  });
+
+  it('includes AggregateError members', () => {
+    const err = new AggregateError(
+      [new Error('addr1 refused'), new Error('addr2 refused')],
+      'all failed',
+    );
+    const out = describeError(err);
+    expect(out).toContain('addr1 refused');
+    expect(out).toContain('addr2 refused');
+  });
+
+  it('terminates on a cyclic cause chain', () => {
+    const a = new Error('a') as Error & { cause?: unknown };
+    const b = new Error('b') as Error & { cause?: unknown };
+    a.cause = b;
+    b.cause = a;
+    expect(() => describeError(a)).not.toThrow();
+    expect(describeError(a)).toBe('Error: a ← Error: b');
+  });
+
+  it('handles a non-Error rejection without throwing', () => {
+    expect(describeError('a bare string')).toBe('a bare string');
+    expect(describeError(undefined)).toBe('');
   });
 });

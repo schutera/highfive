@@ -2,12 +2,12 @@ import 'dotenv/config';
 import { app } from './app';
 import { getApiKey } from './auth';
 import { reportDuckdbHealth } from './duckdbBootProbe';
-// DUCKDB_URL itself is deliberately NOT imported here: it can carry basic-auth
-// credentials, and every string this file builds ends up in the disk-persisted,
-// admin-readable log ring. DUCKDB_URL_SAFE is the only loggable form.
+// DUCKDB_URL is safe to log: resolveDuckdbUrl rejects any URL carrying
+// userinfo, so the constant can never hold a credential. The raw *env value*
+// still can, which is why the warning below redacts it.
 import {
   DEFAULT_DUCKDB_URL,
-  DUCKDB_URL_SAFE,
+  DUCKDB_URL,
   duckdbHealth,
   duckdbUrlReason,
   redactCredentials,
@@ -49,7 +49,8 @@ if (duckdbUrlReason !== 'ok') {
         // A malformed `ftp://user:pass@host` reaches exactly this branch.
         `set to an unusable value (${JSON.stringify(
           redactCredentials(process.env.DUCKDB_SERVICE_URL),
-        )}) — it must be an absolute http(s) URL, e.g. http://duckdb-service:8000`;
+        )}) — it must be an absolute http(s) URL with no embedded credentials ` +
+        `(Node's fetch rejects those outright), e.g. http://duckdb-service:8000`;
   log.warn(
     `[startup] DUCKDB_SERVICE_URL ${detail} — falling back to ${DEFAULT_DUCKDB_URL}. ` +
       `Set it explicitly in production (pm2: ecosystem.config.js; ` +
@@ -84,7 +85,7 @@ function bootstrap() {
   // included — for the whole retry window whenever duckdb is slow or down.
   // `reportDuckdbHealth` captures all errors internally, so the .catch is for
   // the genuinely-impossible case only; swallowing silently would hide it.
-  reportDuckdbHealth({ health: duckdbHealth, log, duckdbUrl: DUCKDB_URL_SAFE }).catch((err) => {
+  reportDuckdbHealth({ health: duckdbHealth, log, duckdbUrl: DUCKDB_URL }).catch((err) => {
     log.warn(`⚠ DuckDB boot probe failed unexpectedly: ${String(err)}`);
   });
 }

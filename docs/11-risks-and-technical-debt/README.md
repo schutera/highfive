@@ -223,9 +223,9 @@ first failure above. 25 s is what those 10 attempts cost once the
 `AbortSignal` exists, and it is the figure the deadline had to improve on.
 
 Measured under the 15 s deadline that replaced it: a refused loopback port
-yields **30 attempts in ~14.7 s**, a blackhole listener **6 attempts**. (The
-arithmetic predicts ~14.68 s for the first; real runs land a little over from
-timer and GC slop.)
+yields **29 attempts in ~14.8 s**, a blackhole listener **6 attempts**. (The
+last attempt is not started unless ≥250 ms of budget remains — see
+`DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS` — which is why it is 29 and not 30.)
 
 Same loop, a 5× spread in wall-clock. In the refused shape the budget is under
 half the 10 s `start_period` duckdb-service's own healthcheck allows for its

@@ -9,6 +9,7 @@ pydantic>=2.12.5
 # pm2 on the SAME system interpreter with no venv (see production-runbook.md),
 # so they share one site-packages: two different `requests==` pins meant
 # last-installed-wins, and whichever service deployed most recently silently
-# violated the other's pin. deploy.sh now installs both on every dep change,
-# which would have made that flap on every deploy. Keep these two lines in sync.
+# violated the other's pin. deploy.sh installs each service's
+# requirements whenever that file changes, so the two pins would have fought
+# each other across deploys. Keep these two lines in sync.
 requests==2.32.5

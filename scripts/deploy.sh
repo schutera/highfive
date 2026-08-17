@@ -88,8 +88,8 @@ PY
 changed_match() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
 
 health_ok() { # health_ok <url> ; retries up to ~20s
-  local url="$1" i
-  for i in $(seq 1 10); do
+  local url="$1"
+  for _ in $(seq 1 10); do
     curl -fsS --max-time 5 "$url" >/dev/null 2>&1 && return 0
     sleep 2
   done
@@ -110,11 +110,33 @@ reload_services() { local p; for p in $1; do [ -n "$p" ] && pm2 reload "$p" --up
 # Rollback: restore the pre-deploy snapshot so the OLD version keeps running.
 # (Only reachable before firmware publish — firmware is the last, irreversible step.)
 # ---------------------------------------------------------------------------
+# Health endpoints matching what was actually rolled back. Probing only the
+# backend and then reporting "old version is running and healthy" is the same
+# report-green-without-checking mistake this script exists to avoid: rollback()
+# is reachable from duckdb, image and homepage health failures, in which case
+# the backend was very likely never touched and passes trivially.
+rollback_health_targets() {
+  local p out=""
+  for p in $RELOADED; do
+    case "$p" in
+      highfive-api)   out+="$HEALTH_BACKEND " ;;
+      duckdb-service) out+="$HEALTH_DUCKDB " ;;
+      image-service)  out+="$HEALTH_IMAGE " ;;
+    esac
+  done
+  [ "${HOMEPAGE_RESTORED:-0}" = "1" ] && out+="$HEALTH_HOMEPAGE "
+  # Nothing was reloaded (e.g. a lockfile-only tick): the backend is still the
+  # meaningful liveness signal, so don't return an empty list and call it green.
+  [ -z "$out" ] && out="$HEALTH_BACKEND "
+  printf '%s' "$out"
+}
+
 rollback() {
   local reason="$1"
   log "ROLLBACK: $reason — restoring $PREV_SHA"
   [ -d "$REPO/backend/dist.bak" ] && { rm -rf "$REPO/backend/dist"; mv "$REPO/backend/dist.bak" "$REPO/backend/dist"; }
-  [ -d "$REPO/homepage/dist.old" ] && { rm -rf "$REPO/homepage/dist"; mv "$REPO/homepage/dist.old" "$REPO/homepage/dist"; }
+  HOMEPAGE_RESTORED=0
+  [ -d "$REPO/homepage/dist.old" ] && { rm -rf "$REPO/homepage/dist"; mv "$REPO/homepage/dist.old" "$REPO/homepage/dist"; HOMEPAGE_RESTORED=1; }
   git reset --hard "$PREV_SHA" >/dev/null 2>&1 || true
   # `npm ci` DELETES node_modules before installing, and nothing else here puts
   # it back. If the install is what failed, the tree above is restored but the
@@ -125,18 +147,32 @@ rollback() {
   # ecosystem.config.js schedules on its own via max_memory_restart).
   # Reinstall against the now-restored lockfile; if that fails too, this is not
   # a clean rollback and must not be reported as one.
-  if [ "${NPM_CI_RAN:-0}" = "1" ]; then
-    log "rollback: reinstalling node_modules against $PREV_SHA's lockfile"
-    if ! HUSKY=0 npm ci >>"$AUTOLOG" 2>&1; then
-      notify fail "Deploy FAILED — rollback INCOMPLETE" "$reason"$'\n'"Tree restored to $PREV_SHA, but 'npm ci' also failed during rollback: node_modules is wiped or partial. The cluster is still serving from memory and WILL fail on its next restart. NEEDS A HUMAN."
+  # Only reinstall if the forward `npm ci` actually got as far as clearing the
+  # tree. npm validates package.json/lockfile agreement BEFORE removing
+  # node_modules, so an abort at that stage leaves a perfectly good tree —
+  # wiping and reinstalling it anyway would manufacture the very outage this
+  # guard exists to prevent. npm writes node_modules/.package-lock.json on a
+  # completed install, so its absence is the "tree is gone or partial" signal.
+  if [ "${NPM_CI_RAN:-0}" = "1" ] && [ ! -f "$REPO/node_modules/.package-lock.json" ]; then
+    log "rollback: node_modules is missing/partial — reinstalling against $PREV_SHA's lockfile"
+    if ! ( cd "$REPO" && HUSKY=0 npm ci ) >>"$AUTOLOG" 2>&1; then
+      # Reload first: the restored artifacts are on disk but not loaded, and
+      # escalating without reloading would leave the failed build running while
+      # telling the operator otherwise.
+      reload_services "$RELOADED"
+      notify fail "Deploy FAILED — rollback INCOMPLETE" "$reason"$'\n'"Tree restored to $PREV_SHA and services reloaded, but 'npm ci' also failed during rollback, so node_modules is wiped or partial. Node services will fail on their next (re)start even if they answer now. NEEDS A HUMAN — see $AUTOLOG."
       exit 1
     fi
   fi
   reload_services "$RELOADED"
-  if health_ok "$HEALTH_BACKEND"; then
-    notify fail "Deploy FAILED — rolled back" "$reason"$'\n'"Restored $PREV_SHA; old version is running and healthy."
+  local url failed=""
+  for url in $(rollback_health_targets); do
+    health_ok "$url" || failed+="$url "
+  done
+  if [ -z "$failed" ]; then
+    notify fail "Deploy FAILED — rolled back" "$reason"$'\n'"Restored $PREV_SHA; verified healthy: $(rollback_health_targets)"
   else
-    notify fail "Deploy FAILED — rollback health ALSO failing" "$reason"$'\n'"Restored $PREV_SHA but $HEALTH_BACKEND is not 200 — NEEDS A HUMAN."
+    notify fail "Deploy FAILED — rollback health ALSO failing" "$reason"$'\n'"Restored $PREV_SHA but these are not 200: $failed"$'\n'"NEEDS A HUMAN."
   fi
   exit 1
 }
@@ -269,6 +305,12 @@ main() {
   if changed_match '^package(-lock)?\.json$|^(backend|homepage|contracts)/package\.json$'; then
     log "npm deps changed — root npm ci (workspaces)"
     NPM_CI_RAN=1
+    # Record it as a real action. A lockfile-only tick (an `npm audit fix`, a
+    # transitive bump) matches neither ^backend/ nor ^homepage/, so nothing is
+    # built or reloaded — and without this the notification would claim
+    # "(no service rebuild — docs/firmware/other)" for a tick that just
+    # replaced every dependency on disk under the live cluster.
+    actions+="npm-deps "
     # Output to the log, not /dev/null: this failure is FATAL and rolls back
     # production, so "root npm ci failed" without the reason is the one message
     # an operator cannot act on.
@@ -330,6 +372,13 @@ main() {
   changed_match '^duckdb-service/'      && { health_ok "$HEALTH_DUCKDB"  || rollback "duckdb-service health failed after reload"; }
   changed_match '^image-service/'       && { health_ok "$HEALTH_IMAGE"   || rollback "image-service health failed after reload"; }
   [ "$HOMEPAGE_REBUILT" = "1" ] && { health_ok "$HEALTH_HOMEPAGE" || rollback "homepage health (https) failed after swap"; }
+  # A lockfile-only tick replaces every dependency on disk under the running
+  # cluster but matches none of the gates above, so without this the new tree
+  # would go unverified — the one case where `npm ci` mutates live state and
+  # nothing proves the result. The backend is the Node consumer of that tree.
+  if [ "$NPM_CI_RAN" = "1" ] && ! changed_match '^backend/|^contracts/'; then
+    health_ok "$HEALTH_BACKEND" || rollback "backend health failed after a dependency-only npm ci"
+  fi
 
   # ---- firmware phase (LAST — irreversible; only after services are healthy) -
   local fw_action="none" fw_note=""
@@ -362,7 +411,7 @@ main() {
   # so this notification is the only place it surfaces.
   if [ -n "$PIP_FAILED" ]; then
     notify fail "Deploy DEGRADED (${dur}s)" \
-      "Range $PREV_SHA..$new_sha by $author"$'\n'"Rebuilt: $actions"$'\n'"Firmware: $fw_action $fw_note"$'\n\n'"pip install FAILED for: $PIP_FAILED"$'\n'"Services are up and healthy, but an optional dependency may be missing (e.g. hole detection disabled). See $AUTOLOG."$'\n\n'"$subjects"
+      "Range $PREV_SHA..$new_sha by $author"$'\n'"Rebuilt: $actions"$'\n'"Firmware: $fw_action $fw_note"$'\n\n'"pip install FAILED for: $PIP_FAILED"$'\n'"Services are up and health-checked, but an optional dependency may be missing — for image-service that means hole detection is silently disabled. Health cannot detect this; read $AUTOLOG."$'\n\n'"$subjects"
     log "deploy complete in ${dur}s — DEGRADED (pip: $PIP_FAILED)"
     exit 0
   fi

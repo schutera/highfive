@@ -18,7 +18,7 @@
 set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-cd "$repo_root"
+cd "$repo_root" || exit 1
 
 pattern='AIza[0-9A-Za-z_-]{20,}'
 

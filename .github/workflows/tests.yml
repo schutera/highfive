@@ -303,6 +303,24 @@ jobs:
         # substitute for a CI check".
         run: bash scripts/check-doc-citations.sh
 
+  shellcheck:
+    name: Shell script lint (shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run shellcheck over scripts/
+        # `scripts/deploy.sh` is the highest-blast-radius file in the repo: it
+        # runs as root on the live host every 2 minutes, unattended, and can
+        # reload services, reset the working tree, and publish a firmware OTA
+        # to the fleet (irreversible). Until #196 nothing checked it at all —
+        # `bash -n` in a PR description was the entire verification story. A
+        # bad edit here cannot be caught by any other job in this workflow.
+        # shellcheck ships preinstalled on ubuntu-latest runners.
+        run: shellcheck -S warning scripts/*.sh
+
   python-version-consistency:
     name: Python-version consistency gate
     runs-on: ubuntu-latest

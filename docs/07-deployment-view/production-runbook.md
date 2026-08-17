@@ -306,7 +306,7 @@ npm ci
 #    matrix are floated to >= bounds (numpy>=2.0.0, onnxruntime>=1.23.2,
 #    pydantic>=2.12.5), so pip resolves a per-interpreter wheel — on this 3.10
 #    host that's onnxruntime 1.23.2 / numpy 2.x (ADR-029). image-service BOOTS
-#    without the hole-detection deps (detection degrades to a no-op, ADR-028),
+#    without the hole-detection deps (detection degrades to a no-op, ADR-027),
 #    which is why the pip step is non-fatal in scripts/deploy.sh.
 python3 -m pip install -r duckdb-service/requirements.txt
 python3 -m pip install -r image-service/requirements.txt
@@ -315,7 +315,13 @@ python3 -m pip install -r image-service/requirements.txt
 npm --prefix backend run build
 ( cd homepage && VITE_API_URL=https://highfive.schutera.com/api npm run build )
 
-# 4) Reload (zero-downtime for the api cluster) and health-check
+# 4) Reload (zero-downtime for the api cluster) and health-check.
+#    NOTE: `duckdb-service` and `image-service` must already exist as pm2 apps.
+#    The ecosystem.config.js template in section 6 above defines ONLY
+#    highfive-api — provisioning the two Python services is out of this
+#    runbook's scope (see the banner at the top). If they were never
+#    registered, pm2 reports "process or namespace not found" for them and the
+#    two curls below connection-refuse. `pm2 list` tells you what exists.
 pm2 reload highfive-api duckdb-service image-service
 curl -fsS http://127.0.0.1:3001/api/health     # backend
 curl -fsS http://127.0.0.1:8000/health         # duckdb-service

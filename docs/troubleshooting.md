@@ -181,6 +181,47 @@ curl.exe -s "$base/api/images?module_id=$mac&limit=1"
 
 Expect only `200` (deleted) and `404` (already gone) — any `000`/`5xx` means the run isn't reaching the server, stop and investigate. **The UI count self-corrects:** the dashboard/admin "IMAGES" value is the live `real_image_count` ([`backend/src/database.ts`](../backend/src/database.ts)'s `fetchAndAssemble`), not the increment-only `module_configs.image_count`, so it drops as you delete — no separate counter fix needed.
 
+### `git commit` fails with `Der Befehl "ruff" ... konnte nicht gefunden werden` / `ruff: command not found`
+
+**Symptom.** A commit that touches any `.py` file under `duckdb-service/` or
+`image-service/` dies in the pre-commit hook. Commits touching only
+TypeScript/Markdown succeed, which makes it look intermittent.
+
+**Cause.** `.lintstagedrc.json` runs `ruff check --fix` + `ruff format` on
+those paths, invoking `ruff` as a bare command. `pip install ruff` puts
+`ruff.exe` in Python's `Scripts\` directory, which is **not** on `PATH` by
+default on Windows — so `py -m ruff --version` works while `ruff --version`
+does not, and only Python-touching commits notice.
+
+**Fix.** Install the pinned version and put `Scripts\` on `PATH`:
+
+```powershell
+py -m pip install ruff==0.14.1     # match duckdb-service/requirements-dev.txt
+$scripts = "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts"
+[Environment]::SetEnvironmentVariable(
+  "PATH", "$([Environment]::GetEnvironmentVariable('PATH','User'));$scripts", "User")
+# then restart the shell, and verify:
+ruff --version
+```
+
+For a one-off commit without changing your profile, from Git Bash:
+
+```bash
+export PATH="$PATH:/c/Users/wienh/AppData/Local/Programs/Python/Python312/Scripts"
+git commit -F your-message.txt
+```
+
+**Do not `--no-verify` past it.** The hook auto-fixes import order and
+formatting and re-stages the result; skipping it just moves the failure to CI
+with an extra commit in between. Note also that a hook failure means **the
+commit did not happen** — create a new commit, never `--amend` (that would
+clobber the previous one). See CLAUDE.md's critical rules.
+
+**Unrelated-looking companion failure.** If you also see
+`prettier --write [SIGKILL]` alongside this, that is usually memory pressure
+from test suites running concurrently, not a prettier bug — let the suites
+finish and re-run the commit.
+
 ### Backend vitest run reports fewer files than exist / `Error: Worker exited unexpectedly` (Windows)
 
 **Symptom.** `cd backend && npm test` finishes green but with a file short —

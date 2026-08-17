@@ -111,6 +111,39 @@ The DuckDB database is stored in the Docker volume:
 This volume is shared between the **image service** and the
 **DuckDB service** to persist the database and images across container restarts.
 
+### Startup ordering
+
+`backend` and `image-service` both declare
+`depends_on: duckdb-service: {condition: service_healthy}`, so compose holds
+them until duckdb-service's healthcheck passes rather than merely until its
+container starts. duckdb-service budgets `start_period: 10s` for Flask +
+DuckDB's `init_db()`; without the gate the dependants come up alongside it and
+their first calls land on a port nothing is listening on yet. For the backend
+that surfaced as a spurious `⚠ DuckDB service not reachable` at boot which then
+lingered in the admin Server Logs panel (#171), reading like a live outage long
+after the service was fine.
+
+The healthcheck runs at `interval: 2s` rather than the usual 15s precisely
+because two services now block on it: the first probe's latency is a tax on
+every `docker compose up`. `tests/ui/docker-compose.ui.yml` uses the same 2s
+for the same reason. `docker-compose.prod.yml` deliberately keeps 15s — prod
+boots once and pays the steady-state probe cost forever, the opposite
+trade-off to a dev loop.
+
+The backend _also_ retries the probe in-process
+(`backend/src/duckdbBootProbe.ts`). That is not redundancy for this file's
+benefit — it covers an **off-compose host** (the PM2 runbook), which has no
+orchestrator to gate on, so start ordering is whatever the operator arranged.
+See [production-runbook.md](production-runbook.md).
+
+**Known trade-off of the gate.** Because `backend` now waits for
+duckdb-service to be _healthy_, a duckdb that never becomes healthy means no
+backend at all — so `/api/health` and the admin Server Logs panel, the very
+surface you would use to diagnose it, are unreachable in that case. Use
+`docker compose logs duckdb-service` instead. The alternative (no gate, backend
+up but degraded) is what the in-process probe provides on the PM2 path; the two
+deployment styles genuinely differ here.
+
 ### Server log persistence (#178 / ADR-023)
 
 Each service also persists its admin **Server Logs** ring to disk (JSONL, daily

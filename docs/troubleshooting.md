@@ -181,6 +181,39 @@ curl.exe -s "$base/api/images?module_id=$mac&limit=1"
 
 Expect only `200` (deleted) and `404` (already gone) — any `000`/`5xx` means the run isn't reaching the server, stop and investigate. **The UI count self-corrects:** the dashboard/admin "IMAGES" value is the live `real_image_count` ([`backend/src/database.ts`](../backend/src/database.ts)'s `fetchAndAssemble`), not the increment-only `module_configs.image_count`, so it drops as you delete — no separate counter fix needed.
 
+### Backend vitest run reports fewer files than exist / `Error: Worker exited unexpectedly` (Windows)
+
+**Symptom.** `cd backend && npm test` finishes green but with a file short —
+e.g. `Test Files 29 passed (30)` — a whole file silently missing from the run — or fails outright
+with `Error: Worker exited unexpectedly`. Re-running passes with the full
+count. The missing file varies between runs.
+
+**Cause.** A `tinypool` worker-process flake specific to Windows, not a test
+defect. It has been observed independently across several review passes on
+this repo and has never reproduced on CI (which runs Linux, cold-cache) or
+been attributed to any particular test file.
+
+**What to do.** Re-run before believing it. If you need a deterministic run —
+for a review claim, or to bisect a real failure — take the worker pool out of
+the picture:
+
+```powershell
+$repo = "C:\Users\you\VSCode\highfive"
+cd $repo\backend; npx vitest run --no-file-parallelism --pool=forks
+```
+
+That configuration has been stable across repeated runs. **Do not "fix" this
+by adding retries or by trimming the suite** — the underlying run is sound,
+and a green count that came from a retry hides the real signal.
+
+Note also that a partial run is easy to misread as success: check the **file
+count**, not just the absence of red. Compare against the actual number of
+spec files rather than a number memorised from a doc:
+
+```powershell
+(Get-ChildItem $repo\backend\tests -Filter *.test.ts).Count
+```
+
 ---
 
 ## ESP32-CAM hardware

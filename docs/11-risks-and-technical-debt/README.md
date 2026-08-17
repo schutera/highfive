@@ -63,9 +63,11 @@ fixed in commit `778c9b1`. Don't reintroduce them.
 
 ## Operational trade-offs (intentional, not debt)
 
-- **Backend re-fetches on every request.** Stateless projection. No
-  caching layer. Acceptable at the expected read volume; revisit if
-  multi-tenant.
+- **Backend holds only a 5 s snapshot cache.** Read-through projection
+  with a short TTL (`backend/src/database.ts`'s `ASSEMBLE_CACHE_TTL_MS`)
+  plus in-flight dedupe; anything older re-fetches, and a degraded
+  snapshot is never cached. Acceptable at the expected read volume;
+  revisit if multi-tenant.
 - **Stub empty/sealed classifier.** `stub_classify()` ships in
   production today. The learned detector already localizes holes for the
   snips (ADR-027) but defers empty/sealed; a learned classifier will fill
@@ -129,6 +131,202 @@ This section grows over time. Each entry is a problem we paid for —
 write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
+
+### A secret-redactor is only as good as its wiring — 13 green tests on the helper, and the password still reached the disk (PR #193)
+
+**What happened.** A `DUCKDB_SERVICE_URL` carrying basic-auth credentials had
+its password written verbatim into the log ring — which ADR-023 persists to
+disk and the admin Server Logs panel renders — across **three** review rounds,
+each of which believed it had fixed the problem:
+
+1. Round 1 added `redactUrlCredentials` and wired it to the **malformed**
+   branch only. A well-formed `http://user:pass@host` resolves as `ok`, so it
+   never touched the redactor. The rare branch was protected; the common one
+   was not.
+2. Round 2 fixed the regex (it had missed scheme-less `user:pass@host`) and
+   shipped 6 helper tests. The wiring gap was untouched, so the leak remained.
+3. Round 3 redacted the URL in the boot warning — and the password still
+   appeared, because undici embeds the offending URL in **its own error
+   message** (`Request cannot be constructed from a URL that includes
+   credentials: http://user:pass@host/health`), which was interpolated into
+   the same line one field over.
+
+Throughout, every test passed. None of them tested a call site.
+
+**Why it happened.** Redaction is a **wiring** property, not a string-transform
+property, and unit tests on the transform cannot see wiring. Worse, the fix
+was scoped to whatever example the reviewer named each round, while a docstring
+asserted an invariant across the whole backend ("the **only** form that may be
+written to a log") that was enforced in two files out of four. **An invariant
+asserted in a comment and enforced in some of the code is worse than no
+invariant, because the next reader trusts the comment.**
+
+The real fix was one level up, and it was cheaper than any of the three
+attempts: Node's `fetch` **refuses** a URL containing credentials before any
+network I/O, so such a value was never going to work at all — it broke 100% of
+duckdb hops, not just the probe. `resolveDuckdbUrl` now rejects it as
+`malformed`. `DUCKDB_URL` is therefore credential-free *by construction*, every
+log site in `app.ts` and `database.ts` is safe with no per-site redaction, and a
+config that used to fail silently now fails loudly at boot.
+
+**How to avoid it next time.**
+
+- **Make the value safe, not the log statements.** If a secret can be in a
+  variable, the choke point is where the variable is *produced*. Redacting at
+  each call site is a decision that has to be re-made forever and only has to
+  be forgotten once.
+- **Test the call site, not the helper.** A redactor with 13 passing tests
+  leaked three times. The test that would have caught all three feeds a
+  credentialed value into the function that *logs*, and asserts the password is
+  absent from the output.
+- **Check whether the bad input is even legal.** Asking "can this value ever
+  work?" beat three rounds of "how do I hide it?" — and turned a silent
+  data-leak into a loud misconfiguration warning.
+- **When an error is logged, remember the error text may contain the input.**
+  `String(err)` from `fetch` embeds the URL. Redact the message, not just the
+  field you remembered to interpolate.
+
+### A markdown formatter rewrites emphasis, and this repo writes identifiers in prose — `prettier --write docs/` silently destroyed `RTC_NOINIT` (PR #193)
+
+**What happened.** A blanket `npx prettier --write docs/ …` — run to format two
+files the branch legitimately touched — reformatted every markdown file under
+`docs/`, including chapters the branch had nothing to do with. In
+`docs/06-runtime-view/esp-reliability.md` it turned
+
+```
+Because RTC_NOINIT survives software resets … Noting only on a _successful_ upload
+```
+
+into
+
+```
+Because RTC*NOINIT survives software resets … Noting only on a \_successful* upload
+```
+
+The identifier `RTC_NOINIT` no longer exists in the file (so it is
+**ungreppable** — and CLAUDE.md's own bench-gotcha section tells you to grep for
+exactly it), and because intraword `*` opens emphasis in CommonMark, the whole
+paragraph renders as one italic run. It reached `main`-bound review invisibly:
+the diff looked like whitespace churn in an unrelated chapter, which is the
+least-read part of any diff.
+
+**Why it happened.** Prettier's markdown printer normalises emphasis delimiters
+(`_x_` → `*x*`). Underscores in bare identifiers are indistinguishable from
+emphasis delimiters to that printer, so it pairs the `_` inside `RTC_NOINIT`
+with the next `_` in the paragraph and re-emits both as `*`. This repo's docs
+are unusually dense with bare snake_case in prose — `RTC_NOINIT`, `hb_failure`,
+`capture_gate`, `date_trunc`, `module_configs` — so the hazard is broad, not
+freak. `.lintstagedrc.json`'s `*.{…,md,…}` → `prettier --write` glob means any
+commit touching any doc can trip it.
+
+**How to avoid it next time.**
+
+- **`docs/**/\*.md` is in `.prettierignore`.** Do not remove it to "fix
+  formatting"; the formatter is not safe on this prose.
+- **Never run a formatter across a directory to fix the files you edited.**
+  Name the files: `npx prettier --write path/to/the/two/files.md`. Scope creep
+  in a formatter run is invisible in review precisely because it looks boring.
+- **Wrap identifiers in backticks in prose.** `` `RTC_NOINIT` `` is immune to
+  emphasis parsing and greppable; bare `RTC_NOINIT` is neither guaranteed.
+- **When a diff touches a file your change has no business touching, read it —
+  don't wave it through as whitespace.** That is the review step that caught
+  this one, four rounds in.
+
+### An advisory boot probe placed in front of `app.listen` turned a cosmetic log warning into a real outage — and a bare `fetch()` would have kept the backend from ever starting (PR #193)
+
+**What happened.** The backend's boot-time `duckdbHealth()` probe was a
+one-shot check that raced `duckdb-service` binding its port, so a healthy
+stack logged `⚠ DuckDB service not reachable` on most restarts. That single
+stale line then sat near the top of the admin Server Logs panel (#171),
+reading like a live outage. The first fix wrapped the probe in a
+`10 × 500 ms` retry loop — but left it **before** `app.listen`. Result: with
+duckdb genuinely down, every route including `/api/health` connection-refused
+for the whole ~4.5 s loop. A cosmetic problem had been traded for an
+availability regression, and CI was green throughout because the happy path
+resolves on attempt 1.
+
+Worse, `duckdbHealth()` used a bare `fetch()`. Node's `fetch` has **no default
+timeout**, so against a host that accepts the TCP connection but never answers
+(hung, not refused — a stuck DuckDB query, a half-open NAT mapping) the first
+attempt never settles: the loop never advances, `app.listen` is never reached,
+and the backend never comes up **at all**. Reproduced on the bench with a
+`net.createServer(() => {})` blackhole; the process sat there indefinitely.
+
+**Why it happened.** Two failure shapes wearing the same disguise. (1) An
+"advisory" check is only advisory if nothing waits on it — putting `await` in
+front of the bind silently promotes it to a startup dependency, and the code
+still _reads_ advisory because the comment says so. (2) Retry loops are written
+against the failure you're imagining (a service that will be up shortly), not
+the one that hurts (a service that answers the SYN and nothing else). A refused
+port fails fast, so the loop looks quick in testing; a hung port never fails at
+all.
+
+A third-order trap: the retry budget was expressed as an **attempt count**, and
+an attempt does not have one cost. Measured:
+
+| Failure shape                                   | Cost per attempt       | What 10 attempts cost at a 2 s cap |
+| ----------------------------------------------- | ---------------------- | ---------------------------------- |
+| Refused port, loopback                          | ~6 ms                  | ~4.5 s (all of it sleeping)        |
+| Refused port, across the docker bridge          | ~70 ms                 | ~5.2 s                             |
+| Stopped / hung service (accepts, never answers) | the full timeout (2 s) | ~25 s                              |
+
+The column is deliberately phrased as "at a 2 s cap" rather than "what the
+original loop bought": the `10 × 500 ms` version had **no** cap, so in the
+bottom row it did not cost 25 s — it never finished at all, which is the
+first failure above. 25 s is what those 10 attempts cost once the
+`AbortSignal` exists, and it is the figure the deadline had to improve on.
+
+Measured under the 15 s deadline that replaced it: a refused loopback port
+yields **29 attempts in ~14.8 s**, a blackhole listener **6 attempts**. (The
+last attempt is not started unless ≥250 ms of budget remains — see
+`DUCKDB_BOOT_PROBE_MIN_ATTEMPT_MS` — which is why it is 29 and not 30.)
+
+Same loop, a 5× spread in wall-clock. In the refused shape the budget is under
+half the 10 s `start_period` duckdb-service's own healthcheck allows for its
+cold start; in the hung shape it is 25 s of a boot diagnostic nobody asked for.
+**The number you write is not the budget you get**, and you cannot pick a
+sensible attempt count without first knowing which failure you're pricing.
+
+Note the deadline rewrite made the hung shape _shorter_ (15 s vs ~25 s). That is
+deliberate, not an accident of the refactor: the probe's job is to out-wait a
+startup race measured in seconds, not to wait out a genuinely down service —
+nothing useful happens in the extra 10 s.
+
+**How to avoid it next time.**
+
+- **Bind the port first.** Anything advisory — health probes, cache warms,
+  telemetry registration — is fire-and-forget _after_ `app.listen`. If it must
+  gate startup, it isn't advisory; say so and own the downtime.
+- **Every `fetch()` in this repo gets an `AbortSignal.timeout(...)`.** There is
+  no default. Audit with
+  `grep -rn -A3 "await fetch(" backend/src/` — note a bare
+  `| grep -v AbortSignal` **over-reports**, because most calls span lines and
+  carry the signal in the options object below. As of this writing only 3 of
+  the 17 `fetch` calls in `backend/src/app.ts` are bounded (the `/images` list
+  hop and the two `/detections*` hops); `backend/src/database.ts`'s
+  `fetchJsonOk` — the read-model fan-out, four hops on the hot path — is not.
+  Tracked in [#223](https://github.com/schutera/highfive/issues/223); do not
+  read one bounded call as evidence the chain is covered.
+- **Budget retries by wall-clock deadline, not attempt count**, whenever the
+  per-attempt cost varies with the failure shape (it usually does).
+  `backend/src/duckdbBootProbe.ts` does this, and
+  `backend/tests/duckdb-boot-probe.test.ts` pins **both** measured shapes.
+- **A fake clock that only advances on `sleep` can only test instant failure.**
+  The first cut of that suite did exactly this, so every attempt was free in
+  fake time and the timeout shape — the one the `AbortSignal` was added for —
+  was unreachable. A regression deleting the timeout would have passed. Make
+  the fake work advance the fake clock, and have it honour the timeout it was
+  granted, or the deadline assertions are theatre.
+- **Prefer the orchestrator over an application-level retry when you have one.**
+  `depends_on: {condition: service_healthy}` solved this declaratively for
+  compose; the in-process retry exists for the PM2 host, which has no
+  orchestrator. Doing both is fine — but write down _which_ path each one
+  covers, or the next reader will delete one as redundant.
+- **A boot path that no test has ever executed is not tested.** The retry loop
+  lived in `server.ts`, which calls `bootstrap()` at module scope and so cannot
+  be imported by a test. `port.ts` already existed to solve exactly this;
+  the convention was applied to the trivial helper and skipped for the risky
+  one. Extract the logic, then pin it.
 
 ### CI tested only Python 3.11, but the repo names its runtime three different ways — a 3.11-only `datetime.UTC` crashed both services on deploy (#180, #192)
 

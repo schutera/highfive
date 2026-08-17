@@ -35,6 +35,17 @@ services:
       - /app/backend/node_modules
       - backend_logs:/var/log/highfive
     restart: unless-stopped
+    # Gate the backend on duckdb-service being *healthy*, not merely started.
+    # Without this the two come up together and the backend's boot health
+    # probe races duckdb binding its port, logging a spurious "not reachable"
+    # that then lingers in the admin log panel (#171). docker-compose.prod.yml
+    # and this file's own image-service already do exactly this; backend was
+    # the one service missing it. The in-process retry in
+    # backend/src/duckdbBootProbe.ts still covers the PM2 host, which has no
+    # orchestrator to gate on.
+    depends_on:
+      duckdb-service:
+        condition: service_healthy
     networks:
       - net
 
@@ -125,9 +136,22 @@ services:
           '-c',
           "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
         ]
-      interval: 15s
+      # 2s, not 15s: `backend` and `image-service` both gate on this
+      # healthcheck, so the first probe's latency is a tax on every
+      # `docker compose up` — at 15s the stack idled several seconds waiting
+      # to be told about a service that was already serving.
+      # tests/ui/docker-compose.ui.yml already uses 2s for the same reason.
+      # (docker-compose.prod.yml keeps 15s on purpose: prod boots once and
+      # pays the steady-state probe cost forever.)
+      interval: 2s
       timeout: 5s
-      retries: 3
+      # 5 consecutive post-start failures before unhealthy. Failures during
+      # start_period don't count, so the cold start keeps its full 10s grace.
+      # Time-to-unhealthy depends on how the check fails: ~10s when it fails
+      # fast, up to 5x(timeout+interval) = ~35s against a hung service that
+      # holds the connection open. Same "an attempt does not have one cost"
+      # trap the boot probe budgets around.
+      retries: 5
       start_period: 10s
     networks:
       - net

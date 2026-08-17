@@ -1,16 +1,18 @@
 # Backend (`backend/`)
 
 Node 22 + Express + TypeScript. Serves the React frontend with a typed,
-auth-gated JSON API. Stateless read-through projection on top of
-`duckdb-service`; no DB connection of its own.
+auth-gated JSON API. Read-through projection on top of `duckdb-service`
+(with a 5 s in-memory snapshot cache, see below); no DB connection of
+its own.
 
-| Path                          | Role                                                                         |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| `backend/src/server.ts`       | Express bootstrap, port `3002`                                               |
-| `backend/src/app.ts`          | Route handlers                                                               |
-| `backend/src/auth.ts`         | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
-| `backend/src/duckdbClient.ts` | Typed HTTP client for `duckdb-service`                                       |
-| `backend/tests/*.test.ts`     | Vitest + supertest, 17 tests                                                 |
+| Path                             | Role                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------- |
+| `backend/src/server.ts`          | Express bootstrap, port `3002`                                               |
+| `backend/src/app.ts`             | Route handlers                                                               |
+| `backend/src/auth.ts`            | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
+| `backend/src/duckdbClient.ts`    | Typed HTTP client for `duckdb-service`                                       |
+| `backend/src/duckdbBootProbe.ts` | Advisory boot-time reachability probe (retry loop, deadline-budgeted)        |
+| `backend/tests/*.test.ts`        | Vitest + supertest, 287 tests across 30 files                                |
 
 ## Endpoints
 
@@ -33,12 +35,19 @@ Full request/response shapes in [docs/api-reference.md](../api-reference.md).
 ## Read-through projection
 
 Every `/api/modules*` request fans out to `duckdb-service` via
-`Promise.allSettled` over `GET /modules`, `GET /nests`,
-`GET /progress`, normalises the rows into the shared
-`@highfive/contracts` DTOs, and returns them. There is no caching
-layer — on partial upstream failure, the response degrades (some
-fields empty) rather than 500ing. Acceptable trade-off given the
-expected read volume (one operator, polling).
+`Promise.allSettled` over `GET /modules`, `GET /nests`, `GET /progress`,
+and `GET /heartbeats_summary`, normalises the rows into the shared
+`@highfive/contracts` DTOs, and returns them. On partial upstream
+failure the response degrades (some fields empty) rather than 500ing.
+Acceptable trade-off given the expected read volume (one operator,
+polling).
+
+A short-TTL in-memory cache sits in front of the fan-out
+(`backend/src/database.ts`'s `ASSEMBLE_CACHE_TTL_MS`, 5 s) and dedupes
+concurrent callers. Only a **fully-successful** snapshot is cached — a
+degraded one is deliberately not, so a transient upstream failure can't
+be served for the rest of the TTL. Pinned by
+[`backend/tests/read-model-cache.test.ts`](../../backend/tests/read-model-cache.test.ts).
 
 ## Auth flow
 
@@ -56,9 +65,37 @@ and the superseded-in-part
 
 ## Operational notes
 
-- `backend` retries `duckdb-service` on startup with exponential
-  backoff and starts empty if the DB is unreachable; it does not
-  block.
+- `backend` probes `duckdb-service` at startup and retries for up to a
+  **15 s wall-clock deadline** (500 ms between attempts, each attempt
+  capped by a 2 s fetch timeout, and the final attempt clamped to the
+  remaining budget so the deadline is a true ceiling). The probe is
+  **advisory** and is fired **after** `app.listen`, so it never delays
+  the port binding — the API serves regardless of the outcome. See
+  `backend/src/duckdbBootProbe.ts`'s `probeDuckdbHealth`.
+- The budget is a deadline rather than an attempt count because an
+  attempt does not have one cost: a refused port fails in ~6 ms on
+  loopback / ~70 ms across the docker bridge, while a stopped-or-hung
+  service burns the full 2 s timeout. The old `10 × 500 ms` therefore
+  meant ~4.5 s in one shape and ~25 s in the other. Both are pinned in
+  `backend/tests/duckdb-boot-probe.test.ts`.
+- If the probe gives up, the backend re-checks **once, beginning 60 s
+  after boot** (the probe's own elapsed time is subtracted from that
+  wait, so the follow-up starts at 60 s rather than 75 s; it answers up
+  to one attempt-timeout later) and logs either a recovery line or an
+  explicit "still unreachable — no further boot checks".
+  Without it, a boot-time warning stands uncorrected in the admin Server
+  Logs panel (#171) even after the service recovers: the ring evicts it
+  only once 2000 newer entries push it out
+  (`backend/src/logRing.ts`'s `MAX_RING_ENTRIES`), never on recovery.
+- The retry exists for an **off-compose host** (the PM2 runbook), which
+  has no orchestrator to gate on, so start ordering is whatever the
+  operator arranged and a one-shot probe can race the service binding
+  its port. All four compose stacks in the repo
+  (`docker-compose.yml`, `docker-compose.prod.yml`,
+  `tests/e2e/docker-compose.test.yml`, `tests/ui/docker-compose.ui.yml`)
+  instead gate the backend declaratively on
+  `depends_on: duckdb-service: {condition: service_healthy}` — so on
+  every orchestrated path the probe should succeed on attempt 1.
 - Internal URL: `http://duckdb-service:8000` (Docker service name,
   never `localhost`).
 - Internal URL for the admin proxy:

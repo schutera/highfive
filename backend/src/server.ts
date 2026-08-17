@@ -1,7 +1,17 @@
 import 'dotenv/config';
 import { app } from './app';
 import { getApiKey } from './auth';
-import { duckdbHealth } from './duckdbClient';
+import { reportDuckdbHealth } from './duckdbBootProbe';
+// DUCKDB_URL is safe to log: resolveDuckdbUrl rejects any URL carrying
+// userinfo, so the constant can never hold a credential. The raw *env value*
+// still can, which is why the warning below redacts it.
+import {
+  DUCKDB_URL,
+  describeDuckdbUrlMisconfig,
+  describeError,
+  duckdbHealth,
+  duckdbUrlReason,
+} from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
 import { installLogRing, initLogPersistence, writeStdout } from './logRing';
@@ -25,14 +35,15 @@ if (portUnsetWarning) {
   );
 }
 
-async function bootstrap() {
-  try {
-    const health = await duckdbHealth();
-    log.info(`🗄 DuckDB service reachable: ${JSON.stringify(health)}`);
-  } catch (err) {
-    log.warn(`⚠ DuckDB service not reachable: ${String(err)}`);
-  }
+// Composed in duckdbClient so it can be unit-tested — this message echoes the
+// raw env value back and is the last place a credential can reach the ring.
+const duckdbUrlWarning = describeDuckdbUrlMisconfig(
+  duckdbUrlReason,
+  process.env.DUCKDB_SERVICE_URL,
+);
+if (duckdbUrlWarning) log.warn(duckdbUrlWarning);
 
+function bootstrap() {
   app.listen(PORT, () => {
     // Don't say "http://localhost" — the process binds all interfaces and on
     // prod is reached via nginx, so the localhost prefix is misleading in the
@@ -52,6 +63,15 @@ async function bootstrap() {
       writeStdout(`   Admin login: POST /api/admin/login {"password":"<key>"}\n`);
       writeStdout(`   Or machine credential: X-Admin-Key: ${getApiKey()}\n`);
     }
+  });
+
+  // Fire-and-forget, and deliberately NOT awaited: the probe is advisory, so
+  // gating the bind on it would connection-refuse every route — /api/health
+  // included — for the whole retry window whenever duckdb is slow or down.
+  // `reportDuckdbHealth` captures all errors internally, so the .catch is for
+  // the genuinely-impossible case only; swallowing silently would hide it.
+  reportDuckdbHealth({ health: duckdbHealth, log, duckdbUrl: DUCKDB_URL }).catch((err) => {
+    log.warn(`⚠ DuckDB boot probe failed unexpectedly: ${describeError(err)}`);
   });
 }
 

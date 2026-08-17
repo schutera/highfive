@@ -4,7 +4,10 @@ import request from 'supertest';
 
 // Mock db so importing the app doesn't trigger real fetches.
 vi.mock('../src/database', () => ({
-  db: { listModules: vi.fn().mockResolvedValue([]), getModuleDetail: vi.fn().mockResolvedValue(null) },
+  db: {
+    listModules: vi.fn().mockResolvedValue([]),
+    getModuleDetail: vi.fn().mockResolvedValue(null),
+  },
 }));
 
 import { app } from '../src/app';
@@ -29,7 +32,9 @@ describe('GET /api/admin/logs/stream (#178 Phase 4)', () => {
   });
 
   it('returns 400 on a non-allow-listed service', async () => {
-    const res = await request(app).get('/api/admin/logs/stream?service=nginx').set('X-Admin-Key', KEY);
+    const res = await request(app)
+      .get('/api/admin/logs/stream?service=nginx')
+      .set('X-Admin-Key', KEY);
     expect(res.status).toBe(400);
   });
 
@@ -96,19 +101,21 @@ describe('GET /api/admin/logs/stream (#178 Phase 4)', () => {
     const { port } = server.address() as { port: number };
 
     const body = await new Promise<string>((resolve, reject) => {
-      http.get(
-        {
-          port,
-          path: '/api/admin/logs/stream?service=duckdb-service',
-          headers: { 'X-Admin-Key': KEY },
-        },
-        (res) => {
-          expect(res.statusCode).toBe(200);
-          let buf = '';
-          res.on('data', (c) => (buf += c.toString()));
-          res.on('end', () => resolve(buf));
-        },
-      ).on('error', reject);
+      http
+        .get(
+          {
+            port,
+            path: '/api/admin/logs/stream?service=duckdb-service',
+            headers: { 'X-Admin-Key': KEY },
+          },
+          (res) => {
+            expect(res.statusCode).toBe(200);
+            let buf = '';
+            res.on('data', (c) => (buf += c.toString()));
+            res.on('end', () => resolve(buf));
+          },
+        )
+        .on('error', reject);
       setTimeout(() => reject(new Error('timed out')), 4000);
     });
 
@@ -142,10 +149,7 @@ describe('GET /api/admin/logs/stream (#178 Phase 4)', () => {
         // intentionally never close
       },
     });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({ ok: true, status: 200, body: openStream }),
-    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, body: openStream }));
 
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, resolve));

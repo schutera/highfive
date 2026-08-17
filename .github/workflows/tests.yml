@@ -303,6 +303,30 @@ jobs:
         # substitute for a CI check".
         run: bash scripts/check-doc-citations.sh
 
+  shellcheck:
+    name: Shell script lint (shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run shellcheck over the deploy + release scripts
+        # These are the highest-blast-radius files in the repo and the only
+        # ones no other job touches. `scripts/deploy.sh` runs as root on the
+        # live host every 2 minutes, unattended, and can reload services, reset
+        # the working tree, and publish an irreversible firmware OTA to the
+        # fleet; `ESP32-CAM/build.sh` produces the artifacts and manifest that
+        # OTA ships. Until #196 nothing checked either — `bash -n` in a PR
+        # description was the entire verification story.
+        #
+        # `-S info` (not just `warning`) is deliberate: SC2086, unquoted
+        # expansion, is info-level, and it is the bug class most likely to bite
+        # a root-run script handling paths. All files are clean at this level
+        # today, so the gate costs nothing to keep. shellcheck ships
+        # preinstalled on ubuntu-latest runners.
+        run: shellcheck -S info scripts/*.sh ESP32-CAM/build.sh
+
   python-version-consistency:
     name: Python-version consistency gate
     runs-on: ubuntu-latest

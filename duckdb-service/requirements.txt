@@ -5,4 +5,11 @@ duckdb==1.4.4
 # a pydantic-core wheel for every interpreter — 2.12.5's pinned pydantic-core has
 # no cp314 wheel. duckdb 1.4.4 already ships cp310–cp314. See ADR-029.
 pydantic>=2.12.5
-requests==2.32.3
+# Must match image-service/requirements.txt exactly. On the PM2 bare-metal path both services run
+# on the SAME system interpreter with no venv (see production-runbook.md), so
+# they share one site-packages (under Docker Compose they do not): two different `requests==` pins meant
+# last-installed-wins, and whichever service deployed most recently silently
+# violated the other's pin. deploy.sh installs each service's
+# requirements whenever that file changes, so the two pins would have fought
+# each other across deploys. Keep these two lines in sync.
+requests==2.32.5

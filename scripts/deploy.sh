@@ -12,10 +12,13 @@
 # Design notes:
 #   * Idempotent + timer-safe: flock-guarded, exits SILENTLY when main is
 #     unchanged (the 99% case — no Discord spam).
-#   * "Fail gracefully": services are built BEFORE anything live is touched and
-#     only reloaded after a green build; a post-reload health failure rolls the
-#     working tree + build artifacts back to PREV_SHA and reloads again, so the
-#     OLD version keeps running.
+#   * "Fail gracefully": services are built before being reloaded, and a
+#     post-reload health failure rolls the working tree + build artifacts back
+#     to PREV_SHA and reloads again, so the OLD version keeps running.
+#     CAVEAT: dependency installs are not artifact-swappable. `npm ci` wipes and
+#     reinstalls node_modules in place (rollback() reinstalls the previous
+#     lockfile), and `pip install` mutates the shared system site-packages and
+#     is NOT reverted on rollback — pip upgrades are forward-only.
 #   * Firmware is published LAST — only after the services are live and healthy,
 #     because it is the one irreversible step. A broken/failing build never
 #     reaches the field (old manifest stays served). Once a *good* manifest is
@@ -35,6 +38,9 @@ LOCK="/tmp/highfive-deploy.lock"
 LOGDIR="$REPO/logs"
 AUTOLOG="$LOGDIR/auto-deploy.log"
 DEPLOYLOG="$LOGDIR/deploy.log"
+# Records the SHA of a deploy that failed, so the 2-minute timer does not
+# retry a known-broken commit (and re-wipe node_modules) forever.
+FAILED_MARKER="$LOGDIR/last-failed-sha"
 BRANCH="main"
 
 DUCKDB_BASE="http://127.0.0.1:8000"
@@ -85,8 +91,8 @@ PY
 changed_match() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
 
 health_ok() { # health_ok <url> ; retries up to ~20s
-  local url="$1" i
-  for i in $(seq 1 10); do
+  local url="$1"
+  for _ in $(seq 1 10); do
     curl -fsS --max-time 5 "$url" >/dev/null 2>&1 && return 0
     sleep 2
   done
@@ -101,23 +107,98 @@ except Exception: print('')" "$REPO/$1/firmware.json" "$2"
 served_field() { manifest_field homepage/dist "$1"; }   # what's live now
 built_field()  { manifest_field homepage/public "$1"; }  # what build.sh just made
 
-reload_services() { local p; for p in $1; do [ -n "$p" ] && pm2 reload "$p" --update-env >/dev/null 2>&1 || true; done; }
+reload_services() {
+  local p
+  for p in $1; do
+    [ -z "$p" ] && continue
+    # A failed reload is logged, not swallowed: "process or namespace not
+    # found" is a real state on this host (the runbook's ecosystem template
+    # registers only highfive-api), and silently succeeding on it is how a
+    # deploy reports green while a service was never restarted.
+    pm2 reload "$p" --update-env >/dev/null 2>&1 || log "WARN: pm2 reload '$p' failed (not registered?)"
+  done
+}
+
+# Append to RELOADED without duplicating — several gates can select the same
+# pm2 app (a backend change AND a dependency change both need highfive-api).
+add_reload() { case " $RELOADED " in *" $1 "*) ;; *) RELOADED+="$1 " ;; esac; }
 
 # ---------------------------------------------------------------------------
 # Rollback: restore the pre-deploy snapshot so the OLD version keeps running.
 # (Only reachable before firmware publish — firmware is the last, irreversible step.)
 # ---------------------------------------------------------------------------
+# Health endpoints matching what was actually rolled back. Probing only the
+# backend and then reporting "old version is running and healthy" is the same
+# report-green-without-checking mistake this script exists to avoid: rollback()
+# is reachable from duckdb, image and homepage health failures, in which case
+# the backend was very likely never touched and passes trivially.
+rollback_health_targets() {
+  local p out=""
+  for p in $RELOADED; do
+    case "$p" in
+      highfive-api)   out+="$HEALTH_BACKEND " ;;
+      duckdb-service) out+="$HEALTH_DUCKDB " ;;
+      image-service)  out+="$HEALTH_IMAGE " ;;
+    esac
+  done
+  [ "${HOMEPAGE_RESTORED:-0}" = "1" ] && out+="$HEALTH_HOMEPAGE "
+  # Nothing was reloaded (e.g. a lockfile-only tick): the backend is still the
+  # meaningful liveness signal, so don't return an empty list and call it green.
+  [ -z "$out" ] && out="$HEALTH_BACKEND "
+  printf '%s' "$out"
+}
+
 rollback() {
   local reason="$1"
   log "ROLLBACK: $reason — restoring $PREV_SHA"
+  # Mark the target SHA as failed so main() does not retry it on the next tick.
+  # REMOTE_SHA is `local` to main(), which is dynamically scoped here.
+  if [ -n "${REMOTE_SHA:-}" ]; then
+    printf '%s' "$REMOTE_SHA" > "$FAILED_MARKER" 2>/dev/null || true
+  fi
   [ -d "$REPO/backend/dist.bak" ] && { rm -rf "$REPO/backend/dist"; mv "$REPO/backend/dist.bak" "$REPO/backend/dist"; }
-  [ -d "$REPO/homepage/dist.old" ] && { rm -rf "$REPO/homepage/dist"; mv "$REPO/homepage/dist.old" "$REPO/homepage/dist"; }
+  HOMEPAGE_RESTORED=0
+  [ -d "$REPO/homepage/dist.old" ] && { rm -rf "$REPO/homepage/dist"; mv "$REPO/homepage/dist.old" "$REPO/homepage/dist"; HOMEPAGE_RESTORED=1; }
   git reset --hard "$PREV_SHA" >/dev/null 2>&1 || true
+  # `npm ci` DELETES node_modules before installing, and nothing else here puts
+  # it back. If the install is what failed, the tree above is restored but the
+  # dependencies are wiped or half-written — and the running cluster keeps
+  # answering from modules already resident in RAM, so the health check below
+  # PASSES and we would report "old version is running and healthy" while the
+  # host is armed to die on its next `pm2 restart` (which the documented
+  # ecosystem.config.js schedules on its own via max_memory_restart).
+  # Reinstall against the now-restored lockfile; if that fails too, this is not
+  # a clean rollback and must not be reported as one.
+  # Reinstall unconditionally when the forward install ran — BOTH failure
+  # shapes need it, and an earlier "is the tree intact?" heuristic got the more
+  # common one backwards:
+  #   * `npm ci` itself failed  -> node_modules is wiped or partial.
+  #   * `npm ci` SUCCEEDED and a later step failed -> node_modules is synced to
+  #     the NEW lockfile while the tree above was just reset to PREV_SHA, so the
+  #     old code would run against the new dependency set and be announced as a
+  #     clean restore.
+  # A redundant `npm ci` during an already-failing deploy is cheap insurance;
+  # the tree/lockfile mismatch it prevents is not hypothetical.
+  if [ "${NPM_CI_RAN:-0}" = "1" ]; then
+    log "rollback: reinstalling node_modules against $PREV_SHA's lockfile"
+    if ! ( cd "$REPO" && HUSKY=0 npm ci ) >>"$AUTOLOG" 2>&1; then
+      # Reload first: the restored artifacts are on disk but not loaded, and
+      # escalating without reloading would leave the failed build running while
+      # telling the operator otherwise.
+      reload_services "$RELOADED"
+      notify fail "Deploy FAILED — rollback INCOMPLETE" "$reason"$'\n'"Tree restored to $PREV_SHA and services reloaded, but 'npm ci' also failed during rollback, so node_modules is wiped or partial. Node services will fail on their next (re)start even if they answer now. NEEDS A HUMAN — see $AUTOLOG."
+      exit 1
+    fi
+  fi
   reload_services "$RELOADED"
-  if health_ok "$HEALTH_BACKEND"; then
-    notify fail "Deploy FAILED — rolled back" "$reason"$'\n'"Restored $PREV_SHA; old version is running and healthy."
+  local url failed=""
+  for url in $(rollback_health_targets); do
+    health_ok "$url" || failed+="$url "
+  done
+  if [ -z "$failed" ]; then
+    notify fail "Deploy FAILED — rolled back" "$reason"$'\n'"Restored $PREV_SHA; verified healthy: $(rollback_health_targets)"
   else
-    notify fail "Deploy FAILED — rollback health ALSO failing" "$reason"$'\n'"Restored $PREV_SHA but $HEALTH_BACKEND is not 200 — NEEDS A HUMAN."
+    notify fail "Deploy FAILED — rollback health ALSO failing" "$reason"$'\n'"Restored $PREV_SHA but these are not 200: $failed"$'\n'"NEEDS A HUMAN."
   fi
   exit 1
 }
@@ -204,6 +285,19 @@ main() {
   local REMOTE_SHA; REMOTE_SHA="$(git rev-parse "origin/$BRANCH")"
   [ "$PREV_SHA" = "$REMOTE_SHA" ] && exit 0   # silent no-op (the common tick)
 
+  # Don't re-attempt a SHA that already failed. rollback() resets the tree and
+  # exits, so without this the next tick two minutes later retries the identical
+  # commit — forever, re-posting "NEEDS A HUMAN" each time. That was merely
+  # noisy before; now that a deploy can wipe and reinstall node_modules, the
+  # retry loop repeatedly tears down production's dependency tree on a host
+  # that is already known-broken. Clear the marker (or push a fix) to resume.
+  if [ -f "$FAILED_MARKER" ] && [ "$(cat "$FAILED_MARKER" 2>/dev/null)" = "$REMOTE_SHA" ]; then
+    log "skip: $REMOTE_SHA already failed a deploy — rm $FAILED_MARKER to retry"
+    exit 0
+  fi
+
+  # A new SHA is being attempted — clear any stale failure marker.
+  rm -f "$FAILED_MARKER" 2>/dev/null || true
   local started; started="$(date -u +%s)"
   log "new commits $PREV_SHA..$REMOTE_SHA — deploying"
   local author subjects
@@ -221,24 +315,109 @@ main() {
   rm -rf "$REPO/backend/dist.bak" "$REPO/homepage/dist.old" "$REPO/homepage/dist.new"
   [ -d "$REPO/backend/dist" ] && cp -a "$REPO/backend/dist" "$REPO/backend/dist.bak"
 
+  # NPM_CI_RAN / PIP_FAILED are read by rollback() and the final notification.
   local actions="" HOMEPAGE_REBUILT=0
+  NPM_CI_RAN=0
+  PIP_FAILED=""
 
-  # ---- build phase (no live mutation) ---------------------------------------
+  # ---- build phase -----------------------------------------------------------
+  # NOTE: not entirely free of live mutation any more — `npm ci` below wipes and
+  # reinstalls node_modules underneath the running cluster. It is still ordered
+  # before the builds and before any reload, and `rollback()` reinstalls, but
+  # the old "nothing live is touched until reload" invariant no longer holds
+  # here. See the header design note.
+  #
+  # Workspaces monorepo (contracts/backend/homepage share ONE root lockfile): a
+  # new backend/homepage dependency changes the ROOT `package-lock.json`, not
+  # `<pkg>/package-lock.json`, so reinstall from the root — BEFORE the builds, or
+  # `tsc`/`vite` compile against missing deps and roll back (hit this with
+  # rotating-file-stream, #178). `npm ci` at root installs every workspace. The
+  # root `package.json` is in the gate because it declares the workspace list.
+  #
+  # HUSKY=0: a root `npm ci` runs the root `prepare` script, which is `husky`.
+  # Installing hooks on the deploy host would point `core.hooksPath` at .husky,
+  # and this script's own `git commit` in publish_firmware would then fire
+  # pre-commit (lint-staged) — an unguarded call, so a hook failure kills the
+  # script via errexit after firmware.json is already live, leaving a dirty
+  # tree that bricks every subsequent tick on the dirty-tree check. Deploy
+  # hosts do not want developer hooks.
+  local NPM_DEPS_CHANGED=0
+  if changed_match '^package(-lock)?\.json$|^(backend|homepage|contracts)/package\.json$'; then
+    NPM_DEPS_CHANGED=1
+    log "npm deps changed — root npm ci (workspaces)"
+    NPM_CI_RAN=1
+    actions+="npm-deps "
+    # Select highfive-api for reload/health BEFORE running the install, for two
+    # reasons that both bit earlier revisions of this file:
+    #   1. If `npm ci` fails and calls rollback(), RELOADED would otherwise
+    #      still be empty — so rollback's reload would iterate over nothing and
+    #      its health probe would fall back to a backend it never restarted,
+    #      reporting "verified healthy" about a process answering from RAM.
+    #   2. New modules on disk do nothing for a Node process that is still
+    #      holding the old module graph. Without a reload the deps never go
+    #      live, and a post-install health check cannot fail.
+    add_reload highfive-api
+    # Output to the log, not /dev/null: this failure is FATAL and rolls back
+    # production, so "root npm ci failed" without the reason is the one message
+    # an operator cannot act on.
+    HUSKY=0 npm ci >>"$AUTOLOG" 2>&1 || rollback "root npm ci failed (see npm output in $AUTOLOG)"
+  fi
   if changed_match '^backend/|^contracts/'; then
     log "building backend"
-    changed_match '^backend/package-lock\.json$' && npm --prefix backend ci >/dev/null 2>&1
     npm --prefix backend run build >/dev/null 2>&1 || rollback "backend build (tsc) failed"
-    actions+="backend "; RELOADED+="highfive-api "
+    actions+="backend "; add_reload highfive-api
   fi
-  if changed_match '^homepage/|^contracts/'; then
+  # Rebuild the bundle when dependencies changed, not only when homepage/ did:
+  # a bumped homepage dependency lands in node_modules and would otherwise stay
+  # unbundled — absent from the shipped site until some unrelated homepage file
+  # happens to change, while the deploy reports OK.
+  if changed_match '^homepage/|^contracts/' || [ "$NPM_DEPS_CHANGED" = "1" ]; then
     log "building homepage -> dist.new"
-    changed_match '^homepage/package-lock\.json$' && npm --prefix homepage ci >/dev/null 2>&1
     ( cd homepage && npx tsc && npx vite build --outDir dist.new ) >/dev/null 2>&1 || rollback "homepage build failed"
     [ -f "$REPO/homepage/dist.new/index.html" ] || rollback "homepage dist.new missing index.html"
+    # The bundle inlines VITE_API_URL at build time. If the host is missing
+    # homepage/.env.production the fallback in src/services/api.ts bakes in
+    # http://localhost:3002/api and ships a site that cannot reach the API —
+    # and the homepage health check only verifies the HTML loads, so it would
+    # pass. Documented in production-runbook.md; this is the guard.
+    if grep -rq "localhost:3002" "$REPO/homepage/dist.new/assets" 2>/dev/null; then
+      rollback "homepage bundle points at localhost:3002 — VITE_API_URL not set on this host (see homepage/.env.production)"
+    fi
     HOMEPAGE_REBUILT=1; actions+="homepage "
   fi
-  changed_match '^duckdb-service/' && { RELOADED+="duckdb-service "; actions+="duckdb-service "; }
-  changed_match '^image-service/'  && { RELOADED+="image-service ";  actions+="image-service "; }
+  # Python services run under pm2 on the system `python3` (no venv) — install new
+  # deps into it BEFORE reload.
+  #
+  # NON-FATAL, but NOT health-gated. A genuinely-required missing module crashes
+  # the reload → health fails → rollback, so that half is covered. The half that
+  # is NOT: image-service imports cv2/numpy/onnxruntime under a try/except
+  # (`services/hole_detection.py`'s `_RUNTIME_AVAILABLE`) and `/health` is a pure
+  # liveness probe that never touches them. So a missing OPTIONAL wheel — the
+  # exact case this non-fatal design exists for — leaves health green while hole
+  # detection is silently dead. The health check therefore cannot be the gate;
+  # instead the failure is recorded and surfaced in the final notification, so a
+  # degraded deploy can never report a clean "Deploy OK".
+  #
+  # pip output goes to the deploy log rather than /dev/null: the failure this
+  # anticipates is "no matching distribution" for a wheel that doesn't exist on
+  # this interpreter, and that reason exists only in pip's stderr.
+  pip_install_service() {
+    local svc="$1"
+    # Log which interpreter we are actually installing into. The whole step
+    # assumes `python3` is the same interpreter pm2 launches the services with
+    # — unverifiable from this repo. If it is not, pip SUCCEEDS, installs into
+    # a site-packages nobody imports, and the fix is a silent no-op. Recording
+    # it turns that assumption into something an operator can check.
+    log "$svc deps changed — pip install into $(python3 -c 'import sys; print(sys.executable)' 2>/dev/null || echo 'python3 (unresolved)')"
+    if ! python3 -m pip install -r "$svc/requirements.txt" >>"$AUTOLOG" 2>&1; then
+      log "WARN: $svc pip install had failures (see pip output in $AUTOLOG)"
+      PIP_FAILED+="$svc "
+    fi
+  }
+  if changed_match '^duckdb-service/requirements\.txt$'; then pip_install_service duckdb-service; fi
+  if changed_match '^image-service/requirements\.txt$'; then pip_install_service image-service; fi
+  changed_match '^duckdb-service/' && { add_reload duckdb-service; actions+="duckdb-service "; }
+  changed_match '^image-service/'  && { add_reload image-service;  actions+="image-service "; }
 
   # ---- reload + health (live mutation begins; firmware NOT yet touched) ------
   if [ "$HOMEPAGE_REBUILT" = "1" ]; then
@@ -251,6 +430,14 @@ main() {
   changed_match '^duckdb-service/'      && { health_ok "$HEALTH_DUCKDB"  || rollback "duckdb-service health failed after reload"; }
   changed_match '^image-service/'       && { health_ok "$HEALTH_IMAGE"   || rollback "image-service health failed after reload"; }
   [ "$HOMEPAGE_REBUILT" = "1" ] && { health_ok "$HEALTH_HOMEPAGE" || rollback "homepage health (https) failed after swap"; }
+  # A lockfile-only tick replaces every dependency on disk under the running
+  # cluster but matches none of the service gates above. highfive-api is added
+  # to RELOADED by the npm branch, so it HAS been restarted against the new
+  # modules by now and this probe is meaningful rather than a formality against
+  # a process still holding the old module graph.
+  if [ "$NPM_CI_RAN" = "1" ] && ! changed_match '^backend/|^contracts/'; then
+    health_ok "$HEALTH_BACKEND" || rollback "backend health failed after a dependency-only npm ci"
+  fi
 
   # ---- firmware phase (LAST — irreversible; only after services are healthy) -
   local fw_action="none" fw_note=""
@@ -278,7 +465,16 @@ main() {
   [ -z "$actions" ] && actions="(no service rebuild — docs/firmware/other)"
   printf '%s deployed auto (%s) -- %s; firmware=%s %s; %ds\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$new_sha" "$actions" "$fw_action" "$fw_note" "$dur" >> "$DEPLOYLOG"
-  notify success "Deploy OK (${dur}s)" "Range $PREV_SHA..$new_sha by $author"$'\n'"Rebuilt: $actions"$'\n'"Firmware: $fw_action $fw_note"$'\n\n'"$subjects"
+  # A pip failure is non-fatal but must NOT be reported as a clean deploy: the
+  # health checks cannot see a missing optional dependency (see pip_install_service),
+  # so this notification is the only place it surfaces.
+  if [ -n "$PIP_FAILED" ]; then
+    notify fail "Deploy DEGRADED (${dur}s)" \
+      "Range $PREV_SHA..$new_sha by $author"$'\n'"Built/installed: $actions"$'\n'"Firmware: $fw_action $fw_note"$'\n\n'"pip install FAILED for: $PIP_FAILED"$'\n'"Services are up and health-checked, but an optional dependency may be missing — for image-service that means hole detection is silently disabled. Health cannot detect this; read $AUTOLOG."$'\n\n'"$subjects"
+    log "deploy complete in ${dur}s — DEGRADED (pip: $PIP_FAILED)"
+    exit 0
+  fi
+  notify success "Deploy OK (${dur}s)" "Range $PREV_SHA..$new_sha by $author"$'\n'"Built/installed: $actions"$'\n'"Firmware: $fw_action $fw_note"$'\n\n'"$subjects"
   log "deploy complete in ${dur}s"
 }
 

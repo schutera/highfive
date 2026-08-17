@@ -1,4 +1,8 @@
 Flask==3.1.2
+# Must match duckdb-service/requirements.txt exactly. On the PM2 bare-metal
+# path both services share one system site-packages (no venv), so divergent
+# pins meant last-installed-wins; under Docker Compose they are separate
+# containers and would not collide. Keep these two lines in sync.
 requests==2.32.5
 # pydantic floated to a lower bound (not ==) so the 3.10–3.14 CI matrix resolves
 # a pydantic-core wheel for every interpreter — 2.12.5's pinned pydantic-core has

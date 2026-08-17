@@ -52,3 +52,18 @@ pnpm-lock.yaml
 .next/
 .vite/
 .cache/
+
+# arc42 documentation prose — DO NOT auto-format.
+#
+# Prettier's markdown printer rewrites emphasis delimiters, and this repo's
+# docs are dense with bare snake_case identifiers in prose (RTC_NOINIT,
+# hb_failure, capture_gate, date_trunc, module_configs, …). Underscores in
+# adjacent identifiers get paired as an emphasis span, so a reformat silently
+# turned `RTC_NOINIT survives … a _successful_ upload` into
+# `RTC*NOINIT survives … a \_successful* upload` — the identifier destroyed and
+# ungreppable, the paragraph rendered as one italic run. Caught in PR #193
+# only because a reviewer diffed an unrelated chapter.
+#
+# Lesson: docs/11-risks-and-technical-debt/README.md → "A markdown formatter
+# rewrites emphasis, and this repo writes identifiers in prose".
+docs/**/*.md

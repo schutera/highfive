@@ -69,9 +69,7 @@ describe('access logging (#178)', () => {
   });
 
   it('never logs the admin login password from the request body', async () => {
-    await request(app)
-      .post('/api/admin/login')
-      .send({ password: 'hunter2-should-never-appear' });
+    await request(app).post('/api/admin/login').send({ password: 'hunter2-should-never-appear' });
     const all = msgs().join('\n');
     expect(all).not.toContain('hunter2-should-never-appear');
     // The login attempt is still logged as an access entry (path + status only).

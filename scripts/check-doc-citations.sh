@@ -19,7 +19,7 @@
 set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-cd "$repo_root"
+cd "$repo_root" || exit 1
 
 # Match `path/to/file.ext:NNN`. Use git grep so .gitignore is honoured.
 # `|| true` because git grep returns 1 on no matches, which set -e would treat as fatal.

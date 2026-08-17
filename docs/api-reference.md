@@ -850,6 +850,13 @@ GET /health
 { "ok": true, "db": "/data/app.duckdb" }
 ```
 
+> **Consumer note.** The backend's boot probe
+> (`backend/src/duckdbClient.ts`'s `duckdbHealth`) treats a `200` carrying
+> `{"ok": false}` as **unreachable**, not as reachable-but-degraded. `ok` is
+> the liveness signal; a 200 alone is not. `routes/health.py` hardcodes
+> `ok=True` today, so any future "up but not serving" state must set `ok`
+> false rather than relying on the status code.
+
 ## 3.2 Register a module
 
 ```

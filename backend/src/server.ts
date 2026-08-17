@@ -1,8 +1,12 @@
 import 'dotenv/config';
 import { app } from './app';
 import { getApiKey } from './auth';
-import { probeDuckdbHealth } from './duckdbBootProbe';
-import { DUCKDB_URL, duckdbHealth, duckdbUrlFromDefault } from './duckdbClient';
+import {
+  DUCKDB_RECOVERY_RECHECK_MS,
+  probeDuckdbHealth,
+  recheckDuckdbHealth,
+} from './duckdbBootProbe';
+import { DEFAULT_DUCKDB_URL, DUCKDB_URL, duckdbHealth, duckdbUrlReason } from './duckdbClient';
 import { isProduction } from './env';
 import { log } from './log';
 import { installLogRing, initLogPersistence, writeStdout } from './logRing';
@@ -26,9 +30,17 @@ if (portUnsetWarning) {
   );
 }
 
-if (duckdbUrlFromDefault) {
+if (duckdbUrlReason !== 'ok') {
+  // Name the actual mistake. Saying "unset" to an operator who can see the
+  // variable set — which a single fromDefault boolean forces — is the same
+  // class of misleading boot warning this whole change exists to remove.
+  const detail =
+    duckdbUrlReason === 'unset'
+      ? 'unset or blank'
+      : `set to an unusable value (${JSON.stringify(process.env.DUCKDB_SERVICE_URL)}) — ` +
+        `it must be an absolute http(s) URL, e.g. http://duckdb-service:8000`;
   log.warn(
-    `[startup] DUCKDB_SERVICE_URL unset — defaulting to ${DUCKDB_URL}. ` +
+    `[startup] DUCKDB_SERVICE_URL ${detail} — falling back to ${DEFAULT_DUCKDB_URL}. ` +
       `Set it explicitly in production (pm2: ecosystem.config.js; ` +
       `compose: DUCKDB_SERVICE_URL=http://duckdb-service:8000).`,
   );
@@ -45,10 +57,29 @@ async function reportDuckdbHealth() {
   const outcome = await probeDuckdbHealth({ health: duckdbHealth });
   if (outcome.reachable) {
     log.info(`🗄 DuckDB service reachable: ${JSON.stringify(outcome.health)}`);
+    return;
+  }
+  // Elapsed, not just attempts: attempt count is the unit this probe
+  // deliberately stopped budgeting in, since one attempt costs ~6ms against a
+  // refused port and a full 2s against a hung one.
+  log.warn(
+    `⚠ DuckDB service not reachable after ${outcome.attempts} attempts / ` +
+      `${outcome.elapsedMs}ms (${DUCKDB_URL}): ${String(outcome.error)}`,
+  );
+
+  // Look once more later, so the warning above cannot stand uncorrected in
+  // the admin log panel for the rest of the process lifetime when duckdb
+  // simply came up late. See recheckDuckdbHealth's docstring.
+  const recovered = await recheckDuckdbHealth({ health: duckdbHealth });
+  if (recovered) {
+    log.info(
+      `🗄 DuckDB service recovered ${DUCKDB_RECOVERY_RECHECK_MS / 1000}s after boot: ` +
+        `${JSON.stringify(recovered)} — the warning above is stale.`,
+    );
   } else {
     log.warn(
-      `⚠ DuckDB service not reachable after ${outcome.attempts} attempts ` +
-        `(${DUCKDB_URL}): ${String(outcome.error)}`,
+      `⚠ DuckDB service still unreachable ${DUCKDB_RECOVERY_RECHECK_MS / 1000}s after boot ` +
+        `(${DUCKDB_URL}). No further boot checks — request paths surface live errors.`,
     );
   }
 }

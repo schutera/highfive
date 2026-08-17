@@ -136,9 +136,18 @@ services:
           '-c',
           "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
         ]
-      interval: 15s
+      # 2s, not 15s: `backend` and `image-service` both gate on this
+      # healthcheck, so the first probe's latency is a tax on every
+      # `docker compose up`. At 15s the stack idled ~6-15s (depending on
+      # Docker version's start_interval support) waiting to be told about a
+      # service that was already serving. tests/ui/docker-compose.ui.yml
+      # already uses 2s for exactly this reason.
+      interval: 2s
       timeout: 5s
-      retries: 3
+      # 5 consecutive post-start failures (~10s) before unhealthy. Failures
+      # during start_period don't count toward this, so the cold start still
+      # gets its full 10s of grace.
+      retries: 5
       start_period: 10s
     networks:
       - net

@@ -11,7 +11,7 @@ auth-gated JSON API. Stateless read-through projection on top of
 | `backend/src/auth.ts`            | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
 | `backend/src/duckdbClient.ts`    | Typed HTTP client for `duckdb-service`                                       |
 | `backend/src/duckdbBootProbe.ts` | Advisory boot-time reachability probe (retry loop, deadline-budgeted)        |
-| `backend/tests/*.test.ts`        | Vitest + supertest, 242 tests across 30 files                                |
+| `backend/tests/*.test.ts`        | Vitest + supertest, 249 tests across 30 files                                |
 
 ## Endpoints
 
@@ -66,24 +66,32 @@ and the superseded-in-part
 
 - `backend` probes `duckdb-service` at startup and retries for up to a
   **15 s wall-clock deadline** (500 ms between attempts, each attempt
-  capped by a 2 s fetch timeout). The probe is **advisory** and is fired
-  **after** `app.listen`, so it never delays the port binding — the API
-  serves regardless of the outcome. The budget is a deadline rather than
-  an attempt count because the failure mode is a _refused_ port, where
-  each attempt fails in ~1 ms and an attempt cap would silently shrink
-  the window to well under duckdb-service's own 10 s healthcheck
-  `start_period`. See `backend/src/duckdbBootProbe.ts`'s
-  `probeDuckdbHealth`.
+  capped by a 2 s fetch timeout, and the final attempt clamped to the
+  remaining budget so the deadline is a true ceiling). The probe is
+  **advisory** and is fired **after** `app.listen`, so it never delays
+  the port binding — the API serves regardless of the outcome. See
+  `backend/src/duckdbBootProbe.ts`'s `probeDuckdbHealth`.
+- The budget is a deadline rather than an attempt count because an
+  attempt does not have one cost: a refused port fails in ~6 ms on
+  loopback / ~70 ms across the docker bridge, while a stopped-or-hung
+  service burns the full 2 s timeout. The old `10 × 500 ms` therefore
+  meant ~4.5 s in one shape and ~25 s in the other. Both are pinned in
+  `backend/tests/duckdb-boot-probe.test.ts`.
+- If the probe gives up, the backend looks **once more after 60 s** and
+  logs either a recovery line or an explicit "still unreachable, no
+  further boot checks". Without that, a boot-time warning stands
+  uncorrected in the admin Server Logs panel (#171) even after the
+  service recovers — the ring evicts it only once 2000 newer entries
+  push it out (`backend/src/logRing.ts`'s `MAX_RING_ENTRIES`), never on
+  recovery.
 - The retry exists for the **PM2 host**, which has no orchestrator and
   starts `highfive-api` and `duckdb-service` within a second of each
-  other, so a one-shot probe races the service binding its port. Both
-  compose files instead gate the backend declaratively on
-  `depends_on: duckdb-service: {condition: service_healthy}`. The
-  symptom either way was a spurious `⚠ DuckDB service not reachable`
-  that then lingered near the top of the admin Server Logs panel (#171)
-  long after the service was fine — it is evicted only once 2000 newer
-  entries push it out of the ring (`backend/src/logRing.ts`'s
-  `MAX_RING_ENTRIES`), not on recovery.
+  other, so a one-shot probe races the service binding its port. All
+  four compose stacks in the repo (`docker-compose.yml`,
+  `docker-compose.prod.yml`, `tests/e2e/docker-compose.test.yml`,
+  `tests/ui/docker-compose.ui.yml`) instead gate the backend
+  declaratively on
+  `depends_on: duckdb-service: {condition: service_healthy}`.
 - Internal URL: `http://duckdb-service:8000` (Docker service name,
   never `localhost`).
 - Internal URL for the admin proxy:

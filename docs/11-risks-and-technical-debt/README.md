@@ -155,15 +155,32 @@ and the backend never comes up **at all**. Reproduced on the bench with a
 front of the bind silently promotes it to a startup dependency, and the code
 still _reads_ advisory because the comment says so. (2) Retry loops are written
 against the failure you're imagining (a service that will be up shortly), not
-the one that hurts (a service that answers the SYN and nothing else). A
-refused port fails in ~1 ms, so the loop looks fast in testing; a hung port
-fails never.
+the one that hurts (a service that answers the SYN and nothing else). A refused
+port fails fast, so the loop looks quick in testing; a hung port never fails at
+all.
 
-A third-order trap: the retry budget was expressed as an **attempt count**.
-Because the real failure mode is instant refusal, `10 × 500 ms` is not a 10-attempt
-window — it is 4.5 s of sleeping, less than half the 10 s `start_period`
-duckdb-service's own healthcheck budgets for its cold start. The budget you
-write is not the budget you get when failures are free.
+A third-order trap: the retry budget was expressed as an **attempt count**, and
+an attempt does not have one cost. Measured:
+
+| Failure shape                                   | Cost per attempt       | What `10 × 500 ms` really buys |
+| ----------------------------------------------- | ---------------------- | ------------------------------ |
+| Refused port, loopback                          | ~6 ms                  | ~4.5 s (all of it sleeping)    |
+| Refused port, across the docker bridge          | ~70 ms                 | ~5.2 s                         |
+| Stopped / hung service (accepts, never answers) | the full timeout (2 s) | ~25 s                          |
+
+Measured under the 15 s deadline that replaced it: a refused loopback port
+yields **30 attempts / 14806 ms**, a blackhole listener **6 attempts**.
+
+Same loop, a 5× spread in wall-clock. In the refused shape the budget is under
+half the 10 s `start_period` duckdb-service's own healthcheck allows for its
+cold start; in the hung shape it is 25 s of a boot diagnostic nobody asked for.
+**The number you write is not the budget you get**, and you cannot pick a
+sensible attempt count without first knowing which failure you're pricing.
+
+Note the deadline rewrite made the hung shape _shorter_ (15 s vs ~25 s). That is
+deliberate, not an accident of the refactor: the probe's job is to out-wait a
+startup race measured in seconds, not to wait out a genuinely down service —
+nothing useful happens in the extra 10 s.
 
 **How to avoid it next time.**
 
@@ -178,11 +195,18 @@ write is not the budget you get when failures are free.
   the 17 `fetch` calls in `backend/src/app.ts` are bounded (the `/images` list
   hop and the two `/detections*` hops); `backend/src/database.ts`'s
   `fetchJsonOk` — the read-model fan-out, four hops on the hot path — is not.
-  Tracked separately; do not read one bounded call as evidence the chain is
-  covered.
+  Tracked in [#223](https://github.com/schutera/highfive/issues/223); do not
+  read one bounded call as evidence the chain is covered.
 - **Budget retries by wall-clock deadline, not attempt count**, whenever the
-  failure can be instant. `backend/src/duckdbBootProbe.ts` does this, and
-  `backend/tests/duckdb-boot-probe.test.ts` pins it with a fake clock.
+  per-attempt cost varies with the failure shape (it usually does).
+  `backend/src/duckdbBootProbe.ts` does this, and
+  `backend/tests/duckdb-boot-probe.test.ts` pins **both** measured shapes.
+- **A fake clock that only advances on `sleep` can only test instant failure.**
+  The first cut of that suite did exactly this, so every attempt was free in
+  fake time and the timeout shape — the one the `AbortSignal` was added for —
+  was unreachable. A regression deleting the timeout would have passed. Make
+  the fake work advance the fake clock, and have it honour the timeout it was
+  granted, or the deadline assertions are theatre.
 - **Prefer the orchestrator over an application-level retry when you have one.**
   `depends_on: {condition: service_healthy}` solved this declaratively for
   compose; the in-process retry exists for the PM2 host, which has no

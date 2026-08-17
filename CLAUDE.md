@@ -56,7 +56,7 @@ make test-ui            # boots docker compose + production homepage, seeds, run
 Per-service unit tests (what CI runs):
 
 ```bash
-cd backend        && npm ci && npm test                       # vitest + supertest, 242 tests (30 files)
+cd backend        && npm ci && npm test                       # vitest + supertest, 249 tests (30 files)
 cd homepage       && npm ci && npm test                       # vitest + jsdom, 191 tests (31 files)
 cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 232 tests
 cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 98 tests

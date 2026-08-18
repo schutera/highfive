@@ -493,6 +493,32 @@ Two non-obvious contract details:
   (`/api/snips/:filename`). The crop is the privacy mechanism (#154), so the
   bytes route is public.
 
+## `POST /upload` — one status code, two response shapes (2026-07 audit, #203)
+
+The unauthenticated ingest endpoint gained a rate bound, and the **over-budget
+response is a `200` that stores nothing**:
+
+```jsonc
+// success
+{ "message": "...", "mac": "...", "battery": 67, "filename": "...", "classification": { … } }
+
+// throttled — SAME status code, none of the other keys
+{ "message": "Upload rate exceeded — discarded" }
+```
+
+**Branch on the presence of `filename`, never on the status code.** A consumer
+that assumes every `200` carries the full envelope gets a `KeyError` /
+`undefined` the first time a module storms. The ESP firmware is safe by
+accident here — `ESP32-CAM/client.cpp` reads only the status line — but any
+future consumer (a test harness, a second ingest client, a dashboard poller)
+is not.
+
+The status code is `200` rather than `429` on purpose: a non-2xx counts toward
+the firmware's 5-consecutive-failure circuit breaker and would reboot a module
+already in a capture storm. There is also a `413` for bodies over
+`MAX_CONTENT_LENGTH`. Full detail in
+[api-reference.md § 2.2](../api-reference.md).
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing

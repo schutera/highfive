@@ -726,12 +726,19 @@ Status codes:
 - **400** — missing/overlong name, or invalid email.
 - **429** — per-IP rate limit exceeded (3 signups per hour per IP,
   2026-07 audit, for #206 — the endpoint is an anonymous relay into the
-  operator's alert channel and must not be floodable). Budget is
-  consumed by submissions that pass validation: a **400 costs nothing**,
-  but a submission that reaches the relay costs budget even if Discord
-  then fails (**502**/**503**) — refunding on failure would let a
-  flooder farm unlimited relay attempts while Discord is down. The
-  homepage shows a translated retry-later message.
+  operator's alert channel and must not be floodable). Exactly which
+  responses cost budget follows from where the check sits in the
+  handler:
+  - **400** (validation) — no cost; returns before the limiter.
+  - **503** (`DISCORD_WEBHOOK_URL` unset) — no cost; this server-side
+    misconfiguration is also detected before the limiter.
+  - **502** (Discord rejected the call) — **costs budget**. The limiter
+    runs before the relay, and refunding on failure would let a flooder
+    farm unlimited relay attempts for as long as Discord is failing.
+    During such an outage the signup is lost either way, since nothing
+    reaches the channel.
+
+  The homepage shows a translated retry-later message.
 - **503** — `DISCORD_WEBHOOK_URL` not configured server-side.
 - **502** — Discord rejected the webhook call.
 
@@ -789,6 +796,40 @@ Response:
 ```
 
 The classifier is currently a stub returning random 0/1 values.
+
+### Bounds on this endpoint (2026-07 audit, for #203)
+
+`/upload` is unauthenticated by design (the fleet cannot hold per-device
+secrets — see [auth.md](08-crosscutting-concepts/auth.md)), so it carries two
+bounds. **Both add response shapes a consumer must handle:**
+
+| Condition                                                    | Status  | Body                                                     |
+| ------------------------------------------------------------ | ------- | -------------------------------------------------------- |
+| Request body over `MAX_CONTENT_LENGTH` (5 MB, `MAX_UPLOAD_BYTES`) | **413** | `{"error": "Request body too large"}`                     |
+| Over the per-module rate budget (30/h, `UPLOAD_THROTTLE_PER_HOUR`) | **200** | `{"message": "Upload rate exceeded — discarded"}`         |
+
+> **The throttled response is a 200 that stores nothing**, and it carries
+> **none** of `mac` / `battery` / `filename` / `classification`. A consumer
+> that reads `response["filename"]` on any 200 will `KeyError` here — branch on
+> the presence of `filename`, not on the status code.
+>
+> It is a 200 rather than a 429 deliberately: any non-2xx counts toward the
+> firmware's 5-consecutive-failure circuit breaker
+> (`ESP32-CAM/client.cpp` → `ESP.restart()`), so refusing with an error would
+> reboot a module that is already in a capture storm and make the storm worse.
+> The device-side cap is `capture_gate` (ADR-024); this is the server-side
+> backstop. **Do not "fix" this to a 429** — see
+> [image-upload-flow.md](06-runtime-view/image-upload-flow.md).
+>
+> The 413 *is* a non-2xx, which is acceptable only because no legitimate
+> firmware frame (a VGA JPEG well under 200 KB plus a small sidecar) can
+> approach 5 MB.
+
+The rate budget keys on the client-supplied MAC, which is canonicalized but
+**not authenticated** — so it bounds a runaway or looping module, not a hostile
+client, which can rotate MACs. See
+[auth.md](08-crosscutting-concepts/auth.md) and
+[#224](https://github.com/schutera/highfive/issues/224).
 
 ## 2.3 Module logs
 

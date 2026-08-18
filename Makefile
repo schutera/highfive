@@ -24,6 +24,8 @@ help:
 	@echo "                          Catch broken pre-#40 'hold IO0 for N seconds' factory-reset prose"
 	@echo "  make check-stale-display-name-rule"
 	@echo "                          Catch the deprecated 'displayName ?? name' rule re-emerging outside its allow-list (PR 1)"
+	@echo "  make check-duckdb-bind-claims"
+	@echo "                          Assert dev keeps duckdb LAN-reachable and prod stays loopback"
 	@echo "  make check-no-hardcoded-api-keys"
 	@echo "                          Catch a hardcoded Google API key literal in source (issue #18)"
 	@echo "  make check-python-version"

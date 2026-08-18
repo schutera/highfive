@@ -83,6 +83,19 @@ else:
 fail=0
 note() { printf '  %s\n' "$*"; }
 
+# docker-compose.yml declares `env_file: - .env`, and compose refuses to render
+# a file whose env_file is missing. `.env` is gitignored, so it exists on a
+# developer box and NOT on a CI runner — which is exactly how this gate passed
+# locally and failed on its first CI run. Provide a throwaway one, and remove
+# only what we created so a real `.env` is never touched.
+CREATED_ENV=0
+cleanup() { [ "$CREATED_ENV" = "1" ] && rm -f "$repo_root/.env"; }
+trap cleanup EXIT
+if [ ! -f "$repo_root/.env" ]; then
+  : > "$repo_root/.env"
+  CREATED_ENV=1
+fi
+
 prod_ip="$(bind_host_ip docker-compose.prod.yml)"
 dev_ip="$(bind_host_ip docker-compose.yml)"
 

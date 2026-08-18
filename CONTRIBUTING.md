@@ -144,6 +144,29 @@ recent history:
 
 Branch off `main`, open a PR back to `main`. CI must be green to merge.
 
+### `main` vs `production` (#152 / ADR-030)
+
+`main` is the **integration line** — everything lands here first, and this is
+the only branch you ever open a PR against.
+
+`production` is the **release branch**: it is what the live host actually
+deploys, for both the web services and firmware OTA. Releasing is not a merge
+and not a PR — it is a deliberate fast-forward of `production` onto a chosen
+`main` commit, done by a maintainer:
+
+```bash
+git push origin <chosen-main-sha>:production   # fast-forward; never --force
+```
+
+So `main` may legitimately run ahead of what is live. **Never open a PR into
+`production`, never commit to it directly, and never force-push it** — the
+`--ff-only` pull on the deploy host depends on `production` staying a strict
+prefix of `main`'s history. Full model, including the one automated exception
+(the firmware auto-bump, tracked in
+[#225](https://github.com/schutera/highfive/issues/225)), is in
+[ADR-030](docs/09-architecture-decisions/adr-030-production-as-gated-release-branch.md)
+and [production-deployment.md](docs/07-deployment-view/production-deployment.md).
+
 ## Commit conventions
 
 This repo follows [Conventional Commits](https://www.conventionalcommits.org/).

@@ -1004,25 +1004,52 @@ with a divergent history, while the **live** services clearly ran
 `main` but not on `production`. So the documented deploy source did not
 match what was actually deployed.
 
-**Why it happened — the deeper cause.** `main` and `production` shared
-**no common git ancestor at all**: `main`'s history had been
-squashed/rebuilt (its root is an orphan commit from 2026-05-21, `#124`),
-while `production` still rooted at the original 2025-06-24 "Initial
-commit". With unrelated histories, `production` could **never** be
-fast-forwarded or cleanly merged from `main` — so once the services track
-was quietly re-pointed at `main`, the `production` branch had no mechanism
-to catch up and silently rotted into a stale artifact that still read as
-authoritative. A branch you cannot fast-forward is a branch that will
-drift; the rebuild that disconnected the histories is what made the drift
-inevitable rather than merely likely.
+**Why it happened — the deeper cause.** Nothing kept `production` current
+and nothing failed when it stopped being current. The services deploy
+source was quietly re-pointed at `main`, no one fast-forwarded or retired
+`production`, and because no check ever compared the documented source to
+the live one, a branch that had stopped meaning anything went on reading as
+authoritative for two months. **A deploy branch with no promotion mechanism
+and no staleness signal is a stale artifact waiting to happen** — the
+absence of a forcing function is the whole cause.
+
+> **Correction (PR #194 review) — and a lesson in its own right.** The
+> original version of this entry blamed something else entirely: that `main`
+> and `production` "shared **no common git ancestor**" because `main`'s
+> history had been rebuilt into an orphan root, making a fast-forward
+> *structurally impossible*. That is false. Verified:
+>
+> ```
+> git rev-list --max-parents=0 main    → d9ac93d  (2025-06-24, exactly one root)
+> git rev-list --max-parents=0 bf8b314 → d9ac93d  (the SAME root)
+> git merge-base main bf8b314          → da1b21d  (2026-04-26)
+> ```
+>
+> One shared root, a real merge base, 25 divergent commits — an ordinary
+> merge was available the whole time. The cited `#124` is `f6a89c8`, a
+> senior-reviewer config commit with nothing to do with history rewriting.
+>
+> **Why this is worth keeping rather than quietly editing:** the false
+> narrative was the *only* recorded justification for force-resetting a
+> release branch and discarding 25 commits, and it had already been
+> generalised into a "how to avoid this next time" rule below — a rule
+> future maintainers would have applied to a scenario that never happened.
+> A post-mortem's root cause gets acted on; an unverified one gets acted on
+> just as hard. `git merge-base` would have taken five seconds. This is
+> CLAUDE.md's "never trust commit messages over code" rule failing in the
+> one document type whose entire purpose is to be trusted later.
 
 **Resolution (#152, [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md)).**
 Adopted `production` as the single **gated release branch** for both web
-services and firmware OTA. The unrelated-history split was reconciled by
-archiving the old branch (tag `archive/production-2026-05-02`, still
-pointing at `bf8b314`) and force-resetting `production` to `main`'s tip —
-after which the two share history and every future promotion is a clean
-fast-forward. `scripts/deploy.sh` now tracks `production`
+services and firmware OTA. The old branch was archived (tag
+`archive/production-2026-05-02` → `bf8b314`) and `production` force-reset
+onto `main`'s history, after which every promotion is a clean fast-forward.
+**Note the archive tag is local-only until pushed** (`git ls-remote --tags
+origin | grep archive` returns nothing) — those 25 commits currently survive
+on the remote only because a stale feature branch happens to contain
+`bf8b314`, which `clean_gone` would delete. Run
+`git push origin archive/production-2026-05-02` to make the recovery point
+real. `scripts/deploy.sh` now tracks `production`
 (`BRANCH=production`), and the deploy docs describe the
 promote-then-auto-deploy flow.
 

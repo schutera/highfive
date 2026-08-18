@@ -42,6 +42,9 @@ DEPLOYLOG="$LOGDIR/deploy.log"
 # Records the SHA of a deploy that failed, so the 2-minute timer does not
 # retry a known-broken commit (and re-wipe node_modules) forever.
 FAILED_MARKER="$LOGDIR/last-failed-sha"
+# One-shot marker so the wrong-branch alert fires once per wrong branch, not
+# once every two minutes. Cleared as soon as the checkout matches BRANCH.
+BRANCH_MARKER="$LOGDIR/branch-mismatch-notified"
 # Services + firmware deploy from the gated `production` branch (#152). `main` is
 # the integration line; a release is `git push origin <sha>:production` (a
 # fast-forward), which this timer then deploys. Firmware OTA bumps + prod-* tags
@@ -266,7 +269,7 @@ publish_firmware() {
     -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
   PREV_SHA="$(git rev-parse HEAD)"   # a later step must never git-reset away a live OTA
   if git push --quiet origin "$BRANCH" && git tag -a "prod-$new_ver" -m "auto OTA $new_ver/seq$new_seq" && git push --quiet origin "prod-$new_ver"; then
-    notify firmware "FLEET OTA PUBLISHED: $new_ver / seq$new_seq" "Forward-only, NO field rollback. app_size $m_size. Devices flip on next daily reboot. Tag prod-$new_ver. NOTE: bump committed to $BRANCH only — MERGE it back to main now (git checkout main; git merge origin/$BRANCH; git push origin main) or the next promotion won't fast-forward. See ADR-028 (a cherry-pick will NOT work)."
+    notify firmware "FLEET OTA PUBLISHED: $new_ver / seq$new_seq" "Forward-only, NO field rollback. app_size $m_size. Devices flip on next daily reboot. Tag prod-$new_ver. NOTE: bump committed to $BRANCH only — MERGE it back to main now (git checkout main; git merge origin/$BRANCH; git push origin main) or the next promotion won't fast-forward. See ADR-030 (a cherry-pick will NOT work)."
   else
     notify firmware "FLEET OTA PUBLISHED (bump push FAILED)" "$new_ver/seq$new_seq is LIVE in the manifest, but pushing the bump to $BRANCH failed — $BRANCH is out of sync, reconcile by hand (and merge the bump back to main)."
   fi
@@ -291,16 +294,18 @@ main() {
     # possible failure here: deploys simply cease, nothing alerts, and `main`
     # keeps accumulating commits nobody notices are unshipped. The marker file
     # keeps it to one Discord message rather than one every two minutes.
-    local marker="$LOGDIR/branch-mismatch-notified"
-    if [ ! -f "$marker" ] || [ "$(cat "$marker" 2>/dev/null)" != "$cur_branch" ]; then
+    if [ ! -f "$BRANCH_MARKER" ] || [ "$(cat "$BRANCH_MARKER" 2>/dev/null)" != "$cur_branch" ]; then
+      # Marker BEFORE notify: notify can fail (unwritable log + failing webhook)
+      # and under `set -e` that would kill main() before the marker lands,
+      # producing this alert every two minutes — exactly what it prevents.
+      printf '%s' "$cur_branch" > "$BRANCH_MARKER" 2>/dev/null || true
       notify fail "Auto-deploy PAUSED — wrong branch checked out" \
-        "$REPO is on '$cur_branch' but this deploy driver tracks '$BRANCH'."$'\n'"No deploys will run until the host is switched:"$'\n'"  cd $REPO && git fetch origin && git checkout $BRANCH && git reset --hard origin/$BRANCH"$'\n'"See docs/07-deployment-view/production-deployment.md (one-time cutover)."
-      printf '%s' "$cur_branch" > "$marker" 2>/dev/null || true
+        "$REPO is on '$cur_branch' but this deploy driver tracks '$BRANCH'. No deploys will run until the host is switched."$'\n\n'"ORDER MATTERS — verify the promotion FIRST, or you roll production backwards:"$'\n'"  1) git fetch origin && git show origin/$BRANCH:scripts/deploy.sh | grep '^BRANCH='"$'\n'"     -> must print BRANCH=\"$BRANCH\". If it prints \"main\", promote first:"$'\n'"        git push origin <main-sha>:$BRANCH"$'\n'"  2) cd $REPO && git fetch origin && git checkout $BRANCH && git reset --hard origin/$BRANCH"$'\n\n'"Doing (2) before (1) reverts the live services AND deletes this alert."$'\n'"See docs/07-deployment-view/production-deployment.md -> One-time cutover."
     fi
     log "skip: on '$cur_branch', not '$BRANCH'"
     exit 0
   fi
-  rm -f "$LOGDIR/branch-mismatch-notified" 2>/dev/null || true
+  rm -f "$BRANCH_MARKER" 2>/dev/null || true
   if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     notify fail "Deploy BLOCKED — dirty working tree" "Uncommitted tracked changes in $REPO; auto-deploy won't touch them. Resolve by hand."
     exit 1

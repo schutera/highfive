@@ -19,18 +19,40 @@ found three problems stacked on top of each other:
 2. **Firmware OTA and the services track were documented as separate.**
    Firmware was "cut on `main` + `prod-*` tags"; services "deployed from
    `production`". Two deploy tracks, two stories, one repo.
-3. **`main` and `production` shared no common git ancestor.** `main`'s
-   history had been squashed/rebuilt (orphan root, 2026-05-21, `#124`),
-   while `production` still rooted at the original 2025-06-24 "Initial
-   commit". With unrelated histories, `production` could never be
-   fast-forwarded or cleanly merged from `main` — which is *why* it silently
-   rotted once the live source was quietly repointed at `main`.
+3. **`production` was simply never fast-forwarded after the live source was
+   repointed at `main`.** No mechanism kept it current, nobody owned it, and
+   nothing failed when it fell behind — so it rotted quietly for two months.
 
-`production`'s 136 unique commits were verified stale (their content —
-contracts package, `ModuleId`, the homepage redesign — already exists on
-`main`; the only-on-`production` files were the superseded `documentation/`
-folder, old planning docs, and the old `homepage/src/assets/firmware.bin`
-location). Nothing live would be lost by replacing them.
+   > **Correction (PR #194 review).** An earlier revision of this ADR claimed
+   > the two branches "shared no common git ancestor" because `main`'s history
+   > had been squashed/rebuilt into an orphan root, and that `production` was
+   > therefore *structurally unable* to fast-forward. **That is false**, and it
+   > mattered: it was the sole recorded justification for discarding history
+   > with a force-reset rather than merging. Verified against the repo:
+   >
+   > ```
+   > git rev-list --max-parents=0 main    → d9ac93d  (2025-06-24, one root)
+   > git rev-list --max-parents=0 bf8b314 → d9ac93d  (the SAME root)
+   > git merge-base main bf8b314          → da1b21d  (2026-04-26)
+   > ```
+   >
+   > One root, shared, with a real merge base. A merge was always possible; it
+   > was rejected for tidiness, not blocked by topology. The cited `#124` is
+   > `f6a89c8`, a senior-reviewer config commit unrelated to history rewriting.
+   > Recorded here rather than quietly deleted because CLAUDE.md's "never trust
+   > commit messages over code" rule exists for exactly this, and this document
+   > broke it while adopting it.
+
+`production`'s **25** unique commits (`git rev-list --count main..bf8b314`)
+were verified stale — their content (contracts package, `ModuleId`, the
+homepage redesign) already exists on `main`; the only-on-`production` files
+were the superseded `documentation/` folder, old planning docs, and the old
+`homepage/src/assets/firmware.bin` location. Nothing live would be lost by
+replacing them.
+
+> An earlier revision said 136. The number is load-bearing — it is the stated
+> evidence for "nothing live would be lost" — so it is corrected rather than
+> softened.
 
 Options weighed: (1) adopt `main` as the source and retire `production`;
 (2) keep `production` and fast-forward it each deploy; (3) treat
@@ -48,19 +70,39 @@ live. The on-host `scripts/deploy.sh` tracks `production` (`BRANCH=production`),
 pulls it `--ff-only`, rebuilds only changed services, and — for
 firmware-source changes — publishes the OTA and cuts the `prod-<codename>`
 tag on `production`. To make future promotions clean fast-forwards, the
-unrelated-history split was reconciled once: the old branch was archived
-(tag `archive/production-2026-05-02`, pointing at `bf8b314`) and
-`production` was force-reset to `main`'s tip.
+divergence was reconciled once: the old branch was archived (tag
+`archive/production-2026-05-02` → `bf8b314`) and `production` was force-reset
+onto `main`'s history. (A merge was possible — see the correction above — but
+the 25 divergent commits were verified stale and replacing them was chosen for
+tidiness.)
 
 ## Consequences
 
 - **Single, unambiguous deploy source.** Docs, `scripts/deploy.sh`, and
   reality now agree; the issue-#152 "verify your actual deploy source"
   hedges are removed.
-- **A real promotion gate.** `main` accumulates merged work continuously;
-  promoting to `production` is the explicit "ship it" act. The 2-minute
-  timer still automates the *deploy*, but the *decision* is the
-  `production` push.
+- **A promotion gate by convention, NOT by enforcement.** `main` accumulates
+  merged work continuously; promoting to `production` is the explicit "ship
+  it" act. The 2-minute timer still automates the _deploy_; the _decision_ is
+  the `production` push.
+
+  Be precise about what is and isn't enforced, because the word "gate"
+  invites a dangerous assumption:
+  - Neither branch has GitHub branch protection.
+  - `.github/workflows/tests.yml` runs CI on `main` only — a commit promoted
+    to `production` is not re-tested there.
+  - `git push origin <sha>:production` accepts **any** fast-forwarding commit.
+    It need not be on `main` and need not have passed CI. Nothing mechanical
+    distinguishes a promotion from a stray push.
+
+  **`production` must stay unprotected.** `scripts/deploy.sh`'s
+  `publish_firmware` commits the SEQUENCE/VERSION auto-bump and pushes it to
+  `BRANCH` from the host. Enabling branch protection would reject that push,
+  and because the OTA manifest is already published by then, the fleet would
+  receive firmware whose bump is **not recorded in git** — the "merging
+  firmware source is not a release" trap from the other direction. If a real
+  enforced gate is ever wanted, move the auto-bump commit to `main` first
+  (see [#225](https://github.com/schutera/highfive/issues/225)).
 - **Future updates are fast-forwards.** Because `production` was reset onto
   `main`, it is now a prefix of `main`'s history; the `--ff-only` pull on
   the host keeps working and a non-fast-forward push is a loud failure
@@ -77,9 +119,16 @@ unrelated-history split was reconciled once: the old branch was archived
   `main:production` push is still rejected. The cleaner long-term fix is to
   have `publish_firmware` commit to `main` and then promote (mirroring the
   manual checklist), so the auto path stops being the one exception to the
-  fast-forward invariant — tracked as a follow-up.
+  fast-forward invariant — tracked in [#225](https://github.com/schutera/highfive/issues/225).
 - **One-time operator cutover required.** The prod host previously tracked
   `main`; it must `git checkout production` once (see
   [production-deployment.md → Releasing](../07-deployment-view/production-deployment.md#releasing-the-gated-production-branch)).
-- **History loss is bounded.** The pre-#152 `production` history is
-  discarded from the branch but preserved in `archive/production-2026-05-02`.
+- **History loss is bounded — but the recovery point is not on the remote
+  yet.** The pre-#152 `production` history is discarded from the branch and
+  preserved in the local tag `archive/production-2026-05-02`.
+  `git ls-remote --tags origin | grep archive` currently returns nothing, so
+  on GitHub those 25 commits survive only because the stale branch
+  `origin/fix/cutover-blockers-prod-2026-05-02` happens to contain
+  `bf8b314` — and that branch is a prime candidate for the repo's own
+  `clean_gone` cleanup. Run `git push origin archive/production-2026-05-02`
+  to make the claim in this bullet true.

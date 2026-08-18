@@ -498,22 +498,60 @@ Then the host deploys it:
   tag on `production`. See [production-runbook.md](production-runbook.md) and
   [firmware-release.md](firmware-release.md).
 
-**One-time cutover** (run once, on the host, when adopting this model — the
-host previously tracked `main`). After `origin/production` has been reset to
-match `main` (see [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md)
-for the reconciliation):
+### One-time cutover — ORDER MATTERS
+
+Run once, on the host, when adopting this model (the host previously tracked
+`main`).
+
+> ⚠️ **Promote first, check out second.** Doing it the other way round reverts
+> production. `origin/production` lags `main`, so
+> `git reset --hard origin/production` on a host that is currently serving
+> `main` rolls the live services *backwards* to whatever `production` last
+> pointed at — and if that predates the switch, the `scripts/deploy.sh` you
+> land on still has `BRANCH="main"` while the checkout is `production`, so the
+> driver silently no-ops on every tick and the "wrong branch" alert that would
+> have told you is itself reverted away. Silent, permanent, and self-concealing.
+
+**Step 1 — promote (from a maintainer clone, not the host).** Pick the `main`
+commit you intend to release and fast-forward `production` onto it:
+
+```bash
+git fetch origin
+git log --oneline origin/production..origin/main      # what you are about to ship
+git push origin <chosen-main-sha>:production          # fast-forward; no --force
+```
+
+**Step 2 — verify the promotion landed before touching the host.** The single
+thing that matters is that the promoted `deploy.sh` tracks `production`:
+
+```bash
+git fetch origin
+git show origin/production:scripts/deploy.sh | grep '^BRANCH='
+# MUST print:  BRANCH="production"
+```
+
+If it prints `BRANCH="main"`, stop — step 1 did not include the switch commit.
+Continuing from here is what produces the silent-no-deploy state above.
+
+**Step 3 — cut the host over.**
 
 ```bash
 cd /var/www/highfive            # or /opt/highfive, wherever the live checkout is
 git fetch origin
 git checkout production
-git reset --hard origin/production   # PM2 host: the deploy timer now pulls production (BRANCH=production). Docker hosts pull manually.
+git reset --hard origin/production
 # verify services answer
 curl -fsS http://127.0.0.1:3001/api/health
 curl -fsS https://highfive.schutera.com/firmware.json
+# and confirm the driver agrees with the checkout
+grep '^BRANCH=' scripts/deploy.sh && git rev-parse --abbrev-ref HEAD
 ```
 
-After the cutover the deploy source is `origin/production`; nothing else changes.
+After the cutover the deploy source is `origin/production`; nothing else
+changes. Until step 3 happens the auto-deploy is paused and posts a single
+Discord alert saying so (`scripts/deploy.sh`, branch-mismatch guard) — that
+alert is the safety net for a half-finished cutover, which is precisely why it
+must not be reverted away by doing step 3 first.
 
 ## Known gaps
 

@@ -6,6 +6,81 @@ Symptom-based guide covering the most common issues during initial hardware setu
 
 ## Server stack
 
+### `ssh highfive` → "Permission denied (publickey)" — and then port 22 stops answering entirely
+
+Two separate failures that look like one, and the second is self-inflicted.
+
+**1. No `User` in the SSH config.** If `~/.ssh/config` pins only `HostName`,
+OpenSSH falls back to the *local* account name — on Windows, your Windows login
+(`$env:USERNAME`). That account does not exist on the server, so even a
+correctly installed key gets `Permission denied (publickey)`. Having your key
+in the server's `authorized_keys` is only half the credential; the login name
+is the other half, and it is **not** derivable from the key comment or your
+email. Ask the server owner — do not guess, for the reason below.
+
+**2. Guessing the username gets your IP banned.** Repeated failed auth trips
+the host's brute-force protection, and the ban drops **port 22 only** while
+everything else keeps serving:
+
+```powershell
+# The tell: web stack fine, SSH black-holed => you are banned, not an outage.
+(Invoke-WebRequest https://highfive.schutera.com/ -UseBasicParsing -TimeoutSec 15).StatusCode   # 200
+Test-NetConnection highfive.schutera.com -Port 22 | Select-Object TcpTestSucceeded              # False
+```
+
+A refused or timed-out port 22 while `https://` still returns `200` is almost
+never a down server — the same host is serving 443 at that moment.
+
+> Two mechanisms are easy to conflate here, and only one of them black-holes
+> the port. `MaxAuthTries` (sshd) just closes an individual connection after N
+> auth attempts — you still get a prompt on the next connection. A **ban**
+> (fail2ban, sshguard, or a cloud firewall rule) drops the packets entirely,
+> which is what "connection timed out" versus "Permission denied" tells you
+> apart. Which one is running on this host has not been confirmed from the
+> outside; the observed behaviour was a hard port-22 black-hole after a handful
+> of failed logins in quick succession.
+
+**Fix.** Get the login name from the server owner and pin it, together with the
+port if it is non-standard:
+
+```powershell
+# Check first — appending blindly duplicates an existing block, and OpenSSH
+# silently uses the FIRST match, so a stale entry would keep winning.
+Select-String -Path $env:USERPROFILE\.ssh\config -Pattern '^Host highfive' -ErrorAction SilentlyContinue
+
+$sshUser = "the-name-the-owner-gave-you"    # NOT your Windows login
+@"
+Host highfive
+    HostName highfive.schutera.com
+    User $sshUser
+    IdentityFile ~/.ssh/id_ed25519
+"@ | Out-File -Append -Encoding ascii $env:USERPROFILE\.ssh\config
+```
+
+If you are already banned, **stop retrying** — with fail2ban every further
+attempt refreshes the ban timer, so a retry loop keeps you locked out
+indefinitely. Wait it out (the default `bantime` is 10 minutes, but prod hosts
+are often configured far longer) or ask the owner to unban you, which needs
+your public egress address:
+
+```powershell
+(Invoke-RestMethod https://api.ipify.org?format=json).ip   # give this to the owner
+# owner runs, on the host:  sudo fail2ban-client set sshd unbanip THAT_IP
+```
+
+Then verify with a **single** attempt — not a loop:
+
+```powershell
+ssh -o BatchMode=yes -o ConnectTimeout=10 highfive "id -un; hostname"
+```
+
+To confirm which public key you actually handed over (it must match
+`authorized_keys` byte-for-byte):
+
+```powershell
+Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
+```
+
 ### Root URLs return 404 / "Cannot GET /"
 
 **Normal behaviour.** The backend and Flask services have no root route. Use the health endpoints instead:

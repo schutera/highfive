@@ -540,12 +540,28 @@ cd /var/www/highfive            # or /opt/highfive, wherever the live checkout i
 git fetch origin
 git checkout production
 git reset --hard origin/production
+
+# REBUILD — `git reset --hard` restores the SOURCE tree only. backend/dist,
+# homepage/dist and node_modules stay at whatever this host last built, and no
+# later timer tick will fix that: deploy.sh exits at
+# `[ "$PREV_SHA" = "$REMOTE_SHA" ] && exit 0`, so once HEAD matches the remote
+# it does nothing. Skip this and the host serves stale artifacts from
+# source it no longer has — and every check below still passes.
+HUSKY=0 npm ci
+npm --prefix backend run build
+( cd homepage && VITE_API_URL=https://highfive.schutera.com/api npm run build )
+pm2 reload ecosystem.config.js --update-env
+
 # verify services answer
 curl -fsS http://127.0.0.1:3001/api/health
 curl -fsS https://highfive.schutera.com/firmware.json
 # and confirm the driver agrees with the checkout
 grep '^BRANCH=' scripts/deploy.sh && git rev-parse --abbrev-ref HEAD
 ```
+
+> You can skip the rebuild only if step 1 promoted the exact SHA this host was
+> already serving. Since the "Cut a release" guidance above deliberately invites
+> promoting a *chosen* commit rather than `origin/main`'s tip, assume you cannot.
 
 After the cutover the deploy source is `origin/production`; nothing else
 changes. Until step 3 happens the auto-deploy is paused and posts a single

@@ -1053,8 +1053,10 @@ real. `scripts/deploy.sh` now tracks `production`
 (`BRANCH=production`), and the deploy docs describe the
 promote-then-auto-deploy flow.
 
-**How to avoid the class of bug next time.** A long-lived deploy branch
-must remain a fast-forward descendant of the integration line — if a
+**How to avoid the class of bug next time.** A deploy branch needs a
+promotion mechanism and a staleness signal; without both it stops meaning
+anything and nothing tells you. Secondarily, it must remain a fast-forward
+descendant of the integration line — if a
 history rewrite (squash, filter, re-root) ever disconnects them, **either
 reconcile immediately or retire the orphaned branch**; never leave a
 branch that is documented as authoritative but is structurally incapable

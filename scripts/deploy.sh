@@ -269,7 +269,7 @@ publish_firmware() {
     -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
   PREV_SHA="$(git rev-parse HEAD)"   # a later step must never git-reset away a live OTA
   if git push --quiet origin "$BRANCH" && git tag -a "prod-$new_ver" -m "auto OTA $new_ver/seq$new_seq" && git push --quiet origin "prod-$new_ver"; then
-    notify firmware "FLEET OTA PUBLISHED: $new_ver / seq$new_seq" "Forward-only, NO field rollback. app_size $m_size. Devices flip on next daily reboot. Tag prod-$new_ver. NOTE: bump committed to $BRANCH only — MERGE it back to main now (git checkout main; git merge origin/$BRANCH; git push origin main) or the next promotion won't fast-forward. See ADR-030 (a cherry-pick will NOT work)."
+    notify firmware "FLEET OTA PUBLISHED: $new_ver / seq$new_seq" "Forward-only, NO field rollback. app_size $m_size. Devices flip on next daily reboot. Tag prod-$new_ver. NOTE: bump committed to $BRANCH only — MERGE it back to main -- FROM A MAINTAINER CLONE, NOT THIS HOST (git checkout main on the host would trip the branch-mismatch guard and pause every deploy): git fetch origin; git checkout main; git merge origin/$BRANCH; git push origin main. Otherwise the next promotion will not fast-forward. A cherry-pick will NOT work -- see ADR-030 and issue #225."
   else
     notify firmware "FLEET OTA PUBLISHED (bump push FAILED)" "$new_ver/seq$new_seq is LIVE in the manifest, but pushing the bump to $BRANCH failed — $BRANCH is out of sync, reconcile by hand (and merge the bump back to main)."
   fi

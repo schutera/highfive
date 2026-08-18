@@ -45,3 +45,14 @@ to recover from.
   service names.
 - **Never ship the dev API key** (`hf_dev_key_2026`) as a production
   fallback. Override `HIGHFIVE_API_KEY` for any non-local deploy.
+- **Never deploy or cut a release from `main`.** `main` is the integration
+  line; `production` is the release branch for **both** the web services and
+  firmware OTA (#152). A release is a deliberate fast-forward —
+  `git push origin <chosen-main-sha>:production` — which the on-host
+  `scripts/deploy.sh` timer (`BRANCH=production`) then deploys. Never open a
+  PR into `production`, never commit to it directly, and never force-push it:
+  the host's `--ff-only` pull requires it to stay a strict prefix of `main`.
+  It must also stay **unprotected** — branch protection would reject
+  `publish_firmware`'s SEQUENCE-bump push and ship firmware whose bump is not
+  recorded in git. See
+  [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md).

@@ -43,16 +43,42 @@ found three problems stacked on top of each other:
    > commit messages over code" rule exists for exactly this, and this document
    > broke it while adopting it.
 
-`production`'s **25** unique commits (`git rev-list --count main..bf8b314`)
-were verified stale — their content (contracts package, `ModuleId`, the
-homepage redesign) already exists on `main`; the only-on-`production` files
-were the superseded `documentation/` folder, old planning docs, and the old
-`homepage/src/assets/firmware.bin` location. Nothing live would be lost by
-replacing them.
+`production` carried **25** unique commits
+(`git rev-list --count main..bf8b314`). What follows is what was actually
+checked, rather than a summary — this paragraph is now the *only* justification
+for discarding them, so it states its own evidence:
 
-> An earlier revision said 136. The number is load-bearing — it is the stated
-> evidence for "nothing live would be lost" — so it is corrected rather than
-> softened.
+- **21 of 25 are homepage/setup UI work** (the Phase-1/2 a11y pass, the type
+  ramp, the skill-audit refactors). Superseded wholesale by the homepage
+  redesign already on `main`.
+- **17 paths exist on the archived branch and not on `main`**
+  (`git diff --name-only --diff-filter=D bf8b314 origin/main`): the superseded
+  `documentation/` folder (9 files), the root `ARCHITECTURE.md` /
+  `FRONTEND_PLAN.md` / `UBIQUITOUS_LANGUAGE.md` planning docs — all three
+  superseded by the arc42 tree — the old `homepage/src/assets/firmware.bin`
+  location, and three test files (`backend/tests/auth.test.ts`,
+  `homepage/src/__tests__/App.test.tsx`, `espConfig.test.ts`) whose subjects
+  are covered by the current suites.
+- **4 are ESP32 commits, and one of them is NOT content-equal on `main`.**
+  The archived tip `bf8b314` ("use `esp_task_wdt_reconfigure` and defer
+  loopTask subscribe past AP setup") uses an API that does not appear anywhere
+  on `main`: `git grep esp_task_wdt_reconfigure origin/main -- ESP32-CAM/`
+  returns nothing, and `main` still uses the IDF-4 `esp_task_wdt_init` /
+  `esp_task_wdt_add` pair. **`main` solves the same problem a different way** —
+  a ≥60 s `TASK_WDT_TIMEOUT_S` (with a `static_assert` and ADR-007 behind it)
+  plus `runAccessPoint()` feeding the watchdog — and the AP-mode reboot loop is
+  recorded as fixed in
+  [troubleshooting.md](../troubleshooting.md). So the *defect* is closed on
+  `main`; the *commit* is not an ancestor of it. Nothing live is lost, but
+  "already exists on `main`" would have been the wrong description.
+
+> **Two corrections from the PR #194 review.** An earlier revision of this
+> paragraph said **136** commits (actual: 25) and described the only-on-branch
+> files as just "the superseded `documentation/` folder, old planning docs, and
+> the old firmware.bin location" — which omits four test files and says nothing
+> about the ESP work. Both are recorded rather than silently edited: this
+> paragraph is load-bearing for a destructive act, and the review dimension it
+> failed is precisely "an assertion of verification is not verification."
 
 Options weighed: (1) adopt `main` as the source and retire `production`;
 (2) keep `production` and fast-forward it each deploy; (3) treat
@@ -68,8 +94,9 @@ deliberate fast-forward of `production` onto a chosen `main` commit**
 (`git push origin <sha>:production`), so `main` may run ahead of what is
 live. The on-host `scripts/deploy.sh` tracks `production` (`BRANCH=production`),
 pulls it `--ff-only`, rebuilds only changed services, and — for
-firmware-source changes — publishes the OTA and cuts the `prod-<codename>`
-tag on `production`. To make future promotions clean fast-forwards, the
+firmware-source changes, and only when `FIRMWARE_AUTO_OTA=1` in
+`.deploy.env` — publishes the OTA and cuts the `prod-<codename>` tag on
+`production`. To make future promotions clean fast-forwards, the
 divergence was reconciled once: the old branch was archived (tag
 `archive/production-2026-05-02` → `bf8b314`) and `production` was force-reset
 onto `main`'s history. (A merge was possible — see the correction above — but
@@ -89,8 +116,8 @@ tidiness.)
   Be precise about what is and isn't enforced, because the word "gate"
   invites a dangerous assumption:
   - Neither branch has GitHub branch protection.
-  - `.github/workflows/tests.yml` runs CI on `main` only — a commit promoted
-    to `production` is not re-tested there.
+  - `.github/workflows/tests.yml` triggers on `main` (push + PR) and never on
+    `production`, so a promoted commit is not re-tested at promotion time.
   - `git push origin <sha>:production` accepts **any** fast-forwarding commit.
     It need not be on `main` and need not have passed CI. Nothing mechanical
     distinguishes a promotion from a stray push.

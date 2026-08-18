@@ -236,11 +236,20 @@ a single `git push origin <sha>:production` is what makes a service change **and
 a firmware bump go live together.
 
 > **History note.** Before #152, `origin/production` had drifted far behind
-> `main` (and shared no common ancestor — `main`'s history had been rebuilt) while
-> the live services actually deployed from `main`. The branch was reconciled by
-> archiving the old history (`archive/production-2026-05-02`) and force-resetting
-> `production` to `main`, after which all promotions are clean fast-forwards. See
+> `main` — nothing kept it current and nothing failed when it fell behind —
+> while the live services actually deployed from `main`. It was reconciled by
+> archiving the old history (`archive/production-2026-05-02`, a **local** tag
+> until pushed) and force-resetting `production` onto `main`, after which all
+> promotions are clean fast-forwards. See
 > [chapter 11 → "`production` branch drifted from the deployed services"](../11-risks-and-technical-debt/README.md#production-branch-drifted-from-the-deployed-services-resolved-152).
+>
+> An earlier version of this note added "and shared no common ancestor —
+> `main`'s history had been rebuilt". That was false (`git merge-base` returns
+> `da1b21d`; both branches share root `d9ac93d`) and is retracted in
+> [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md)
+> and chapter 11. It is corrected here too because this is the runbook someone
+> reads *while cutting a release* — a retraction filed only in an ADR does not
+> reach them.
 
 ## Rollback
 

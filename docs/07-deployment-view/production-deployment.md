@@ -73,7 +73,8 @@ by design — see "Known gaps" for why and the migration path.
 
 ```bash
 # SSH into server
-ssh user@your-server-ip
+ssh user@your-server-ip   # publickey denied? do NOT guess the username —
+                          # see troubleshooting.md "Production host access (SSH)"
 
 # 1. Create swap space (prevents OOM during build)
 sudo fallocate -l 4G /swapfile

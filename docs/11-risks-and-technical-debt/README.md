@@ -170,6 +170,49 @@ identity key, normalize it once at the boundary
 (`sanitize_upload_filename` + `reserve_filename`) and thread the
 **stored** value through every consumer; grep for the raw value's
 other uses before calling it done.
+### Probing a production host with guessed SSH usernames gets your IP banned — and the ban looks exactly like an outage
+
+**What happened.** `ssh highfive` returned `Permission denied (publickey)`
+despite the key being installed correctly. The cause was mundane:
+`~/.ssh/config` pinned only `HostName`, so OpenSSH sent the *local* Windows
+account name as the login. Rather than asking the server owner for the account
+name, the next step was to guess it — `root`, `ubuntu`, `admin`, and so on, in
+quick succession.
+
+That tripped the host's brute-force protection. Port 22 stopped answering
+entirely while `https://highfive.schutera.com/` kept returning `200`. The
+asymmetry read as "the SSH daemon is down", which invited more retries — the
+one action guaranteed not to help.
+
+**Why it happened.** Two reinforcing mistakes.
+
+1. **A missing username was treated as a puzzle to solve rather than a question
+   to ask.** A login name is not derivable from a key comment, an email
+   address, or a repo. Guessing it against production is indistinguishable from
+   an attack, because it *is* the same traffic pattern.
+2. **A dead port was read as a dead service.** The discriminator was available
+   the whole time and takes one command: if HTTPS still answers, the host is up
+   and something is filtering *you*.
+
+**How to avoid it next time.**
+
+- **Never guess credentials against production.** Ask the owner. If they are
+  unavailable, wait — an hour of waiting costs less than a ban plus the
+  explanation.
+- **When one port dies, check another before concluding "outage".** Web fine +
+  SSH dead = you are blocked, not the server. Same reasoning as the
+  `docs/troubleshooting.md` firewall entries: prove the path before blaming the
+  service.
+- **Read `ssh -v` before changing anything.** `debug1: Authenticating to
+  host:22 as 'name'` states the actual failure in one line; the whole detour
+  started with not looking at it.
+- **A ban is not extended by retrying** (the firewall drops packets before sshd
+  logs anything), but re-offending after it expires earns a longer one. So
+  retrying is pointless rather than harmful — and stopping is still correct.
+
+Symptom-level fix, with the commands: `docs/troubleshooting.md` →
+"Production host access (SSH)".
+
 ### Hardening dev to "match prod" removed the compensating mechanism prod has and dev doesn't — the loopback bind that broke every ESP on the bench (2026-07 audit, #203 / PR #222)
 
 **What happened.** The audit noticed `duckdb-service` has unauthenticated

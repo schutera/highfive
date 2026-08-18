@@ -37,6 +37,11 @@ setup, see [docker-compose.md](docker-compose.md).
 
 ### 1. Clone the Production Branch
 
+> **If this fails with `Permission denied (publickey)`, do NOT guess the
+> username.** Guessing trips the host's brute-force protection and bans your
+> IP — port 22 goes dead while HTTPS keeps serving, which reads as an outage.
+> See [troubleshooting.md → Production host access (SSH)](../troubleshooting.md#production-host-access-ssh).
+
 ```bash
 # SSH into your server
 ssh username@your-server-ip

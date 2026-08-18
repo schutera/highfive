@@ -71,10 +71,15 @@ by design — see "Known gaps" for why and the migration path.
 
 ## Quick Deploy
 
+> **`Permission denied (publickey)`? Do not guess the username.** Guessing
+> trips the host's brute-force protection and bans your IP — port 22 goes
+> dead while HTTPS keeps serving, which reads as an outage. `ssh -G <host>`
+> shows the resolved login offline, without spending an auth attempt. See
+> [troubleshooting.md → Production host access (SSH)](../troubleshooting.md#production-host-access-ssh).
+
 ```bash
 # SSH into server
-ssh user@your-server-ip   # publickey denied? do NOT guess the username —
-                          # see troubleshooting.md "Production host access (SSH)"
+ssh user@your-server-ip
 
 # 1. Create swap space (prevents OOM during build)
 sudo fallocate -l 4G /swapfile

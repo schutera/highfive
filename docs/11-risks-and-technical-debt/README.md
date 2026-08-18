@@ -170,6 +170,7 @@ identity key, normalize it once at the boundary
 (`sanitize_upload_filename` + `reserve_filename`) and thread the
 **stored** value through every consumer; grep for the raw value's
 other uses before calling it done.
+
 ### Probing a production host with guessed SSH usernames gets your IP banned — and the ban looks exactly like an outage
 
 **What happened.** `ssh highfive` returned `Permission denied (publickey)`
@@ -206,9 +207,14 @@ one action guaranteed not to help.
 - **Read `ssh -v` before changing anything.** `debug1: Authenticating to
   host:22 as 'name'` states the actual failure in one line; the whole detour
   started with not looking at it.
-- **A ban is not extended by retrying** (the firewall drops packets before sshd
-  logs anything), but re-offending after it expires earns a longer one. So
-  retrying is pointless rather than harmful — and stopping is still correct.
+- **A ban is not extended by retrying** — the firewall blocks the packet
+  before sshd logs anything, so nothing re-triggers the filter. Re-offending
+  *after* it expires can earn a longer one where fail2ban's (off-by-default)
+  `bantime.increment` is enabled. So retrying is pointless rather than
+  harmful — and stopping is still correct.
+- **`ssh -G <host>` answers the whole question offline.** It prints the
+  resolved config without opening a socket, so it costs no auth attempt and
+  works even while banned. Reach for it before anything that sends packets.
 
 Symptom-level fix, with the commands: `docs/troubleshooting.md` →
 "Production host access (SSH)".

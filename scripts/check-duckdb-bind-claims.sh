@@ -89,7 +89,15 @@ note() { printf '  %s\n' "$*"; }
 # locally and failed on its first CI run. Provide a throwaway one, and remove
 # only what we created so a real `.env` is never touched.
 CREATED_ENV=0
-cleanup() { [ "$CREATED_ENV" = "1" ] && rm -f "$repo_root/.env"; }
+# `return 0` is load-bearing: an EXIT trap whose last command fails sets the
+# script's exit status, so the bare `[ … ] && rm` form here made the gate exit
+# 1 whenever there was nothing to clean up — i.e. on every developer machine
+# that HAS a .env. It passed when run interactively and failed under the
+# pre-push hook, which is a maddening way to spend ten minutes.
+cleanup() {
+  if [ "$CREATED_ENV" = "1" ]; then rm -f "$repo_root/.env"; fi
+  return 0
+}
 trap cleanup EXIT
 if [ ! -f "$repo_root/.env" ]; then
   : > "$repo_root/.env"

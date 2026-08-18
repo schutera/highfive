@@ -80,6 +80,10 @@ services:
       # forwards X-Admin-Key) authenticates against this service's internal
       # /logs gate.
       - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:?HIGHFIVE_API_KEY must be set in .env.production (see .env.production.example)}
+      # Production marker for the boot guard (2026-07 audit, for #204):
+      # the service refuses to start if HIGHFIVE_API_KEY is unset/blank or
+      # the public dev fallback. Mirrors backend/src/auth.ts.
+      - HIGHFIVE_ENV=production
       # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       - LOG_DIR=/data/logs/image
@@ -88,6 +92,9 @@ services:
       # (app.py `_seed_demo_snips`), but make it explicit so prod never ships
       # demo crops — mirrors duckdb-service's SEED_DATA=false below.
       - SEED_DATA=false
+      # Optional: Discord alert on first image per module. Empty disables
+      # sending — no baked-in default (2026-07 audit, for #201).
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
       - duckdb_data:/data
     restart: unless-stopped
@@ -118,9 +125,16 @@ services:
       - SEED_DATA=false
       # Must match the backend's key for the #171 server-logs proxy.
       - HIGHFIVE_API_KEY=${HIGHFIVE_API_KEY:?HIGHFIVE_API_KEY must be set in .env.production (see .env.production.example)}
+      # Production marker for the boot guard (2026-07 audit, for #204):
+      # the service refuses to start if HIGHFIVE_API_KEY is unset/blank or
+      # the public dev fallback. Mirrors backend/src/auth.ts.
+      - HIGHFIVE_ENV=production
       # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       - LOG_DIR=/data/logs/duckdb
+      # Optional: Discord alerts (registration, first image, silence watcher).
+      # Empty disables sending — no baked-in default (2026-07 audit, for #201).
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
       - duckdb_data:/data
     restart: unless-stopped

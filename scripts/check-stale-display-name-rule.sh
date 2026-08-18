@@ -30,7 +30,7 @@
 set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-cd "$repo_root"
+cd "$repo_root" || exit 1
 
 # Allow-list: legitimate `??` uses that are NOT stale label-rule
 # restatements. Anchored on the specific file + distinctive substring

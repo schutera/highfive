@@ -26,6 +26,11 @@ export default function WaitlistPage() {
         body: JSON.stringify({ name: name.trim(), email: email.trim() }),
       });
       if (!res.ok) {
+        // 429 = per-IP rate limit (for #206) — show the specific,
+        // translated message instead of the server's English error.
+        if (res.status === 429) {
+          throw new Error(t('waitlist.rateLimited'));
+        }
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error || 'Signup failed');
       }
@@ -67,18 +72,14 @@ export default function WaitlistPage() {
           <h1 className="text-3xl md:text-5xl font-bold text-gray-900 mb-3">
             {t('waitlist.heroTitle')}
           </h1>
-          <p className="text-base md:text-lg text-gray-600">
-            {t('waitlist.heroText')}
-          </p>
+          <p className="text-base md:text-lg text-gray-600">{t('waitlist.heroText')}</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg border border-amber-100 p-6 md:p-8">
           {status === 'success' ? (
             <div className="text-center py-6">
               <div className="text-5xl mb-3">🎉</div>
-              <h2 className="text-xl font-bold text-gray-900 mb-2">
-                {t('waitlist.successTitle')}
-              </h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-2">{t('waitlist.successTitle')}</h2>
               <p className="text-gray-600 mb-6">{t('waitlist.successText')}</p>
               <Link
                 to="/"
@@ -90,7 +91,10 @@ export default function WaitlistPage() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label htmlFor="waitlist-name" className="block text-sm font-semibold text-gray-700 mb-1">
+                <label
+                  htmlFor="waitlist-name"
+                  className="block text-sm font-semibold text-gray-700 mb-1"
+                >
                   {t('waitlist.nameLabel')}
                 </label>
                 <input
@@ -107,7 +111,10 @@ export default function WaitlistPage() {
               </div>
 
               <div>
-                <label htmlFor="waitlist-email" className="block text-sm font-semibold text-gray-700 mb-1">
+                <label
+                  htmlFor="waitlist-email"
+                  className="block text-sm font-semibold text-gray-700 mb-1"
+                >
                   {t('waitlist.emailLabel')}
                 </label>
                 <input
@@ -137,9 +144,7 @@ export default function WaitlistPage() {
                 {status === 'submitting' ? t('waitlist.submitting') : t('waitlist.submit')}
               </button>
 
-              <p className="text-xs text-gray-500 text-center">
-                {t('waitlist.privacy')}
-              </p>
+              <p className="text-xs text-gray-500 text-center">{t('waitlist.privacy')}</p>
             </form>
           )}
         </div>

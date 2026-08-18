@@ -710,6 +710,38 @@ and
 [weather-worker-flow.md](06-runtime-view/weather-worker-flow.md)
 for the rationale and the live-worker counterpart.
 
+## 1.9 Waitlist signup (public)
+
+```
+POST /api/waitlist
+Content-Type: application/json
+Body: { "name": "Test Bee", "email": "bee@example.com" }
+```
+
+Public, no auth — forwards the signup to the operator's Discord
+webhook. Returns `{ "ok": true }` on success.
+
+Status codes:
+
+- **400** — missing/overlong name, or invalid email.
+- **429** — per-IP rate limit exceeded (3 signups per hour per IP,
+  2026-07 audit, for #206 — the endpoint is an anonymous relay into the
+  operator's alert channel and must not be floodable). Exactly which
+  responses cost budget follows from where the check sits in the
+  handler:
+  - **400** (validation) — no cost; returns before the limiter.
+  - **503** (`DISCORD_WEBHOOK_URL` unset) — no cost; this server-side
+    misconfiguration is also detected before the limiter.
+  - **502** (Discord rejected the call) — **costs budget**. The limiter
+    runs before the relay, and refunding on failure would let a flooder
+    farm unlimited relay attempts for as long as Discord is failing.
+    During such an outage the signup is lost either way, since nothing
+    reaches the channel.
+
+  The homepage shows a translated retry-later message.
+- **503** — `DISCORD_WEBHOOK_URL` not configured server-side.
+- **502** — Discord rejected the webhook call.
+
 <br>
 
 # 2. Image Service API
@@ -764,6 +796,40 @@ Response:
 ```
 
 The classifier is currently a stub returning random 0/1 values.
+
+### Bounds on this endpoint (2026-07 audit, for #203)
+
+`/upload` is unauthenticated by design (the fleet cannot hold per-device
+secrets — see [auth.md](08-crosscutting-concepts/auth.md)), so it carries two
+bounds. **Both add response shapes a consumer must handle:**
+
+| Condition                                                    | Status  | Body                                                     |
+| ------------------------------------------------------------ | ------- | -------------------------------------------------------- |
+| Request body over `MAX_CONTENT_LENGTH` (5 MB, `MAX_UPLOAD_BYTES`) | **413** | `{"error": "Request body too large"}`                     |
+| Over the per-module rate budget (30/h, `UPLOAD_THROTTLE_PER_HOUR`) | **200** | `{"message": "Upload rate exceeded — discarded"}`         |
+
+> **The throttled response is a 200 that stores nothing**, and it carries
+> **none** of `mac` / `battery` / `filename` / `classification`. A consumer
+> that reads `response["filename"]` on any 200 will `KeyError` here — branch on
+> the presence of `filename`, not on the status code.
+>
+> It is a 200 rather than a 429 deliberately: any non-2xx counts toward the
+> firmware's 5-consecutive-failure circuit breaker
+> (`ESP32-CAM/client.cpp` → `ESP.restart()`), so refusing with an error would
+> reboot a module that is already in a capture storm and make the storm worse.
+> The device-side cap is `capture_gate` (ADR-024); this is the server-side
+> backstop. **Do not "fix" this to a 429** — see
+> [image-upload-flow.md](06-runtime-view/image-upload-flow.md).
+>
+> The 413 *is* a non-2xx, which is acceptable only because no legitimate
+> firmware frame (a VGA JPEG well under 200 KB plus a small sidecar) can
+> approach 5 MB.
+
+The rate budget keys on the client-supplied MAC, which is canonicalized but
+**not authenticated** — so it bounds a runaway or looping module, not a hostile
+client, which can rotate MACs. See
+[auth.md](08-crosscutting-concepts/auth.md) and
+[#224](https://github.com/schutera/highfive/issues/224).
 
 ## 2.3 Module logs
 
@@ -849,6 +915,13 @@ GET /health
 ```json
 { "ok": true, "db": "/data/app.duckdb" }
 ```
+
+> **Consumer note.** The backend's boot probe
+> (`backend/src/duckdbClient.ts`'s `duckdbHealth`) treats a `200` carrying
+> `{"ok": false}` as **unreachable**, not as reachable-but-degraded. `ok` is
+> the liveness signal; a 200 alone is not. `routes/health.py` hardcodes
+> `ok=True` today, so any future "up but not serving" state must set `ok`
+> false rather than relying on the status code.
 
 ## 3.2 Register a module
 
@@ -950,6 +1023,21 @@ GET /progress
 `progress_id` and `hatched` are spelled correctly (a recent fix
 corrected legacy `progess_id` / `hateched`).
 
+Optional query params (2026-07 audit, for #205; unfiltered call is
+unchanged legacy behaviour):
+
+| Param       | Meaning                                                                      |
+| ----------- | ---------------------------------------------------------------------------- |
+| `module_id` | Only rows for this module's nests (canonical or legacy colon MAC form).      |
+| `since`     | Inclusive ISO-date lower bound (`YYYY-MM-DD`) on `date`.                     |
+| `until`     | Inclusive ISO-date upper bound.                                              |
+| `limit`     | Keep only the most recent N rows (capped at 100000). Trims **oldest** first. |
+
+Invalid params return `400`. **Ordering contract:** rows come back
+date-ascending (ties by `nest_id`) — consumers may rely on the last
+element per nest being the latest row (the backend's `totalHatches`
+roll-up does).
+
 ## 3.6 Add classification result
 
 ```
@@ -968,11 +1056,12 @@ Content-Type: application/json
 ```
 
 Returns `{ "success": true }`. Missing nests are auto-created. Progress
-rows are inserted with the current date. The legacy typo `modul_id` is
-still accepted via `AliasChoices` on
-`duckdb-service/models/progress.py`'s `ClassificationOutput` as a
-deprecation window — see
-[08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md).
+rows are inserted with the current date. A non-JSON body or a payload
+that fails validation returns a clean `400` (for #205 — this route
+previously 500'd on malformed input). The legacy typo `modul_id` was a
+deprecation alias until the window closed in the 2026-07 audit (for
+#207); it now fails validation → 400 — see
+[08-crosscutting-concepts/api-contracts.md](08-crosscutting-concepts/api-contracts.md).
 
 ## 3.7 Telemetry heartbeat
 

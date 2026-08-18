@@ -59,6 +59,27 @@ and negative-case the two values cut from the safelist during
 review (`'dev'`, `'testing'`) so a future re-add must update the
 tests in lockstep.
 
+**The Flask services carry the same guard (2026-07 audit, #204).**
+Both `duckdb-service` and `image-service` resolve the same
+key-or-dev-fallback for their admin-gated `/logs` endpoints, and both
+now refuse to boot in production with the fallback: each service's
+`services/prod_guard.py` (twin copies, like `log_ring.py`) raises at
+app import when production is declared but `HIGHFIVE_API_KEY` is
+unset, blank, or the dev fallback in any casing. Because there is no
+`NODE_ENV` for Python and modern Flask dropped `FLASK_ENV`,
+production is declared explicitly via **`HIGHFIVE_ENV=production`**:
+
+- `docker-compose.prod.yml` sets it for both Flask services (this is
+  the supported deploy path — the `:?` interpolation on
+  `HIGHFIVE_API_KEY` already fail-fasts there, so the in-service guard
+  is the backstop for other permutations).
+- **PM2/bare-metal operators must set `HIGHFIVE_ENV=production` in the
+  server-side process config** for `duckdb-service` and
+  `image-service` (the pm2 apps `scripts/deploy.sh` reloads). Without
+  the marker the guard is a no-op — the off-ramp semantics match the
+  backend's `NODE_ENV=development` off-ramp: an explicit operator
+  choice, not a silent default.
+
 ## Admin session (cookie)
 
 Defined in [`backend/src/session.ts`](../../backend/src/session.ts).
@@ -270,6 +291,31 @@ is being staged):
    map view are unaffected (the saved geolocation from first boot
    persists in module config).
 
+## Third-party credentials: Discord webhook
+
+Both Python services can post operator alerts to Discord —
+`duckdb-service/services/discord.py` (module registration, first
+image, silence-watcher module-down alerts per ADR-005) and
+`image-service/services/discord.py` (its own copy of the notifier).
+A Discord webhook URL is a **bearer credential**: anyone holding it
+can post arbitrary messages to the channel, so it is handled like a
+secret even though it grants no read access.
+
+- **Source of the value:** the `DISCORD_WEBHOOK_URL` env var only,
+  wired through `docker-compose.yml` / `docker-compose.prod.yml`
+  (optional — empty or unset disables sending; both `send_discord_*`
+  helpers skip cleanly and log the skip).
+- **Never in source.** A live webhook URL was committed as the
+  in-source default of both notifier modules and rotated in the
+  2026-07 audit (issue #201; lesson recorded in
+  [chapter 11 → "Hardcoded secrets"](../11-risks-and-technical-debt/README.md#hardcoded-secrets)).
+  `scripts/check-no-hardcoded-api-keys.sh` (pre-push) now fails on
+  any `discord.com/api/webhooks/<id>` literal.
+- **Rotation:** Discord → Server Settings → Integrations → Webhooks →
+  delete + recreate, then update the env value on the host. Rotation
+  is the only real mitigation for a leak — git history keeps the old
+  literal forever.
+
 ## Server logs: secrets must never be logged (ADR-023)
 
 The admin **Server Logs** panel tails each service's own log ring
@@ -315,9 +361,49 @@ keeps onboarding to one secret while preserving the gating semantics.
   build, or the production origin otherwise). Not
   defence-in-depth; a compromised LAN device can spoof uploads.
   Acceptable for the current threat model (single-tenant, hobbyist
-  deployment); revisit if multi-tenancy is added.
-- All `duckdb-service` routes — assumed to be reachable only from
-  inside the Docker `net` bridge. Don't expose this port to LAN.
+  deployment); revisit if multi-tenancy is added. Since the 2026-07
+  audit (for #203) the endpoint carries two bounds: a 5 MB
+  request-size ceiling (`MAX_CONTENT_LENGTH`, env-overridable via
+  `MAX_UPLOAD_BYTES`) and a **per-module** rate guard
+  (`services/upload_throttle.py`, default 30/hour via
+  `UPLOAD_THROTTLE_PER_HOUR`, 0 disables). Over-budget uploads are
+  **accepted and discarded with a 200**, never a 429 — a non-2xx
+  counts toward the firmware's upload-failure circuit breaker and
+  would reboot a storming module, amplifying the storm.
+
+  **Be precise about what that bounds.** The rate guard keys on the
+  client-supplied MAC, which is canonicalized but not authenticated, so
+  it bounds a **runaway or looping module** — the threat it was written
+  for — and not a hostile client, which can rotate MACs for a fresh
+  budget each time. The `_MAX_TRACKED` cap bounds the tracking dict,
+  not the writes. So `/upload` is _rate-bounded per claimed identity_,
+  not rate-bounded per caller. Closing that would need a budget keyed
+  on something a client cannot mint, and an IP-keyed one must be sized
+  for a whole site behind a single NAT egress — every module at a
+  location shares an address, so a naive per-IP cap throttles
+  legitimate ingestion. Tracked in
+  [#224](https://github.com/schutera/highfive/issues/224).
+- All `duckdb-service` routes — unauthenticated by design, on the
+  assumption that only in-bridge callers reach them. **That assumption
+  holds in production and NOT in dev**, and the difference is
+  deliberate:
+  - **Prod** (`docker-compose.prod.yml`) binds the host mapping to
+    `127.0.0.1:8002`. Host-Nginx proxies exactly the two paths the
+    fleet needs (`/new_module`, `/heartbeat`); nothing else is
+    reachable off-box.
+  - **Dev** (`docker-compose.yml`) publishes `8002` on all interfaces,
+    because there is no Nginx in the dev stack and the LAN-dev firmware
+    posts registration and heartbeat straight at
+    `http://<DEV_SERVER_HOST>:8002` (baked by
+    `ESP32-CAM/extra_scripts.py`). A loopback bind there leaves a
+    module with no route in at all. The 2026-07 audit (#203) briefly
+    matched dev to prod and broke exactly that.
+
+  So **treat a running dev stack as trusted-LAN-only** — it serves
+  `DELETE /modules/:id` and friends to anyone on the same network. On
+  an untrusted network, drop the `8002` port mapping and accept that no
+  ESP can register while it is gone. See
+  [docker-compose.md → Startup ordering](../07-deployment-view/docker-compose.md).
 
 ## Captive-portal credential handling
 

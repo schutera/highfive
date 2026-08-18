@@ -23,12 +23,33 @@ const CACHE_TTL_MS = 60 * 60 * 1000;
 
 // Per-replica in-memory cache. Multi-replica deployments will hit the
 // upstream once per replica per IP per hour — acceptable; see ADR-012.
-// Caveat: entries are only evicted on TTL expiry at read time. Long-
-// running single processes with high visitor-IP diversity will see this
-// map grow unboundedly. Current traffic doesn't make this practical,
-// but consider swapping to an LRU if the backend ever serves a public
-// audience at scale.
+// Bounded (2026-07 audit, for #206): entries used to be evicted only on
+// TTL expiry at read time, so high visitor-IP diversity (or a scan) grew
+// the map monotonically for process lifetime. Inserts now sweep expired
+// entries and then evict oldest-inserted once the cap is hit — Map
+// preserves insertion order, and with a 1 h TTL insertion order is a
+// good-enough LRU proxy without a dependency.
+const CACHE_MAX_ENTRIES = 5000;
 const cache = new Map<string, { data: UserLocation; expiresAt: number }>();
+
+function boundedCacheSet(
+  ip: string,
+  entry: { data: UserLocation; expiresAt: number },
+  nowMs: number,
+): void {
+  if (cache.size >= CACHE_MAX_ENTRIES) {
+    for (const [key, value] of cache) {
+      if (value.expiresAt < nowMs) cache.delete(key);
+    }
+    const it = cache.keys();
+    while (cache.size >= CACHE_MAX_ENTRIES) {
+      const next = it.next();
+      if (next.done) break;
+      cache.delete(next.value);
+    }
+  }
+  cache.set(ip, entry);
+}
 
 /**
  * Strip the IPv6-mapped IPv4 prefix (`::ffff:`) Express adds on dual-stack
@@ -125,11 +146,16 @@ export async function lookupUserLocation(
     lng: obj.longitude,
   };
 
-  cache.set(ip, { data, expiresAt: now() + CACHE_TTL_MS });
+  boundedCacheSet(ip, { data, expiresAt: now() + CACHE_TTL_MS }, now());
   return { source: 'miss', data };
 }
 
 /** Drop everything in the per-replica cache. Test-only. */
 export function _resetUserLocationCache(): void {
   cache.clear();
+}
+
+/** Current cache entry count. Test-only — pins the #206 size bound. */
+export function _userLocationCacheSize(): number {
+  return cache.size;
 }

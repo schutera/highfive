@@ -493,30 +493,55 @@ Two non-obvious contract details:
   (`/api/snips/:filename`). The crop is the privacy mechanism (#154), so the
   bytes route is public.
 
+## `POST /upload` — one status code, two response shapes (2026-07 audit, #203)
+
+The unauthenticated ingest endpoint gained a rate bound, and the **over-budget
+response is a `200` that stores nothing**:
+
+```jsonc
+// success
+{ "message": "...", "mac": "...", "battery": 67, "filename": "...", "classification": { … } }
+
+// throttled — SAME status code, none of the other keys
+{ "message": "Upload rate exceeded — discarded" }
+```
+
+**Branch on the presence of `filename`, never on the status code.** A consumer
+that assumes every `200` carries the full envelope gets a `KeyError` /
+`undefined` the first time a module storms. The ESP firmware is safe by
+accident here — `ESP32-CAM/client.cpp` reads only the status line — but any
+future consumer (a test harness, a second ingest client, a dashboard poller)
+is not.
+
+The status code is `200` rather than `429` on purpose: a non-2xx counts toward
+the firmware's 5-consecutive-failure circuit breaker and would reboot a module
+already in a capture storm. There is also a `413` for bodies over
+`MAX_CONTENT_LENGTH`. Full detail in
+[api-reference.md § 2.2](../api-reference.md).
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing
 anything in this neighbourhood.
 
-### `modul_id` (deprecation alias)
+### `modul_id` (deprecation alias — REMOVED, 2026-07)
 
-`POST /add_progress_for_module` accepts the canonical `module_id` on
-the wire as of the cutover. The legacy typo `modul_id` (missing "e")
-is still **accepted** by `duckdb-service/models/progress.py`'s
-`ClassificationOutput` via Pydantic `AliasChoices`, but `image-service`
-emits the canonical name (`image-service/services/upload_pipeline.py`'s
-`_record_progress`). Everywhere else (DB column, route param, DTO) the
-canonical name is `module_id` and always has been.
+`POST /add_progress_for_module` accepts only the canonical
+`module_id`. The legacy typo `modul_id` (missing "e") was tolerated by
+`duckdb-service/models/progress.py`'s `ClassificationOutput` via
+Pydantic `AliasChoices` as a deprecation window; the 2026-07 audit
+(for #207) verified no emitter remained — in-tree the only sender is
+`image-service/services/upload_pipeline.py`'s `_record_progress`,
+which emits the canonical name, and the sole `modul_id` fixture (the
+Postman collection in `dev-tools/`) was corrected — and the alias was
+removed. A payload using the typo now gets a clean `400`; the
+rejection is pinned by
+`duckdb-service/tests/test_progress.py`'s
+`test_add_progress_rejects_legacy_modul_id_typo`.
 
-**Why the alias exists**: deprecation window for any in-tree or
-external caller that still posts the old key. Removable once nothing
-in the tree references it; the canonical wire field has been
-`module_id` since the cutover.
-
-**Recommendation**: do not regress emitters back to `modul_id`. When
-removing the alias, grep for the string in this repo and in any
-out-of-tree consumer first, drop the `AliasChoices` validator, and
-land both ends in the same PR.
+**Do not reintroduce the alias.** If an out-of-tree caller surfaces
+that still posts the old key, fix the caller — the window had months
+of runway and the typo must not become load-bearing again.
 
 ### `progess` / `hateched` (fixed, do not regress)
 
@@ -530,6 +555,18 @@ JS object keys — every cached `DailyProgress` had `progress_id` and
 Fixed in commit `778c9b1`. Comments in `database.ts`
 ("Backend name!") had asserted the typos were canonical. No contract
 test covered the read.
+
+### `GET /progress` ordering is part of the contract (for #205)
+
+Rows come back **date-ascending** (ties by `nest_id`), and the
+optional `limit` param trims the **oldest** rows first. Both halves
+are load-bearing: `backend/src/database.ts`'s `totalHatches` roll-up
+reads each nest's last array element as "the latest row". A change to
+the ordering (or a limit that trims newest-first) silently zeroes or
+staleifies dashboard totals — the test
+`duckdb-service/tests/test_progress.py`'s
+`test_get_progress_limit_keeps_most_recent_and_stays_ascending` pins
+this.
 
 ### TS interface duplication (resolved)
 
@@ -545,7 +582,7 @@ documented here and pinned by tests on both sides.
 
 | Endpoint                                   | Caller                                                  | Payload fields                                                                                                                                                                                                                                                      |
 | ------------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /add_progress_for_module`            | `image-service`'s `UploadPipeline._record_progress`     | `module_id` (canonical, `modul_id` alias accepted), `classification`                                                                                                                                                                                                |
+| `POST /add_progress_for_module`            | `image-service`'s `UploadPipeline._record_progress`     | `module_id` (canonical; legacy `modul_id` alias removed 2026-07, #207), `classification`                                                                                                                                                                            |
 | `POST /record_image`                       | `image-service`'s `UploadPipeline._record_image_upload` | `module_id` (canonical), `filename`                                                                                                                                                                                                                                 |
 | `POST /modules/<module_id>/heartbeat`      | `image-service`'s `UploadPipeline._record_heartbeat`    | `battery` (int 0-100)                                                                                                                                                                                                                                               |
 | `GET  /modules/<module_id>/progress_count` | `image-service`'s `UploadPipeline._check_first_upload`  | (no body)                                                                                                                                                                                                                                                           |

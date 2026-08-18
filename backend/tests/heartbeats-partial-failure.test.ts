@@ -79,7 +79,7 @@ function mockFetch(opts: {
     if (url.endsWith('/nests')) {
       return new Response(JSON.stringify({ nests }), { status: 200 });
     }
-    if (url.endsWith('/progress')) {
+    if (url.includes('/progress')) {
       return new Response(JSON.stringify({ progress }), { status: 200 });
     }
     throw new Error(`unmocked fetch: ${url}`);

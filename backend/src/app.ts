@@ -12,6 +12,7 @@ import type {
 } from '@highfive/contracts';
 import { db } from './database';
 import { verifyApiKey, getApiKey } from './auth';
+import { SlidingWindowLimiter } from './rateLimit';
 import { accessLog } from './accessLog';
 import { getRecentEntries } from './logRing';
 import { streamBackendRing, writeSseHeaders } from './logStream';
@@ -125,7 +126,17 @@ app.get('/api/snips/:filename', async (req, res) => {
   }
 });
 
-// Public waitlist signup — forwards to Discord webhook
+// Public waitlist signup — forwards to Discord webhook.
+//
+// Rate-limited per IP (2026-07 audit, for #206): this is an anonymous
+// relay into the operator's Discord alert channel — unthrottled, one
+// client could flood it and drown real silence-watcher alerts. 3/hour
+// is generous for a human signing up and a hard wall for a script.
+// Separate limiter instance from the login path: different semantics
+// (every submission consumes budget, not just failures) and no shared
+// buckets between concerns.
+const waitlistLimiter = new SlidingWindowLimiter(3, 60 * 60 * 1000);
+
 app.post('/api/waitlist', async (req, res) => {
   try {
     const { name, email } = req.body ?? {};
@@ -144,6 +155,22 @@ app.post('/api/waitlist', async (req, res) => {
     if (!DISCORD_WEBHOOK_URL) {
       console.warn('Waitlist signup received but DISCORD_WEBHOOK_URL is not set');
       res.status(503).json({ error: 'Waitlist temporarily unavailable' });
+      return;
+    }
+
+    // Budget is consumed by submissions that pass validation, i.e. AFTER the
+    // shape checks above but BEFORE the relay. So a validation typo costs
+    // nothing (it never reaches here), while a submission that reaches the
+    // relay costs budget whether or not Discord actually accepts it.
+    //
+    // That second half is deliberate, not an oversight: refunding on webhook
+    // failure would let a flooder farm unlimited relay attempts for as long as
+    // Discord is failing. The cost is that a genuine outage can spend a
+    // legitimate signer's hourly budget — acceptable, because during an outage
+    // nothing reaches the channel anyway, so the signup is lost either way.
+    const ip = req.ip ?? 'unknown';
+    if (!waitlistLimiter.allow(ip)) {
+      res.status(429).json({ error: 'Too many signups from your network — try again later' });
       return;
     }
 

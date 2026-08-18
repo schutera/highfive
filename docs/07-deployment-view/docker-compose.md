@@ -87,6 +87,26 @@ After startup the services are available on the following ports:
 
 The web-interface itself is reachable under: http://localhost:5173
 
+> **DuckDB Service is LAN-reachable in dev, and loopback-only in prod.**
+> It is the sole DB writer and its internal endpoints (`/new_module`,
+> `/heartbeat`, `DELETE /modules/:id`, …) are unauthenticated by design,
+> so `docker-compose.prod.yml` binds it to `127.0.0.1` and lets host-Nginx
+> proxy the only two paths the fleet needs.
+>
+> **Dev cannot do the same**, because there is no Nginx in the dev stack and
+> the ESP talks to this port directly: `ESP32-CAM/extra_scripts.py` bakes
+> `HF_INIT_URL_DEFAULT = http://<DEV_SERVER_HOST>:8002/new_module` into every
+> LAN-dev build, `esp_init.cpp`'s `initNewModuleOnServer` registers against
+> it, and `client.cpp`'s `sendHeartbeat` reuses the same URL "purely as the
+> carrier of host+port". A loopback bind here removes the module's only route
+> in — registration fails and heartbeats stop, silently.
+>
+> **So treat the dev stack as trusted-LAN-only.** On café or untrusted office
+> Wi-Fi, either don't run it or drop the `8002` port mapping in
+> `docker-compose.yml` and accept that no ESP can register while it's gone.
+> The 2026-07 audit (#203) originally bound this to loopback in dev too; that
+> was reverted because it broke the hardware bench with no replacement path.
+
 > **Backend port — 3002 by default.** `backend/src/server.ts` reads
 > the `PORT` env var through `backend/src/port.ts`'s `resolvePort()`,
 > which falls back to `3002` when `PORT` is unset, empty, or
@@ -110,6 +130,39 @@ The DuckDB database is stored in the Docker volume:
 
 This volume is shared between the **image service** and the
 **DuckDB service** to persist the database and images across container restarts.
+
+### Startup ordering
+
+`backend` and `image-service` both declare
+`depends_on: duckdb-service: {condition: service_healthy}`, so compose holds
+them until duckdb-service's healthcheck passes rather than merely until its
+container starts. duckdb-service budgets `start_period: 10s` for Flask +
+DuckDB's `init_db()`; without the gate the dependants come up alongside it and
+their first calls land on a port nothing is listening on yet. For the backend
+that surfaced as a spurious `⚠ DuckDB service not reachable` at boot which then
+lingered in the admin Server Logs panel (#171), reading like a live outage long
+after the service was fine.
+
+The healthcheck runs at `interval: 2s` rather than the usual 15s precisely
+because two services now block on it: the first probe's latency is a tax on
+every `docker compose up`. `tests/ui/docker-compose.ui.yml` uses the same 2s
+for the same reason. `docker-compose.prod.yml` deliberately keeps 15s — prod
+boots once and pays the steady-state probe cost forever, the opposite
+trade-off to a dev loop.
+
+The backend _also_ retries the probe in-process
+(`backend/src/duckdbBootProbe.ts`). That is not redundancy for this file's
+benefit — it covers an **off-compose host** (the PM2 runbook), which has no
+orchestrator to gate on, so start ordering is whatever the operator arranged.
+See [production-runbook.md](production-runbook.md).
+
+**Known trade-off of the gate.** Because `backend` now waits for
+duckdb-service to be _healthy_, a duckdb that never becomes healthy means no
+backend at all — so `/api/health` and the admin Server Logs panel, the very
+surface you would use to diagnose it, are unreachable in that case. Use
+`docker compose logs duckdb-service` instead. The alternative (no gate, backend
+up but degraded) is what the in-process probe provides on the PM2 path; the two
+deployment styles genuinely differ here.
 
 ### Server log persistence (#178 / ADR-023)
 

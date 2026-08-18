@@ -28,8 +28,11 @@ from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
 from services.log_ring import log_event, subscribe, unsubscribe
 from services.module_id import ModuleId
+from services.paths import safe_child_path
+from services.prod_guard import require_prod_key
 from services.sidecar import LogSidecarEnvelope
 from services.upload_pipeline import UploadPipeline, UploadRequest
+from services.upload_throttle import DEFAULT_MAX_PER_HOUR, UploadThrottle
 
 # Tee stdout/stderr into the in-memory ring (#171) so the admin server-logs
 # endpoint can tail this service's output. Runs before the app serves traffic;
@@ -55,7 +58,29 @@ logging.getLogger("werkzeug").setLevel(logging.ERROR)
 # production caller (not just the tee fallback). Never log secrets here.
 log_event("info", "📷 image-service starting")
 
+# Refuse to boot a declared-production process on the public dev-key
+# fallback — mirrors backend/src/auth.ts (2026-07 audit, for #204).
+require_prod_key()
+
 app = Flask(__name__)
+
+# Request-size ceiling (2026-07 audit, for #203). Real ESP32-CAM frames
+# are VGA JPEGs well under 200 KB plus a small telemetry sidecar; 5 MB
+# leaves an order-of-magnitude headroom while stopping a hostile client
+# from streaming gigabytes into the shared /data volume. Werkzeug
+# enforces this before the handler runs; the 413 handler below keeps
+# the response JSON. A 413 is a non-2xx and counts toward the
+# firmware's upload-failure circuit breaker — acceptable, because no
+# legitimate firmware frame can ever trip it.
+app.config["MAX_CONTENT_LENGTH"] = int(
+    os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024))
+)
+
+
+@app.errorhandler(413)
+def _too_large(_e):
+    log_event("warn", "upload rejected: request exceeded MAX_CONTENT_LENGTH")
+    return jsonify({"error": "Request body too large"}), 413
 
 
 def _status_level(code: int) -> str:
@@ -113,7 +138,9 @@ def _seed_demo_snips() -> None:
     or already-populated target is a no-op, never fatal — a demo-asset hiccup
     must not stop the image service from booting.
     """
-    if os.getenv("SEED_DATA", "").lower() != "true" or not os.path.isdir(_DEMO_SNIP_DIR):
+    if os.getenv("SEED_DATA", "").lower() != "true" or not os.path.isdir(
+        _DEMO_SNIP_DIR
+    ):
         return
     for name in os.listdir(_DEMO_SNIP_DIR):
         if not name.lower().endswith(".jpg"):
@@ -167,6 +194,12 @@ def _send_discord(content: str) -> None:
     have the pipeline pick up the replacement at call time."""
     send_discord_message(content)
 
+
+# Per-module upload rate guard (for #203). Env-overridable; 0 disables.
+# See the accept-and-discard rationale at the /upload call site.
+upload_throttle = UploadThrottle(
+    max_per_window=int(os.getenv("UPLOAD_THROTTLE_PER_HOUR", str(DEFAULT_MAX_PER_HOUR)))
+)
 
 upload_pipeline = UploadPipeline(
     upload_folder=UPLOAD_FOLDER,
@@ -287,6 +320,24 @@ def upload_image():
     except ValidationError:
         return jsonify({"error": "invalid mac format"}), 400
 
+    # Rate guard (2026-07 audit, for #203). Deliberately accept-and-discard
+    # with a 200, NOT a 429: any non-2xx counts toward the firmware's
+    # 5-consecutive-failure circuit breaker (ESP32-CAM/client.cpp →
+    # ESP.restart()), so refusing with an error would reboot a module
+    # that's already in a capture storm and make the storm worse. The
+    # device-side storm cap is capture_gate (ADR-024); this is the
+    # server-side backstop against runaway or non-fleet clients.
+    # monotonic, not time.time(): an NTP step backwards would leave
+    # future-stamped events that never age out of the sliding window and
+    # would throttle a healthy module until wall-clock caught up.
+    if not upload_throttle.allow(canonical_mac, time.monotonic()):
+        log_event(
+            "warn",
+            f"upload throttled for mac={canonical_mac} — discarded (over "
+            f"{upload_throttle.max_per_window}/h)",
+        )
+        return jsonify({"message": "Upload rate exceeded — discarded"}), 200
+
     result = upload_pipeline.run(
         UploadRequest(
             mac=canonical_mac,
@@ -389,8 +440,15 @@ def delete_image(filename):
         status. A retry by the caller sees a consistent file+row pair
         instead of an orphaned row pointing at a deleted file.
       * Network/timeout exception → 502, file untouched.
+      * Traversal / non-basename filename → 400, nothing touched
+        (2026-07 audit, for #202 — the read paths get containment from
+        `send_from_directory`; the delete path must enforce its own).
     """
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    if "/" in filename or "\\" in filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    file_path = safe_child_path(UPLOAD_FOLDER, filename)
+    if file_path is None:
+        return jsonify({"error": "Invalid filename"}), 400
     try:
         resp = http_requests.delete(
             f"{DUCKDB_SERVICE_URL}/image_uploads/{filename}", timeout=5
@@ -424,9 +482,13 @@ def delete_image(filename):
 
 @app.get("/images/<path:filename>")
 def serve_image(filename):
-    """Serve an image file from the upload folder."""
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
-    if not os.path.isfile(file_path):
+    """Serve an image file from the upload folder.
+
+    `send_from_directory` already refuses traversal; the pre-check goes
+    through the same containment helper so a hostile name 404s without
+    ever probing paths outside the folder (for #202)."""
+    file_path = safe_child_path(UPLOAD_FOLDER, filename)
+    if file_path is None or not os.path.isfile(file_path):
         return jsonify({"error": "Image not found"}), 404
     return send_from_directory(UPLOAD_FOLDER, filename)
 
@@ -439,8 +501,8 @@ def serve_snip(filename):
     prefix) keeps the public backend proxy a clean ``/api/snips/:filename``
     without a slash-in-param. Snips are public by design — the crop removes all
     background, so no auth is required (issue #154)."""
-    file_path = os.path.join(SNIP_FOLDER, filename)
-    if not os.path.isfile(file_path):
+    file_path = safe_child_path(SNIP_FOLDER, filename)
+    if file_path is None or not os.path.isfile(file_path):
         return jsonify({"error": "Snip not found"}), 404
     return send_from_directory(SNIP_FOLDER, filename)
 

@@ -131,31 +131,23 @@ and flags the synonyms, typos, and overloads that have caused bugs.
 > **Dev:** "And the **Classification Output** — that's the JSON with
 > per-bee-type cell values?"
 
-> **Domain expert:** "Right. Note `ClassificationOutput` accepts both
-> the canonical `module_id` and the legacy typo `modul_id` via
-> Pydantic `AliasChoices` — image-service emits the canonical name
-> today; the alias is a deprecation window for any out-of-tree caller
-> still on the old key, and will be removed once nothing references
-> it. Worth flagging on any contract refactor that closes the window."
+> **Domain expert:** "Right. Note `ClassificationOutput` accepts only
+> the canonical `module_id` — the legacy typo `modul_id` was a
+> Pydantic `AliasChoices` deprecation window until the 2026-07 audit
+> closed it (for #207); the typo now fails validation."
 
 ## Flagged ambiguities
 
 ### Same concept, two names
 
 - **`modul_id` vs `module_id`** — `ClassificationOutput` (the payload
-  on `POST /add_progress_for_module`) carries the canonical
-  `module_id` on the wire as of the cutover; the legacy typo
-  `modul_id` is still **accepted** via Pydantic `AliasChoices` as a
-  deprecation window for any caller still on the old key. Verified in
-  `duckdb-service/models/progress.py`'s `ClassificationOutput`
-  (`validation_alias=AliasChoices("module_id", "modul_id")`) and
-  `image-service/services/upload_pipeline.py`'s `_record_progress`
-  (emits `{"module_id": mac, ...}`). DB column, route param, DTO all
-  use `module_id`.
-  **Recommendation:** do not regress emitters back to `modul_id`. When
-  removing the alias, grep the tree (and any out-of-tree consumer)
-  for the typo first, drop the `AliasChoices` validator, and land both
-  ends in the same PR.
+  on `POST /add_progress_for_module`) accepts only the canonical
+  `module_id`. The legacy typo `modul_id` was a Pydantic
+  `AliasChoices` deprecation window, **closed in the 2026-07 audit
+  (for #207)** after a full-tree sweep found no emitter; the typo now
+  fails validation (clean 400). DB column, route param, DTO all use
+  `module_id`. **Do not reintroduce the alias** — fix any straggling
+  caller instead.
 - **`mac` vs `esp_id` vs `module_id` vs `id`** — the same string is
   called `mac` on multipart upload and the ESP firmware,
   `esp_id` as a `validation_alias` on `ModuleData`, `module_id` in
@@ -258,11 +250,10 @@ and flags the synonyms, typos, and overloads that have caused bugs.
   the bug. **Why this happened:** comments in `database.ts`
   ("Backend name!") asserted the typos were the canonical names. No
   contract test covered the read.
-- **`modul_id`** — accepted as a deprecation alias for `module_id`
-  on `POST /add_progress_for_module` via Pydantic `AliasChoices`.
-  Image-service emits the canonical `module_id`; the alias remains
-  for any out-of-tree consumer still on the old key, removable once
-  nothing references it.
+- **`modul_id`** — _RESOLVED 2026-07 (for #207)_. Was accepted as a
+  deprecation alias for `module_id` on `POST /add_progress_for_module`
+  via Pydantic `AliasChoices`; the window closed after a full-tree
+  sweep found no emitter. The typo now fails validation.
 - **TS interface duplication between `backend` and `homepage`**
   — _RESOLVED 2026-04-26_. Both sides used to declare their own
   `Module`, `ModuleDetail`, `NestData`, `DailyProgress`. The homepage

@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version
+.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version check-duckdb-bind-claims
 
 help:
 	@echo "HiveHive — available make targets"
@@ -24,6 +24,8 @@ help:
 	@echo "                          Catch broken pre-#40 'hold IO0 for N seconds' factory-reset prose"
 	@echo "  make check-stale-display-name-rule"
 	@echo "                          Catch the deprecated 'displayName ?? name' rule re-emerging outside its allow-list (PR 1)"
+	@echo "  make check-duckdb-bind-claims"
+	@echo "                          Assert dev keeps duckdb LAN-reachable and prod stays loopback"
 	@echo "  make check-no-hardcoded-api-keys"
 	@echo "                          Catch a hardcoded Google API key literal in source (issue #18)"
 	@echo "  make check-python-version"
@@ -124,6 +126,10 @@ check-stale-display-name-rule:
 check-no-hardcoded-api-keys:
 	@echo ">>> bash scripts/check-no-hardcoded-api-keys.sh"
 	@bash scripts/check-no-hardcoded-api-keys.sh
+
+check-duckdb-bind-claims:
+	@echo ">>> bash scripts/check-duckdb-bind-claims.sh"
+	@bash scripts/check-duckdb-bind-claims.sh
 
 check-python-version:
 	@echo ">>> bash scripts/check-python-version.sh"

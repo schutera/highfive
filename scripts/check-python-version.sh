@@ -27,7 +27,7 @@
 set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-cd "$repo_root"
+cd "$repo_root" || exit 1
 
 version_file=".python-version"
 if [[ ! -f "$version_file" ]]; then

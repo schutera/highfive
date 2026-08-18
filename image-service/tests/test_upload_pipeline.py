@@ -420,3 +420,79 @@ def test_pipeline_malformed_logs_writes_parse_error_sidecar(tmp_path: Path):
     assert sidecar["payload"]["raw"] == "not json {{"
     assert sidecar["mac"] == TEST_MAC_4
     assert sidecar["image"] == "bad.jpg"
+
+
+# ---------------- filename identity (2026-07 audit, for #202) ----------------
+
+
+def test_pipeline_colliding_filenames_do_not_overwrite(tmp_path: Path):
+    """Fleet names carry no module identity — two modules capturing in the
+    same second produce the same name. The second upload must get a deduped
+    stored name, and every downstream consumer must see the stored name."""
+    duckdb = _FakeDuckDB(progress_count=5)
+    pipeline = _make_pipeline(tmp_path, duckdb)
+
+    name = "esp_capture_20260719_120000.jpg"
+    first = pipeline.run(
+        UploadRequest(
+            mac=TEST_MAC_1, battery=80, image=_FakeImage(name, b"AA"), logs_raw=None
+        )
+    )
+    second = pipeline.run(
+        UploadRequest(
+            mac=TEST_MAC_2, battery=70, image=_FakeImage(name, b"BB"), logs_raw=None
+        )
+    )
+
+    assert first.filename == name
+    assert second.filename == "esp_capture_20260719_120000-1.jpg"
+    assert (tmp_path / name).read_bytes() == b"AA", "first capture must survive"
+    assert (tmp_path / second.filename).read_bytes() == b"BB"
+    # The DB rows carry the stored (deduped) names, not the raw client name.
+    recorded = [f for (_mac, f) in duckdb.record_image_calls]
+    assert recorded == [name, second.filename]
+
+
+def test_pipeline_hostile_filename_is_sanitized_everywhere(tmp_path: Path):
+    """A traversal name is normalized before persisting; the stored name is
+    what reaches the DB row and the result — never the raw client name."""
+    duckdb = _FakeDuckDB(progress_count=5)
+    pipeline = _make_pipeline(tmp_path, duckdb)
+
+    result = pipeline.run(
+        UploadRequest(
+            mac=TEST_MAC_3,
+            battery=60,
+            image=_FakeImage("../../evil.jpg", b"XX"),
+            logs_raw=json.dumps({"rssi": -60}),
+        )
+    )
+
+    assert result.filename == "evil.jpg"
+    assert (tmp_path / "evil.jpg").exists()
+    assert not (tmp_path.parent / "evil.jpg").exists(), "must not escape the folder"
+    # Sidecar sits beside the stored file and names the stored file.
+    sidecar = json.loads((tmp_path / "evil.jpg.log.json").read_text())
+    assert sidecar["image"] == "evil.jpg"
+    assert [f for (_mac, f) in duckdb.record_image_calls] == ["evil.jpg"]
+
+
+def test_pipeline_failed_save_releases_the_reserved_name(tmp_path: Path):
+    """A failed image.save must unlink the reservation placeholder so the
+    directory is left exactly as found (review-caught)."""
+
+    class _ExplodingImage:
+        filename = "esp_capture_20260719_120000.jpg"
+
+        def save(self, path: str) -> None:
+            raise OSError("disk full")
+
+    pipeline = _make_pipeline(tmp_path, _FakeDuckDB(progress_count=5))
+    req = UploadRequest(
+        mac=TEST_MAC_1, battery=50, image=_ExplodingImage(), logs_raw=None
+    )
+    try:
+        pipeline.run(req)
+    except OSError:
+        pass
+    assert list(tmp_path.iterdir()) == [], "no placeholder ghost may remain"

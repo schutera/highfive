@@ -14,7 +14,13 @@ Behavior is preserved exactly from the original inline `/upload` handler:
   is invisible to admin and dashboard.
 - Sidecar shape: written via `LogSidecarEnvelope` (unchanged).
 - Discord message format: identical to the original.
-- Filenames written to the upload volume are unchanged.
+- Filenames written to the upload volume are the client's name after
+  `services.paths.sanitize_upload_filename` + `reserve_filename`
+  (2026-07 audit, for #202): a no-op for every fleet-grammar name, but
+  hostile names are normalized and a colliding name gets a `-N` suffix
+  instead of silently overwriting an existing capture. The stored name
+  (not the raw client name) is what flows to the DB row, sidecar,
+  snips, and Discord.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from typing import Any
 from requests import RequestException
 
 from services.hole_detection import BEE_TYPE_WIRE_TO_DB, DetectionResult, HoleDetector
+from services.paths import reserve_filename, sanitize_upload_filename
 from services.sidecar import LogSidecarEnvelope
 
 # Type-only hint for the werkzeug FileStorage. Importing werkzeug here is
@@ -87,9 +94,9 @@ class UploadPipeline:
 
     def run(self, req: UploadRequest) -> UploadResult:
         is_first = self._check_first_upload(req.mac)
-        file_path = self._persist_image(req)
-        self._record_image_upload(req.mac, req.image.filename)
-        self._persist_sidecar(req, file_path)
+        file_path, stored_filename = self._persist_image(req)
+        self._record_image_upload(req.mac, stored_filename)
+        self._persist_sidecar(req, file_path, stored_filename)
         # Hole detection (#165, ADR-027): the learned detector locates holes and
         # crops a real per-nest snip from each, but defers empty/sealed — so it
         # returns an empty `classification` (`detection.ok` is False) and the
@@ -99,11 +106,11 @@ class UploadPipeline:
         detection = self._detect(file_path)
         classification = detection.classification if detection.ok else self.classify()
         self._record_progress(req.mac, classification)
-        self._persist_and_record_snips(req.mac, req.image.filename, detection)
+        self._persist_and_record_snips(req.mac, stored_filename, detection)
         self._record_heartbeat(req.mac, req.battery)
         if is_first:
-            self._notify_first_sighting(req.mac, req.battery, req.image.filename)
-        return UploadResult(filename=req.image.filename, classification=classification)
+            self._notify_first_sighting(req.mac, req.battery, stored_filename)
+        return UploadResult(filename=stored_filename, classification=classification)
 
     # ------------------------------------------------------------------
     # Steps
@@ -121,11 +128,30 @@ class UploadPipeline:
         except RequestException:
             return False
 
-    def _persist_image(self, req: UploadRequest) -> str:
-        """Save the uploaded image to the upload folder. Returns the file path."""
-        file_path = os.path.join(self.upload_folder, req.image.filename)
-        req.image.save(file_path)
-        return file_path
+    def _persist_image(self, req: UploadRequest) -> tuple[str, str]:
+        """Save the uploaded image to the upload folder.
+
+        Returns ``(file_path, stored_filename)``. The stored name is the
+        sanitized + collision-deduped client name (for #202); every
+        downstream consumer (DB row, sidecar, snips, Discord, response)
+        must use it, never the raw ``req.image.filename``.
+        """
+        stored_filename = sanitize_upload_filename(req.image.filename)
+        # NOTE: reserve_filename CREATES an empty placeholder on disk (its
+        # atomicity mechanism) — the save below overwrites it. Release the
+        # claim if the save fails, so a disk-full/truncated upload leaves
+        # the directory exactly as it found it.
+        stored_filename = reserve_filename(self.upload_folder, stored_filename)
+        file_path = os.path.join(self.upload_folder, stored_filename)
+        try:
+            req.image.save(file_path)
+        except BaseException:
+            try:
+                os.unlink(file_path)
+            except OSError:
+                pass
+            raise
+        return file_path, stored_filename
 
     def _record_image_upload(self, mac: str, filename: str) -> None:
         """Insert image_uploads row in duckdb-service.
@@ -144,7 +170,9 @@ class UploadPipeline:
                 flush=True,
             )
 
-    def _persist_sidecar(self, req: UploadRequest, file_path: str) -> None:
+    def _persist_sidecar(
+        self, req: UploadRequest, file_path: str, stored_filename: str
+    ) -> None:
         """Write optional ESP telemetry beside the image as a typed envelope.
 
         On-disk shape: {"mac", "received_at", "image", "payload": {...}}.
@@ -162,22 +190,21 @@ class UploadPipeline:
         envelope = LogSidecarEnvelope(
             mac=req.mac,
             received_at=LogSidecarEnvelope.now_iso(),
-            image=req.image.filename,
+            image=stored_filename,
             payload=payload,
         )
         try:
             with open(file_path + ".log.json", "w", encoding="utf-8") as f:
                 f.write(envelope.to_json_string())
         except OSError as exc:
-            print(f"[logs] failed to write sidecar for {req.image.filename}: {exc}")
+            print(f"[logs] failed to write sidecar for {stored_filename}: {exc}")
 
     def _record_progress(self, mac: str, classification: dict) -> None:
         """POST classification results to duckdb-service. Silently tolerates failures.
 
-        Wire field is the canonical ``module_id``; duckdb-service still
-        accepts the legacy ``modul_id`` typo via Pydantic ``AliasChoices``
-        as a deprecation alias, removable once nothing in the tree
-        references it.
+        Wire field is the canonical ``module_id``. (The legacy
+        ``modul_id`` typo alias on the duckdb side was removed in the
+        2026-07 audit, for #207 — the typo now fails validation there.)
         """
         payload = {"module_id": mac, "classification": classification}
         try:

@@ -18,7 +18,7 @@
 set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-cd "$repo_root"
+cd "$repo_root" || exit 1
 
 pattern='AIza[0-9A-Za-z_-]{20,}'
 
@@ -61,5 +61,34 @@ if [[ -n "$hits" ]]; then
   exit 1
 fi
 
-echo "check-no-hardcoded-api-keys: OK — no Google API key literals found."
+# Second pattern: Discord webhook URLs. A webhook URL is a bearer
+# credential (anyone holding it can post to the channel), and one was
+# committed as an in-source default in services/discord.py of both
+# Python services — found and rotated in the 2026-07 audit (for #201).
+# The `[0-9]` anchor means prose mentions of the path shape without an
+# actual channel id (docs, this script) don't match.
+#
+# `discord(app)?\.com` — the legacy `discordapp.com` host still works and is
+# still handed out by older integrations, so a webhook pasted from one would
+# have slipped past a `discord\.com`-only pattern. Verified by probe: the
+# narrower pattern returned OK on a planted discordapp.com literal.
+webhook_pattern='discord(app)?\.com/api/webhooks/[0-9]'
+
+webhook_hits=$(git grep -nIE "$webhook_pattern" -- . "${skip_args[@]}" 2>/dev/null || true)
+
+if [[ -n "$webhook_hits" ]]; then
+  echo "check-no-hardcoded-api-keys: FAIL — Discord webhook URL literal in source:"
+  echo ""
+  echo "$webhook_hits" | sed 's/^/  /'
+  echo ""
+  echo "  Treat this as a security incident, not a typo:"
+  echo "    1. Rotate the webhook in Discord (Server Settings → Integrations → Webhooks)."
+  echo "    2. Route the value through the DISCORD_WEBHOOK_URL env var"
+  echo "       (see docker-compose*.yml and docs/08-crosscutting-concepts/auth.md)."
+  echo "    3. Remove the literal from the working tree. The git history will still"
+  echo "       contain it — rotation is the only real mitigation."
+  exit 1
+fi
+
+echo "check-no-hardcoded-api-keys: OK — no Google API key or Discord webhook literals found."
 exit 0

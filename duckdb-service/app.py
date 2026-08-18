@@ -19,6 +19,7 @@ from services.backup import run_backup
 from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
 from services.log_ring import log_event
+from services.prod_guard import require_prod_key
 from services.silence_watcher import check_silence
 from services.weather_worker import run_weather_fetch
 
@@ -45,6 +46,10 @@ logging.getLogger("werkzeug").setLevel(logging.ERROR)
 # under `python app.py`, so the structured ingestion path has a real
 # production caller (not just the tee fallback). Never log secrets here.
 log_event("info", "🗄 duckdb-service starting (DuckDB persistence)")
+
+# Refuse to boot a declared-production process on the public dev-key
+# fallback — mirrors backend/src/auth.ts (2026-07 audit, for #204).
+require_prod_key()
 
 app = Flask(__name__)
 

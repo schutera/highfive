@@ -2,10 +2,11 @@ import os
 
 import requests
 
-DISCORD_WEBHOOK_URL = os.getenv(
-    "DISCORD_WEBHOOK_URL",
-    "https://discord.com/api/webhooks/1485907261774626888/nHzIRU3T2NGZxDlOx9mGWi50fBIWOx8CNI31nPtyum8ijjFaOIRkPzTtkh1oDHJIr4Qi",
-)
+# No baked-in fallback: a webhook URL is a bearer credential, and a
+# committed default ships it to every clone (2026-07 audit, for #201 —
+# the previously committed webhook was rotated). Unset means Discord
+# notifications are disabled; see docker-compose*.yml for the wiring.
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
 if not DISCORD_WEBHOOK_URL:
     print(

@@ -134,7 +134,24 @@ sequenceDiagram
    [`ESP32-CAM/client.cpp`'s `postImage`](../../ESP32-CAM/client.cpp).
 
 2. **Image-service ingestion.**
-   - Saves the JPEG to the shared `duckdb_data` volume.
+   - **Bounds first (2026-07 audit, for #203):** requests over the 5 MB
+     `MAX_CONTENT_LENGTH` ceiling are rejected 413 before the handler
+     runs (no legitimate frame approaches it), and a per-module rate
+     guard (`services/upload_throttle.py`, default 30/hour) causes
+     over-budget uploads to be **accepted-and-discarded with a 200** —
+     deliberately not a 429, because any non-2xx feeds the firmware's
+     5-failure circuit breaker (`ESP32-CAM/client.cpp`) and would
+     reboot a module mid-storm. Discards are logged; nothing persists.
+   - Saves the JPEG to the shared `duckdb_data` volume. The stored
+     filename is the client's name after
+     `image-service/services/paths.py`'s `sanitize_upload_filename` +
+     `reserve_filename` (2026-07 audit, for #202): byte-identical for
+     every fleet-grammar name (`esp_capture_…jpg`), but traversal /
+     hostile names are normalized, and a colliding name gets a `-N`
+     suffix instead of overwriting — fleet filenames carry no module
+     identity, so two modules capturing in the same second used to
+     silently clobber each other. The **stored** name is what flows to
+     the DB row, sidecar, snips, Discord ping, and response.
    - Records the upload row via duckdb-service (see step 3).
    - If `logs` is parseable, writes a `<image>.log.json` sidecar next
      to the image as a `LogSidecarEnvelope` (`mac`, `received_at`,
@@ -216,10 +233,8 @@ shared volume locally; only the DB writes are HTTP. See
 ## Field-name drift to watch
 
 The `POST /add_progress_for_module` payload carries the canonical
-`module_id` on the wire. The legacy typo `modul_id` (missing "e") is
-still accepted by `duckdb-service/models/progress.py`'s
-`ClassificationOutput` via Pydantic `AliasChoices` as a deprecation
-window for any in-flight callers that still emit the old key; new
-emitters must use `module_id`. The alias will be removed once
-nothing in the tree references it — see
+`module_id` on the wire. The legacy typo `modul_id` (missing "e") was
+accepted as a deprecation alias until the window closed in the
+2026-07 audit (for #207); the typo now fails validation with a clean
+400 — see
 [08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md).

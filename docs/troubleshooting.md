@@ -45,12 +45,18 @@ For scripts/CI, skip the cookie entirely and send the machine credential:
 docker compose logs <service-name>   # e.g. duckdb-service
 ```
 
-The most common cause is a missing or malformed `.env` file at the repo root. It must contain at minimum:
+The most common cause is a missing or malformed `.env` file at the repo root.
+Recreate it from the template rather than hand-writing it:
 
-```env
-DEBUG=true
-DUCKDB_SERVICE_URL=http://duckdb-service:8000
+```bash
+cp .env.example .env
 ```
+
+Note that no variable in it is actually *required* — `DEBUG` defaults to
+`false` and `DUCKDB_SERVICE_URL` defaults to the Docker service name — so a
+service that exits on a malformed `.env` is failing on a syntax error in the
+file, not on a missing value. `docker compose config` will show you the parse
+error.
 
 ### `image-service` exits with `ImportError: libgomp.so.1: cannot open shared object file`
 

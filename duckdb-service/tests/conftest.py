@@ -13,9 +13,17 @@ DuckDB file we:
    captured ``DB_PATH``/``get_conn`` at import time (``db.schema``,
    ``routes.health``, ``routes.modules``, ``routes.nests``,
    ``routes.progress``, and finally ``app``).
-4. Patch out ``services.discord.send_discord_message`` (and the version
-   already imported into ``routes.modules``) to a no-op spy so tests
-   never hit the network.
+4. Patch out ``services.discord.send_discord_message`` (and every other
+   module that did ``from services.discord import send_discord_message``
+   at its own import time — currently ``routes.modules``,
+   ``services.backup``, ``services.silence_watcher``) to a no-op spy so
+   tests never hit the network. Any module that imports a *name* (rather
+   than the module) from ``db.connection`` or ``services.discord`` at
+   its own top level has this same staleness problem and belongs in both
+   ``_purge_service_modules`` and this fixture's reimport block — adding
+   a new such module (e.g. for #240) without adding it here means its
+   ``lock``/``get_conn``/``send_discord_message`` silently point at a
+   previous test's generation.
 """
 
 from __future__ import annotations
@@ -46,6 +54,8 @@ def _purge_service_modules() -> None:
         "routes.admin_weather",
         "routes._bucketing",
         "routes",
+        "services.backup",
+        "services.silence_watcher",
         "services.discord",
         "services.weather_worker",
         "services",
@@ -84,7 +94,10 @@ def fresh_db(tmp_path, monkeypatch):
     discord = importlib.import_module("services.discord")
 
     # Replace the discord webhook with a spy BEFORE routes.modules imports
-    # ``send_discord_message`` from it.
+    # ``send_discord_message`` from it. Keep the pre-patch function around
+    # for the rare test that wants to observe the REAL implementation
+    # (e.g. asserting on the actual ``requests.post`` call shape).
+    real_send_discord_message = discord.send_discord_message
     discord_calls: list[str] = []
 
     def _fake_send(content: str) -> None:
@@ -101,6 +114,18 @@ def fresh_db(tmp_path, monkeypatch):
     importlib.import_module("routes.progress")
     importlib.import_module("routes.measurements")
 
+    # services.backup and services.silence_watcher both do ``from
+    # services.discord import send_discord_message`` (and, for
+    # silence_watcher, ``from db.connection import lock, get_conn`` too) —
+    # same bound-name-captured-at-import-time problem as routes.modules.
+    # Both must be in the purge list above AND reimported here, or they
+    # silently keep a previous test's stale ``lock``/``get_conn``/spy.
+    backup = importlib.import_module("services.backup")
+    monkeypatch.setattr(backup, "send_discord_message", _fake_send)
+
+    silence_watcher = importlib.import_module("services.silence_watcher")
+    monkeypatch.setattr(silence_watcher, "send_discord_message", _fake_send)
+
     # init_db on the fresh file.
     schema.init_db()
 
@@ -112,6 +137,9 @@ def fresh_db(tmp_path, monkeypatch):
         schema=schema,
         discord=discord,
         discord_calls=discord_calls,
+        real_send_discord_message=real_send_discord_message,
+        backup=backup,
+        silence_watcher=silence_watcher,
     )
     return ns
 

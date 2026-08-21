@@ -178,6 +178,43 @@ backfills the ring from disk on restart so the panel shows pre-restart history:
 `docker compose down -v` clears these along with `duckdb_data`. Unset `LOG_DIR`
 to fall back to the in-memory-only ring (pre-ADR-023 behaviour).
 
+### Backup retention (#232 / ADR-031)
+
+`duckdb-service`'s weekly job (`services/backup.py`'s `run_backup()`, scheduled
+Sunday 03:00) writes a gzip'd, sha256'd, rotated snapshot of `app.duckdb` —
+never a raw file upload to Discord, which now gets a text-only notification
+(size, lock-hold duration, hash, path). It aborts (with a Discord alert,
+no partial files left behind) if free disk space on the **same** volume
+as the live DB is under 1.5× the live DB's size — headroom on top of the
+live file (already-allocated, not new usage) for the raw copy (~1×) plus
+the still-growing gzip output briefly coexisting before the raw copy is
+removed, not a doubling/tripling of the live file's own footprint — so
+this guards against the backup job itself being the thing that fills the
+disk. Two optional env vars, both read at call
+time — `docker compose up -d duckdb-service` (which recreates the
+container so `env_file: .env` is re-read) picks up a change; editing
+`.env` alone does **not**, since Compose evaluates `env_file:` at
+container-create time, not on a live-reload:
+
+- `BACKUP_DIR` — default `/data/backups`, a subdir of the shared `duckdb_data`
+  volume. `docker compose down -v` clears it along with everything else on
+  that volume.
+- `BACKUP_KEEP` — default `4`, floored at `1` (so `BACKUP_KEEP=0` can't be
+  read as "keep nothing" and delete the backup a run just made); older
+  `highfive_backup_*.duckdb.gz` files (and their `.sha256` sidecars) are
+  deleted beyond this count.
+
+Neither var needs setting for the defaults to work. The "backups are
+local-only" boot/post-run warning is gated on a **heartbeat file**
+(`BACKUP_DIR/.offhost_sync_ok`, `services/backup.py`'s
+`_has_fresh_offhost_sync`), not a static flag — the app can't observe
+whether an external rsync/restic unit is actually *running*, only
+whether one has touched this file inside the last 48h, so the warning
+comes back on its own if the sync stops rather than staying silenced
+forever. See
+[production-deployment.md → Backup & Restore](production-deployment.md#backup--restore)
+for the off-host sync unit template that writes this heartbeat.
+
 ### Demo nest snips for the time-lapse (#166)
 
 `SEED_DATA: 'true'` is set on **both** `duckdb-service` (which seeds the

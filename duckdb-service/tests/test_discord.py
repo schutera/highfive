@@ -34,11 +34,3 @@ def test_send_message_skips_http_when_unset(monkeypatch):
     monkeypatch.setattr(discord, "DISCORD_WEBHOOK_URL", "")
     _forbid_http(monkeypatch)
     discord.send_discord_message("module registered")  # must not raise
-
-
-def test_send_file_skips_http_when_unset(tmp_path, monkeypatch):
-    monkeypatch.setattr(discord, "DISCORD_WEBHOOK_URL", "")
-    _forbid_http(monkeypatch)
-    sample = tmp_path / "capture.jpg"
-    sample.write_bytes(b"\xff\xd8\xff\xd9")
-    assert discord.send_discord_file(str(sample), "first image") is False

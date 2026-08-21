@@ -685,17 +685,259 @@ transactional table-rebuild pattern described in the callout below.
 > rather than serving a half-migrated DB — but a manual backup means a
 > recovery path that doesn't depend on the WAL.
 >
-> ```bash
-> # Before pulling a schema-change deploy:
-> docker compose -f docker-compose.prod.yml --env-file .env.production exec \
->   duckdb-service cp /data/app.duckdb /data/app.duckdb.bak.$(date +%Y%m%d)
-> ```
+> Run **Step 0** in [Backup & Restore](#backup--restore) below before
+> pulling a schema-change deploy — it forces a `CHECKPOINT` before
+> copying (a bare `cp` of the live file, without one, can miss WAL-only
+> data), verifies the copy opens read-only, and moves it off-host. The
+> weekly in-app retained backup (same section, "Retained backups") is
+> not a substitute here — it runs on its own Sunday-03:00 schedule, not
+> on-demand right before a risky deploy.
 >
 > Lessons learned from each migration shipped to date live in
 > `docs/11-risks-and-technical-debt/README.md`. The current PR adds
 > the [#69](https://github.com/schutera/highfive/issues/69) entry
 > (drop `module_configs.status`); its regression test lives at
 > `duckdb-service/tests/test_schema_migration.py`.
+
+## Backup & Restore
+
+Covers issue #232 (the weekly job used to hold the sole writer's lock for a
+full gzip of the live DB and ship it only to Discord — retaining nothing,
+and never touching `/data/images`). See
+[ADR-031](../09-architecture-decisions/adr-031-backup-file-copy-not-export-database.md)
+for why the retained artifact is a gzip'd file copy, not `EXPORT DATABASE`,
+and [docker-compose.md → Backup retention](docker-compose.md#backup-retention-232--adr-031)
+for the `BACKUP_DIR` / `BACKUP_KEEP` env vars. (For the PM2 path, adapt the
+Docker-flavored commands below per
+[production-runbook.md](production-runbook.md) and #242.)
+
+**On the historical "~8 GB DB file" figure cited in
+[chapter 11](../11-risks-and-technical-debt/README.md) and this issue:**
+that incident was recorded against an earlier PM2-hosted deployment.
+**As of 2026-08-22 the current `production` deployment (post
+[ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md))
+has no data yet** — confirmed directly rather than assumed. Treat 8 GB as
+a capacity-planning reference for when data volume returns to that scale
+(re-time the numbers below then), not a claim about today's file size.
+Step 0 below is therefore documented and drilled on the **dev** stack
+(see "Restore drill") rather than executed against live prod — there is
+nothing there to back up yet. Run it for real before the first
+`production` deploy that carries real data, and again before any future
+schema-rewrite deploy per the callout above.
+
+### Step 0 — manual backup before a risky prod change
+
+DuckDB's own single-writer protection is a **file-level lock held only
+while a connection is open** — it stops two connections from being
+open read-write at the same instant, but `db/connection.py`'s
+`get_conn()` opens and closes a connection **per call**, so the live
+serving process spends most of its time with *no* connection open at
+all. A `docker compose exec` process's own `CHECKPOINT` could slot into
+one of those gaps and succeed cleanly. The actual danger is the plain
+`shutil.copy2`/`cp` step right after: a raw file copy is not a DuckDB
+connection, so DuckDB's lock does nothing to stop the live process from
+opening its *own* connection and writing **while the copy is reading
+the same bytes** — producing a torn file that its own sha256 would
+still "verify" correctly, because the hash is computed on the copy
+after the fact, not against the live source. **Stop the service
+first** — this is a deliberate pre-migration action, not a routine
+one, so a brief planned outage is the right tradeoff over a maybe-torn
+backup:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production stop duckdb-service
+
+# Confirm the stop actually took effect before touching the file — the
+# safety argument above rests entirely on this, not on `run` vs `exec`
+# (a `run --rm` container behaves identically whether the named service
+# is stopped or still running; nothing about `run` itself is safer).
+docker compose -f docker-compose.prod.yml --env-file .env.production ps duckdb-service
+# -> must show no running container (or "exited") before proceeding.
+
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm duckdb-service \
+  python -c "import duckdb; c=duckdb.connect('/data/app.duckdb'); c.execute('CHECKPOINT'); c.close()"
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm duckdb-service \
+  cp /data/app.duckdb /data/app.duckdb.bak.$(date -u +%Y%m%d)
+
+# Verify the copy opens read-only before trusting it
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm duckdb-service \
+  python -c "import duckdb; c=duckdb.connect('/data/app.duckdb.bak.$(date -u +%Y%m%d)', read_only=True); print(c.execute('SELECT COUNT(*) FROM module_configs').fetchone())"
+
+docker compose -f docker-compose.prod.yml --env-file .env.production start duckdb-service
+
+# Then move the DB copy AND /data/images (captures, snips/, *.log.json
+# sidecars) off-host — see "Off-host sync" below for a template unit.
+```
+
+Record the command output, file size, and wall-clock time actually taken in
+this section once this has been run against real prod data.
+
+### Retained backups (in-app, automatic — no operator action needed)
+
+`duckdb-service` already runs a weekly retained backup on its own —
+`services/backup.py`'s `run_backup()`, scheduled Sunday 03:00 **inside the
+serving Flask process** (so it shares the real `db.connection.lock` with
+every request handler; this is why it's safe to run without stopping the
+service, unlike a manual on-demand run via Step 0's approach above). It
+holds the lock
+only for a `CHECKPOINT` + file copy — not the gzip — and aborts with a
+Discord alert if free disk space is under 1.5× the live DB size before
+even attempting the copy. Files land under `BACKUP_DIR` (default
+`/data/backups`, inside the `duckdb_data` volume — the **same** volume as
+the live DB, so a volume-level failure takes both out together, which is
+exactly why off-host sync below is not optional) as
+`highfive_backup_<UTC timestamp>.duckdb.gz` + a `.sha256` sidecar, rotated
+to the newest `BACKUP_KEEP` (default `4`, floored at 1 so `BACKUP_KEEP=0`
+can never delete the backup it just made). Discord gets a text-only
+notification (size, lock-hold duration, hash, path) — never the file
+itself.
+
+There is deliberately no documented "trigger it manually against the live
+container" command anywhere in this file: doing that via a separate
+process has exactly the copy-races-a-live-writer problem explained in
+Step 0 above. If an on-demand backup is needed outside the weekly
+schedule — including the restore drill below, which triggers this same
+`run_backup()` function directly rather than Step 0's raw
+`duckdb.connect` + `CHECKPOINT` + `cp` (they're different commands for
+different purposes: this one produces the exact retained/rotated/gzip'd
+artifact the weekly job would, Step 0 is a one-off pre-migration
+snapshot) — always stop the service first, never `exec` into the
+running container.
+
+**At prod scale**, both the checkpoint-and-copy lock hold and the restore
+below are linear in DB file size — an 8 GB file (see the historical-figure
+note above) would hold `db.connection.lock` for **minutes**, not the
+milliseconds measured in the dev drill below, and that lock blocks every
+route including `/heartbeat` and `/new_module` (the two paths host-nginx
+proxies for the ESP fleet). Re-measure and record the real number here
+once prod carries data at that scale, and consider whether the weekly
+03:00 window needs to move if it collides with fleet activity.
+
+### Off-host sync
+
+Nothing off-host exists in this repo yet — the template below is a
+starting point. It targets both `/data/backups` (the retained
+`.duckdb.gz` files) and `/data/images` (captures, `snips/`,
+`*.log.json` sidecars) from the same `duckdb_data` volume, syncing each
+to its **own** destination subdirectory (a single `rsync` with two
+trailing-slash sources would flatten both trees into one directory):
+
+```bash
+# One-time: provision an SSH key for the sync unit's user and trust it
+# on the off-host target (skip if one already exists for this host).
+ssh-keygen -t ed25519 -f /root/.ssh/highfive-offhost-sync -N ""
+ssh-copy-id -i /root/.ssh/highfive-offhost-sync.pub your-offhost-user@your-offhost-host
+
+# On the prod host — /etc/systemd/system/highfive-offhost-sync.service
+sudo tee /etc/systemd/system/highfive-offhost-sync.service > /dev/null << 'EOF'
+[Unit]
+Description=Sync HighFive backups + images off-host
+
+[Service]
+Type=oneshot
+# your-offhost-user@your-offhost-host is a placeholder — a second VPS, NAS,
+# or any SSH-reachable target with enough disk. -z compresses on the wire;
+# --delete is deliberately OMITTED so a bad local rotation can't propagate
+# into a silent remote deletion. Two separate rsync calls (not one with
+# both sources) so the destination mirrors /data's shape instead of
+# flattening backups/ and images/ together.
+ExecStart=/usr/bin/rsync -az -e "ssh -i /root/.ssh/highfive-offhost-sync" \
+  /var/lib/docker/volumes/highfive_duckdb_data/_data/backups/ \
+  your-offhost-user@your-offhost-host:/srv/highfive-offhost-backup/backups/
+ExecStart=/usr/bin/rsync -az -e "ssh -i /root/.ssh/highfive-offhost-sync" \
+  /var/lib/docker/volumes/highfive_duckdb_data/_data/images/ \
+  your-offhost-user@your-offhost-host:/srv/highfive-offhost-backup/images/
+# Heartbeat file the app checks (services/backup.py's
+# _has_fresh_offhost_sync) so the in-app "local-only" warning reflects
+# whether this unit actually ran recently, not just whether it was ever
+# set up once.
+ExecStart=/usr/bin/touch /var/lib/docker/volumes/highfive_duckdb_data/_data/backups/.offhost_sync_ok
+EOF
+
+sudo tee /etc/systemd/system/highfive-offhost-sync.timer > /dev/null << 'EOF'
+[Unit]
+Description=Run HighFive off-host sync daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now highfive-offhost-sync.timer
+sudo systemctl start highfive-offhost-sync.service   # first run, on demand
+sudo systemctl status highfive-offhost-sync.service
+```
+
+The heartbeat file is read from inside the container at
+`BACKUP_DIR/.offhost_sync_ok` (same file, since `BACKUP_DIR` is a path
+into this same named volume) — no separate config flag to remember to
+flip, and the warning naturally comes back if the timer stops running.
+
+### Restore drill
+
+Performed 2026-08-21 on the **dev** stack (`docker compose`, not prod —
+prod has no data yet, see the status note above), using the same
+stop-first pattern as Step 0 throughout — including to *produce* the
+backup, not just to restore it, so this drill exercises exactly the
+procedure documented above rather than a live-container shortcut. Steps
+0 and 4 below are read-only `COUNT` verification queries against the
+**live, healthy** container (not a data-modifying operation, and not
+concurrent with any backup/restore step) — `exec` is fine there. A
+`read_only=True` connect can occasionally fail with a transient lock
+error if it lands in the same instant the serving process itself holds
+a connection open; that's a "retry the query," not a correctness issue,
+since nothing here writes. Steps and measured timing:
+
+```bash
+# 0) Seeded dev stack, 7 modules / 52 nests / 356 daily_progress rows.
+docker compose exec duckdb-service python -c "
+import duckdb
+c = duckdb.connect('/data/app.duckdb', read_only=True)
+print(c.execute('SELECT COUNT(*) FROM module_configs').fetchone())
+print(c.execute('SELECT COUNT(*) FROM nest_data').fetchone())
+print(c.execute('SELECT COUNT(*) FROM daily_progress').fetchone())
+"
+# -> (7,) (52,) (356,)
+
+# 1) Produce a backup — stopped first, matching Step 0 (not docker compose
+#    exec against the live container; `run --rm` on a stopped service is
+#    the safe equivalent of the weekly in-process schedule for this drill).
+docker compose stop duckdb-service
+docker compose run --rm duckdb-service python -c "
+import time
+from services.backup import run_backup
+start = time.monotonic()
+run_backup()
+print(f'wall clock: {time.monotonic()-start:.2f}s')
+"
+# -> lock held 0.07s; wall clock 0.99s (checkpoint+copy+gzip+sha256+rotate+notify)
+# -> highfive_backup_2026-08-21_225112.duckdb.gz, 706118 bytes (~0.7 MB) for a ~110 MB DB file
+docker compose start duckdb-service
+
+# 2) Simulate the failure: stop the service again.
+docker compose stop duckdb-service
+
+# 3) Restore from the retained backup (a throwaway container on the same
+#    named volume — no running duckdb-service container is needed for this).
+docker run --rm -v highfive_duckdb_data:/data alpine sh -c \
+  "cd /data && gunzip -c backups/highfive_backup_2026-08-21_225112.duckdb.gz > app.duckdb.restored && mv app.duckdb.restored app.duckdb"
+# -> 1.03s wall clock
+
+# 4) Bring the service back and verify.
+docker compose start duckdb-service
+docker compose exec duckdb-service python -c "
+import duckdb
+c = duckdb.connect('/data/app.duckdb', read_only=True)
+print(c.execute('SELECT COUNT(*) FROM module_configs').fetchone())
+print(c.execute('SELECT COUNT(*) FROM nest_data').fetchone())
+print(c.execute('SELECT COUNT(*) FROM daily_progress').fetchone())
+"
+# -> (7,) (52,) (356,) — identical to step 0's counts. curl .../health -> {"ok": true}.
+```
 
 ## Stop / restart
 

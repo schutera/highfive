@@ -48,6 +48,7 @@ and link backwards.
 | [028](adr-028-ml-inference-server-side-only.md)             | ML inference is server-side only — the ESP runs no models                       | Accepted                                                          |
 | [029](adr-029-python-version-matrix-floated-pins.md)        | Python services CI-tested across 3.10–3.14; native deps floated to `>=` bounds  | Accepted                                                          |
 | [030](adr-030-production-as-gated-release-branch.md)        | `production` is the single gated release branch (services + firmware)            | Accepted                                                          |
+| [031](adr-031-backup-file-copy-not-export-database.md)      | Retained backups are gzip'd file copies, not `EXPORT DATABASE`                    | Accepted                                                          |
 
 ## When to create an ADR
 

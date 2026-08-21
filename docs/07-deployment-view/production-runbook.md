@@ -435,6 +435,25 @@ the floated deps) are in
 All AI/ML inference is server-side — the ESP runs no models
 ([ADR-028](../09-architecture-decisions/adr-028-ml-inference-server-side-only.md)).
 
+## Backup & Restore
+
+Full procedure lives in
+[production-deployment.md → Backup & Restore](production-deployment.md#backup--restore)
+(the supported Docker path) — Step 0 (manual pre-migration backup, stop-first
+so it's safe), the automatic weekly retained backup (`services/backup.py`,
+issue #232,
+[ADR-031](../09-architecture-decisions/adr-031-backup-file-copy-not-export-database.md)),
+the off-host sync template, and the restore drill actually performed (dev
+stack, row counts verified identical pre/post) all live there since every
+command in that procedure is Docker-flavored. On this PM2 path, adapt: swap
+`docker compose ... exec/run --rm duckdb-service <cmd>` for
+`pm2 stop/start duckdb-service` plus running `<cmd>` directly against the
+host's `python3` (see [#242](https://github.com/schutera/highfive/issues/242)
+for which deployment path is actually live), and the `duckdb_data`-volume
+paths (`/var/lib/docker/volumes/highfive_duckdb_data/_data/...`) for whatever
+host path this runbook's PM2 services were configured to use instead
+(`LOG_DIR` above is the analogous per-service override to look at).
+
 ## Verification
 
 ### Check Backend is Running

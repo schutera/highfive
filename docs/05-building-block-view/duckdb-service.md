@@ -331,7 +331,7 @@ through this endpoint).
 | Module                        | Role                                                                                                                                                                             |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `services/silence_watcher.py` | Periodic Discord alert when a module goes silent for >3 h, recovery message on return — see [ADR-005](../09-architecture-decisions/adr-005-silence-watcher-in-duckdb-service.md) |
-| `services/backup.py`          | Periodic snapshot of `app.duckdb` to a sibling backup file under `/data`                                                                                                         |
+| `services/backup.py`          | Weekly retained, rotated, gzip'd + sha256'd snapshot of `app.duckdb` under `BACKUP_DIR` (default `/data/backups`); Discord gets a text notification only, never the file — see [ADR-031](../09-architecture-decisions/adr-031-backup-file-copy-not-export-database.md) |
 | `services/discord.py`         | Thin webhook wrapper used by the silence watcher and the AI-classification flow                                                                                                  |
 
 ## References:

@@ -6,10 +6,10 @@ Orientation for the **HiveHive** (a.k.a. `highfive`) bee-monitoring monorepo. De
 
 Highest-priority items from the 2026-08-18 repo audit (tracking epic #262), in the order to tackle them. **When you finish one, delete its entry in the same commit/PR that resolves it. When the list is empty, delete this whole section** — do not leave a stale "queue" around after the work is done.
 
-1. **#232 — No retained backup.** The only backup path gzips the live DuckDB file under the global write lock once a week and posts it to Discord — nothing is retained, nothing is off-host, no restore has ever been drilled. Irreversible-data-loss risk. Effort M.
-2. **#228 — Upload content validation.** `/upload` is credential-free by design and accepts file content with no magic-byte check, no dimension guard, and inconsistent extension/Content-Type handling. Effort M, medium risk.
-3. **#229 — Harden `/new_module` + `/heartbeat`.** Same internet-reachable, credential-free trust-boundary theme as #228: no-overwrite semantics, unknown-MAC drop, input clamps, nginx rate limits, stop logging raw bodies. Effort M–L, medium risk.
-4. **#231 — Firmware `setTimeout()` unit bug + portal/OTA deadline.** An arc42 doc currently certifies the timeout bug fixed; verify against `ESP32-CAM/client.cpp`/`esp_init.cpp` vs `ota.cpp` before trusting that claim. Needs a `SEQUENCE`-bumped release to actually ship — see [Cutting a firmware OTA release](#cutting-a-firmware-ota-release). Effort M + release.
+1. **#228 — Upload content validation.** `/upload` is credential-free by design and accepts file content with no magic-byte check, no dimension guard, and inconsistent extension/Content-Type handling. Effort M, medium risk.
+2. **#229 — Harden `/new_module` + `/heartbeat`.** Same internet-reachable, credential-free trust-boundary theme as #228: no-overwrite semantics, unknown-MAC drop, input clamps, nginx rate limits, stop logging raw bodies. Effort M–L, medium risk.
+3. **#231 — Firmware `setTimeout()` unit bug + portal/OTA deadline.** An arc42 doc currently certifies the timeout bug fixed; verify against `ESP32-CAM/client.cpp`/`esp_init.cpp` vs `ota.cpp` before trusting that claim. Needs a `SEQUENCE`-bumped release to actually ship — see [Cutting a firmware OTA release](#cutting-a-firmware-ota-release). Effort M + release.
+4. **#232 follow-up — stand up real off-host backup sync; run Step 0 for real.** The code-level fix shipped (retained/rotated/tested backup, disk-space guard, restore drill actually performed on dev) — see [`docs/11-risks-and-technical-debt/README.md`](docs/11-risks-and-technical-debt/README.md) "The weekly 'backup' was not a backup" and [ADR-031](docs/09-architecture-decisions/adr-031-backup-file-copy-not-export-database.md). What's left is operational, not code: the off-host sync systemd unit is a documented template nobody has run yet, so `/data/backups` and `/data/images` still live only on the same volume as the live DB, and the manual pre-migration backup (Step 0, [production-deployment.md](docs/07-deployment-view/production-deployment.md#backup--restore)) has only been drilled on dev — production has no data yet, so there's been nothing to back up for real. Pick this up once a real off-host destination exists and/or before the first `production` deploy that carries real data. Effort S (given a chosen destination).
 
 ## Project at a glance
 
@@ -67,7 +67,7 @@ Per-service unit tests (what CI runs):
 ```bash
 cd backend        && npm ci && npm test                       # vitest + supertest, 287 tests (30 files)
 cd homepage       && npm ci && npm test                       # vitest + jsdom, 191 tests (31 files)
-cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 232 tests
+cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 284 tests
 cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 98 tests
 cd ESP32-CAM      && pio test -e native                       # Unity host tests, ~281 RUN_TEST across 20 suites
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware

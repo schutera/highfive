@@ -13,10 +13,11 @@
 # realistic key shape and won't false-positive on the prefix alone
 # appearing inside a longer English word.
 #
-# The canonical fix when this fires: revoke the key in the issuing
-# console, then route the value through the build-time injection
-# pattern documented in docs/08-crosscutting-concepts/auth.md
-# ("Third-party API keys: Geolocation").
+# The canonical fix, in all three cases: rotate/revoke the credential
+# at its source (Google Cloud console, Discord webhook settings, or
+# the affected Wi-Fi router — see each FAIL block below for specifics),
+# then remove the literal from the tree. Deleting the line alone never
+# mitigates a leak in a public repo: git history keeps it regardless.
 
 set -uo pipefail
 
@@ -31,12 +32,12 @@ pattern='AIza[0-9A-Za-z_-]{20,}'
 #
 # Why each entry is on the list:
 #   * scripts/check-no-hardcoded-api-keys.sh — this script itself
-#     contains the regex (line 23 above), which would obviously match.
+#     contains all three regexes above, which would obviously match.
 #   * docs/11-risks-and-technical-debt/README.md — the post-mortem
-#     entry for issue #18 doesn't quote the leaked literal today, but
-#     the file is allowlisted so a future post-mortem can quote a
-#     (revoked) key verbatim if that aids the lesson, without forcing
-#     a global allowlist edit at the same time.
+#     entries for issues #18/#201/#227 don't quote a leaked literal
+#     today, but the file is allowlisted so a future post-mortem can
+#     quote a (revoked/rotated) credential verbatim if that aids the
+#     lesson, without forcing a global allowlist edit at the same time.
 skip_files=(
   'scripts/check-no-hardcoded-api-keys.sh'
   'docs/11-risks-and-technical-debt/README.md'
@@ -95,11 +96,17 @@ fi
 
 # Third pattern: WiFi.begin() with two string literals — a Wi-Fi SSID +
 # passphrase inlined in firmware source. Found in the 2026-08 audit as a
-# commented-out bench line in ESP32-CAM/esp_init.cpp (SEC-14, see #227).
-# The config-driven form
-# WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD) and the bare
-# WiFi.begin() do not match: both literals must be double-quoted strings.
-wifi_pattern='WiFi\.begin\(\s*"[^"]*"\s*,\s*"[^"]*"'
+# commented-out bench line in ESP32-CAM/esp_init.cpp (issue #227). The
+# config-driven form WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD)
+# and the bare WiFi.begin() do not match: both literals must be
+# double-quoted strings. Scope is deliberately narrow to this one call
+# shape — it does NOT cover ESP32-CAM/host.cpp's intentional captive-
+# portal WiFi.softAP(HOST_SSID, HOST_PASSWORD, ...) AP credential (see
+# docs/08-crosscutting-concepts/auth.md "Captive-portal credential
+# handling"), nor WiFiMulti.addAP(...) or an Arduino F("...") literal;
+# [[:space:]] (not \s) is used for POSIX ERE portability across grep
+# implementations.
+wifi_pattern='WiFi\.begin\([[:space:]]*"[^"]*"[[:space:]]*,[[:space:]]*"[^"]*"'
 
 wifi_hits=$(git grep -nIE "$wifi_pattern" -- . "${skip_args[@]}" 2>/dev/null || true)
 

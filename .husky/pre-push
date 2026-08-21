@@ -21,9 +21,9 @@ bash scripts/check-stale-reset-prose.sh || exit 1
 # "`displayName ?? name` lived in seven docs and eight render sites".
 bash scripts/check-stale-display-name-rule.sh || exit 1
 
-# Catch a hardcoded Google API key, Discord webhook, or Wi-Fi
-# credential literal — the failure modes of issue #18 and issue #227.
-# See docs/11-risks-and-technical-debt/README.md
+# Catch a hardcoded Google API key, Discord webhook, or WiFi.begin()
+# Wi-Fi credential literal — the failure modes of issue #18 and issue
+# #227. See docs/11-risks-and-technical-debt/README.md
 # "Third-party API keys belong in build-time macros, not source".
 bash scripts/check-no-hardcoded-api-keys.sh || exit 1
 bash scripts/check-duckdb-bind-claims.sh || exit 1

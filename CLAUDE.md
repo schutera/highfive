@@ -4,12 +4,12 @@ Orientation for the **HiveHive** (a.k.a. `highfive`) bee-monitoring monorepo. De
 
 ## Immediate priority queue (self-removing)
 
-Highest-priority items from the 2026-08-18 repo audit (tracking epic [#262](https://github.com/schutera/highfive/issues/262)), in the order to tackle them. **When you finish one, delete its entry (and any now-stale prose above the list about "N items left") in the same commit/PR that resolves it. When the list is empty, delete this whole section** — do not leave a stale "queue" around after the work is done.
+Highest-priority items from the 2026-08-18 repo audit (tracking epic #262), in the order to tackle them. **When you finish one, delete its entry in the same commit/PR that resolves it. When the list is empty, delete this whole section** — do not leave a stale "queue" around after the work is done.
 
-1. **[#232](https://github.com/schutera/highfive/issues/232) — No retained backup.** The only backup path gzips the live DuckDB file under the global write lock once a week and posts it to Discord — nothing is retained, nothing is off-host, no restore has ever been drilled. Irreversible-data-loss risk. Effort M.
-2. **[#228](https://github.com/schutera/highfive/issues/228) — Upload content validation.** `/upload` is credential-free by design and accepts file content with no magic-byte check, no dimension guard, and inconsistent extension/Content-Type handling (bundles SEC-4/9/10). Effort M, medium risk.
-3. **[#229](https://github.com/schutera/highfive/issues/229) — Harden `/new_module` + `/heartbeat`.** Same internet-reachable, credential-free trust-boundary theme as #228: no-overwrite semantics, unknown-MAC drop, input clamps, nginx rate limits, stop logging raw bodies. Effort M–L, medium risk.
-4. **[#231](https://github.com/schutera/highfive/issues/231) — Firmware `setTimeout()` unit bug + portal/OTA deadline.** Docs certify the timeout bug fixed; it isn't, on the pinned Arduino-ESP32 2.0.17 core. Needs a `SEQUENCE`-bumped release to actually ship — see [Cutting a firmware OTA release](#cutting-a-firmware-ota-release). Effort M + release.
+1. **#232 — No retained backup.** The only backup path gzips the live DuckDB file under the global write lock once a week and posts it to Discord — nothing is retained, nothing is off-host, no restore has ever been drilled. Irreversible-data-loss risk. Effort M.
+2. **#228 — Upload content validation.** `/upload` is credential-free by design and accepts file content with no magic-byte check, no dimension guard, and inconsistent extension/Content-Type handling. Effort M, medium risk.
+3. **#229 — Harden `/new_module` + `/heartbeat`.** Same internet-reachable, credential-free trust-boundary theme as #228: no-overwrite semantics, unknown-MAC drop, input clamps, nginx rate limits, stop logging raw bodies. Effort M–L, medium risk.
+4. **#231 — Firmware `setTimeout()` unit bug + portal/OTA deadline.** An arc42 doc currently certifies the timeout bug fixed; verify against `ESP32-CAM/client.cpp`/`esp_init.cpp` vs `ota.cpp` before trusting that claim. Needs a `SEQUENCE`-bumped release to actually ship — see [Cutting a firmware OTA release](#cutting-a-firmware-ota-release). Effort M + release.
 
 ## Project at a glance
 

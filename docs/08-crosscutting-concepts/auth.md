@@ -439,6 +439,13 @@ hostile rendering surface for any secret it has previously stored.
   filing as a separate UX issue if hobbyist deployment hits it.
 - **`Serial.println` of the saved password was redacted in #41.**
   Earlier versions printed the credential to USB serial during boot.
+- **`HOST_PASSWORD` is a deliberate exception to the hardcoded-secret
+  guard, not an oversight.** `scripts/check-no-hardcoded-api-keys.sh`
+  gained a pattern in #227 for a `WiFi.begin` call carrying two literal
+  string arguments (a *station*-mode credential leak, like the #227
+  incident itself) — it does not match, and is not meant to match,
+  `WiFi.softAP(HOST_SSID, HOST_PASSWORD, 1, 0)`: the AP PSK above is
+  intentionally committed and documented, not a leak to catch.
 
 The `data-keep-current-on-empty` attribute is intentionally narrow:
 it pairs a JS validator skip with a server-side conditional

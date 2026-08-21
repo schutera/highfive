@@ -270,3 +270,8 @@ homepage/coverage/
 
 # QR-design experiment outputs (scripts/qr_experiment.py, issue #13)
 scripts/qr_output/
+
+# Saved browser copies of the audit report artifact can carry quoted
+# evidence (incl. leaked secrets) from the source repo — never commit
+# one, defense-in-depth against a careless `git add -A` (found during #227).
+*.mhtml

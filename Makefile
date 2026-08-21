@@ -27,7 +27,7 @@ help:
 	@echo "  make check-duckdb-bind-claims"
 	@echo "                          Assert dev keeps duckdb LAN-reachable and prod stays loopback"
 	@echo "  make check-no-hardcoded-api-keys"
-	@echo "                          Catch a hardcoded Google API key, Discord webhook, or Wi-Fi credential literal (issues #18, #227)"
+	@echo "                          Catch a hardcoded Google API key, Discord webhook, or WiFi.begin() Wi-Fi credential literal (issues #18, #227)"
 	@echo "  make check-python-version"
 	@echo "                          Verify Dockerfiles, ruff floor + CI matrices match /.python-version (#197)"
 	@echo ""

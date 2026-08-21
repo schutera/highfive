@@ -353,7 +353,6 @@ void setupWifiConnection(wifi_configuration_t *wifi_config) {
   WiFi.setAutoReconnect(true);
   WiFi.onEvent(onWifiEvent);
   WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD);
-  //WiFi.begin("Vodafone-CAKE", "tYsjat-gakke8-kephaw");
   Serial.printf("---- connecting to %s\n", wifi_config->SSID);
   ledSetMode(hf::LedMode::Connecting);
   unsigned long wifiStart = millis();

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Catch a hardcoded Google API key in source — the failure mode of
-# issue #18 (the Geolocation key that leaked because it was inlined as
-# a string literal in ESP32-CAM/esp_init.cpp). Run from `make
-# check-no-hardcoded-api-keys` and the husky pre-push hook.
+# Catch a hardcoded Google API key, Discord webhook URL, or Wi-Fi
+# SSID/passphrase in source — the failure modes of issue #18 (the
+# Geolocation key that leaked because it was inlined as a string
+# literal in ESP32-CAM/esp_init.cpp), the 2026-07 audit's Discord
+# webhook default, and issue #227 (a commented-out Wi-Fi credential
+# in the same file). Run from `make check-no-hardcoded-api-keys` and
+# the husky pre-push hook.
 #
 # Google API keys start with `AIza` followed by 35 chars from the URL-
 # safe base64 alphabet (letters, digits, `-`, `_`). The pattern below
@@ -90,5 +93,29 @@ if [[ -n "$webhook_hits" ]]; then
   exit 1
 fi
 
-echo "check-no-hardcoded-api-keys: OK — no Google API key or Discord webhook literals found."
+# Third pattern: WiFi.begin() with two string literals — a Wi-Fi SSID +
+# passphrase inlined in firmware source. Found in the 2026-08 audit as a
+# commented-out bench line in ESP32-CAM/esp_init.cpp (SEC-14, see #227).
+# The config-driven form
+# WiFi.begin(wifi_config->SSID, wifi_config->PASSWORD) and the bare
+# WiFi.begin() do not match: both literals must be double-quoted strings.
+wifi_pattern='WiFi\.begin\(\s*"[^"]*"\s*,\s*"[^"]*"'
+
+wifi_hits=$(git grep -nIE "$wifi_pattern" -- . "${skip_args[@]}" 2>/dev/null || true)
+
+if [[ -n "$wifi_hits" ]]; then
+  echo "check-no-hardcoded-api-keys: FAIL — Wi-Fi SSID/passphrase literal in source:"
+  echo ""
+  echo "$wifi_hits" | sed 's/^/  /'
+  echo ""
+  echo "  Treat this as a security incident, not a typo:"
+  echo "    1. Rotate the Wi-Fi password on the router that broadcasts that SSID."
+  echo "    2. Route credentials through the config-driven WiFi.begin(wifi_config->SSID,"
+  echo "       wifi_config->PASSWORD) path (captive-portal / NVS config) — never a literal."
+  echo "    3. Remove the literal from the working tree. The git history will still"
+  echo "       contain it — rotation is the only real mitigation."
+  exit 1
+fi
+
+echo "check-no-hardcoded-api-keys: OK — no Google API key, Discord webhook, or Wi-Fi credential literals found."
 exit 0

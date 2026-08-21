@@ -2,6 +2,16 @@
 
 Orientation for the **HiveHive** (a.k.a. `highfive`) bee-monitoring monorepo. Deeper context lives in the arc42 docs at [`docs/`](docs/) and in [`CONTRIBUTING.md`](CONTRIBUTING.md); this file does not duplicate them.
 
+## Immediate priority queue (self-removing)
+
+Highest-priority items from the 2026-08-18 repo audit (tracking epic [#262](https://github.com/schutera/highfive/issues/262)), in the order to tackle them. **When you finish one, delete its entry (and any now-stale prose above the list about "N items left") in the same commit/PR that resolves it. When the list is empty, delete this whole section** — do not leave a stale "queue" around after the work is done.
+
+1. **[#227](https://github.com/schutera/highfive/issues/227) — Committed Wi-Fi credential.** A real home Wi-Fi SSID + passphrase sits commented-out in `ESP32-CAM/esp_init.cpp:356`, in git history since `f5dc06d`. Rotate the password (maintainer, out-of-repo — a PR alone cannot close this), delete the line, extend `scripts/check-no-hardcoded-api-keys.sh` with a `WiFi.begin("...", "...")` pattern, record it in ch11 next to the #18 entry. Effort S, no deps.
+2. **[#232](https://github.com/schutera/highfive/issues/232) — No retained backup.** The only backup path gzips the live DuckDB file under the global write lock once a week and posts it to Discord — nothing is retained, nothing is off-host, no restore has ever been drilled. Irreversible-data-loss risk. Effort M.
+3. **[#228](https://github.com/schutera/highfive/issues/228) — Upload content validation.** `/upload` is credential-free by design and accepts file content with no magic-byte check, no dimension guard, and inconsistent extension/Content-Type handling (bundles SEC-4/9/10). Effort M, medium risk.
+4. **[#229](https://github.com/schutera/highfive/issues/229) — Harden `/new_module` + `/heartbeat`.** Same internet-reachable, credential-free trust-boundary theme as #228: no-overwrite semantics, unknown-MAC drop, input clamps, nginx rate limits, stop logging raw bodies. Effort M–L, medium risk.
+5. **[#231](https://github.com/schutera/highfive/issues/231) — Firmware `setTimeout()` unit bug + portal/OTA deadline.** Docs certify the timeout bug fixed; it isn't, on the pinned Arduino-ESP32 2.0.17 core. Needs a `SEQUENCE`-bumped release to actually ship — see [Cutting a firmware OTA release](#cutting-a-firmware-ota-release). Effort M + release.
+
 ## Project at a glance
 
 HiveHive monitors wild-bee nesting activity. ESP32-CAM modules upload images to a Python image service, a Python DuckDB service owns persistence, a Node/Express backend aggregates for the UI, and a React + Vite homepage renders dashboard, map, and setup wizard. Dev-side everything runs under `docker compose` on the shared bridge network `net`.

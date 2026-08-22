@@ -38,6 +38,8 @@ cp .env.example .env       # then edit if needed
 docker compose up --build  # homepage on http://localhost:5173
 ```
 
+For production deployment, see [`.env.production.example`](.env.production.example) and the [Production Runbook](docs/07-deployment-view/production-runbook.md).
+
 Full setup, ports, and service map: **[Deployment Guide](docs/07-deployment-view/docker-compose.md)**.
 
 <br>

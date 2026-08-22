@@ -88,8 +88,14 @@ app.get('/api/images/:filename', async (req, res) => {
       res.status(response.status).json({ error: 'Image not found' });
       return;
     }
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    res.setHeader('Content-Type', contentType);
+    // Hard-set, not forwarded (2026-08 audit, for #228): image-service now
+    // only ever stores/serves `.jpg` with `mimetype="image/jpeg"`
+    // (`services/paths.py::sanitize_upload_filename` forces the extension,
+    // `app.py::serve_image` pins the mimetype), so this proxy no longer
+    // needs to trust the upstream header — belt and braces against a
+    // future upstream regression reintroducing a client-controlled
+    // Content-Type on this public, unauthenticated route.
+    res.setHeader('Content-Type', 'image/jpeg');
     const buffer = Buffer.from(await response.arrayBuffer());
     res.send(buffer);
   } catch (error) {
@@ -113,8 +119,9 @@ app.get('/api/snips/:filename', async (req, res) => {
       res.status(response.status).json({ error: 'Snip not found' });
       return;
     }
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    res.setHeader('Content-Type', contentType);
+    // Hard-set, not forwarded — mirrors the /api/images proxy above
+    // (2026-08 audit, for #228). Snips are always written as `.jpg`.
+    res.setHeader('Content-Type', 'image/jpeg');
     const buffer = Buffer.from(await response.arrayBuffer());
     res.send(buffer);
   } catch (error) {

@@ -1,10 +1,14 @@
 """Upload pipeline for image-service.
 
-Encapsulates the multi-step `/upload` workflow (first-upload detection,
-image persistence, sidecar persistence, classification, progress + heartbeat
-recording, optional Discord notification) behind a class with injected
-collaborators. The pipeline is deliberately Flask-free: callers parse the
-HTTP request, build an `UploadRequest`, and consume an `UploadResult`.
+Encapsulates the multi-step `/upload` workflow (content validation + image
+persistence, first-upload detection, sidecar persistence, classification,
+progress + heartbeat recording, optional Discord notification) behind a
+class with injected collaborators. The pipeline is deliberately Flask-free:
+callers parse the HTTP request, build an `UploadRequest`, and consume an
+`UploadResult`. Content validation (`_persist_image`'s `probe_jpeg` call)
+runs before the first network round-trip to duckdb-service (2026-08 audit,
+for #228 — a rejected upload must not still amplify to a duckdb-service
+call on every attempt).
 
 Behavior is preserved exactly from the original inline `/upload` handler:
 - Failure tolerance: the first-upload check, progress POST, and heartbeat
@@ -34,6 +38,7 @@ from typing import Any
 from requests import RequestException
 
 from services.hole_detection import BEE_TYPE_WIRE_TO_DB, DetectionResult, HoleDetector
+from services.image_guard import probe_jpeg
 from services.paths import reserve_filename, sanitize_upload_filename
 from services.sidecar import LogSidecarEnvelope
 
@@ -93,8 +98,15 @@ class UploadPipeline:
         self.snip_folder = snip_folder or os.path.join(upload_folder, "snips")
 
     def run(self, req: UploadRequest) -> UploadResult:
-        is_first = self._check_first_upload(req.mac)
+        # `_persist_image` (which probes the bytes are a valid, in-bounds
+        # JPEG — 2026-08 audit, for #228) runs FIRST, before
+        # `_check_first_upload`'s network round-trip to duckdb-service
+        # (senior-review P1): a rejected upload must not still amplify to
+        # a GET against duckdb-service on every attempt. An
+        # `InvalidImageError` here propagates straight out of `run()`
+        # to `app.py`'s catch, with zero network calls made.
         file_path, stored_filename = self._persist_image(req)
+        is_first = self._check_first_upload(req.mac)
         self._record_image_upload(req.mac, stored_filename)
         self._persist_sidecar(req, file_path, stored_filename)
         # Hole detection (#165, ADR-027): the learned detector locates holes and
@@ -135,7 +147,17 @@ class UploadPipeline:
         sanitized + collision-deduped client name (for #202); every
         downstream consumer (DB row, sidecar, snips, Discord, response)
         must use it, never the raw ``req.image.filename``.
+
+        Validates the bytes are a well-formed, in-bounds JPEG before
+        anything reserves a name or touches disk (2026-08 audit, for
+        #228). ``probe_jpeg`` raises ``InvalidImageError`` on non-JPEG
+        content (stops stored-HTML/SVG) or an oversized declared frame
+        (stops a decompression bomb reaching ``cv2.imread``); the caller
+        (``app.py::upload_image``) turns that into a 400. Runs first, on
+        purpose — ``reserve_filename`` below creates an on-disk
+        placeholder, and a rejected upload must leave nothing behind.
         """
+        probe_jpeg(req.image.stream)
         stored_filename = sanitize_upload_filename(req.image.filename)
         # NOTE: reserve_filename CREATES an empty placeholder on disk (its
         # atomicity mechanism) — the save below overwrites it. Release the

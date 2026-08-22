@@ -42,8 +42,14 @@ modules_bp = Blueprint("modules", __name__)
 
 @modules_bp.post("/new_module")
 def add_module():
+    # 2026-08 audit, for #229: `/new_module` is internet-reachable and
+    # credential-free. The pre-validation `json_data` can carry attacker
+    # keys and the operator's `email`, so it must never reach the
+    # admin-readable / disk-persisted log ring (app.py's "path ONLY —
+    # never query string, headers, or body" invariant). Nothing is
+    # printed here; the post-validation summary below logs only
+    # non-sensitive, already-coarsened fields.
     json_data = request.get_json()
-    print(f"[new_module] Received: {json_data}")
     try:
         data = ModuleData(**json_data)
     except ValidationError as e:
@@ -64,43 +70,34 @@ def add_module():
         return jsonify({"error": str(e)}), 400
 
     # ``data.mac`` is a ``ModuleId`` root model; unwrap to the canonical str
-    # for DB writes, the Discord message, and the response body.
+    # for DB writes and the response body.
     mac_str = data.mac.root
-    stored_name = data.module_name
+    now = datetime.now().strftime("%Y-%m-%d")
     try:
         with write_transaction() as con:
-            # Same-batch ESP32 firmware can generate identical default
-            # names (issue #92 fixed the entropy, but operator-chosen
-            # names and legacy batches can still collide). Auto-suffix
-            # the firmware-reported `name` so two distinct modules never
-            # show up under the same label even before an operator sets
-            # `display_name`. We only suffix when the conflicting row
-            # has a *different* id — re-registrations of the same
-            # module keep their existing name unchanged.
+            # 2026-08 audit, for #229: this write is credential-free and
+            # internet-reachable (any client that knows or enumerates a
+            # 12-hex module id via public `GET /modules` can call it), so
+            # a re-registration must not let an attacker overwrite a real
+            # module's `name`/`email`/location. Only fields the STORED row
+            # doesn't already have a real value for get filled in from the
+            # incoming payload. There is currently NO non-destructive way
+            # to correct `name`/`email`/location once set — `PATCH
+            # /modules/<id>/display_name` writes a *different*,
+            # UNIQUE-constrained column (an admin-settable display
+            # override), never `name` itself. The only actual path is
+            # `DELETE /modules/<id>` + re-register, which wipes the
+            # module's entire history (`daily_progress`, `nest_data`,
+            # `image_uploads`, `module_heartbeats`, `measurements`), not
+            # just its identity fields — see `docs/08-crosscutting-
+            # concepts/auth.md` for the full rationale and the tracked
+            # follow-up (non-destructive `PATCH` endpoints for these
+            # fields). Same-batch ESP32 firmware can still
+            # generate identical default names on FIRST registration
+            # (issue #92 fixed the entropy, but operator-chosen names and
+            # legacy batches can still collide), so the auto-suffix below
+            # only ever runs for a brand-new row.
             #
-            # Cap at -99 so a pathological collision rate cannot run
-            # away; raising at the cap surfaces the situation rather
-            # than silently storing a 100th lookalike.
-            stored_name = _resolve_unique_firmware_name(con, mac_str, data.module_name)
-            now = datetime.now().strftime("%Y-%m-%d")
-            # PR II / issue #89 follow-up: the firmware calls
-            # `initNewModuleOnServer` on EVERY boot, registering at the
-            # (0,0) sentinel when boot-time getGeolocation fails. The
-            # original UPSERT clobbered lat/lng with EXCLUDED unconditionally,
-            # which would erase a heartbeat-side-recovered location on
-            # the next daily reboot whose boot fix failed. The CASE
-            # below preserves the existing lat/lng iff:
-            #   - the incoming row is at (0,0) (no fix this boot), AND
-            #   - the existing row is NOT at (0,0) (real fix landed
-            #     previously via heartbeat-side recovery OR earlier
-            #     successful boot).
-            # Symmetric with `routes/heartbeats.py::post_heartbeat`'s
-            # "only patch from (0,0)" rule — both writers respect the
-            # same invariant: a deliberately-placed module is never
-            # clobbered, and a (0,0) row is patched up to a real fix
-            # from either side. Pinned by
-            # `test_new_module_re_registration_does_not_clobber_recovered_location`
-            # in `tests/test_modules.py`.
             # `add_module` is the ONLY writer that bumps `last_seen_at` —
             # that column is the device-liveness signal the backend's
             # `fetchAndAssemble` folds into `Module.lastSeenAt` for the
@@ -108,7 +105,27 @@ def add_module():
             # `module_configs` (display_name rename, heartbeat row-patch,
             # heartbeat-side geo-patch) is row-metadata and bumps only
             # `updated_at`. Re-registration is a "device was heard from"
-            # event, so the UPSERT path bumps both.
+            # event, so the UPSERT path bumps both — regardless of
+            # whether any value actually changed.
+            is_new = (
+                con.execute(
+                    "SELECT 1 FROM module_configs WHERE id = ?", (mac_str,)
+                ).fetchone()
+                is None
+            )
+            # Cap at -99 so a pathological collision rate cannot run
+            # away; raising at the cap surfaces the situation rather
+            # than silently storing a 100th lookalike. Only run for a
+            # brand-new row (senior-review P2): the CASE below discards
+            # this value on a re-registration anyway, and running it
+            # unconditionally meant a pathological collision on some
+            # OTHER module's name could 500 a re-registration whose own
+            # name was never going to be written.
+            stored_name = (
+                _resolve_unique_firmware_name(con, mac_str, data.module_name)
+                if is_new
+                else data.module_name
+            )
             con.execute(
                 """
                 INSERT INTO module_configs
@@ -116,21 +133,54 @@ def add_module():
                      updated_at, last_seen_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 ON CONFLICT (id) DO UPDATE SET
-                    name = EXCLUDED.name,
+                    name = CASE
+                        WHEN module_configs.name IS NULL OR module_configs.name = ''
+                        THEN EXCLUDED.name
+                        ELSE module_configs.name
+                    END,
+                    -- 2026-08 audit, for #229 (senior-review P0 fix — the
+                    -- first-pass version of this CASE inverted the rule
+                    -- below and still let an anonymous re-POST relocate a
+                    -- placed module; verified end-to-end before landing
+                    -- this fix). Location follows the SAME "preserve
+                    -- unless the stored value is unset" shape as
+                    -- name/email above: `lat`/`lng` can never be SQL NULL
+                    -- (schema: NOT NULL), so their "unset" state is the
+                    -- `(0,0)` sentinel instead. Patch from the incoming
+                    -- payload ONLY when the STORED row is at `(0,0)` AND
+                    -- the incoming payload carries a real (non-`(0,0)`)
+                    -- fix — the PR II / issue #89 recovery case (firmware
+                    -- calls `initNewModuleOnServer` on every boot,
+                    -- registering at `(0,0)` when boot-time
+                    -- getGeolocation fails). Every other combination
+                    -- preserves the stored value — an anonymous
+                    -- re-registration can NEVER move an already-placed
+                    -- module, matching `routes/heartbeats.py`'s
+                    -- `post_heartbeat`, which gates on the same "only
+                    -- patch from a STORED (0,0)" condition. A genuine
+                    -- operator relocation goes through
+                    -- `DELETE /modules/<id>` + re-register (a fresh
+                    -- INSERT, not this UPDATE branch) — destructive
+                    -- (wipes the module's whole history, not just this
+                    -- field), see the module-level comment above.
                     lat = CASE
-                        WHEN EXCLUDED.lat = 0 AND EXCLUDED.lng = 0
-                             AND NOT (module_configs.lat = 0 AND module_configs.lng = 0)
-                        THEN module_configs.lat
-                        ELSE EXCLUDED.lat
+                        WHEN module_configs.lat = 0 AND module_configs.lng = 0
+                             AND NOT (EXCLUDED.lat = 0 AND EXCLUDED.lng = 0)
+                        THEN EXCLUDED.lat
+                        ELSE module_configs.lat
                     END,
                     lng = CASE
-                        WHEN EXCLUDED.lat = 0 AND EXCLUDED.lng = 0
-                             AND NOT (module_configs.lat = 0 AND module_configs.lng = 0)
-                        THEN module_configs.lng
-                        ELSE EXCLUDED.lng
+                        WHEN module_configs.lat = 0 AND module_configs.lng = 0
+                             AND NOT (EXCLUDED.lat = 0 AND EXCLUDED.lng = 0)
+                        THEN EXCLUDED.lng
+                        ELSE module_configs.lng
                     END,
                     battery_level = EXCLUDED.battery_level,
-                    email = EXCLUDED.email,
+                    email = CASE
+                        WHEN module_configs.email IS NULL OR module_configs.email = ''
+                        THEN EXCLUDED.email
+                        ELSE module_configs.email
+                    END,
                     updated_at = NOW(),
                     last_seen_at = NOW()
                 """,
@@ -144,21 +194,52 @@ def add_module():
                     data.email,
                 ),
             )
+            # Read back what actually landed — the CASE clauses above may
+            # have kept the stored value instead of the incoming one, so
+            # the response / Discord message must reflect the true
+            # persisted row, not the (possibly-discarded) incoming payload.
+            final_name, final_lat, final_lng = con.execute(
+                "SELECT name, lat, lng FROM module_configs WHERE id = ?",
+                (mac_str,),
+            ).fetchone()
+            # DuckDB returns DECIMAL(9,6) columns as `decimal.Decimal`,
+            # whose str() shows full fixed-point precision (e.g.
+            # "48.520000") — float() first so the Discord message and log
+            # line render the same compact form as the pre-#229 code did
+            # (e.g. "48.52") rather than a decimal-precision artifact
+            # (senior-review round 2 P2).
+            final_lat = float(final_lat)
+            final_lng = float(final_lng)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    send_discord_message(
-        f"🐝 **New Hive Module registered!**\n"
-        f"**Name:** {stored_name}\n"
-        f"**ID:** {mac_str}\n"
-        f"**Location:** {data.latitude}, {data.longitude}\n"
-        f"**Battery:** {data.battery}%"
+    # Discord only on first registration (2026-08 audit, for #229): the
+    # unconditional post let anyone spam the webhook by re-posting the
+    # same MAC repeatedly.
+    if is_new:
+        send_discord_message(
+            f"🐝 **New Hive Module registered!**\n"
+            f"**Name:** {final_name}\n"
+            f"**ID:** {mac_str}\n"
+            f"**Location:** {final_lat}, {final_lng}\n"
+            f"**Battery:** {data.battery}%"
+        )
+    # Post-validation summary only — esp_id, stored name, coarsened
+    # lat/lng (already rounded to 2 dp by `ModuleData._coarsen`). Never
+    # the operator's email or any other raw body field (2026-08 audit,
+    # for #229 — the pre-validation `print` this replaces put `email`
+    # and arbitrary attacker-supplied keys into the admin-readable,
+    # disk-persisted log ring).
+    print(
+        f"[new_module] id={mac_str} name={final_name} "
+        f"lat={final_lat} lng={final_lng} new={is_new}"
     )
     # Echo the actually-stored name so the firmware / operator sees the
-    # disambiguation when an auto-suffix fired. Pre-PR-I callers ignored
-    # extra fields, so this is backward-compatible.
+    # disambiguation when an auto-suffix fired, or the preserved name on
+    # a re-registration. Pre-PR-I callers ignored extra fields, so this
+    # is backward-compatible.
     return jsonify(
-        {"message": "Module added successfully", "id": mac_str, "name": stored_name}
+        {"message": "Module added successfully", "id": mac_str, "name": final_name}
     )
 
 

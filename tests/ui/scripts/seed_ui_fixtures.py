@@ -205,15 +205,21 @@ def seed_admin_gallery_images() -> None:
         module_name="UI Test Gallery",
     )
     esp.register().raise_for_status()
-    # The LAST (= newest) upload is a real ESP capture — mock_esp's default
-    # `_make_fake_image()` bytes carry JPEG markers but random payload, which a
-    # browser cannot decode (naturalWidth stays 0). The newest image must be real
-    # for module-nest-snips.spec.ts / snip-timelapse.spec.ts: the learned detector
-    # (ADR-027) only finds holes on a real capture, not a synthetic mock (out of
-    # distribution). A 7/5/5/4 block capture yields ~21 `undetermined` snips. The
-    # five older uploads stay fake on purpose: admin-image-pagination.spec.ts
-    # counts cells, not loaded thumbnails, exactly because fake bytes may fail to
-    # render.
+    # The LAST (= newest) upload is a real ESP capture. mock_esp's default
+    # `_make_fake_image()` bytes (2026-08 audit, for #228) are a header-valid
+    # JPEG (real SOI/APP0/SOF0, so `image-service`'s `probe_jpeg` accepts
+    # them) but the entropy-coded body past the header is still pseudo-random
+    # garbage — whether a browser's <img> reports a real `naturalWidth` from
+    # the valid header or gives up entirely on the corrupt body is untested
+    # and irrelevant either way: admin-image-pagination.spec.ts (verified,
+    # see its own comment) counts gallery cells via
+    # `[data-testid="admin-image-cell"]`, never `naturalWidth` or a decoded
+    # thumbnail, exactly so this doesn't matter. The newest image must be
+    # real for module-nest-snips.spec.ts / snip-timelapse.spec.ts: the
+    # learned detector (ADR-027) only finds holes on a real capture, not a
+    # synthetic mock (out of distribution). A 7/5/5/4 block capture yields
+    # ~21 `undetermined` snips. The five older uploads stay synthetic on
+    # purpose — see admin-image-pagination.spec.ts.
     real_jpeg = (
         REPO_ROOT / "dev-tools" / "real_captures" / "block_tungsten_640.jpg"
     ).read_bytes()

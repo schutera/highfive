@@ -519,6 +519,69 @@ already in a capture storm. There is also a `413` for bodies over
 `MAX_CONTENT_LENGTH`. Full detail in
 [api-reference.md § 2.2](../api-reference.md).
 
+## `POST /upload` stored filename and served Content-Type (2026-08 audit, #228)
+
+Two more wire-visible changes, both forcing behaviour that used to be
+client-controlled:
+
+- **The stored (and echoed) filename's extension is always `.jpg`**,
+  regardless of what the client sent — `services/paths.py::sanitize_upload_filename`
+  strips everything from the first `.` onward and appends `.jpg`. A consumer
+  that derives a file extension from the **uploaded** filename rather than
+  the **response**'s `message`/any listing endpoint's `filename` field will
+  be wrong for a non-`.jpg` upload (rare in practice — only a hostile or
+  buggy client sends one).
+- **A non-`.jpg` response body is also now possible on `200`'s sibling
+  `400`:** `{"error": "invalid image: <reason>"}` when the bytes aren't a
+  parseable JPEG or the declared frame exceeds `MAX_IMAGE_DIM`. Same
+  "branch on the shape, not just the code" rule as the throttle response
+  above — a `400` here carries `error`, never `message`/`filename`/`classification`.
+- **`GET /images/<name>` and `GET /snips/<name>`** (image-service) now
+  `404` any non-`.jpg` name. The `/api/images`/`/api/snips` backend
+  proxies don't re-check the extension themselves — a non-`.jpg` request
+  still ends up `404` through them because they forward image-service's
+  status verbatim — but they DO independently hard-set
+  `Content-Type: image/jpeg` on a `200` (belt-and-braces against a future
+  upstream regression), rather than forwarding whatever Content-Type
+  image-service sent. See
+  [api-reference.md § 2.2b / § 2.5](../api-reference.md).
+
+## `POST /new_module` and `POST /heartbeat` write semantics (2026-08 audit, #229)
+
+Both routes are internet-reachable and credential-free (see
+[auth.md](auth.md)); the 2026-08 audit hardened what a re-POST can do
+without adding a credential requirement (that's [ADR-032](../09-architecture-decisions/adr-032-device-identity-for-ingest.md),
+still Proposed).
+
+- **`POST /new_module` re-registration no longer overwrites an existing
+  row's identity fields.** `name`/`email` are kept from the stored row
+  unless the stored value is NULL/empty. `latitude`/`longitude` (never
+  NULL — schema `NOT NULL`) are kept unless the **stored** row sits at
+  the `(0,0)` sentinel and the incoming payload carries a real fix (PR II
+  / #89's recovery case) — gated on the stored value, not the incoming
+  one, so an anonymous re-POST can move a module out of `(0,0)` but can
+  never relocate an already-placed one. `battery_level`/`updated_at`/
+  `last_seen_at` still bump every call, a documented residual gap (see
+  [auth.md](auth.md)). **Consequence for any consumer:** the response's `name`
+  field on a re-registration reflects the **preserved** stored value, not
+  necessarily the `module_name` the caller just sent — a client that
+  assumes `response.name === request.module_name` will observe drift the
+  moment two registrations of the same `esp_id` carry different names.
+  Full detail: [api-reference.md § 3.2](../api-reference.md).
+- **`POST /heartbeat` for an unregistered `mac` returns `{"ok": true}`,
+  `200`, and writes nothing** (previously it always inserted into
+  `module_heartbeats`, even for a MAC with no `module_configs` row at
+  all). A consumer probing "does this MAC exist" via heartbeat side
+  effects will no longer see a row appear. Full detail:
+  [api-reference.md § 3.7](../api-reference.md).
+- **`battery` on `POST /heartbeat` is clamped to `[0, 100]`**, not
+  rejected — `battery: 250` is stored as `100`. Contrast with the
+  sibling `POST /modules/<id>/heartbeat` (§3.8) — same field name
+  (`battery`) on the wire, a different rule — which has always
+  **rejected** an out-of-range value with `400` — the two
+  routes deliberately disagree here (this one never 400s on a malformed
+  optional field; that one validates a required one at the front door).
+
 ## Field-name drift to watch for
 
 These three patterns have caused real bugs. Grep before changing

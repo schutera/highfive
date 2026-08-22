@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
 from db.connection import lock, get_conn
-from db.repository import write_transaction
+from db.repository import query_one, write_transaction
 from models.geo import coarsen_coord
 from models.module_id import ModuleId
 
@@ -93,6 +93,30 @@ def post_heartbeat():
     except ValidationError:
         return jsonify({"error": "invalid mac format"}), 400
 
+    # 2026-08 audit, for #229: `/heartbeat` is internet-reachable and
+    # credential-free. Without this check anyone who knows (or enumerates
+    # via public `GET /modules`) a well-formed 12-hex MAC — even one with
+    # no `module_configs` row — could grow `module_heartbeats` and
+    # `measurements` without bound and spoof liveness for a module that
+    # doesn't exist. 200, not 404: the firmware fails a heartbeat quietly
+    # and a non-2xx here would count toward its failure streak (#172) for
+    # what is, for a real module, just a registration-ordering race
+    # (`/heartbeat` reaching us before that module's own `/new_module`).
+    if query_one("SELECT 1 FROM module_configs WHERE id = ?", (mac,)) is None:
+        print(f"[heartbeat] unknown module {mac} — discarded, nothing written")
+        return jsonify({"ok": True}), 200
+    # Senior-review P2: this check and the `write_transaction()` below are
+    # two separate lock acquisitions (`query_one` releases `lock` before
+    # returning), so there is a narrow TOCTOU window — a concurrent
+    # `DELETE /modules/<id>` between the two could still let an `INSERT`
+    # land in `module_heartbeats`/`measurements` for a MAC that no longer
+    # has a `module_configs` row. `module_heartbeats.module_id` carries no
+    # FK (`db/schema.py`), so the result is an orphan row, not a 500.
+    # Low-impact (admin-only delete, narrow window) and accepted rather
+    # than fixed: closing it would mean holding one lock across both the
+    # existence check and the writes, which is a bigger structural change
+    # than this bug fix warrants.
+
     battery = _to_int(data.get("battery"))
     rssi = _to_int(data.get("rssi"))
     uptime_ms = _to_int(data.get("uptime_ms"))
@@ -136,6 +160,23 @@ def post_heartbeat():
     lng = _to_float(data.get("longitude"))
     acc = _to_float(data.get("accuracy"))
 
+    # Clamp rather than reject (2026-08 audit, for #229): mirrors the
+    # legacy `/modules/<id>/heartbeat` route's `ge=0, le=100` rule
+    # (`routes/modules.py::heartbeat`) without turning this handler into
+    # one that can 400 a well-intentioned-but-glitchy client — every other
+    # optional field here already degrades to `None` instead of failing
+    # the request (see `_to_int`/`_to_float`), and this endpoint's whole
+    # design is "never 500, never hard-fail on a bad field".
+    if battery is not None:
+        battery = max(0, min(100, battery))
+
+    # path/mac/counters only — never the raw lat/lng/acc (2026-08 audit,
+    # for #229). The prior line printed precise coordinates before
+    # `coarsen_coord` ran, landing sub-2-dp precision in the admin-
+    # readable, disk-persisted log ring; app.py's "path ONLY — never
+    # query string, headers, or body" invariant applies here too. The
+    # coarsened patch (if any) is still logged below, at the point it's
+    # actually applied.
     print(
         f"[heartbeat] mac={mac} battery={battery} rssi={rssi} "
         f"uptime_ms={uptime_ms} free_heap={free_heap} fw={fw_version} "
@@ -143,12 +184,8 @@ def post_heartbeat():
         f"boot_count={boot_count} "
         f"last_hb_fail_code={last_hb_fail_code} "
         f"last_hb_fail_count={last_hb_fail_count} "
-        f"last_stage_before_reboot={last_stage_before_reboot}"
-        + (
-            f" lat={lat} lng={lng} acc={acc}"
-            if (lat is not None or lng is not None)
-            else ""
-        )
+        f"last_stage_before_reboot={last_stage_before_reboot} "
+        f"geo_present={lat is not None and lng is not None}"
     )
 
     # Stamp `received_at` explicitly in UTC so the row this writer
@@ -246,6 +283,13 @@ def post_heartbeat():
                 "SELECT lat, lng FROM module_configs WHERE id = ?",
                 [mac],
             ).fetchone()
+            # `None` here is reachable, not dead: the unknown-MAC check
+            # above (#229) ran under a SEPARATE, already-released lock
+            # acquisition, so a `DELETE /modules/<id>` racing between that
+            # check and this transaction can still remove the row in
+            # between. This guard is the geo-patch's own defence against
+            # that narrow window (see the TOCTOU note on the unknown-MAC
+            # check above).
             if row is not None:
                 existing_lat = float(row[0]) if row[0] is not None else 0.0
                 existing_lng = float(row[1]) if row[1] is not None else 0.0

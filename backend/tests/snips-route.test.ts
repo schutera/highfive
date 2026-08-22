@@ -168,7 +168,7 @@ describe('GET /api/modules/:id/snips/history', () => {
 });
 
 describe('GET /api/snips/:filename', () => {
-  it('proxies the snip bytes from image-service with its content type', async () => {
+  it('proxies the snip bytes from image-service with a hard-set image/jpeg content type', async () => {
     const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
     (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
@@ -182,6 +182,25 @@ describe('GET /api/snips/:filename', () => {
     expect(res.headers['content-type']).toContain('image/jpeg');
     const [url] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(String(url)).toContain('/snips/cap-leafcutter-1.jpg');
+  });
+
+  it('overrides the upstream content type rather than forwarding it (2026-08 audit, #228)', async () => {
+    // image-service should never send anything but image/jpeg post-#228, but
+    // this proxy must not trust it either way — a future upstream regression
+    // (or a misconfigured/compromised image-service) must not be able to
+    // make this public, unauthenticated route serve a client-chosen
+    // Content-Type again.
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', 'text/html']]),
+      arrayBuffer: async () => bytes.buffer,
+    });
+
+    const res = await request(app).get('/api/snips/cap-leafcutter-1.jpg');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('image/jpeg');
   });
 
   it('forwards a 404 when the snip is missing', async () => {

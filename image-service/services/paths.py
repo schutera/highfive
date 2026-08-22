@@ -42,22 +42,43 @@ def safe_child_path(base_dir: str, name: str) -> str | None:
     return candidate
 
 
+_FORCED_EXT = ".jpg"
+
+
 def sanitize_upload_filename(raw: str | None, *, fallback: str = "upload.jpg") -> str:
-    """Normalize a client-supplied filename to a single safe path component.
+    """Normalize a client-supplied filename to a single safe ``.jpg`` path
+    component.
 
     basename (both separator styles) → allowlist to ``[A-Za-z0-9._-]``
-    (others become ``_``) → no leading dots → length cap (keeps the
-    tail, preserving the extension) → ``fallback`` when nothing usable
-    remains.
+    (others become ``_``) → no leading dots → ``fallback`` when nothing
+    usable remains → extension chain stripped and forced to ``.jpg``
+    (2026-08 audit, for #228) → length cap on the stem, budgeted so the
+    forced ``.jpg`` still fits.
+
+    Forcing the extension closes the stored-HTML risk the allowlist alone
+    left open: `[A-Za-z0-9._-]` keeps `.html`/`.svg`/`.xhtml`/`.log.json`
+    untouched, and `app.py`'s serve routes used to guess the Content-Type
+    from that extension. `probe_jpeg` (services/image_guard.py) has
+    already confirmed the bytes ARE a JPEG by the time this runs (see
+    `upload_pipeline.py::_persist_image`), so this is purely a naming
+    normalization, not a second content check. Every fleet name
+    (``esp_capture_YYYYMMDD_hhmmss.jpg``, see the module docstring) has no
+    dot before its own extension, so stripping "everything from the first
+    dot onward" is a byte-identical no-op for real uploads.
     """
     name = (raw or "").replace("\\", "/")
     name = os.path.basename(name)
     name = _DISALLOWED.sub("_", name).lstrip(".")
-    if len(name) > _MAX_NAME_LEN:
-        name = name[-_MAX_NAME_LEN:].lstrip(".")
     if not name or set(name) <= {"_", ".", "-"}:
         return fallback
-    return name
+    # `stem` is always non-empty here: `name` has no leading dots (already
+    # stripped above) and isn't purely `_`/`.`/`-` (already fallback-ed
+    # above), so its first character survives the split unconditionally.
+    stem = name.split(".", 1)[0]
+    budget = _MAX_NAME_LEN - len(_FORCED_EXT)
+    if len(stem) > budget:
+        stem = stem[:budget]
+    return f"{stem}{_FORCED_EXT}"
 
 
 def reserve_filename(directory: str, filename: str) -> str:

@@ -70,8 +70,36 @@ def test_empty_and_hostile_only_fall_back():
     assert sanitize_upload_filename("../..") == "upload.jpg"
 
 
-def test_overlong_name_keeps_tail_and_extension():
+def test_overlong_name_keeps_prefix_and_extension():
     got = sanitize_upload_filename("a" * 500 + ".jpg")
+    assert len(got) <= 120
+    assert got.endswith(".jpg")
+
+
+# ------------------- forced .jpg extension (2026-08 audit, for #228) -------------------
+
+
+def test_non_jpg_extensions_are_forced_to_jpg():
+    assert sanitize_upload_filename("evil.html") == "evil.jpg"
+    assert sanitize_upload_filename("evil.svg") == "evil.jpg"
+    assert sanitize_upload_filename("evil.xhtml") == "evil.jpg"
+
+
+def test_sidecar_lookalike_name_collapses_to_jpg():
+    # A name that would otherwise alias a telemetry sidecar's own naming
+    # scheme (`<image>.log.json`, services/upload_pipeline.py) must not
+    # survive as anything but a plain .jpg — everything from the first dot
+    # onward is stripped, not just the final suffix.
+    assert sanitize_upload_filename("a.jpg.log.json") == "a.jpg"
+    assert sanitize_upload_filename("x.log.json") == "x.jpg"
+
+
+def test_extensionless_name_gets_jpg_appended():
+    assert sanitize_upload_filename("noext") == "noext.jpg"
+
+
+def test_overlong_name_reserves_room_for_forced_extension():
+    got = sanitize_upload_filename("a" * 500 + ".html")
     assert len(got) <= 120
     assert got.endswith(".jpg")
 

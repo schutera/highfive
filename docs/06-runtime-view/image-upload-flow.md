@@ -14,9 +14,10 @@ sequenceDiagram
 
     ESP->>ESP: capture, build telemetry
     ESP->>IMG: POST /upload<br/>(multipart: image, mac, battery, logs)
+    IMG->>IMG: probe_jpeg() — magic-byte + header dimension check (#228)<br/>reject (400, nothing written, zero network calls) before anything else runs
+    IMG->>IMG: save image to /data/images
     IMG->>DDB: GET /modules/&lt;mac&gt;/progress_count
     DDB-->>IMG: count (used for first-upload detection)
-    IMG->>IMG: save image to /data/images
     IMG->>DDB: POST /record_image<br/>(body: {module_id, filename})
     DDB->>DDB: insert image_uploads row (uploaded_at server-stamped)
     IMG->>IMG: write &lt;img&gt;.log.json sidecar (if logs present)
@@ -32,6 +33,8 @@ sequenceDiagram
 
     Note over ESP,DDB: independently, hourly
     ESP->>DDB: POST /heartbeat<br/>(telemetry, body: mac, battery, rssi, uptime_ms, free_heap, fw_version,<br/>optional latitude/longitude/accuracy when deferred-retry recovered)
+    DDB->>DDB: module_configs row for mac exists? (#229)<br/>no → 200 {"ok": true}, nothing written
+    DDB->>DDB: clamp battery to [0, 100] if present (#229)
     DDB->>DDB: BEGIN; insert row in module_heartbeats
     DDB->>DDB: if battery is not None: insert measurements(metric=battery_pct, source=esp-heartbeat) (#110)
     DDB->>DDB: if lat/lng/accuracy plausible AND existing config row at (0,0): UPDATE module_configs (#89)
@@ -55,8 +58,13 @@ sequenceDiagram
 > `latitude/longitude/accuracy` triplet attached by `sendHeartbeat`
 > only when `hasPendingGeolocationFixToReport()` is true (PR II /
 > issue #89: the firmware's deferred-retry path obtained a fix
-> mid-uptime after a failed boot getGeolocation). The handler runs
-> all its writes inside one explicit BEGIN/COMMIT
+> mid-uptime after a failed boot getGeolocation). This route is
+> internet-reachable and credential-free (host-nginx proxies it
+> alongside `/new_module`), so since the 2026-08 audit (#229) it
+> checks `module_configs` for the mac **before** any write and returns
+> early (`200`, nothing written) for an unregistered mac, and clamps
+> `battery` to `[0, 100]` instead of storing it unbounded. The handler
+> runs all its writes inside one explicit BEGIN/COMMIT
 > (`db/repository.py`'s `write_transaction`): a row into
 > `module_heartbeats`; a sibling row into `measurements` with
 > `metric='battery_pct'` and `source='esp-heartbeat'` when the
@@ -142,16 +150,32 @@ sequenceDiagram
      deliberately not a 429, because any non-2xx feeds the firmware's
      5-failure circuit breaker (`ESP32-CAM/client.cpp`) and would
      reboot a module mid-storm. Discards are logged; nothing persists.
+   - **Content validated before anything is written (2026-08 audit, for
+     #228):** `services/image_guard.py::probe_jpeg` reads the JPEG magic
+     bytes and walks header segments to the first SOF marker, checking
+     the declared frame against `MAX_IMAGE_DIM` (default 4096px) —
+     without decoding pixel data. Runs on the raw upload stream *before*
+     `reserve_filename` claims a name or anything is saved. A failure
+     (non-JPEG bytes, oversized declared frame, truncated/malformed
+     header) returns `400` with nothing persisted — no file, no sidecar,
+     no DB row — and never reaches `cv2.imread` below. This is what
+     closes two real risks the old "save whatever the client sends"
+     behaviour left open: a stored `.html`/`.svg` served back same-origin
+     with a sniffed Content-Type, and a decompression bomb (a small file
+     whose declared dimensions decode to gigabytes) hitting the request
+     thread.
    - Saves the JPEG to the shared `duckdb_data` volume. The stored
      filename is the client's name after
      `image-service/services/paths.py`'s `sanitize_upload_filename` +
-     `reserve_filename` (2026-07 audit, for #202): byte-identical for
+     `reserve_filename` (2026-07 audit, for #202; extension forced to
+     `.jpg` since the 2026-08 audit, for #228): byte-identical for
      every fleet-grammar name (`esp_capture_…jpg`), but traversal /
-     hostile names are normalized, and a colliding name gets a `-N`
-     suffix instead of overwriting — fleet filenames carry no module
-     identity, so two modules capturing in the same second used to
-     silently clobber each other. The **stored** name is what flows to
-     the DB row, sidecar, snips, Discord ping, and response.
+     hostile names are normalized, the extension is always `.jpg`
+     regardless of what the client sent, and a colliding name gets a
+     `-N` suffix instead of overwriting — fleet filenames carry no
+     module identity, so two modules capturing in the same second used
+     to silently clobber each other. The **stored** name is what flows
+     to the DB row, sidecar, snips, Discord ping, and response.
    - Records the upload row via duckdb-service (see step 3).
    - If `logs` is parseable, writes a `<image>.log.json` sidecar next
      to the image as a `LogSidecarEnvelope` (`mac`, `received_at`,
@@ -172,10 +196,13 @@ sequenceDiagram
    `image-service` calls `duckdb-service` over HTTP (never opens its
    own DuckDB connection — see
    [ADR-001](../09-architecture-decisions/adr-001-duckdb-as-sole-writer.md)).
-   In call order:
-   - `GET /modules/<mac>/progress_count` — fires first, before the
-     image is even saved. Used to detect first-upload events for new
-     modules so the Discord ping only fires once per module's lifetime.
+   In call order — content validation (step 2's `probe_jpeg`) and the
+   image save happen first, **before** any of these network calls
+   (2026-08 audit, for #228 — a rejected upload must not still amplify
+   to a duckdb-service round-trip on every attempt):
+   - `GET /modules/<mac>/progress_count` — used to detect first-upload
+     events for new modules so the Discord ping only fires once per
+     module's lifetime.
    - `POST /record_image` — inserts an `image_uploads` row tying the
      filename on disk to its `module_id`. The admin page and the
      dashboard's `last_image_at` both join on this table. Failure is
@@ -204,8 +231,13 @@ sequenceDiagram
 
 5. **Independent telemetry channel.** Once an hour the firmware fires
    `POST /heartbeat` directly to `duckdb-service` with its own body
-   shape (mac, battery, rssi, uptime_ms, free_heap, fw_version). Each
-   call inserts a row into `module_heartbeats`; the most recent row is
+   shape (mac, battery, rssi, uptime_ms, free_heap, fw_version). This
+   route has no credential and is internet-reachable, so since the
+   2026-08 audit (for #229) a heartbeat for a mac with no
+   `module_configs` row is dropped (still `200`, nothing written) —
+   real modules always register before their first heartbeat, so this
+   only ever discards a caller that isn't a real registered module.
+   Otherwise each call inserts a row into `module_heartbeats`; the most recent row is
    surfaced on `Module.latestHeartbeat`
    ([ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md)).
    This path does not run on every upload and is not gated by image

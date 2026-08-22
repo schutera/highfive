@@ -50,6 +50,7 @@ image-service/
 └── services/
     ├── duckdb.py           # HTTP client for DuckDB service (incl. record_detections)
     ├── hole_detection.py   # learned HoleDetector — ONNX inference + snip crop (#165)
+    ├── image_guard.py      # JPEG magic-byte + dimension probe before save/decode (#228)
     └── upload_pipeline.py  # orchestrates detect → record progress → persist snips
 ```
 
@@ -84,8 +85,14 @@ The central entry point. Called by Hive modules whenever a new image is captured
 ### Data Flow
 
 1. Hive module sends image to `/upload`
-2. Image is saved to the Docker volume (`/data/images/`); a `.log.json`
-   sidecar is written next to it if `logs` is present
+2. **Content validated first (2026-08 audit, for #228):**
+   `services/image_guard.py::probe_jpeg` checks the JPEG magic bytes and
+   the SOF-declared frame size (against `MAX_IMAGE_DIM`, default 4096px)
+   — before anything is saved or decoded. A failure returns `400` with
+   nothing persisted. Image is then saved to the Docker volume
+   (`/data/images/`), always with a `.jpg` extension regardless of the
+   uploaded filename (`services/paths.py::sanitize_upload_filename`); a
+   `.log.json` sidecar is written next to it if `logs` is present
 3. `HoleDetector` runs the learned ONNX model to locate every nest hole and
    crops a snip per hole into `/data/images/snips/` (`state = "undetermined"` —
    empty/sealed is deferred). On detection failure it returns nothing and the

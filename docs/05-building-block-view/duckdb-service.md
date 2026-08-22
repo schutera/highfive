@@ -182,11 +182,35 @@ here. See [ADR-021](../09-architecture-decisions/adr-021-admin-server-log-ring.m
 
 ### POST /new_module
 
-Registers a new module in the system.
+Registers a new module in the system. Internet-reachable and
+credential-free (host-nginx proxies it; see
+[auth.md](../08-crosscutting-concepts/auth.md)).
 
-- Existing modules with the same ID will be overwritten
-- The time of registration is saved (`first_online`); `updated_at` is bumped on every call via the `ON CONFLICT DO UPDATE` branch
-- The firmware-reported `module_name` is checked against other modules' `name` before insert; on collision the value is auto-suffixed (`-2`, `-3`, …) so two modules cannot share a label even before an operator runs the rename flow. Response body echoes the actually-stored name. See [ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md).
+- **Existing modules with the same ID are NOT overwritten** (2026-08
+  audit, for #229 — this was the pre-fix behaviour and is exactly what
+  made a re-POST from an anonymous caller a public-map-defacement
+  vector). `name`/`email` are kept unless the stored value is NULL/empty.
+  `latitude`/`longitude` **cannot** be NULL/empty (schema: `NOT NULL`),
+  so their rule is different in kind, not just an "additional exception":
+  the incoming fix is written **only when the stored row sits at the
+  `(0,0)` sentinel** (PR II / #89's condition), gated on the **stored**
+  value. This is a genuine behaviour change from the pre-#229 UPSERT,
+  which gated on the *incoming* payload instead and — like `name`/`email`
+  — let any non-`(0,0)` incoming value overwrite a placed module. (A
+  first-pass version of this PR's fix carried the old, incoming-gated CASE
+  forward unchanged under a comment claiming it was already correct; that
+  was the bug senior-review caught before merge — see
+  [chapter 11](../11-risks-and-technical-debt/README.md).)
+  `battery_level`/`updated_at`/`last_seen_at` still bump on
+  every call regardless — a documented residual gap, see
+  [auth.md](../08-crosscutting-concepts/auth.md). The response echoes the
+  actually-**persisted** row, so a re-registration with a different
+  `module_name` gets back the preserved (old) name.
+- The time of first registration is saved (`first_online`).
+- The firmware-reported `module_name` is checked against other modules' `name` before insert **on a first registration only**; on collision the value is auto-suffixed (`-2`, `-3`, …) so two modules cannot share a label even before an operator runs the rename flow. See [ADR-011](../09-architecture-decisions/adr-011-module-display-name-override.md).
+- The Discord "new module" webhook fires only on a row's first insert,
+  never on a re-registration (2026-08 audit, for #229 — previously
+  unconditional, so a re-POST loop could spam the alert channel).
 - The dashboard's `Module.status` is **derived** from `lastSeenAt` in `backend/src/database.ts`'s `fetchAndAssemble` (2 h offline threshold); duckdb-service does not store a `status` column (dropped in [#69](https://github.com/schutera/highfive/issues/69))
 
 ### GET /modules
@@ -244,7 +268,8 @@ endpoints are wholly separate.
 ### POST /heartbeat — telemetry heartbeat
 
 Called by ESP32-CAM firmware directly, hourly (`sendHeartbeat` in
-`ESP32-CAM/client.cpp`). Implementation in
+`ESP32-CAM/client.cpp`). Internet-reachable and credential-free, like
+`/new_module` above. Implementation in
 `duckdb-service/routes/heartbeats.py` (`post_heartbeat` route).
 
 Body (form-encoded): `mac`, `battery`, `rssi`, `uptime_ms`,
@@ -253,8 +278,17 @@ Body (form-encoded): `mac`, `battery`, `rssi`, `uptime_ms`,
 these only when its deferred-retry path obtained a fix mid-uptime
 after a failed boot getGeolocation). Returns `{"ok": true}`.
 
-Side effects: an unconditional `INSERT` into `module_heartbeats`
-(see `post_heartbeat` body) plus a **conditional UPDATE** of
+**A `mac` with no existing `module_configs` row still returns
+`{"ok": true}`, `200` — but writes nothing** (2026-08 audit, for #229;
+see the same rationale on `/new_module` above — an internet-reachable,
+credential-free write must not let an unregistered/spoofed MAC grow
+`module_heartbeats`/`measurements` without bound). `battery` is clamped
+to `[0, 100]` rather than rejected. The server log line for this route
+no longer prints raw `latitude`/`longitude`/`accuracy` (it did, pre-fix,
+**before** `coarsen_coord` ran) — only a `geo_present` boolean.
+
+Side effects for a `mac` that IS registered: an `INSERT` into
+`module_heartbeats` (see `post_heartbeat` body) plus a **conditional UPDATE** of
 `module_configs.lat`/`lng` (PR II / issue #89). The UPDATE fires
 iff the optional lat/lng/accuracy fields parsed plausible (matching
 the `_is_plausible_fix` rule — same shape as `hf::isPlausibleFix`

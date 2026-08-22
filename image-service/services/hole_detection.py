@@ -52,6 +52,33 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from services.image_guard import max_image_dim_from_env
+
+# Defence-in-depth ceiling on OpenCV's own decoder (2026-08 audit, for
+# #228), on top of `image_guard.probe_jpeg`'s header-level dimension
+# check that already runs before any byte reaches this module. Must be
+# set before `import cv2` — OpenCV reads it once, at imgcodecs init.
+# `setdefault` so an operator's own env override still wins.
+#
+# Derived from `MAX_IMAGE_DIM` rather than a second hardcoded constant
+# (senior-review P1, round 2): a hardcoded value here silently drifted
+# from `image_guard`'s env-overridable cap the moment an operator raised
+# `MAX_IMAGE_DIM` without knowing this module had its own copy — verified
+# empirically that `cv2.imread` then *raises* `cv2.error` (an assertion
+# failure, not a graceful `None`) for a frame between the two caps, which
+# `HoleDetector.detect`'s broad `except Exception` swallows into a
+# silent, permanent "zero detections" for every such upload. Deriving
+# both from the same source closes that gap structurally instead of by
+# convention.
+#
+# Necessarily read once, at import time (must run before `import cv2`
+# below), while `probe_jpeg` re-reads `MAX_IMAGE_DIM` per call — so a
+# `MAX_IMAGE_DIM` change without a process restart would desync the two
+# again. Not a real gap in practice: this env var is container
+# configuration, set once at process start, not toggled at runtime.
+_max_dim = max_image_dim_from_env()
+os.environ.setdefault("OPENCV_IO_MAX_IMAGE_PIXELS", str(_max_dim * _max_dim))
+
 # onnxruntime / OpenCV / numpy are heavy native deps; import defensively so a
 # misconfigured image without them degrades to "no detection" instead of
 # crashing import of the whole image-service.

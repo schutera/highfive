@@ -775,9 +775,21 @@ Content-Type: multipart/form-data
 | `battery` | Text | Yes      | Integer 0–100                                                                      |
 | `logs`    | Text | No       | JSON telemetry payload (see [esp-reliability](06-runtime-view/esp-reliability.md)) |
 
+The `image` field's **bytes** must actually be a JPEG (2026-08 audit, for
+#228) — the field is called `image` and typically carries a `.jpg` name, but
+neither is trusted; see the bounds table below. The **stored** filename's
+extension is always forced to `.jpg` regardless of what the client sent
+(`services/paths.py::sanitize_upload_filename`), so `response.message`'s
+echoed filename may differ from the uploaded name's extension (e.g. an
+upload named `photo.svg` is stored — and echoed — as `photo.jpg`).
+
 If `logs` is present and parseable, it is saved to `{image_path}.log.json`
 in `LogSidecarEnvelope` format: `{mac, received_at, image, payload: {…}}`.
 Unparseable payloads are still saved as `{ "raw": ..., "parse_error": true, ... }`.
+This sidecar is **not** reachable through `GET /images/<filename>` (see
+below) — only through §2.3, whose *intended* gate is the backend's
+`requireAdmin` on `GET /api/modules/:id/logs`. §2.3 says explicitly:
+image-service's own route carries no credential itself.
 
 Response:
 
@@ -807,6 +819,19 @@ bounds. **Both add response shapes a consumer must handle:**
 | ------------------------------------------------------------ | ------- | -------------------------------------------------------- |
 | Request body over `MAX_CONTENT_LENGTH` (5 MB, `MAX_UPLOAD_BYTES`) | **413** | `{"error": "Request body too large"}`                     |
 | Over the per-module rate budget (30/h, `UPLOAD_THROTTLE_PER_HOUR`) | **200** | `{"message": "Upload rate exceeded — discarded"}`         |
+| Non-JPEG bytes (bad magic, malformed header, truncated)      | **400** | `{"error": "invalid image: <reason>"}`                    |
+| Declared dimensions over `MAX_IMAGE_DIM` (4096px default)    | **400** | `{"error": "invalid image: <reason>"}`                    |
+
+> **Since the 2026-08 audit (for #228):** the last two rows are checked by
+> `services/image_guard.py::probe_jpeg` — a JPEG magic-byte + header-only
+> dimension check, **not** a full decode — before anything is written to
+> disk or handed to the hole-detector's `cv2.imread`. Nothing is persisted
+> on either 400: no file, no `.log.json` sidecar, no duckdb row. Real fleet
+> input is always a JPEG capped at UXGA 1600×1200
+> (`ESP32-CAM/esp_init.cpp::getResolutionFromString`), so the 4096 default
+> leaves 2×+ headroom — only a non-firmware client can trigger these rows.
+> Like the 413 above, a 400 here is a non-2xx and counts toward the
+> firmware's failure breaker; acceptable for the same reason.
 
 > **The throttled response is a 200 that stores nothing**, and it carries
 > **none** of `mac` / `battery` / `filename` / `classification`. A consumer
@@ -831,6 +856,28 @@ client, which can rotate MACs. See
 [auth.md](08-crosscutting-concepts/auth.md) and
 [#224](https://github.com/schutera/highfive/issues/224).
 
+## 2.2b Serve an image
+
+```
+GET /images/<filename>
+```
+
+Serves a raw uploaded capture from `IMAGE_STORE_PATH`, public (no auth —
+`<img>` tags can't send custom headers). The backend re-exposes this at
+`GET /api/images/:filename` (§1's image proxy).
+
+Since the 2026-08 audit (for #228): `filename` must end in `.jpg` — every
+upload is now stored with that forced extension, so a non-`.jpg` name
+(including a `.log.json` telemetry sidecar's name) **404s outright**,
+never reaching containment/existence checks. On a hit, the response
+`Content-Type` is pinned to `image/jpeg` explicitly (`send_from_directory(...,
+mimetype="image/jpeg")`) rather than guessed from the extension — the
+guess is what let a stored `.html`/`.svg` upload get served back and
+executed same-origin, pre-fix. The backend proxy (`/api/images/:filename`)
+independently hard-sets the same header rather than forwarding whatever
+image-service sent, as belt-and-braces against a future upstream
+regression.
+
 ## 2.3 Module logs
 
 ```
@@ -839,7 +886,13 @@ GET /modules/<mac>/logs?limit=N
 
 Reads `*.log.json` sidecars on disk, filters by `mac` (envelope field),
 sorts by mtime descending, and returns the newest N (default 10, max 100).
-Used by the backend admin proxy in section 1.4.
+Used by the backend admin proxy in section 1.4. **This route itself
+carries no credential check** — unlike its siblings `GET /logs` and
+`GET /logs/stream`, which check `X-Admin-Key`. The gate is one hop up,
+the backend's `requireAdmin` on `GET /api/modules/:id/logs`. Not
+internet-reachable in prod (image-service binds `127.0.0.1:8000`, and
+nginx proxies only `/upload` off-box); dev publishes the port more
+broadly — see [auth.md](08-crosscutting-concepts/auth.md).
 
 ## 2.4 List images (admin gallery)
 
@@ -894,11 +947,14 @@ GET /snips/<filename>
 ```
 
 Serves a cropped per-nest snip JPEG from the snip folder
-(`IMAGE_STORE_PATH/snips/`). Public, like `GET /images/<filename>` — the crop
-removes all background (#154). The backend re-exposes this at
+(`IMAGE_STORE_PATH/snips/`). Public, like `GET /images/<filename>` (§2.2b) —
+the crop removes all background (#154). The backend re-exposes this at
 `GET /api/snips/:filename` (§1.6b). Snips are produced on `/upload` by the
 learned `HoleDetector` (YOLO26n-seg via ONNX, ADR-027) and recorded via duckdb
-`POST /record_detections` (§3.15). `404` when the snip file is absent.
+`POST /record_detections` (§3.15). `404` when the snip file is absent — since
+the 2026-08 audit (for #228), also when `filename` doesn't end in `.jpg`
+(snips are always written as `.jpg`, so this only rejects a hostile name).
+`Content-Type` is pinned to `image/jpeg` on a hit, mirroring §2.2b.
 
 <br>
 
@@ -948,12 +1004,44 @@ Returns:
 { "id": "b0696ef23a08", "name": "Garden-Hive", "message": "Module added successfully" }
 ```
 
-The response echoes the actually-stored `name`. If another module
-already holds the requested `module_name`, the server auto-suffixes
-(`Garden-Hive-2`, `Garden-Hive-3`, …, capped at `-99`) — the echoed
-value is the disambiguated form so the firmware can observe it.
+The response echoes the actually-stored `name`. On a **first**
+registration, if another module already holds the requested
+`module_name`, the server auto-suffixes (`Garden-Hive-2`,
+`Garden-Hive-3`, …, capped at `-99`) — the echoed value is the
+disambiguated form so the firmware can observe it.
 
-A module with the same identifier is replaced.
+**Re-registering an existing `esp_id` no longer overwrites it** (2026-08
+audit, for #229 — this route is internet-reachable and credential-free,
+see [auth.md](08-crosscutting-concepts/auth.md) for the full rationale
+and a first-pass version of this fix that shipped inverted, caught by
+senior-review). `name`, `email`, and `latitude`/`longitude` are kept from
+the stored row: `name`/`email` unless the stored value is NULL/empty;
+`latitude`/`longitude` (which can never be NULL — schema `NOT NULL`)
+unless the **stored** row sits at the `(0,0)` sentinel AND the incoming
+payload carries a real fix (the PR II / #89 recovery case — an anonymous
+re-POST can move a module OUT of `(0,0)`, never relocate an
+already-placed one). `battery_level` and the liveness timestamps
+(`updated_at`, `last_seen_at`) still bump on every call — a deliberate,
+documented residual gap (see auth.md), not an oversight. The response's
+echoed `name`/`id` always reflect the actually-**persisted** row, so a
+re-registration with a different `module_name` in the payload gets back
+the **preserved** (old) name, not the one it sent. The Discord "new
+module" webhook fires only on the row's first insert, never on a
+re-registration.
+
+**There is no non-destructive way to change `name`, `email`, or location
+today.** `PATCH /modules/<id>/display_name` (§1.4) is a *different*,
+UNIQUE-constrained column — an admin-settable override the homepage
+prefers over `name` for display, never a write to `name` itself. The
+only actual path is `DELETE /modules/<id>` (proxied by the backend's
+admin-gated `DELETE /api/modules/:id`) followed by re-registration — and
+that is destructive, not a lightweight edit: `delete_module` wipes
+`daily_progress`, `nest_data`, `image_uploads`, `module_heartbeats`, and
+`measurements` for the module id, not just the identity fields the
+operator meant to correct. See
+[auth.md](08-crosscutting-concepts/auth.md) for the full rationale and
+the tracked follow-up (non-destructive `PATCH` endpoints for these
+fields).
 
 **Validation errors (HTTP 400):**
 
@@ -1075,7 +1163,7 @@ Form fields:
 | Field                      | Type   | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | -------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mac`                      | string | accepted in canonical 12-hex form, colon-separated, or dash-separated; canonicalised on the server (or `esp_id` alias)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `battery`                  | int    | optional                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `battery`                  | int    | optional; clamped to `[0, 100]` rather than rejected (2026-08 audit, for #229) — a `battery: 250` is stored as `100`, not refused, matching this endpoint's design of never hard-failing on a bad optional field                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `rssi`                     | int    | optional, dBm                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `uptime_ms`                | int    | optional, since last boot                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `free_heap`                | int    | optional, bytes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -1101,7 +1189,19 @@ Returns `{ "ok": true }`, `200`. Missing `mac` returns
 reduce to `[0-9a-f]{12}` returns `{ "error": "invalid mac format" }`,
 `400`.
 
-Side effects: a single `INSERT` into `module_heartbeats`. The
+**A `mac` with no existing `module_configs` row also returns
+`{ "ok": true }`, `200` — but writes nothing** (2026-08 audit, for #229).
+This route is internet-reachable and credential-free; without this check
+any well-formed 12-hex MAC — registered or not — could grow
+`module_heartbeats`/`measurements` without bound and spoof liveness for a
+module that doesn't exist. It stays a `200` rather than `404`
+deliberately: the firmware's own registration call can race this one (a
+module heartbeating moments before its own `/new_module` lands), and a
+non-2xx here would count toward the firmware's failure streak (#172) for
+what is, for a real module, just an ordering race.
+
+Side effects (only for a `mac` that already has a `module_configs` row):
+a single `INSERT` into `module_heartbeats`. The
 handler **also** UPDATEs `module_configs.lat`/`lng` (PR II / issue
 #89) — but ONLY when ALL of the following are true:
 
@@ -1112,10 +1212,20 @@ handler **also** UPDATEs `module_configs.lat`/`lng` (PR II / issue
    A deliberately-placed module is **never** clobbered — the rule
    is "only patch from (0,0)".
 
-The handler does **not** touch `module_configs.updated_at` (that
-column has dual semantics — see chapter-11 "updated_at semantic
-overload" / issue #97). Implementation in the `heartbeat` route of
-`duckdb-service/routes/heartbeats.py`.
+This geo-patch UPDATE bumps `module_configs.updated_at` (row-metadata: the
+row was touched) but **not** `last_seen_at` — the liveness event is
+already recorded in `module_heartbeats` itself, which the backend folds
+into `Module.lastSeenAt` separately (issue #97 split); double-bumping
+`last_seen_at` here would double-count the same event. Implementation in
+the `post_heartbeat` route of `duckdb-service/routes/heartbeats.py`.
+
+**Server logs never carry raw coordinates** (2026-08 audit, for #229): the
+per-heartbeat log line prints only a `geo_present` boolean, not
+`latitude`/`longitude`/`accuracy` — the pre-fix line printed them
+**before** `coarsen_coord` ran, landing sub-2-dp precision in the
+admin-readable, disk-persisted server-log ring (ADR-023). When the
+geo-patch above actually fires, its own log line prints the
+already-coarsened (2 dp) result.
 
 This is the **telemetry heartbeat** fired hourly by firmware's
 `sendHeartbeat` in `ESP32-CAM/client.cpp`. It is distinct from the post-upload

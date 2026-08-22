@@ -279,6 +279,79 @@ No backup was taken; nothing was corrupted or partially written.
   one-off to silence — a volume that stays this full will eventually block
   writes from the services that actually need it (ADR-001's sole writer).
 
+### `POST /upload` returns `400 {"error": "invalid image: ..."}` (2026-08 audit, #228)
+
+`image-service` now validates the uploaded bytes are a well-formed JPEG
+before saving anything — see [auth.md](08-crosscutting-concepts/auth.md)
+and [image-upload-flow.md](06-runtime-view/image-upload-flow.md). Nothing
+is written to disk on this response (no file, no `.log.json` sidecar, no
+duckdb row), so there's nothing to clean up — just fix the client.
+
+- **The client sent non-JPEG bytes**, regardless of the filename it used.
+  A `.jpg`-named file with PNG/HTML/SVG content is rejected — the check
+  reads the actual bytes, not the extension or `Content-Type` header.
+  Confirm with the file's magic bytes:
+  `(Get-Content -Path .\your-file.jpg -Encoding Byte -TotalCount 3) -join ','`
+  — a real JPEG starts `255,216,255` (`FF D8 FF`).
+- **The declared frame exceeds `MAX_IMAGE_DIM`** (default 4096px on the
+  long edge). This fires if you've configured a firmware camera
+  `framesize` larger than the default cap allows, or set
+  `MAX_IMAGE_DIM` lower than your fleet's real resolution. Check the
+  service's current value:
+  `docker compose exec image-service printenv MAX_IMAGE_DIM` — unset
+  means the 4096 default. Raise it (compose `environment:` on
+  `image-service`, or `.env`) if a real, larger-than-default capture is
+  being rejected, then **restart the container** —
+  `services/hole_detection.py` derives its own OpenCV decode-size ceiling
+  (`OPENCV_IO_MAX_IMAGE_PIXELS`) from this same value, but only at
+  process start (it must be set before OpenCV's own `import cv2`), so a
+  live env var change with no restart leaves the OpenCV side on the old
+  ceiling.
+- **A real ESP32-CAM module hitting this** is a strong signal something
+  is wrong upstream, not a false positive to work around — the firmware
+  always sends `Content-Type: image/jpeg` at UXGA 1600×1200 or below
+  (`ESP32-CAM/client.cpp`, `esp_init.cpp::getResolutionFromString`), well
+  inside the default cap. Check for a corrupted capture (camera driver
+  issue) or a proxy/gateway mangling the multipart body in transit
+  before assuming the guard itself is wrong.
+
+### I renamed a module in the captive portal and the dashboard still shows the old name (2026-08 audit, #229)
+
+**Expected, not a bug, since this PR.** `esp_init.cpp` still saves the
+operator's captive-portal `MODULE_NAME` to SPIFFS and still sends it as
+`module_name` on every `POST /new_module` (daily reboot, ADR-007) — but
+`duckdb-service` now **preserves the already-stored `name`** on a
+re-registration instead of overwriting it (`routes/modules.py::add_module`,
+2026-08 audit, for #229 — an anonymous internet caller must not be able
+to silently rename a registered module, and the firmware's own boot-time
+re-POST is indistinguishable from that caller at the protocol level).
+The captive-portal name change is saved on the device and sent to the
+server; the server just no longer trusts a bare re-registration to apply
+it.
+
+- **There is currently no way to push a new `name` from the device to an
+  already-registered module.** Use the admin dashboard's display-name
+  override instead (`PATCH /modules/<id>/display_name` via the backend
+  admin proxy) — it's a separate, admin-settable label the homepage
+  prefers over `name` for display, so it achieves the same visible
+  result without touching the frozen `name` column.
+- **The same freeze applies to `email`**, sent the same way
+  (`esp_config->email` / `NETWORK.EMAIL` in SPIFFS, `esp_init.cpp`) —
+  though today's WiFi-only captive portal (ADR-018) has no form field
+  for it, so this only matters if `email` was set some other way (a
+  manual `config.json` edit, or a future portal field). *Filling in* a
+  blank stored email still works (the CASE only preserves a
+  **non-empty** stored value); *correcting* an already-set one doesn't.
+  Same remedy: no non-destructive fix today, `DELETE` + re-register if
+  it must change.
+- **The only way to change the underlying `name` column** is
+  `DELETE /modules/<id>` (admin-gated) followed by a fresh registration
+  — which also deletes the module's entire observation history
+  (`daily_progress`, `nest_data`, `image_uploads`, `module_heartbeats`,
+  `measurements`). See [auth.md](08-crosscutting-concepts/auth.md).
+- A non-destructive `PATCH /modules/<id>/name` is tracked as a follow-up
+  in the CLAUDE.md priority queue — not implemented yet.
+
 ---
 
 ## Production host access (SSH)

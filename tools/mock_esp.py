@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import struct
 import sys
 import time
 from dataclasses import dataclass, field, asdict
@@ -34,15 +35,35 @@ from typing import List, Optional
 import requests
 
 
-def _make_fake_image(n_bytes: int = 2048, seed: int = 42) -> bytes:
-    """Pseudo-random bytes wrapped in JPEG SOI/EOI markers.
+def _make_fake_image(
+    n_bytes: int = 2048, seed: int = 42, *, height: int = 480, width: int = 640
+) -> bytes:
+    """A synthetic JPEG with a real, header-valid structure: SOI + APP0 +
+    SOF0 (declaring `height`x`width`) + a pseudo-random padding blob + EOI.
 
-    image-service does not decode — image.save(path) just writes bytes —
-    so a deterministic fake of realistic size is enough to assert file
-    persistence without committing a binary fixture.
+    image-service validates the JPEG header before saving (2026-08 audit,
+    for #228, `image-service/services/image_guard.py::probe_jpeg`) — it
+    walks segments to the first SOF marker and checks the declared frame
+    size, but never decodes pixel data. So the header must be real (this
+    function builds one by hand, no image-encoding library dependency —
+    this tool is deliberately lightweight, `requests` is its only import),
+    while the body after SOF0 can stay synthetic: `cv2.imread` on it
+    degrades to "unreadable image" the same way the pre-#228 pure-random
+    payload did, which is already a handled path (`HoleDetector._detect`
+    returns an empty result, never raises).
     """
     rng = random.Random(seed)
-    return b"\xff\xd8" + bytes(rng.getrandbits(8) for _ in range(n_bytes)) + b"\xff\xd9"
+    app0_payload = b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    app0 = b"\xff\xe0" + struct.pack(">H", 2 + len(app0_payload)) + app0_payload
+    sof0_payload = (
+        bytes([8])  # precision
+        + struct.pack(">H", height)
+        + struct.pack(">H", width)
+        + bytes([3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0])  # 3 components
+    )
+    sof0 = b"\xff\xc0" + struct.pack(">H", 2 + len(sof0_payload)) + sof0_payload
+    padding = bytes(rng.getrandbits(8) for _ in range(n_bytes))
+    return b"\xff\xd8" + app0 + sof0 + padding + b"\xff\xd9"
 
 
 @dataclass

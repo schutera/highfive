@@ -12,6 +12,8 @@ Companion to ``test_module_endpoints.py`` — that file covers
 ``module_configs``); this file covers the bare ``/heartbeat`` POST.
 """
 
+from services import log_ring
+
 CANONICAL_MAC = "aabbccddeeff"
 
 
@@ -20,6 +22,23 @@ def _fetch_heartbeat_module_ids(fresh_db):
     try:
         cur = con.execute("SELECT module_id FROM module_heartbeats")
         return [row[0] for row in cur.fetchall()]
+    finally:
+        con.close()
+
+
+def _seed_module_at(fresh_db, module_id, lat=0.0, lng=0.0):
+    """Register a bare `module_configs` row directly (2026-08 audit, for
+    #229): `/heartbeat` now drops anything for a MAC with no config row
+    (nothing to spoof liveness for), so any test that expects a heartbeat
+    to actually persist must register the module first."""
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO module_configs (id, name, lat, lng, first_online) "
+            "VALUES (?, 'Test', ?, ?, '2026-05-01')",
+            (module_id, lat, lng),
+        )
+        con.commit()
     finally:
         con.close()
 
@@ -57,6 +76,7 @@ def test_heartbeat_short_hex_returns_400(client, fresh_db):
 
 
 def test_heartbeat_canonical_mac_writes_canonical_pk(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post(
         "/heartbeat",
         data={"mac": CANONICAL_MAC, "battery": 80, "fw_version": "carpenter"},
@@ -67,18 +87,21 @@ def test_heartbeat_canonical_mac_writes_canonical_pk(client, fresh_db):
 
 
 def test_heartbeat_uppercase_mac_canonicalised(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post("/heartbeat", data={"mac": "AABBCCDDEEFF", "battery": 80})
     assert resp.status_code == 200
     assert _fetch_heartbeat_module_ids(fresh_db) == [CANONICAL_MAC]
 
 
 def test_heartbeat_colon_form_canonicalised(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post("/heartbeat", data={"mac": "AA:BB:CC:DD:EE:FF", "battery": 80})
     assert resp.status_code == 200
     assert _fetch_heartbeat_module_ids(fresh_db) == [CANONICAL_MAC]
 
 
 def test_heartbeat_dash_form_canonicalised(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post("/heartbeat", data={"mac": "aa-bb-cc-dd-ee-ff", "battery": 80})
     assert resp.status_code == 200
     assert _fetch_heartbeat_module_ids(fresh_db) == [CANONICAL_MAC]
@@ -93,6 +116,7 @@ def test_heartbeat_mixed_forms_collapse_to_one_pk(client, fresh_db):
     to decide "is this the same module?". Before the fix, three forms
     would have written three different ``module_id`` strings and the
     dashboard would have shown three "modules"."""
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     forms = [CANONICAL_MAC, "AA:BB:CC:DD:EE:FF", "aa-bb-cc-dd-ee-ff"]
     for form in forms:
         resp = client.post("/heartbeat", data={"mac": form, "battery": 50})
@@ -109,6 +133,7 @@ def test_heartbeat_mixed_forms_collapse_to_one_pk(client, fresh_db):
 def test_heartbeat_esp_id_field_is_canonicalised(client, fresh_db):
     """The route accepts ``esp_id`` as a synonym for ``mac``. Both paths
     must go through the same validator."""
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post(
         "/heartbeat", data={"esp_id": "AA:BB:CC:DD:EE:FF", "battery": 50}
     )
@@ -123,6 +148,98 @@ def test_heartbeat_esp_id_malformed_returns_400(client, fresh_db):
     assert _fetch_heartbeat_module_ids(fresh_db) == []
 
 
+# ---------- unknown-MAC drop (2026-08 audit, for #229) ----------
+#
+# `/heartbeat` is internet-reachable and credential-free. Without an
+# existence check, anyone who knows or enumerates (via public GET /modules)
+# a well-formed 12-hex MAC — even one with no `module_configs` row — could
+# grow `module_heartbeats`/`measurements` without bound and spoof liveness
+# for a module that was never registered.
+
+
+def _fetch_measurement_count(fresh_db, mac):
+    con = fresh_db.connection.get_conn()
+    try:
+        return con.execute(
+            "SELECT COUNT(*) FROM measurements WHERE module_mac = ?", (mac,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+
+def test_heartbeat_unknown_mac_returns_200_and_writes_nothing(client, fresh_db):
+    resp = client.post(
+        "/heartbeat", data={"mac": CANONICAL_MAC, "battery": 50, "rssi": -70}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"ok": True}
+    assert _fetch_heartbeat_module_ids(fresh_db) == []
+    assert _fetch_measurement_count(fresh_db, CANONICAL_MAC) == 0
+
+
+def test_heartbeat_known_mac_still_writes_normally(client, fresh_db):
+    """Companion to the unknown-MAC test: the existence check must not
+    accidentally drop heartbeats for a module that IS registered."""
+    _seed_module_at(fresh_db, CANONICAL_MAC)
+    resp = client.post("/heartbeat", data={"mac": CANONICAL_MAC, "battery": 50})
+    assert resp.status_code == 200
+    assert _fetch_heartbeat_module_ids(fresh_db) == [CANONICAL_MAC]
+    assert _fetch_measurement_count(fresh_db, CANONICAL_MAC) == 1
+
+
+# ---------- battery clamp (2026-08 audit, for #229) ----------
+#
+# Clamped, not rejected — mirrors the legacy `/modules/<id>/heartbeat`
+# route's `ge=0, le=100` rule without turning this always-200 handler into
+# one that can 400 a well-intentioned-but-glitchy client.
+
+
+def test_heartbeat_battery_above_100_is_clamped_to_100(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
+    resp = client.post("/heartbeat", data={"mac": CANONICAL_MAC, "battery": 250})
+    assert resp.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT battery FROM module_heartbeats WHERE module_id = ?",
+            (CANONICAL_MAC,),
+        ).fetchone()
+        measurement = con.execute(
+            "SELECT value FROM measurements WHERE module_mac = ? "
+            "AND metric = 'battery_pct'",
+            (CANONICAL_MAC,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert row == (100,)
+    assert measurement == (100.0,)
+
+
+def test_heartbeat_battery_below_zero_is_clamped_to_zero(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
+    resp = client.post("/heartbeat", data={"mac": CANONICAL_MAC, "battery": -5})
+    assert resp.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT battery FROM module_heartbeats WHERE module_id = ?",
+            (CANONICAL_MAC,),
+        ).fetchone()
+    finally:
+        con.close()
+    assert row == (0,)
+
+
+def test_heartbeat_battery_in_range_is_unaffected_by_clamp(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
+    resp = client.post("/heartbeat", data={"mac": CANONICAL_MAC, "battery": 73})
+    assert resp.status_code == 200
+    hb = client.get(f"/heartbeats/{CANONICAL_MAC}").get_json()["heartbeats"][0]
+    assert hb["battery"] == 73
+
+
 # ---------- geolocation recovery (PR II / issue #89) ----------
 #
 # The firmware ships a plausible lat/lng/accuracy on the heartbeat
@@ -132,19 +249,6 @@ def test_heartbeat_esp_id_malformed_returns_400(client, fresh_db):
 # These tests pin the rule end-to-end so a future refactor can't
 # silently lift the guard to "always patch" (which would clobber
 # deliberately-placed modules).
-
-
-def _seed_module_at(fresh_db, module_id, lat, lng):
-    con = fresh_db.connection.get_conn()
-    try:
-        con.execute(
-            "INSERT INTO module_configs (id, name, lat, lng, first_online) "
-            "VALUES (?, 'Test', ?, ?, '2026-05-01')",
-            (module_id, lat, lng),
-        )
-        con.commit()
-    finally:
-        con.close()
 
 
 def _fetch_module_lat_lng(fresh_db, module_id):
@@ -265,10 +369,11 @@ def test_heartbeat_with_null_island_lat_lng_dropped(client, fresh_db):
 def test_heartbeat_with_lat_lng_for_unregistered_module_does_not_crash(
     client, fresh_db
 ):
-    # Heartbeats for unregistered modules are accepted (the row in
-    # module_heartbeats is keyed by module_id, not FK-constrained to
-    # module_configs). The recovery path must SELECT-then-no-op
-    # rather than UPDATE-and-fail when no config row exists yet.
+    # 2026-08 audit, for #229: an unregistered MAC is now dropped entirely
+    # (see the "unknown MAC" section below) — the geo-patch's own
+    # SELECT-then-no-op guard is defence-in-depth that this test still
+    # exercises indirectly, but the primary guard is the existence check
+    # that runs before any of this handler's write logic.
     resp = client.post(
         "/heartbeat",
         data={
@@ -280,7 +385,7 @@ def test_heartbeat_with_lat_lng_for_unregistered_module_does_not_crash(
         },
     )
     assert resp.status_code == 200
-    # No row to fetch — assertion is just "we didn't 500".
+    assert _fetch_heartbeat_module_ids(fresh_db) == []
 
 
 def test_heartbeat_geo_patch_bumps_updated_at_not_last_seen_at(client, fresh_db):
@@ -392,6 +497,39 @@ def test_heartbeat_geo_patch_coarsens_precise_fix(client, fresh_db):
     assert _fetch_module_lat_lng(fresh_db, CANONICAL_MAC) == (47.79, 9.62)
 
 
+def test_heartbeat_log_ring_never_carries_raw_coordinates(client, fresh_db):
+    """2026-08 audit, for #229: the pre-fix `print(f"... lat={lat} lng={lng}
+    acc={acc}")` ran BEFORE `coarsen_coord`, landing sub-2-dp precision in
+    the admin-readable, disk-persisted log ring. The replacement line logs
+    only a `geo_present` boolean.
+
+    Seeds the module at a REAL (non-(0,0)) location so the separate
+    geo-patch log line (which intentionally logs the already-coarsened 2 dp
+    result when a patch actually fires) stays silent — isolating this
+    assertion to the per-heartbeat summary line the fix touched."""
+    log_ring._reset_for_test()
+    _seed_module_at(fresh_db, CANONICAL_MAC, 48.27, 11.66)
+    client.post(
+        "/heartbeat",
+        data={
+            "mac": CANONICAL_MAC,
+            "battery": 50,
+            "latitude": "47.794321",
+            "longitude": "9.621987",
+            "accuracy": "50",
+        },
+    )
+    entries, _ = log_ring.get_recent(50)
+    blob = "\n".join(e["msg"] for e in entries)
+    assert "47.79" not in blob
+    assert "9.62" not in blob
+    assert "lat=" not in blob
+    assert "lng=" not in blob
+    # No geo-patch fired (the row wasn't at (0,0)) — sanity check the test
+    # actually isolates the per-heartbeat line as intended.
+    assert _fetch_module_lat_lng(fresh_db, CANONICAL_MAC) == (48.27, 11.66)
+
+
 # ---------- diagnostic fields: reset_reason / min_free_heap / boot_count (#148) ----------
 #
 # A crash-looping or hung module never reaches the daily noon image upload
@@ -403,6 +541,7 @@ def test_heartbeat_geo_patch_coarsens_precise_fix(client, fresh_db):
 
 
 def test_heartbeat_persists_diagnostic_fields(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post(
         "/heartbeat",
         data={
@@ -431,6 +570,7 @@ def test_heartbeat_persists_diagnostic_fields(client, fresh_db):
 
 
 def test_heartbeats_get_returns_diagnostic_fields(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     client.post(
         "/heartbeat",
         data={
@@ -451,6 +591,7 @@ def test_heartbeats_get_returns_diagnostic_fields(client, fresh_db):
 def test_heartbeats_summary_returns_latest_diagnostic_fields(client, fresh_db):
     # Two heartbeats: the summary must reflect the MOST RECENT one's
     # diagnostic values (ARG_MAX over received_at), not the first.
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     client.post(
         "/heartbeat",
         data={
@@ -481,6 +622,7 @@ def test_heartbeat_omitting_diagnostic_fields_stores_null(client, fresh_db):
     # Older firmware (pre-#148) omits all three. A mixed fleet during an OTA
     # rollout must not 500 and must store NULL, not 0 (0 boots / 0 KB heap
     # would be an honest-looking lie).
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post(
         "/heartbeat",
         data={"mac": CANONICAL_MAC, "rssi": -80, "fw_version": "mason"},
@@ -508,6 +650,7 @@ def test_heartbeat_persists_failure_streak_fields(client, fresh_db):
     # The #170 reboot-loop shape: the boot heartbeat round-trips 200 while
     # carrying the count of hourly heartbeats that failed in the prior 2 h
     # window (here 2, last code -2 = connect/WiFi-down sentinel).
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post(
         "/heartbeat",
         data={
@@ -534,6 +677,7 @@ def test_heartbeat_persists_failure_streak_fields(client, fresh_db):
 
 
 def test_heartbeats_get_returns_failure_streak_fields(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     client.post(
         "/heartbeat",
         data={
@@ -563,6 +707,7 @@ def test_heartbeats_summary_clears_streak_after_recovery_not_latching(client, fr
     # healthy heartbeat reports 0/0. The summary MUST show the cleared 0, not 3.
     import time
 
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     client.post(
         "/heartbeat",
         data={
@@ -599,6 +744,7 @@ def test_heartbeat_omitting_failure_streak_stores_null(client, fresh_db):
     # must not 500 and must store NULL, not 0 — a real 0-count streak (the
     # healthy steady state) and "this firmware can't report a streak" are
     # different facts the dashboard renders differently.
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post(
         "/heartbeat",
         data={"mac": CANONICAL_MAC, "rssi": -80, "fw_version": "blueberry"},
@@ -614,6 +760,7 @@ def test_heartbeat_omitting_failure_streak_stores_null(client, fresh_db):
 
 
 def test_heartbeat_persists_stage_before_reboot(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     resp = client.post(
         "/heartbeat",
         data={
@@ -636,6 +783,7 @@ def test_heartbeat_persists_stage_before_reboot(client, fresh_db):
 
 
 def test_heartbeat_stage_surfaces_in_get_and_summary(client, fresh_db):
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     client.post(
         "/heartbeat",
         data={"mac": CANONICAL_MAC, "last_stage_before_reboot": "setup:getGeolocation"},
@@ -649,6 +797,7 @@ def test_heartbeat_stage_surfaces_in_get_and_summary(client, fresh_db):
 def test_heartbeat_dense_empty_stage_is_stored_not_null(client, fresh_db):
     # Dense send: a healthy module reports "" (no breadcrumb survived) — distinct
     # on the wire from legacy firmware that omits the field (NULL).
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     client.post(
         "/heartbeat",
         data={"mac": CANONICAL_MAC, "last_stage_before_reboot": ""},
@@ -659,6 +808,7 @@ def test_heartbeat_dense_empty_stage_is_stored_not_null(client, fresh_db):
 
 def test_heartbeat_omitting_stage_stores_null(client, fresh_db):
     # Pre-opt-2 firmware omits the field entirely → NULL, not "".
+    _seed_module_at(fresh_db, CANONICAL_MAC)
     client.post("/heartbeat", data={"mac": CANONICAL_MAC, "rssi": -70})
     hb = client.get(f"/heartbeats/{CANONICAL_MAC}").get_json()["heartbeats"][0]
     assert hb["last_stage_before_reboot"] is None

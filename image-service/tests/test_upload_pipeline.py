@@ -12,7 +12,9 @@ already-canonical ``ModuleId`` strings to mirror the production flow.
 
 from __future__ import annotations
 
+import io
 import json
+import struct
 from pathlib import Path
 
 from requests import RequestException
@@ -30,12 +32,37 @@ TEST_MAC_4 = "778899aabbcc"
 # --------------------------- fakes ---------------------------
 
 
+def _valid_jpeg_header_bytes(height: int = 8, width: int = 8) -> bytes:
+    """Minimal hand-built SOI+SOF0 JPEG header (2026-08 audit, for #228):
+    enough for `services.image_guard.probe_jpeg` to accept it. Not a full
+    decodable JPEG — unneeded here, since every test in this module either
+    injects a fake/no `detector` (never calls `cv2.imread`) or an explicit
+    `_FakeDetector`, so real pixel data never matters at this layer.
+    """
+    sof_payload = (
+        bytes([8])
+        + struct.pack(">H", height)
+        + struct.pack(">H", width)
+        + bytes([3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0])
+    )
+    return b"\xff\xd8\xff\xc0" + struct.pack(">H", 2 + len(sof_payload)) + sof_payload
+
+
 class _FakeImage:
-    """Stand-in for werkzeug FileStorage. Has `filename` and `save(path)`."""
+    """Stand-in for werkzeug FileStorage. Has `filename`, `stream`, and
+    `save(path)`.
+
+    `stream` is independent of `payload` — `probe_jpeg` (called on `stream`
+    before `save`) only needs to see a well-formed JPEG header, while
+    `save` writes whatever arbitrary bytes a test wants to assert on disk
+    (real `FileStorage.save()` reads from its own `.stream` internally;
+    this fake doesn't need that coupling to be faithful, only each
+    collaborator's own contract)."""
 
     def __init__(self, filename: str, payload: bytes = b"\x00fake-bytes"):
         self.filename = filename
         self._payload = payload
+        self.stream = io.BytesIO(_valid_jpeg_header_bytes())
 
     def save(self, path: str) -> None:
         with open(path, "wb") as f:
@@ -477,12 +504,39 @@ def test_pipeline_hostile_filename_is_sanitized_everywhere(tmp_path: Path):
     assert [f for (_mac, f) in duckdb.record_image_calls] == ["evil.jpg"]
 
 
+def test_persist_image_rejects_non_jpeg_before_reserving_a_name(tmp_path: Path):
+    """`InvalidImageError` must propagate from `_persist_image` before
+    `reserve_filename` claims a placeholder — a rejected upload leaves no
+    trace on disk (2026-08 audit, for #228)."""
+    from services.image_guard import InvalidImageError
+    from services.upload_pipeline import UploadRequest as _UR
+
+    class _NotAJpegImage:
+        filename = "evil.html"
+        stream = io.BytesIO(b"<script>alert(1)</script>")
+
+        def save(self, path: str) -> None:
+            raise AssertionError("save() must never run for a rejected upload")
+
+    pipeline = _make_pipeline(tmp_path, _FakeDuckDB(progress_count=5))
+    req = _UR(mac=TEST_MAC_1, battery=50, image=_NotAJpegImage(), logs_raw=None)
+
+    try:
+        pipeline.run(req)
+        raise AssertionError("expected InvalidImageError")
+    except InvalidImageError:
+        pass
+
+    assert list(tmp_path.iterdir()) == [], "no placeholder may be left behind"
+
+
 def test_pipeline_failed_save_releases_the_reserved_name(tmp_path: Path):
     """A failed image.save must unlink the reservation placeholder so the
     directory is left exactly as found (review-caught)."""
 
     class _ExplodingImage:
         filename = "esp_capture_20260719_120000.jpg"
+        stream = io.BytesIO(_valid_jpeg_header_bytes())
 
         def save(self, path: str) -> None:
             raise OSError("disk full")

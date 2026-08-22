@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
 from services.hole_detection import HoleDetector
+from services.image_guard import InvalidImageError
 from services.log_ring import get_recent as _get_recent_logs
 from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
@@ -338,14 +339,29 @@ def upload_image():
         )
         return jsonify({"message": "Upload rate exceeded — discarded"}), 200
 
-    result = upload_pipeline.run(
-        UploadRequest(
-            mac=canonical_mac,
-            battery=battery,
-            image=image,
-            logs_raw=request.form.get("logs"),
+    try:
+        result = upload_pipeline.run(
+            UploadRequest(
+                mac=canonical_mac,
+                battery=battery,
+                image=image,
+                logs_raw=request.form.get("logs"),
+            )
         )
-    )
+    except InvalidImageError as exc:
+        # 2026-08 audit, for #228. A 400 here is a non-2xx and counts
+        # toward the firmware's upload-failure circuit breaker — same
+        # reasoning as the existing 413 comment above: acceptable because
+        # a real ESP32-CAM module can never trip it. Real fleet input is
+        # always a JPEG (`ESP32-CAM/client.cpp` sends
+        # `Content-Type: image/jpeg`) capped at UXGA 1600x1200
+        # (`esp_init.cpp::getResolutionFromString`), well inside the
+        # default `MAX_IMAGE_DIM=4096` — only a non-firmware client can
+        # ever see this response. Nothing is written to disk for a
+        # rejected upload (`UploadPipeline._persist_image` probes before
+        # reserving a filename).
+        log_event("warn", f"upload rejected for mac={canonical_mac}: {exc.reason}")
+        return jsonify({"error": f"invalid image: {exc.reason}"}), 400
     return jsonify(
         {
             "message": f"Image {result.filename} uploaded successfully",
@@ -366,6 +382,14 @@ def get_module_logs(mac: str):
     legacy flat format (`_mac`, `_received_at`, `_image` at top level)
     written by older versions of /upload. All entries are returned in the
     new envelope shape.
+
+    No credential check in this service (unlike `/logs`/`/logs/stream`
+    above) — the intended gate is the backend's `requireAdmin` on
+    `GET /api/modules/:id/logs`. Not internet-reachable in prod
+    (image-service binds `127.0.0.1:8000`, nginx proxies only `/upload`
+    off-box); dev publishes the port more broadly — treat a running dev
+    stack as trusted-LAN-only, same caveat as duckdb-service's
+    unauthenticated routes (see `docs/08-crosscutting-concepts/auth.md`).
     """
     try:
         limit = int(request.args.get("limit", 10))
@@ -486,11 +510,26 @@ def serve_image(filename):
 
     `send_from_directory` already refuses traversal; the pre-check goes
     through the same containment helper so a hostile name 404s without
-    ever probing paths outside the folder (for #202)."""
+    ever probing paths outside the folder (for #202).
+
+    Requires a ``.jpg`` suffix and pins the Content-Type explicitly
+    (2026-08 audit, for #228): every upload is now stored as ``.jpg``
+    (`services/paths.py::sanitize_upload_filename`), so a non-``.jpg``
+    name is either a pre-fix legacy file or an attempt to reach something
+    else under the folder — the ``.log.json`` telemetry sidecars
+    (`_persist_sidecar`) in particular, which must stay reachable only
+    through ``GET /modules/<mac>/logs`` (whose *intended* gate is the
+    backend's `requireAdmin`, not a check in this service — see that
+    route's own docstring). Before this change the Content-Type was
+    guessed from the extension, which is how
+    a stored ``.html``/``.svg`` upload could be served back and executed
+    same-origin."""
+    if not filename.lower().endswith(".jpg"):
+        return jsonify({"error": "Image not found"}), 404
     file_path = safe_child_path(UPLOAD_FOLDER, filename)
     if file_path is None or not os.path.isfile(file_path):
         return jsonify({"error": "Image not found"}), 404
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    return send_from_directory(UPLOAD_FOLDER, filename, mimetype="image/jpeg")
 
 
 @app.get("/snips/<path:filename>")
@@ -500,11 +539,17 @@ def serve_snip(filename):
     A dedicated route (rather than reusing ``/images`` with a ``snips/``
     prefix) keeps the public backend proxy a clean ``/api/snips/:filename``
     without a slash-in-param. Snips are public by design — the crop removes all
-    background, so no auth is required (issue #154)."""
+    background, so no auth is required (issue #154).
+
+    Snips are always written as ``.jpg`` (``UploadPipeline._persist_and_
+    record_snips``); the suffix check + explicit mimetype mirror
+    ``serve_image`` for the same reason (2026-08 audit, for #228)."""
+    if not filename.lower().endswith(".jpg"):
+        return jsonify({"error": "Snip not found"}), 404
     file_path = safe_child_path(SNIP_FOLDER, filename)
     if file_path is None or not os.path.isfile(file_path):
         return jsonify({"error": "Snip not found"}), 404
-    return send_from_directory(SNIP_FOLDER, filename)
+    return send_from_directory(SNIP_FOLDER, filename, mimetype="image/jpeg")
 
 
 if __name__ == "__main__":

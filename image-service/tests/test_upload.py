@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import io
 import json
+import struct
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 
 # Canonical 12-hex-char ModuleId form. The legacy AA:BB:CC:DD:EE:FF input
@@ -18,12 +21,46 @@ TEST_MAC_LEGACY = "AA:BB:CC:DD:EE:FF"
 
 
 def _img_bytes() -> bytes:
-    # Minimal 1x1 PNG, valid enough to be saved by Flask. Content is opaque
-    # to the service — it does not decode the image.
+    # A real, small JPEG (2026-08 audit, for #228): probe_jpeg now inspects
+    # the bytes before save/decode, so the fixture must be a genuine JPEG,
+    # not the opaque-content PNG this used to be. A flat 32x32 frame is
+    # deliberately featureless — verified (see test_image_guard.py's sibling
+    # check and this module's own detection tests below) to produce zero
+    # hole-detector snips, keeping the duckdb POST count assertions in the
+    # happy-path tests unaffected by the real ONNX model.
+    img = np.zeros((32, 32, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".jpg", img)
+    assert ok
+    return buf.tobytes()
+
+
+def _png_bytes() -> bytes:
+    # Minimal 1x1 PNG — used by the negative tests below to prove the
+    # service now actually inspects upload bytes instead of trusting the
+    # client-supplied filename/extension.
     return (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
         b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\x00"
         b"\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+
+def _oversized_jpeg_header_bytes(height: int = 20000, width: int = 20000) -> bytes:
+    """A hand-built JPEG whose SOF0 declares an oversized frame — no real
+    encoder will happily produce a 20000x20000 image for a test fixture,
+    and probe_jpeg only ever reads the header, so this is enough to
+    exercise the rejection without gigabytes of pixel data."""
+    sof_payload = (
+        bytes([8])
+        + struct.pack(">H", height)
+        + struct.pack(">H", width)
+        + bytes([3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0])
+    )
+    return (
+        b"\xff\xd8"
+        + b"\xff\xc0"
+        + struct.pack(">H", 2 + len(sof_payload))
+        + sof_payload
     )
 
 
@@ -187,6 +224,150 @@ def test_upload_battery_accepts_zero_and_hundred(client, upload_env):
         )
         assert resp.status_code == 200, (batt, resp.get_json())
         assert resp.get_json()["battery"] == int(batt)
+
+
+# ---------------- content validation (2026-08 audit, for #228) ----------------
+
+
+def _persisted_files(upload_dir: Path) -> list[Path]:
+    """Files (not directories — `snips/` is created empty at app boot,
+    unrelated to any one upload) under the upload folder."""
+    return [p for p in upload_dir.rglob("*") if p.is_file()]
+
+
+def test_upload_non_jpeg_bytes_returns_400_and_persists_nothing(
+    client, tmp_upload_dir: Path, upload_env
+):
+    """A stored `.html` would be served back and could run same-origin
+    against the admin session cookie (SEC-9) — the fix is to inspect the
+    bytes, not the client-declared filename or Content-Type."""
+    form = _make_form(include_image=False)
+    form["image"] = (io.BytesIO(b"<script>alert(1)</script>"), "evil.html")
+    resp = client.post("/upload", data=form, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert "invalid image" in resp.get_json()["error"].lower()
+    assert _persisted_files(tmp_upload_dir) == [], "nothing may be persisted"
+
+
+@pytest.mark.parametrize("filename", ["image.svg", "image.xhtml", "x.jpg.log.json"])
+def test_upload_non_jpeg_bytes_rejected_regardless_of_extension(
+    client, tmp_upload_dir: Path, upload_env, filename
+):
+    form = _make_form(include_image=False)
+    form["image"] = (io.BytesIO(b"not a jpeg"), filename)
+    resp = client.post("/upload", data=form, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert _persisted_files(tmp_upload_dir) == []
+
+
+def test_upload_png_bytes_named_jpg_returns_400(
+    client, tmp_upload_dir: Path, upload_env
+):
+    """Content is no longer opaque — a PNG posted as `test.jpg` (the shape
+    the pre-fix test fixture itself used) must now be rejected."""
+    form = _make_form(include_image=False)
+    form["image"] = (io.BytesIO(_png_bytes()), "test.jpg")
+    resp = client.post("/upload", data=form, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert _persisted_files(tmp_upload_dir) == []
+
+
+def test_upload_oversized_sof_returns_400_and_never_reaches_imread(
+    client, tmp_upload_dir: Path, upload_env, monkeypatch
+):
+    """A crafted JPEG whose SOF0 declares a 20000x20000 frame must be
+    rejected before any decoder allocates a buffer for it (SEC-10)."""
+    import services.hole_detection as hole_detection_mod
+
+    imread_calls: list[str] = []
+    original_imread = hole_detection_mod.cv2.imread
+
+    def spy_imread(path, *a, **kw):
+        imread_calls.append(path)
+        return original_imread(path, *a, **kw)
+
+    monkeypatch.setattr(hole_detection_mod.cv2, "imread", spy_imread)
+
+    form = _make_form(include_image=False)
+    form["image"] = (io.BytesIO(_oversized_jpeg_header_bytes()), "huge.jpg")
+    resp = client.post("/upload", data=form, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert "invalid image" in resp.get_json()["error"].lower()
+    assert _persisted_files(tmp_upload_dir) == []
+    assert imread_calls == [], "cv2.imread must never see a rejected upload"
+
+
+def test_upload_valid_jpeg_named_svg_is_stored_as_jpg(
+    client, tmp_upload_dir: Path, upload_env
+):
+    """The bytes are what matter, not the client-declared extension — a
+    real JPEG named `photo.svg` is accepted and stored as `.jpg`."""
+    form = _make_form(include_image=False)
+    form["image"] = (io.BytesIO(_img_bytes()), "photo.svg")
+    resp = client.post("/upload", data=form, content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["message"].startswith("Image photo.jpg ")
+    assert (tmp_upload_dir / "photo.jpg").exists()
+    assert not list(tmp_upload_dir.glob("*.svg"))
+
+
+def test_upload_honours_max_image_dim_env_override(
+    client, tmp_upload_dir: Path, upload_env, monkeypatch
+):
+    """A real capture that's fine under the 4096 default is rejected once
+    the operator configures a tighter MAX_IMAGE_DIM."""
+    monkeypatch.setenv("MAX_IMAGE_DIM", "10")
+    form = _make_form(include_image=False)
+    form["image"] = (io.BytesIO(_img_bytes()), "capture.jpg")  # 32x32
+    resp = client.post("/upload", data=form, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert _persisted_files(tmp_upload_dir) == []
+
+
+@pytest.mark.parametrize(
+    "capture_name",
+    ["block_tungsten_640.jpg", "block_warm_1024.jpg"],
+)
+def test_upload_real_captures_still_accepted(
+    client, tmp_upload_dir: Path, upload_env, capture_name
+):
+    """Real ESP32-CAM fleet output — the ground truth this whole guard is
+    calibrated against — must keep uploading with 200 after the fix."""
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "dev-tools"
+        / "real_captures"
+        / capture_name
+    )
+    form = _make_form(include_image=False)
+    form["image"] = (io.BytesIO(fixture_path.read_bytes()), capture_name)
+    resp = client.post("/upload", data=form, content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    assert (tmp_upload_dir / capture_name).exists()
+
+
+def test_serve_image_404s_log_json_sidecar(client, tmp_upload_dir: Path, upload_env):
+    """`GET /images/<name>.log.json` must 404 even when the file exists on
+    disk — the sidecar stays reachable only via the admin-gated
+    `GET /modules/<mac>/logs` (SEC-4)."""
+    sidecar = tmp_upload_dir / "cap.jpg.log.json"
+    sidecar.write_text('{"mac": "aabbccddeeff"}', encoding="utf-8")
+    resp = client.get("/images/cap.jpg.log.json")
+    assert resp.status_code == 404
+
+
+def test_serve_image_sets_image_jpeg_content_type(
+    client, tmp_upload_dir: Path, upload_env
+):
+    resp = client.post(
+        "/upload",
+        data=_make_form(filename="ct-check.jpg"),
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    resp = client.get("/images/ct-check.jpg")
+    assert resp.status_code == 200
+    assert resp.content_type == "image/jpeg"
 
 
 # --------------------------- validation ---------------------------

@@ -10,7 +10,11 @@
 > production path is **Docker Compose + host-Nginx**:
 > [production-deployment.md](production-deployment.md). Use this PM2
 > runbook only if Docker is not an option on the target host; expect
-> to fill in the upload-pipeline plumbing yourself.
+> to fill in the upload-pipeline plumbing yourself — including the
+> `/new_module` and `/heartbeat` rate/body-size limits in
+> [`deploy/nginx/highfive-ingest.conf`](../../deploy/nginx/highfive-ingest.conf)
+> (2026-08 audit, for #229), which this runbook's Nginx config below does
+> not include.
 
 ## Overview
 

@@ -1,3 +1,5 @@
+from services import log_ring
+
 TEST_MAC = "aabbccddeeff"  # canonical ModuleId form
 TEST_MAC_LEGACY = "AA:BB:CC:DD:EE:FF"  # canonicalises to TEST_MAC
 
@@ -118,7 +120,12 @@ def test_new_module_missing_required_field_returns_400(client):
     assert "error" in resp.get_json()
 
 
-def test_new_module_same_id_twice_replaces_row(client, fresh_db):
+def test_new_module_same_id_twice_preserves_name_but_bumps_battery(client, fresh_db):
+    """2026-08 audit, for #229: a re-registration is credential-free and
+    internet-reachable, so it must not let a re-POST silently rename a
+    real module (public-map defacement). `name` is preserved from the
+    stored row; `battery_level` still bumps on every call (liveness
+    metadata, not identity)."""
     first = client.post("/new_module", json=_valid_payload(module_name="First"))
     assert first.status_code == 200
     second = client.post(
@@ -126,13 +133,90 @@ def test_new_module_same_id_twice_replaces_row(client, fresh_db):
         json=_valid_payload(module_name="Second", battery_level=42),
     )
     assert second.status_code == 200
+    # The response echoes the actually-stored (preserved) name, not the
+    # incoming payload's.
+    assert second.get_json()["name"] == "First"
 
     listed = client.get("/modules").get_json()["modules"]
     assert len(listed) == 1
-    assert listed[0]["name"] == "Second"
+    assert listed[0]["name"] == "First"
     assert listed[0]["battery_level"] == 42
-    # Two successful creates -> two webhook calls.
-    assert len(fresh_db.discord_calls) == 2
+    # Discord fires only on first registration (2026-08 audit, for #229) —
+    # the unconditional post let anyone spam the webhook by re-posting the
+    # same MAC repeatedly.
+    assert len(fresh_db.discord_calls) == 1
+
+
+def test_new_module_re_registration_preserves_email_unless_blank(client, fresh_db):
+    """Mirrors the name-preservation rule for `email` (2026-08 audit, for
+    #229): a re-registration fills in email only when the stored value is
+    NULL/empty, never overwrites a real stored value."""
+    first = client.post("/new_module", json=_valid_payload(email="owner@example.com"))
+    assert first.status_code == 200
+
+    second = client.post(
+        "/new_module", json=_valid_payload(email="attacker@example.com")
+    )
+    assert second.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT email FROM module_configs WHERE id = ?", (TEST_MAC,)
+        ).fetchone()
+    finally:
+        con.close()
+    assert row[0] == "owner@example.com"
+
+
+def test_new_module_fills_in_email_when_previously_blank(client, fresh_db):
+    first = client.post("/new_module", json=_valid_payload())  # no email
+    assert first.status_code == 200
+
+    second = client.post("/new_module", json=_valid_payload(email="new@example.com"))
+    assert second.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        row = con.execute(
+            "SELECT email FROM module_configs WHERE id = ?", (TEST_MAC,)
+        ).fetchone()
+    finally:
+        con.close()
+    assert row[0] == "new@example.com"
+
+
+def test_new_module_log_ring_excludes_email_and_raw_body(client, fresh_db):
+    """2026-08 audit, for #229: the pre-fix `print(f"... Received: {json_data}")`
+    put the raw pre-validation body — including `email` and any attacker-
+    supplied extra keys — into the admin-readable, disk-persisted log ring
+    (`app.py`'s own "path ONLY — never query string, headers, or body"
+    invariant). The post-validation summary this replaces must carry
+    neither the email nor arbitrary raw-body content."""
+    log_ring._reset_for_test()
+    client.post(
+        "/new_module",
+        json=_valid_payload(email="owner@example.com", extra_attacker_key="pwned"),
+    )
+    entries, _ = log_ring.get_recent(50)
+    blob = "\n".join(e["msg"] for e in entries)
+    assert "owner@example.com" not in blob
+    assert "pwned" not in blob
+    assert "Received:" not in blob  # the removed raw-body echo
+
+
+def test_new_module_log_ring_coordinates_stay_coarsened(client, fresh_db):
+    """Companion to the email check: no coordinate more precise than 2
+    decimal places (ADR-020) may appear in the log ring."""
+    log_ring._reset_for_test()
+    client.post(
+        "/new_module",
+        json=_valid_payload(latitude=47.808612, longitude=9.643301),
+    )
+    entries, _ = log_ring.get_recent(50)
+    blob = "\n".join(e["msg"] for e in entries)
+    assert "47.808612" not in blob
+    assert "9.643301" not in blob
 
 
 def test_new_module_re_registration_does_not_clobber_recovered_location(
@@ -147,8 +231,22 @@ def test_new_module_re_registration_does_not_clobber_recovered_location(
     ``initNewModuleOnServer`` with (0,0) once more. The pre-fix
     UPSERT clobbered the recovered location back to (0,0), defeating
     the recovery on every daily reboot whose boot fix happened to
-    fail. The new CASE-based UPSERT preserves the existing lat/lng
-    when the incoming row is at (0,0) AND the stored row is not.
+    fail.
+
+    **Precise current rule** (2026-08 audit, for #229 — round-2
+    senior-review caught an earlier version of this docstring stating
+    the rule in terms of the *incoming* row, which is the pre-#229-fix
+    direction and happens to also describe this one scenario correctly,
+    which is exactly what made it dangerous to leave written that way):
+    the CASE now gates on whether the **stored** row sits at ``(0,0)``,
+    not the incoming payload. It preserves the stored lat/lng in EVERY
+    case except "stored is (0,0) AND incoming is a real fix" — this
+    test's scenario (incoming (0,0), stored a real fix) is simply one of
+    the many cases that fall under "preserve," not the defining
+    condition. See
+    ``test_new_module_re_registration_with_real_fix_does_not_relocate_placed_module``
+    for the test that actually pins the stored-vs-incoming gating
+    distinction.
     """
     # Day-1: register at (0,0) — boot getGeolocation failed.
     r1 = client.post(
@@ -189,14 +287,29 @@ def test_new_module_re_registration_does_not_clobber_recovered_location(
     assert float(listed[0]["lng"]) == 9.62
 
 
-def test_new_module_re_registration_with_real_fix_overwrites_existing(client, fresh_db):
-    """Mirror image of the test above — when the firmware DOES have
-    a plausible fix (boot getGeolocation succeeded), the UPSERT must
-    still update lat/lng. The (0,0)-preservation guard is gated on
-    ``EXCLUDED.lat = 0 AND EXCLUDED.lng = 0`` so any non-(0,0)
-    incoming row overrides whatever was there before. This pins the
-    "module physically moved by the operator" path — operator
-    re-onboards from a new location, the new coords win.
+def test_new_module_re_registration_with_real_fix_does_not_relocate_placed_module(
+    client, fresh_db
+):
+    """2026-08 audit, for #229 (senior-review P0 fix). This test USED TO
+    pin the opposite (vulnerable) behaviour — "any non-(0,0) incoming row
+    overrides whatever was there before" — under the theory that a
+    re-registration with different real coordinates represents "the
+    operator physically moved the module." That theory doesn't hold:
+    `/new_module` is internet-reachable and credential-free, so any
+    anonymous caller can send any `esp_id` + any `latitude`/`longitude`.
+    Under the old CASE, one unauthenticated POST could relocate a placed
+    module anywhere on the map (public-map-defacement, the exact threat
+    #229 names). Verified end-to-end before this fix landed: a module at
+    (47.79, 9.62) moved to (-33.86, 151.20) with a single POST.
+
+    The guard now gates on the STORED row being at the `(0,0)` sentinel
+    (mirroring `heartbeats.py::post_heartbeat`'s "only patch from a
+    stored (0,0)" rule), not on the incoming payload. A real relocation
+    goes through `DELETE /modules/<id>` + re-register — a fresh INSERT,
+    not this UPDATE branch — but that path is destructive (wipes the
+    module's whole history, not just `lat`/`lng`); see
+    `test_delete_then_re_register_is_the_documented_relocation_path`,
+    which pins that consequence explicitly.
     """
     r1 = client.post(
         "/new_module",
@@ -204,7 +317,8 @@ def test_new_module_re_registration_with_real_fix_overwrites_existing(client, fr
     )
     assert r1.status_code == 200
 
-    # Operator picks up the module and re-onboards from a different spot.
+    # A hostile (or well-meaning-but-wrong) anonymous re-POST with
+    # different real coordinates must NOT move the module.
     r2 = client.post(
         "/new_module",
         json=_valid_payload(latitude=48.27, longitude=11.66),
@@ -212,8 +326,10 @@ def test_new_module_re_registration_with_real_fix_overwrites_existing(client, fr
     assert r2.status_code == 200
 
     listed = client.get("/modules").get_json()["modules"]
-    assert float(listed[0]["lat"]) == 48.27
-    assert float(listed[0]["lng"]) == 11.66
+    assert float(listed[0]["lat"]) == 47.79, (
+        "an anonymous re-POST must not relocate a placed module"
+    )
+    assert float(listed[0]["lng"]) == 9.62
 
 
 def test_new_module_re_registration_after_null_island_with_real_fix_overwrites(
@@ -223,11 +339,14 @@ def test_new_module_re_registration_after_null_island_with_real_fix_overwrites(
     senior-review P1): day-1 stored is (0,0), day-2 incoming is a
     plausible fix → UPSERT writes the new fix.
 
-    The CASE's WHEN clause requires ``EXCLUDED.lat = 0 AND
-    EXCLUDED.lng = 0``, which is false here, so the ELSE branch runs
-    and EXCLUDED.lat/lng land in the row. Test pins it explicitly
-    rather than leaving the path covered only implicitly by mutation
-    of `test_register_module`.
+    The CASE's WHEN clause requires the STORED row to be at
+    ``(0, 0)`` (2026-08 audit, for #229 — gates on `module_configs.lat`/
+    `lng`, not `EXCLUDED.lat`/`lng`, so an anonymous re-POST can only
+    ever move a module OUT of the (0,0) sentinel, never relocate an
+    already-placed one). That condition is true here — stored is
+    (0,0) — so the incoming fix lands. Test pins it explicitly rather
+    than leaving the path covered only implicitly by mutation of
+    `test_register_module`.
     """
     # Day-1: registered at (0,0) — firmware boot getGeolocation failed.
     r1 = client.post(
@@ -247,6 +366,143 @@ def test_new_module_re_registration_after_null_island_with_real_fix_overwrites(
     listed = client.get("/modules").get_json()["modules"]
     assert float(listed[0]["lat"]) == 47.79
     assert float(listed[0]["lng"]) == 9.62
+
+
+def test_delete_then_re_register_is_the_documented_relocation_path(client, fresh_db):
+    """2026-08 audit, for #229 (senior-review round 2 P1). Since a bare
+    re-registration can no longer relocate a placed module, `auth.md` /
+    `api-reference.md` document `DELETE /modules/<id>` + re-register as
+    the real relocation path — and are explicit that it is destructive,
+    not a lightweight edit. This test pins BOTH halves of that claim:
+
+    1. Relocation actually works: the DELETE clears the row, so the next
+       `/new_module` call is a fresh INSERT (not the ON CONFLICT UPDATE
+       branch), which writes the incoming coordinates unconditionally.
+    2. It costs the module's entire observation history. An earlier
+       version of this test (and the docs it was written to match) only
+       asserted (1), understating the workflow as "same as a `name`
+       change" — it is not. Seed a nest, a progress row, and an image
+       upload before deleting, and assert all three are gone afterward,
+       not just that the location moved.
+    """
+    r1 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=47.79, longitude=9.62),
+    )
+    assert r1.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO nest_data (nest_id, module_id, beeType) VALUES (?, ?, ?)",
+            ("nest-reloc-1", TEST_MAC, "blackmasked"),
+        )
+        con.execute(
+            "INSERT INTO daily_progress "
+            "(progress_id, nest_id, date, empty, sealed, hatched) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("prog-reloc-1", "nest-reloc-1", "2026-05-01", 1, 2, 0),
+        )
+        con.execute(
+            "INSERT INTO image_uploads (module_id, filename, uploaded_at) "
+            "VALUES (?, ?, NOW())",
+            (TEST_MAC, "esp_capture_reloc.jpg"),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    deleted = client.delete(f"/modules/{TEST_MAC}")
+    assert deleted.status_code == 200, deleted.get_json()
+
+    # The destructive half: everything the module ever recorded is gone,
+    # not just its identity fields.
+    con = fresh_db.connection.get_conn()
+    try:
+        nest_count = con.execute(
+            "SELECT COUNT(*) FROM nest_data WHERE module_id = ?", (TEST_MAC,)
+        ).fetchone()[0]
+        progress_count = con.execute(
+            "SELECT COUNT(*) FROM daily_progress WHERE nest_id = ?",
+            ("nest-reloc-1",),
+        ).fetchone()[0]
+        image_count = con.execute(
+            "SELECT COUNT(*) FROM image_uploads WHERE module_id = ?", (TEST_MAC,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert nest_count == 0, (
+        "DELETE must wipe the module's nests, not just its config row"
+    )
+    assert progress_count == 0, "DELETE must wipe daily_progress for the deleted nests"
+    assert image_count == 0, "DELETE must wipe the module's image_uploads history"
+
+    # The relocation half: re-registering after DELETE is a fresh INSERT,
+    # so the new coordinates land unconditionally (no CASE preservation).
+    r2 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=48.27, longitude=11.66),
+    )
+    assert r2.status_code == 200
+
+    listed = client.get("/modules").get_json()["modules"]
+    assert len(listed) == 1
+    assert float(listed[0]["lat"]) == 48.27
+    assert float(listed[0]["lng"]) == 11.66
+
+
+def test_new_module_battery_and_liveness_still_bump_when_location_is_protected(
+    client, fresh_db
+):
+    """2026-08 audit, for #229 (senior-review P1). The location-protection
+    fix above is deliberately narrow: `battery_level`, `updated_at`, and
+    `last_seen_at` still bump on every re-registration, by design (issue
+    #229's own spec, and the #97 invariant that `add_module` is the only
+    writer of `last_seen_at`). This is a real, acknowledged residual gap
+    — an anonymous re-POST can still resurrect a dead module's liveness
+    signal and change its reported battery — documented in auth.md rather
+    than closed here. Pin the bump explicitly so it reads as "known and
+    intentional," not "nobody checked."
+    """
+    import time
+
+    r1 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=47.79, longitude=9.62, battery_level=80),
+    )
+    assert r1.status_code == 200
+
+    con = fresh_db.connection.get_conn()
+    try:
+        before_seen = con.execute(
+            "SELECT last_seen_at FROM module_configs WHERE id = ?", (TEST_MAC,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    time.sleep(0.01)
+
+    r2 = client.post(
+        "/new_module",
+        json=_valid_payload(latitude=48.27, longitude=11.66, battery_level=13),
+    )
+    assert r2.status_code == 200
+
+    listed = client.get("/modules").get_json()["modules"]
+    row = listed[0]
+    # Location did NOT move (the fix above)...
+    assert float(row["lat"]) == 47.79
+    assert float(row["lng"]) == 9.62
+    # ...but battery and liveness DID update (unchanged, intentional behaviour).
+    assert row["battery_level"] == 13
+    con = fresh_db.connection.get_conn()
+    try:
+        after_seen = con.execute(
+            "SELECT last_seen_at FROM module_configs WHERE id = ?", (TEST_MAC,)
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert after_seen > before_seen
 
 
 def test_new_module_initial_registration_at_null_island_stores_zeros(client, fresh_db):

@@ -263,7 +263,35 @@ default) handles future renewals — pair it with a `--post-hook
 
 #### c. Configure host-Nginx
 
-Create `/etc/nginx/sites-available/highfive`:
+First, install the rate-limit zones for `/new_module` and `/heartbeat`
+(2026-08 audit, for #229 — see
+[`deploy/nginx/highfive-ingest.conf`](../../deploy/nginx/highfive-ingest.conf)
+for the full rationale). `limit_req_zone` must live in the `http {}`
+context, so it cannot go inside the `sites-available/highfive` file's
+`server {}` block below:
+
+```bash
+sudo cp deploy/nginx/highfive-ingest.conf /etc/nginx/conf.d/highfive-ingest.conf
+```
+
+> **Retrofitting an already-provisioned host** (this section otherwise
+> reads as a fresh-install walkthrough): the `cp` above and the two
+> `location` block edits below are the entire change — no service
+> restart needed, `nginx -t && systemctl reload nginx` (below, before
+> the Step 6 smoke-test) picks it up. Nothing else in this guide needs
+> re-running. As of this
+> PR nobody has actually applied this to the live host yet. Its syntax
+> was verified with `nginx -t` against the merged config shown above
+> (`nginx:alpine` in Docker, since this dev environment has no local
+> nginx) — but that is a syntax check, not a deployment: it does not
+> confirm the zones behave as intended under real traffic, and it has
+> not been run against production's actual, possibly-diverged
+> `/etc/nginx/sites-available/highfive`. Run `nginx -t` again on the
+> real host after applying it, before reloading (see
+> [ADR-032](../09-architecture-decisions/adr-032-device-identity-for-ingest.md)
+> and the CLAUDE.md priority queue).
+
+Then create `/etc/nginx/sites-available/highfive`:
 
 ```nginx
 # Port 80, highfive.schutera.com - serves ESP firmware traffic on HTTP
@@ -285,11 +313,16 @@ server {
         proxy_read_timeout 60s;
     }
 
+    # limit_req + client_max_body_size added 2026-08 (#229) — these two
+    # routes previously had NO nginx-level bound at all (unlike /upload's
+    # 10M above). Zones defined in highfive-ingest.conf, installed above.
     location = /new_module {
         proxy_pass http://127.0.0.1:8002/new_module;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=hf_new_module burst=20 nodelay;
+        client_max_body_size 8k;
     }
 
     location = /heartbeat {
@@ -297,6 +330,8 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=hf_heartbeat burst=60 nodelay;
+        client_max_body_size 8k;
     }
 
     # OTA firmware artifacts (#26). The ESP firmware fetches both files
@@ -606,6 +641,19 @@ Tracked gaps that this runbook accommodates rather than fixes:
   issues one SAN cert for `highfive.schutera.com` + `api.highfive.schutera.com`.
   The cert lineage on disk uses the first `-d` value as the directory
   name: `/etc/letsencrypt/live/highfive.schutera.com/`.
+- **A pre-#228 image volume would have non-`.jpg` served-file gaps.**
+  Since the 2026-08 audit (for #228), `GET /images/<name>` and
+  `GET /snips/<name>` 404 any name not ending in `.jpg`
+  (`image-service/app.py`'s `serve_image`/`serve_snip`); every upload is
+  now stored with a forced `.jpg` extension regardless of what the
+  client sent. Production currently has no data, so this has no live
+  blast radius today — but a future restore from a pre-#228 backup, or a
+  volume carrying uploads from before this fix, could contain
+  legitimately-stored non-`.jpg` filenames (a hostile pre-fix upload, or
+  an edge case the old allowlist let through) that would 404 after this
+  change. No migration or backfill exists; if this ever matters, audit
+  `IMAGE_STORE_PATH` for non-`.jpg` files before relying on this gap
+  being empty.
 
 ## Troubleshooting
 

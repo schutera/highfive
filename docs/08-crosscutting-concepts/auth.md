@@ -371,6 +371,38 @@ keeps onboarding to one secret while preserving the gating semantics.
   counts toward the firmware's upload-failure circuit breaker and
   would reboot a storming module, amplifying the storm.
 
+  **Since the 2026-08 audit (for #228), two more bounds apply before
+  anything is saved or decoded:** the bytes must parse as a JPEG
+  (`services/image_guard.py::probe_jpeg` — a magic-byte + header check,
+  not a full decode) and the SOF-declared frame must not exceed
+  `MAX_IMAGE_DIM` (default 4096px on the long edge, env-overridable). A
+  failure on either returns `400` with nothing written to disk. The
+  stored filename's extension is now always forced to `.jpg`
+  (`services/paths.py::sanitize_upload_filename`) regardless of what the
+  client sent, and `GET /images/<name>` / `GET /snips/<name>`
+  (image-service) refuse any non-`.jpg` name and pin
+  `Content-Type: image/jpeg` rather than guessing it from the extension.
+  **Precisely what the backend's `/api/images`/`/api/snips` proxies add
+  on top, and what they don't:** they independently hard-set
+  `Content-Type: image/jpeg` (belt-and-braces — see `backend/src/app.ts`),
+  but they do **not** re-check the filename extension themselves; a
+  non-`.jpg` request still ends up `404` because image-service's own
+  route already refuses it and the proxy forwards that status verbatim,
+  not because the backend enforces the extension a second time. One
+  consequence worth stating explicitly: **the `.log.json` telemetry
+  sidecars are no longer reachable through the image route at all**
+  (they never matched `.jpg` even before the fix, but now the route
+  enforces that instead of relying on the extension allowlist happening
+  not to produce a collision) — the intended path to a sidecar's
+  contents is `GET /modules/:id/logs`, but that image-service route
+  itself carries **no credential check** (unlike its sibling `/logs` and
+  `/logs/stream`, which do check `X-Admin-Key`) — the gate is one hop up,
+  the backend's `requireAdmin` on `GET /api/modules/:id/logs`. Prod binds
+  image-service to `127.0.0.1:8000` and nginx proxies only `/upload`
+  there, so this is not internet-reachable in prod; dev publishes the
+  port more broadly (same "treat a running dev stack as trusted-LAN-only"
+  caveat as the duckdb-service routes below).
+
   **Be precise about what that bounds.** The rate guard keys on the
   client-supplied MAC, which is canonicalized but not authenticated, so
   it bounds a **runaway or looping module** — the threat it was written
@@ -385,8 +417,110 @@ keeps onboarding to one secret while preserving the gating semantics.
   [#224](https://github.com/schutera/highfive/issues/224).
 - All `duckdb-service` routes — unauthenticated by design, on the
   assumption that only in-bridge callers reach them. **That assumption
-  holds in production and NOT in dev**, and the difference is
-  deliberate:
+  does NOT hold for `/new_module` and `/heartbeat`** — host-nginx
+  proxies exactly those two paths to the internet in production
+  (`production-deployment.md`), credential-free, so anyone who knows or
+  enumerates a 12-hex module id via the public `GET /modules` can call
+  them. Every other `duckdb-service` route stays genuinely
+  bridge-internal (loopback-bound in prod; see below for dev).
+
+  **Since the 2026-08 audit (for #229), both internet-exposed routes are
+  hardened at the handler level** (this bounds the write, not the read —
+  neither route requires a credential):
+  - `POST /new_module` (`routes/modules.py::add_module`) — a
+    re-registration of an **existing** module id no longer overwrites
+    `name`/`email`/`lat`/`lng` from the incoming payload. `name`/`email`
+    are kept unless the stored value is NULL/empty. `lat`/`lng` cannot be
+    SQL NULL (schema: `NOT NULL`), so their "unset" state is the `(0,0)`
+    sentinel instead: the incoming fix is written **only when the
+    stored row is at `(0,0)`** — gated on the stored value, not the
+    incoming one, mirroring `post_heartbeat`'s "only patch from a stored
+    (0,0)" rule below. An anonymous re-POST with different real
+    coordinates can no longer relocate an already-placed module — a
+    first-pass version of this fix inverted the condition and still
+    allowed exactly that (caught by senior-review, verified end-to-end
+    before landing: one POST moved a module from Germany to Sydney).
+
+    **The only supported relocation (or rename) path today is
+    `DELETE /modules/<id>` + re-register — and it is destructive, not a
+    lightweight edit** (senior-review round 2 caught an earlier draft of
+    this note understating that — "same as a `name` change" was wrong;
+    a `name` change has no non-destructive path either, but conflating
+    the two undersold what DELETE actually costs). `DELETE` is
+    admin-gated (the backend's `requireAdmin` on `DELETE
+    /api/modules/:id`, unlike the anonymous `/new_module` POST it
+    replaces the effect of), which is the right privilege level — but
+    `routes/modules.py::delete_module` wipes `daily_progress`,
+    `nest_data`, `image_uploads`, `module_heartbeats`, and
+    `measurements` for that module id, not just `module_configs`. A
+    relocated module starts its whole observation history over from
+    zero; the JPEGs already on disk are orphaned (the DB rows pointing
+    at them are gone, the files are not). There is no non-destructive
+    way to edit a module's `name`, `email`, or location today — adding
+    admin-gated `PATCH` endpoints for those fields (mirroring the
+    existing `PATCH /modules/<id>/display_name`) is a reasonable
+    follow-up, deliberately not built in this PR — tracked in the
+    CLAUDE.md priority queue.
+
+    **Residual gap, by design, not closed here:** `battery_level`,
+    `updated_at`, and `last_seen_at` still bump on **every** call
+    regardless of whether any protected field changed — this is
+    liveness metadata, not identity, and issue #229's own spec (plus the
+    #97 invariant that `add_module` is the sole writer of
+    `last_seen_at`) requires it. The consequence: an anonymous caller
+    who knows or enumerates a module id can still make a dead module
+    report as freshly alive (resurrecting `last_seen_at`) and change its
+    reported `battery_level`, even though it can no longer move or
+    rename it. [ADR-032](../09-architecture-decisions/adr-032-device-identity-for-ingest.md)'s
+    device-identity follow-up is the intended closure for this, not a
+    handler-level change.
+
+    **Second residual gap the fix itself introduces (round-3
+    senior-review): first registration wins, permanently.** Freezing
+    `name`/`email`/location on re-registration protects a *placed*
+    module — but it also means whoever registers a given MAC **first**
+    owns those fields until an admin intervenes. An attacker who
+    front-runs a real module's first-ever registration (guessing or
+    observing its MAC before the operator powers it on — module ids are
+    12-hex MACs, not secrets) could register it at false coordinates or
+    with a false name; when the real module then boots and registers
+    with its true values, the CASE sees an **existing** (non-`(0,0)`,
+    non-empty) row and preserves the attacker's fake data instead.
+    Pre-#229 the real module's own next boot would have silently
+    corrected this (any non-`(0,0)` incoming value overwrote the row);
+    post-#229 nothing does — the only recovery is an admin
+    `DELETE /modules/<id>` + re-register. This is a real trust-on-first-use
+    trade-off, not a bug: it is the necessary consequence of closing the
+    "anyone can overwrite a placed module" hole this PR exists to close,
+    and the attack requires guessing an unregistered MAC in advance
+    (`GET /modules` only lists already-registered ones). Lower severity
+    than the pre-fix hole, not zero.
+
+    The Discord "new module" webhook now fires only on the
+    row's first insert, not on every re-POST. The pre-validation
+    `print(f"... Received: {json_data}")` — which put the raw body,
+    including `email`, into the admin-readable log ring — is gone; the
+    replacement line logs only the canonical id, stored name, and
+    already-coarsened lat/lng.
+  - `POST /heartbeat` (`routes/heartbeats.py::post_heartbeat`) — a MAC
+    with no `module_configs` row is dropped (still `200`, nothing
+    written to `module_heartbeats`/`measurements`) instead of growing
+    those tables and spoofing liveness for a module that was never
+    registered. `battery` is clamped to `[0, 100]` rather than stored
+    unbounded. The log line no longer prints raw `latitude`/`longitude`
+    (it did, pre-fix, **before** `coarsen_coord` ran) — only a
+    `geo_present` boolean.
+  - **nginx-level rate/body limits** are documented (not yet deployed —
+    see below) in
+    [`deploy/nginx/highfive-ingest.conf`](../../deploy/nginx/highfive-ingest.conf).
+  - Longer-term: [ADR-032](../09-architecture-decisions/adr-032-device-identity-for-ingest.md)
+    proposes an actual device credential (a compiled-in fleet key or
+    per-device keys) for these two routes; the ADR is Proposed, the code
+    is deliberately a separate follow-up.
+
+  **Dev vs. prod bind topology stays as before** (unaffected by the
+  handler hardening above — a credential-free write is still a
+  credential-free write, just a bounded one):
   - **Prod** (`docker-compose.prod.yml`) binds the host mapping to
     `127.0.0.1:8002`. Host-Nginx proxies exactly the two paths the
     fleet needs (`/new_module`, `/heartbeat`); nothing else is

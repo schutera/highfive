@@ -16,6 +16,7 @@ committed real ESP captures (``dev-tools/real_captures/``). The detector must:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -170,3 +171,68 @@ def test_missing_model_degrades_without_raising():
     res = det.detect(str(BLOCK_7554))
     assert not res.ok
     assert res.snips == []
+
+
+def test_opencv_pixel_ceiling_is_derived_from_max_image_dim():
+    """2026-08 audit, for #228 (senior-review, rounds 2 and 3): a hardcoded
+    ``OPENCV_IO_MAX_IMAGE_PIXELS`` silently drifted from ``image_guard``'s
+    env-overridable ``MAX_IMAGE_DIM`` the moment an operator raised the
+    latter without knowing this module had its own copy — an image between
+    the two caps then made `cv2.imread` raise instead of degrade, which
+    `HoleDetector.detect`'s broad except swallowed into permanent,
+    unexplained zero-detection output.
+
+    **Must run in a fresh subprocess, not a same-process module reload**
+    (round-3 senior-review caught this): OpenCV's native imgcodecs library
+    reads `OPENCV_IO_MAX_IMAGE_PIXELS` once, at its own C-level init — which,
+    within this already-running pytest process, already happened via an
+    earlier test's `import cv2` (this file's own `pytest.importorskip("cv2")`
+    at minimum). A same-process `importlib.reload(hole_detection)` re-runs
+    the Python-level `os.environ.setdefault(...)` line but cannot re-trigger
+    that native init, so it could only prove the env var *string* is
+    correct — not that OpenCV's real decode ceiling actually moved. A
+    version of this test that only asserted the string passed even when
+    manually verified (by hand, in this session) that setting the var
+    *after* `import cv2` has zero effect on `cv2.imread`'s behaviour. This
+    version spawns a real process and asserts the actual runtime
+    consequence: a real capture whose pixel count exceeds a tightened
+    `MAX_IMAGE_DIM` makes hole detection degrade to zero detections,
+    end-to-end, exactly as an operator would observe it."""
+    import subprocess
+    import sys
+
+    script = (
+        "import os\n"
+        "os.environ['MAX_IMAGE_DIM'] = '10'\n"  # tighter than the 640x480 capture
+        "import sys\n"
+        f"sys.path.insert(0, {str(_REPO / 'image-service')!r})\n"
+        "from services.hole_detection import HoleDetector\n"
+        f"res = HoleDetector().detect({str(BLOCK_7554)!r})\n"
+        "print('DEGRADED_OK' if not res.ok and res.snips == [] else 'FAIL')\n"
+    )
+    # `env=` explicitly excludes OPENCV_IO_MAX_IMAGE_PIXELS rather than just
+    # inheriting this test process's environment: THIS pytest process has
+    # already imported `services.hole_detection` (this file's own module
+    # import, or an earlier test file's), which already ran the real
+    # `os.environ.setdefault(...)` at the (unset-MAX_IMAGE_DIM) default —
+    # subprocess.run inherits os.environ by default, and `setdefault` inside
+    # the child would then see that inherited value as "already set" and
+    # silently keep it, defeating the whole point of spawning a fresh
+    # process. Confirmed by hand: this test failed with exactly that
+    # inherited-value bug before this env= filter was added.
+    clean_env = {
+        k: v for k, v in os.environ.items() if k != "OPENCV_IO_MAX_IMAGE_PIXELS"
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(_REPO / "image-service"),
+        env=clean_env,
+    )
+    assert "DEGRADED_OK" in result.stdout, (
+        f"expected the tightened MAX_IMAGE_DIM to make OpenCV refuse the "
+        f"capture and HoleDetector degrade gracefully; got "
+        f"stdout={result.stdout!r} stderr={result.stderr[-2000:]!r}"
+    )

@@ -274,7 +274,7 @@ export class ModuleReadModel {
 
     // ---- 1) Normalize progress ----
     const progressByNest = new Map<string, DailyProgress[]>();
-    progressData.progress.forEach((p: any) => {
+    progressData.progress.forEach((p) => {
       const normalized: DailyProgress = {
         progress_id: p.progress_id,
         nest_id: p.nest_id,
@@ -293,7 +293,7 @@ export class ModuleReadModel {
     // upstream value, which is the right signal — duckdb-service drift should
     // surface, not be silently swallowed. Mirrors homepage `services/api.ts`.
     const nestsByModule = new Map<ModuleId, NestData[]>();
-    nestsData.nests.forEach((n: any) => {
+    nestsData.nests.forEach((n) => {
       const moduleId = parseModuleId(n.module_id);
       const nest: NestData = {
         nest_id: n.nest_id,

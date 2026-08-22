@@ -2478,6 +2478,20 @@ by one letter from a real English word as a smell. Add a contract
 test that reads a known row and checks the field values, not just
 that the call succeeds.
 
+**Done.** `backend/tests/database-progress-contract.test.ts` stubs
+`duckdb-service` with known progress and nest rows and asserts every
+`DailyProgress` and `NestData` field by value, plus that no field reads
+`undefined`. Re-introducing the `hateched` typo fails three of its six
+cases. The two `forEach((p: any) =>` / `((n: any) =>` annotations that
+discarded the declared wire types — the only `: any` in `backend/src` —
+were removed at the same time, so `tsc --noEmit` under `"strict": true`
+now infers `DailyProgress` / `NestData` and would reject a misspelled
+read at build time as well.
+
+**Still open.** `backend/` has no eslint config and CI runs no `tsc`
+(#208), so the build-time half of that guard is only enforced when
+someone runs `npm run build` locally.
+
 ### Three "PR-17 review" criticals (fixed `ea7dc73`, `0d1b48f`)
 
 Caught only because reviewers cross-referenced `docker-compose.yml`,

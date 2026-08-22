@@ -189,6 +189,39 @@ identity key, normalize it once at the boundary
 **stored** value through every consumer; grep for the raw value's
 other uses before calling it done.
 
+### Four documents described one `.env`, and the file the quick start copies was a production template (2026-08 audit, #260)
+
+**What happened:** `README.md`'s quick start says
+`cp .env.example .env && docker compose up`, but `.env.example` was headed
+"HighFive Production Environment Variables" and carried
+`NODE_ENV=production`, `PORT=3001`, a production `VITE_API_URL`, and
+`HIGHFIVE_API_KEY=your_secure_production_key_here`. Compose feeds that
+`.env` into `backend`, `image-service` and `duckdb-service`, and the
+`environment:` block overrides `NODE_ENV` and `PORT` — so the stack booted
+and nothing looked wrong, while the placeholder string quietly became the
+admin password of every fresh dev box. Meanwhile `CLAUDE.md`,
+`CONTRIBUTING.md`, `docker-compose.md` and `troubleshooting.md` each
+prescribed a *different* hand-written dev `.env`, and one of them told you
+to `cd hivehive` after cloning `highfive`.
+
+**Why:** nobody owned the file. Each doc that needed a dev `.env` wrote out
+its own version inline instead of pointing at the template, so there were
+five sources of truth and no single one that was wrong enough to notice.
+The compose overrides then hid the mismatch, which is the same shape as the
+inert-security-control incident below: a config everyone believed described
+reality, which the running system had already worked around.
+
+**How to avoid it next time:** a file that ships as a template is the
+canonical description of itself — docs link to it, they do not restate it.
+`.env.example` now documents each variable and which service reads it, and
+the four docs point at it. Worth noting what the restatements had actually
+drifted into: `troubleshooting.md` claimed `DEBUG` and `DUCKDB_SERVICE_URL`
+were required "at minimum", when `image-service/app.py`'s and
+`duckdb-service/app.py`'s `os.getenv("DEBUG", "false")` and
+`os.getenv("DUCKDB_SERVICE_URL", "http://duckdb-service:8000")` mean both
+are optional — so the one doc a stuck contributor reaches for was sending
+them to fix a non-problem.
+
 ### Probing a production host with guessed SSH usernames gets your IP banned — and the ban looks exactly like an outage
 
 **What happened.** `ssh highfive` returned `Permission denied (publickey)`

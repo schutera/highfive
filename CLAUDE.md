@@ -67,7 +67,7 @@ Per-service unit tests (what CI runs):
 ```bash
 cd backend        && npm ci && npm test                       # vitest + supertest, 287 tests (30 files)
 cd homepage       && npm ci && npm test                       # vitest + jsdom, 191 tests (31 files)
-cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 284 tests
+cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 292 tests
 cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 98 tests
 cd ESP32-CAM      && pio test -e native                       # Unity host tests, ~281 RUN_TEST across 20 suites
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware

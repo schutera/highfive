@@ -256,6 +256,29 @@ spec files rather than a number memorised from a doc:
 (Get-ChildItem $repo\backend\tests -Filter *.test.ts).Count
 ```
 
+### Discord posts "Backup FAILED — not enough free space" (#232)
+
+`duckdb-service`'s weekly retained-backup job (`services/backup.py`) checks
+free space on `BACKUP_DIR`'s volume before copying the live DB, and aborts
+rather than risk filling the disk mid-copy — see
+[ADR-031](09-architecture-decisions/adr-031-backup-file-copy-not-export-database.md).
+No backup was taken; nothing was corrupted or partially written.
+
+- **Check actual free space** on the volume backing `BACKUP_DIR` (default
+  `/data/backups`, inside the `duckdb_data` volume):
+  `docker compose exec duckdb-service df -h /data`.
+- **The guard needs ~1.5× the live DB's size free**, as headroom on top of
+  the live file (not a doubling of the live file's own footprint) — see
+  [docker-compose.md → Backup retention](07-deployment-view/docker-compose.md#backup-retention-232--adr-031).
+  If the DB has grown, either free space on the volume or reduce
+  `BACKUP_KEEP` (fewer retained generations, same volume).
+- **This is exactly the scenario off-host sync exists for** — retaining
+  fewer generations locally is safe once they're synced elsewhere; see
+  [production-deployment.md → Backup & Restore → Off-host sync](07-deployment-view/production-deployment.md#off-host-sync).
+- If this fires repeatedly, treat it as a capacity-planning signal, not a
+  one-off to silence — a volume that stays this full will eventually block
+  writes from the services that actually need it (ADR-001's sole writer).
+
 ---
 
 ## Production host access (SSH)

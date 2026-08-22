@@ -840,8 +840,15 @@ Type=oneshot
 # --delete is deliberately OMITTED so a bad local rotation can't propagate
 # into a silent remote deletion. Two separate rsync calls (not one with
 # both sources) so the destination mirrors /data's shape instead of
-# flattening backups/ and images/ together.
-ExecStart=/usr/bin/rsync -az -e "ssh -i /root/.ssh/highfive-offhost-sync" \
+# flattening backups/ and images/ together. --exclude the in-flight
+# markers (services/backup.py's _sweep_stale_tmp_files removes these
+# locally after a crash, but a sync mid-write could still ship a partial
+# file off-host before that sweep runs, and rsync exits non-zero — code
+# 24, "some files vanished" — if a source file disappears mid-transfer,
+# which would abort this oneshot unit's remaining ExecStart lines,
+# including the heartbeat touch below).
+ExecStart=/usr/bin/rsync -az --exclude='.*.duckdb.gz.tmp' --exclude='*.duckdb.gz.inprogress' \
+  -e "ssh -i /root/.ssh/highfive-offhost-sync" \
   /var/lib/docker/volumes/highfive_duckdb_data/_data/backups/ \
   your-offhost-user@your-offhost-host:/srv/highfive-offhost-backup/backups/
 ExecStart=/usr/bin/rsync -az -e "ssh -i /root/.ssh/highfive-offhost-sync" \
@@ -890,7 +897,11 @@ concurrent with any backup/restore step) — `exec` is fine there. A
 `read_only=True` connect can occasionally fail with a transient lock
 error if it lands in the same instant the serving process itself holds
 a connection open; that's a "retry the query," not a correctness issue,
-since nothing here writes. Steps and measured timing:
+since nothing here writes. Re-run 2026-08-21 to add step 3's `sha256sum
+-c` gate — an earlier pass restored straight from the `.gz` without ever
+reading the `.sha256` sidecar the job produces, which meant the drill
+never actually exercised the one integrity control ADR-031 lists as a
+reason to keep it. Steps and measured timing:
 
 ```bash
 # 0) Seeded dev stack, 7 modules / 52 nests / 356 daily_progress rows.
@@ -914,18 +925,20 @@ start = time.monotonic()
 run_backup()
 print(f'wall clock: {time.monotonic()-start:.2f}s')
 "
-# -> lock held 0.07s; wall clock 0.99s (checkpoint+copy+gzip+sha256+rotate+notify)
-# -> highfive_backup_2026-08-21_225112.duckdb.gz, 706118 bytes (~0.7 MB) for a ~110 MB DB file
+# -> lock held 0.07s; wall clock 0.97s (checkpoint+copy+gzip+sha256+rotate+notify)
+# -> highfive_backup_2026-08-21_235457.duckdb.gz, ~0.7 MB for a ~110 MB DB file
 docker compose start duckdb-service
 
 # 2) Simulate the failure: stop the service again.
 docker compose stop duckdb-service
 
-# 3) Restore from the retained backup (a throwaway container on the same
-#    named volume — no running duckdb-service container is needed for this).
+# 3) Verify the sha256 sidecar, THEN restore — a throwaway container on
+#    the same named volume (no running duckdb-service container needed).
+#    The gunzip step is deliberately gated on the sha256sum exiting 0.
 docker run --rm -v highfive_duckdb_data:/data alpine sh -c \
-  "cd /data && gunzip -c backups/highfive_backup_2026-08-21_225112.duckdb.gz > app.duckdb.restored && mv app.duckdb.restored app.duckdb"
-# -> 1.03s wall clock
+  "cd /data/backups && sha256sum -c highfive_backup_2026-08-21_235457.duckdb.gz.sha256 || exit 1; \
+   cd /data && gunzip -c backups/highfive_backup_2026-08-21_235457.duckdb.gz > app.duckdb.restored && mv app.duckdb.restored app.duckdb"
+# -> highfive_backup_2026-08-21_235457.duckdb.gz: OK
 
 # 4) Bring the service back and verify.
 docker compose start duckdb-service

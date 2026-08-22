@@ -37,7 +37,12 @@ _OFFHOST_MAX_AGE_S = 48 * 3600
 
 
 def _backup_dir() -> str:
-    return os.getenv("BACKUP_DIR", DEFAULT_BACKUP_DIR)
+    # `or` rather than plain getenv-with-default: a BACKUP_DIR= line
+    # present-but-blank in an env file (dev's `env_file: .env`, unlike
+    # prod's `${VAR:-default}` compose interpolation, passes an empty
+    # string straight through) is "unset" in effect, not "use the
+    # filesystem root's backups subdir".
+    return os.getenv("BACKUP_DIR") or DEFAULT_BACKUP_DIR
 
 
 def _backup_keep() -> int:
@@ -71,12 +76,21 @@ def _has_fresh_offhost_sync(backup_dir: str) -> bool:
 
 
 def _warn_if_local_only(backup_dir: str, filename: str = "") -> None:
-    if os.getenv("DISCORD_WEBHOOK_URL") or _has_fresh_offhost_sync(backup_dir):
+    # Deliberately NOT gated on DISCORD_WEBHOOK_URL. Discord only ever
+    # gets a text notification (never the DB file, per ADR-031) — whether
+    # it's configured says nothing about whether a backup actually has an
+    # off-host copy. An earlier version of this check OR'd the two, which
+    # meant the one production configuration this warning most needs to
+    # fire in (Discord notifications on, as recommended, but no real
+    # off-host sync set up yet) silently never saw it. Caught only by a
+    # dedicated test, not by inspection across three review rounds — see
+    # test_run_backup_warns_even_when_discord_is_configured.
+    if _has_fresh_offhost_sync(backup_dir):
         return
     suffix = f" ({filename})" if filename else ""
     print(
-        "WARNING: no DISCORD_WEBHOOK_URL and no fresh off-host sync heartbeat"
-        f" (see production-deployment.md 'Backup & Restore') — backups are"
+        "WARNING: no fresh off-host sync heartbeat (see"
+        f" production-deployment.md 'Backup & Restore') — backups are"
         f" local-only{suffix}"
     )
 
@@ -163,12 +177,17 @@ def _cleanup(*paths: str) -> None:
 
 
 def _sweep_stale_tmp_files(backup_dir: str) -> None:
-    """Removes leftover raw-copy / in-progress-gzip files from a prior run
-    that was killed mid-write (OOM, container stop, host crash). These
+    """Removes leftovers from a prior run that was killed mid-write (OOM,
+    container stop, host crash): raw-copy / in-progress-gzip files (which
     never reached their final retained name, so `_rotate`'s
     `*.duckdb.gz` glob never sees them and they'd otherwise leak forever
-    — at up to ~1x the live DB's size each, on the same volume the
-    free-space guard exists to protect.
+    at up to ~1x the live DB's size each), plus an orphaned `.sha256`
+    sidecar left by a crash between the sidecar write and the atomic
+    rename (harmless — `_rotate` never touches a sidecar with no matching
+    `.gz` — but would otherwise also leak forever, one tiny file at a
+    time). Safe to run unconditionally at the top of a fresh run: nothing
+    else is writing to `backup_dir` at this point (single-process
+    precondition, see ADR-031's Forbidden section).
     """
     if not os.path.isdir(backup_dir):
         return
@@ -178,6 +197,11 @@ def _sweep_stale_tmp_files(backup_dir: str) -> None:
     ):
         for stale in glob.glob(os.path.join(backup_dir, pattern)):
             os.remove(stale)
+    for sha_path in glob.glob(
+        os.path.join(backup_dir, "highfive_backup_*.duckdb.gz.sha256")
+    ):
+        if not os.path.exists(sha_path[: -len(".sha256")]):
+            os.remove(sha_path)
 
 
 def run_backup() -> None:

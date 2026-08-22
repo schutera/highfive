@@ -17,12 +17,17 @@ Run hermetically — no Docker, no real DB, no network.
 | `backend`        | vitest + supertest     | 17    | `cd backend && npm test`             |
 | `homepage`       | vitest + jsdom         | 8     | `cd homepage && npm test`            |
 | `image-service`  | pytest                 | 31    | `cd image-service && pytest tests/`  |
-| `duckdb-service` | pytest (in-mem DuckDB) | 24    | `cd duckdb-service && pytest tests/` |
+| `duckdb-service` | pytest (per-test tmp-file DuckDB) | 290 | `cd duckdb-service && pytest tests/` |
 
 In `backend`, the duckdb-service client is mocked via `vi.mock`. In
 `image-service`, all outbound HTTP and `duckdb.connect` calls are
-monkey-patched. In `duckdb-service`, an in-memory DuckDB fixture
-exercises schema, nest creation, progress insertion.
+monkey-patched. In `duckdb-service`, `tests/conftest.py`'s `fresh_db`
+fixture points `DUCKDB_PATH` at a fresh `tmp_path` file per test (not
+in-memory — DuckDB's in-memory mode can't be reopened read-only the way
+several tests, including the backup restore tests, need) and reimports
+every service module that captured env-derived state at its own import
+time, exercising schema, nest creation, progress insertion, and
+(#232) the retained-backup job end to end.
 
 ### ESP32-CAM host tests
 

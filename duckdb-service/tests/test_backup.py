@@ -230,6 +230,19 @@ def test_rotate_skips_a_gz_file_with_no_sidecar(fresh_db, monkeypatch, tmp_path)
     assert remaining == sorted([orphan, "highfive_backup_2026-01-03_000000.duckdb.gz"])
 
 
+def test_run_backup_blank_backup_dir_env_falls_back_to_default(fresh_db, monkeypatch):
+    """A present-but-empty BACKUP_DIR (e.g. a blank line in a dev
+    env_file, which passes an empty string through rather than leaving
+    the var unset) must fall back to DEFAULT_BACKUP_DIR, not resolve to
+    an empty path."""
+    monkeypatch.setenv("BACKUP_DIR", "")
+    _seed_rows(fresh_db)
+
+    fresh_db.backup.run_backup()
+
+    assert len(_gz_files(fresh_db.backup.DEFAULT_BACKUP_DIR)) == 1
+
+
 def test_run_backup_invalid_keep_env_falls_back_to_default(
     fresh_db, monkeypatch, tmp_path
 ):
@@ -300,14 +313,24 @@ def test_run_backup_never_sends_db_file_to_discord(fresh_db, monkeypatch, tmp_pa
     assert "highfive_backup_" in calls[0]["json"]["content"]
 
 
-def test_backup_module_warns_at_import_when_no_sink_configured(monkeypatch, capsys):
+def test_backup_module_warns_at_import_when_no_sink_configured(
+    monkeypatch, capsys, tmp_path
+):
     """Pins the boot-time half of the acceptance criterion directly, via
-    its own fresh import — rather than relying on the run_backup tests
-    below to incidentally observe (or not observe, depending on fixture
-    ordering) the same module-level print."""
+    its own fresh import of both `db.connection` and `services.backup` —
+    NOT just `services.backup`. Without also purging `db.connection` and
+    controlling `DUCKDB_PATH`, `DEFAULT_BACKUP_DIR` would resolve from
+    whatever `db.connection` generation happens to already be cached in
+    sys.modules (e.g. a previous test's `tmp_path`), which could
+    coincidentally already contain a fresh `.offhost_sync_ok` heartbeat
+    and make this assertion pass or fail depending on test order — this
+    was in fact order-dependent before this fix (confirmed by running it
+    directly after the "fresh heartbeat" test above)."""
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("BACKUP_DIR", raising=False)
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "test.duckdb"))
     sys.modules.pop("services.backup", None)
+    sys.modules.pop("db.connection", None)
     capsys.readouterr()
 
     import services.backup  # noqa: F401 -- import side effect is what's tested
@@ -392,6 +415,27 @@ def test_run_backup_warns_when_offhost_heartbeat_is_stale(
     assert "local-only" in captured.out
 
 
+def test_run_backup_warns_even_when_discord_is_configured(
+    fresh_db, monkeypatch, tmp_path, capsys
+):
+    """Discord only ever gets a text notification (never the DB file, per
+    ADR-031) — it configured says nothing about off-host redundancy. An
+    earlier version of this check treated a configured DISCORD_WEBHOOK_URL
+    as equivalent to a real off-host copy and skipped the warning, which
+    silently defeated it in exactly the production configuration
+    docker-compose.prod.yml and .env.production.example recommend
+    (Discord notifications on, no off-host sync set up yet)."""
+    _configure(monkeypatch, tmp_path)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/webhook")
+    _seed_rows(fresh_db)
+    capsys.readouterr()
+
+    fresh_db.backup.run_backup()
+
+    captured = capsys.readouterr()
+    assert "local-only" in captured.out
+
+
 def test_run_backup_releases_lock_before_gzip(fresh_db, monkeypatch, tmp_path):
     _configure(monkeypatch, tmp_path)
     _seed_rows(fresh_db)
@@ -411,6 +455,136 @@ def test_run_backup_releases_lock_before_gzip(fresh_db, monkeypatch, tmp_path):
     fresh_db.backup.run_backup()
 
     assert acquired == [True]
+
+
+def test_run_backup_holds_lock_during_copy(fresh_db, monkeypatch, tmp_path):
+    """The mirror of test_run_backup_releases_lock_before_gzip above: that
+    test only proves the lock is FREE by the time gzip runs, which is
+    equally true whether the lock was ever held at all. This proves the
+    other half of #232's thesis — the lock genuinely IS held for the
+    checkpoint+copy step, not merely released afterward. Confirmed to
+    fail if `with lock:` in `_checkpoint_and_copy` is removed entirely."""
+    _configure(monkeypatch, tmp_path)
+    _seed_rows(fresh_db)
+
+    real_copy2 = fresh_db.backup.shutil.copy2
+    acquired = []
+
+    def _spying_copy2(*args, **kwargs):
+        got = fresh_db.backup.lock.acquire(blocking=False)
+        acquired.append(got)
+        if got:
+            fresh_db.backup.lock.release()
+        return real_copy2(*args, **kwargs)
+
+    monkeypatch.setattr(fresh_db.backup.shutil, "copy2", _spying_copy2)
+
+    fresh_db.backup.run_backup()
+
+    assert acquired == [False]
+
+
+def test_run_backup_gzips_the_copy_not_the_live_db(fresh_db, monkeypatch, tmp_path):
+    """The whole point of #232 is: hold the lock only for CHECKPOINT +
+    copy, then gzip the now-static copy OUTSIDE the lock. If a refactor
+    made the gzip step read DB_PATH directly instead of the copy, a write
+    to the live DB in the gap between the copy and the gzip would leak
+    into the retained artifact — reintroducing (just outside the lock
+    instead of inside it) the exact "backs up the live file, not a
+    consistent snapshot" defect #232 was filed over."""
+    _configure(monkeypatch, tmp_path)
+    _seed_rows(fresh_db)
+
+    real_gzip_and_remove = fresh_db.backup._gzip_and_remove
+
+    def _mutate_live_db_then_gzip(raw_copy_path, dest_gz_path):
+        con = fresh_db.connection.get_conn()
+        try:
+            con.execute(
+                "INSERT INTO module_configs (id, name, lat, lng, "
+                "first_online, image_count) VALUES ('ffffffffffff', "
+                "'Injected after copy', 1.0, 1.0, '2024-01-01', 0)"
+            )
+            con.commit()
+        finally:
+            con.close()
+        return real_gzip_and_remove(raw_copy_path, dest_gz_path)
+
+    monkeypatch.setattr(fresh_db.backup, "_gzip_and_remove", _mutate_live_db_then_gzip)
+
+    fresh_db.backup.run_backup()
+
+    gz_files = _gz_files(tmp_path / "backups")
+    restored_path = tmp_path / "restored.duckdb"
+    _decompress(tmp_path / "backups" / gz_files[0], restored_path)
+    conn = duckdb.connect(str(restored_path), read_only=True)
+    try:
+        injected_count = conn.execute(
+            "SELECT COUNT(*) FROM module_configs WHERE id = 'ffffffffffff'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert injected_count == 0
+
+
+def test_run_backup_leaves_exactly_the_gz_and_sidecar_on_success(
+    fresh_db, monkeypatch, tmp_path
+):
+    """A weaker "at least one .duckdb.gz exists" check would miss a
+    leftover raw copy / in-progress file that `_gzip_and_remove` or
+    `run_backup` failed to clean up on the success path."""
+    backup_dir = _configure(monkeypatch, tmp_path)
+    _seed_rows(fresh_db)
+
+    fresh_db.backup.run_backup()
+
+    gz_files = _gz_files(backup_dir)
+    assert len(gz_files) == 1
+    assert sorted(os.listdir(backup_dir)) == sorted(
+        [gz_files[0], f"{gz_files[0]}.sha256"]
+    )
+
+
+def test_run_backup_failure_after_copy_removes_the_raw_copy(
+    fresh_db, monkeypatch, tmp_path
+):
+    """Distinct from test_run_backup_failure_before_artifact_leaves_no_partial_file
+    (which fails BEFORE the raw copy exists at all, via a failing
+    shutil.copy2) — this fails AFTER the copy succeeds, so the raw copy
+    genuinely exists on disk when stage 1's except handler runs, and only
+    a `_cleanup` call that actually includes `raw_copy_path` removes it."""
+    backup_dir = _configure(monkeypatch, tmp_path)
+    _seed_rows(fresh_db)
+
+    def _raise(*args, **kwargs):
+        raise OSError("gzip exploded")
+
+    monkeypatch.setattr(fresh_db.backup, "_gzip_and_remove", _raise)
+
+    fresh_db.backup.run_backup()
+
+    assert os.listdir(backup_dir) == []
+
+
+def test_run_backup_failure_during_publish_removes_inprogress_and_sidecar(
+    fresh_db, monkeypatch, tmp_path
+):
+    """Fails at the os.replace step, i.e. AFTER gzip + sha256 sidecar
+    write both succeed — so both the .inprogress gz and the .sha256
+    sidecar genuinely exist on disk when the except handler runs, and
+    only a `_cleanup` call that includes both paths removes them."""
+    backup_dir = _configure(monkeypatch, tmp_path)
+    _seed_rows(fresh_db)
+
+    def _raise(*args, **kwargs):
+        raise OSError("rename exploded")
+
+    monkeypatch.setattr(fresh_db.backup.os, "replace", _raise)
+
+    fresh_db.backup.run_backup()
+
+    assert os.listdir(backup_dir) == []
 
 
 def test_run_backup_publishes_gz_atomically_at_the_end(fresh_db, monkeypatch, tmp_path):
@@ -504,6 +678,26 @@ def test_run_backup_sweeps_stale_tmp_files_from_a_prior_crash(
 
     assert not stale_raw.exists()
     assert not stale_inprogress.exists()
+    assert len(_gz_files(backup_dir)) == 1
+
+
+def test_run_backup_sweeps_an_orphan_sidecar_with_no_matching_gz(
+    fresh_db, monkeypatch, tmp_path
+):
+    """A .sha256 with no matching .duckdb.gz (left by a crash between the
+    sidecar write and the atomic rename) is invisible to both `_rotate`
+    (globs *.duckdb.gz) and the raw-copy/in-progress sweep above — it
+    would otherwise leak forever, one small file at a time."""
+    backup_dir = _configure(monkeypatch, tmp_path)
+    _seed_rows(fresh_db)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    orphan_sha = backup_dir / "highfive_backup_2026-01-01_000000.duckdb.gz.sha256"
+    orphan_sha.write_text("deadbeef  highfive_backup_2026-01-01_000000.duckdb.gz\n")
+
+    fresh_db.backup.run_backup()
+
+    assert not orphan_sha.exists()
     assert len(_gz_files(backup_dir)) == 1
 
 

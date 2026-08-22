@@ -163,6 +163,38 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### A rebase dropped two i18n keys, and `t()` renders the key path instead of failing — the degraded-mode banner read `common.heartbeatDataIncomplete` in production (2026-08 audit, #238)
+
+**What happened:** `common.unknown` and `common.heartbeatDataIncomplete`
+were added in `ff1ada1` (#50) and removed again in `8c1be9c` (#52) in a
+hunk unrelated to that PR's subject — an accidental merge/rebase
+regression. Four call sites kept referencing them. Because
+`LanguageContext.t()` returns the key path when the leaf is not
+renderable, the dashboard rendered the literal string
+`common.heartbeatDataIncomplete` to users, in both locales, precisely
+when the backend was degraded and a readable message mattered most.
+Nothing failed: not the type checker, not the 191-test homepage suite,
+not the build.
+
+**Why:** `t()` takes a `string` path, so a key that does not exist is
+indistinguishable at compile time from one that does — there is no
+type-level link between a call site and the translations object. The
+graceful fallback that makes `t()` safe to call is exactly what makes a
+missing key invisible: it degrades to something renderable instead of
+throwing, so the failure only ever shows up on screen.
+
+**How to avoid it next time:** a graceful fallback needs a test that
+notices when it fires. `homepage/src/__tests__/i18nKeyCompleteness.test.ts`
+scans every `t('...')` literal in the homepage source and asserts each
+resolves to renderable text in **every** locale, and that the locales
+stay structurally in step. Two things it has to get right, both learned
+the hard way while writing it: it must accept plural forms
+(`{ one, other }`) as renderable, or it reports the intentional
+`dashboard.modulesListed` as missing; and it must assert it found call
+sites at all, or a scan that silently matches nothing passes every other
+assertion vacuously — which is what happened on the first run, when
+`__dirname` was undefined under vitest's ESM loader.
+
 ### The delete path trusted a client filename the read path didn't — and fleet filenames were silently clobbering each other (2026-07 audit, #202)
 
 **What happened:** `image-service`'s `delete_image` joined the

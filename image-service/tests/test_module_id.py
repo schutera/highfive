@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-
 from services.module_id import ModuleId
 
 # ---------------- canonicalization ----------------

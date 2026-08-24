@@ -18,7 +18,6 @@ import struct
 from pathlib import Path
 
 from requests import RequestException
-
 from services.hole_detection import DetectionResult, Snip
 from services.upload_pipeline import UploadPipeline, UploadRequest
 

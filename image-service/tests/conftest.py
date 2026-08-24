@@ -7,13 +7,11 @@ Discord webhook so tests run hermetically.
 
 from __future__ import annotations
 
-import os
-import sys
 import importlib
+import sys
 from pathlib import Path
 
 import pytest
-
 
 # Make the image-service package root importable when pytest is launched
 # from inside image-service/ (so `import app` and `from services...` work).
@@ -94,7 +92,10 @@ def mocked_duckdb_http(app, monkeypatch: pytest.MonkeyPatch):
     def fake_post(url, json=None, **kwargs):
         state["posts"].append({"url": url, "json": json, "kwargs": kwargs})
         if url.endswith("/heartbeat"):
-            return _Resp(state["heartbeat_status"], {"ok": True} if state["heartbeat_status"] < 400 else {"error": "x"})
+            return _Resp(
+                state["heartbeat_status"],
+                {"ok": True} if state["heartbeat_status"] < 400 else {"error": "x"},
+            )
         # /add_progress_for_module and any other POST
         return _Resp(200, {"ok": True})
 
@@ -107,6 +108,7 @@ def mocked_duckdb_http(app, monkeypatch: pytest.MonkeyPatch):
     # All outbound HTTP from image-service now routes through
     # services.duckdb.DuckDBService, so we only need to patch its `requests`.
     import services.duckdb as duckdb_svc_mod
+
     monkeypatch.setattr(duckdb_svc_mod.requests, "post", fake_post)
     monkeypatch.setattr(duckdb_svc_mod.requests, "get", fake_get)
     return state

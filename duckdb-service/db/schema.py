@@ -2,9 +2,9 @@ import math
 import os
 from datetime import datetime, timedelta, timezone
 
-from db.connection import lock, get_conn
 from models.geo import PUBLIC_COORD_DECIMALS
 
+from db.connection import get_conn, lock
 
 # Single source of truth for the three FK-chained table DDLs. Referenced by
 # both the top-of-`init_db` `CREATE TABLE IF NOT EXISTS` block (for fresh

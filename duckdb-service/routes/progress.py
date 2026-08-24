@@ -1,11 +1,11 @@
 from datetime import date, datetime
 from uuid import uuid4
-from flask import Blueprint, jsonify, request
-from pydantic import ValidationError
 
 from db.repository import query_all, write_transaction
+from flask import Blueprint, jsonify, request
 from models.module_id import ModuleId
-from models.progress import ClassificationOutput, BEE_TYPE_MAP, TARGET_NESTS_PER_TYPE
+from models.progress import BEE_TYPE_MAP, TARGET_NESTS_PER_TYPE, ClassificationOutput
+from pydantic import ValidationError
 
 progress_bp = Blueprint("progress", __name__)
 
@@ -151,7 +151,16 @@ def add_progress_for_module():
             while len(sealed_list) < TARGET_NESTS_PER_TYPE:
                 sealed_list.append(sealed_list[-1])
 
-            for nest_id, sealed in zip(existing_nest_ids, sealed_list):
+            # strict=False preserves the pre-#209 truncate-to-shorter
+            # behaviour, and it is load-bearing: both lists are padded *up*
+            # to TARGET_NESTS_PER_TYPE (=4) above but neither is ever
+            # truncated, so their lengths are max(4, actual) and can differ.
+            # A module carrying more than four nests of a bee type — seeded
+            # data, or rows left behind by an earlier, larger target — zips
+            # short here and always has. Under strict=True that raises
+            # ValueError inside write_transaction and 500s the classification
+            # write path instead of writing the first four rows.
+            for nest_id, sealed in zip(existing_nest_ids, sealed_list, strict=False):
                 sealed_val = int(sealed * 100)
                 con.execute(
                     """

@@ -7,7 +7,6 @@ import sys
 from queue import Empty
 
 import pytest
-
 from services import log_ring
 
 VALID_KEY = "hf_dev_key_2026"  # dev fallback resolved when HIGHFIVE_API_KEY unset

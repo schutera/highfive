@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-
 # Canonical 12-hex-char ModuleId test fixtures (match test_module_endpoints.py).
 TEST_MAC_1 = "aabbccddeeff"
 TEST_MAC_2 = "001122334455"

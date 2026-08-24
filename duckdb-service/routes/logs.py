@@ -13,7 +13,6 @@ import os
 from queue import Empty
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
-
 from services.log_ring import get_recent, subscribe, unsubscribe
 
 logs_bp = Blueprint("logs", __name__)

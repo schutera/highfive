@@ -11,8 +11,9 @@ needing to also purge ``db.repository`` from ``sys.modules``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 
 def _conn_module():
@@ -25,7 +26,7 @@ def _conn_module():
 
 def _rows_as_dicts(cur) -> list[dict]:
     cols = [d[0] for d in cur.description]
-    return [dict(zip(cols, row)) for row in cur.fetchall()]
+    return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
 
 
 def query_all(sql: str, params: tuple = ()) -> list[dict]:
@@ -49,7 +50,7 @@ def query_one(sql: str, params: tuple = ()) -> dict | None:
             cur = con.execute(sql, params)
             cols = [d[0] for d in cur.description]
             row = cur.fetchone()
-            return dict(zip(cols, row)) if row is not None else None
+            return dict(zip(cols, row, strict=True)) if row is not None else None
         finally:
             con.close()
 

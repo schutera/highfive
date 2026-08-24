@@ -68,7 +68,11 @@ _subscribers: "set[queue.Queue]" = set()
 
 def _now_iso() -> str:
     # Millisecond precision, 'Z' suffix — matches the LogEntry contract.
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def _push(level: str, msg: str) -> dict:

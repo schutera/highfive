@@ -1,5 +1,6 @@
 import os
 import threading
+
 import duckdb
 
 DB_PATH = os.getenv("DUCKDB_PATH", "./data/app.duckdb")

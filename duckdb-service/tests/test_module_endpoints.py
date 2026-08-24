@@ -60,7 +60,7 @@ def _fetch_module(fresh_db, module_id):
         )
         cols = [d[0] for d in cur.description]
         row = cur.fetchone()
-        return dict(zip(cols, row)) if row else None
+        return dict(zip(cols, row, strict=True)) if row else None
     finally:
         con.close()
 
@@ -294,7 +294,7 @@ def test_record_image_stamps_uploaded_at_in_utc(client, fresh_db):
     canary" rather than a current-bug repro, which is the right kind
     of pin to leave behind for a class-of-bug fix.
     """
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     _seed_module(fresh_db, TEST_MAC_1)
     before = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -400,7 +400,7 @@ def test_activity_timeseries_empty_module_fills_zero_buckets(client, fresh_db):
 
 def test_activity_timeseries_groups_uploads_by_hour(client, fresh_db):
     """Two uploads in the same hour → one bucket with count=2."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     _seed_module(fresh_db, TEST_MAC_1)
     # Pick a timestamp well inside the default 7-day window.
@@ -453,7 +453,7 @@ def test_activity_timeseries_daily_groups_uploads_by_day(client, fresh_db):
     bucket *count* (which still hits 7 with all zeros), so the bug
     survived. This test asserts that data lands in the daily bucket.
     """
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     _seed_module(fresh_db, TEST_MAC_1)
     # Cluster all seeded stamps around midday so even a test run that
@@ -491,7 +491,7 @@ def test_activity_timeseries_daily_groups_uploads_by_day(client, fresh_db):
 
 def test_activity_timeseries_excludes_other_modules(client, fresh_db):
     """Activity for another module must not bleed into the result."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     _seed_module(fresh_db, TEST_MAC_1)
     _seed_module(fresh_db, TEST_MAC_2)
@@ -512,7 +512,9 @@ def test_activity_timeseries_excludes_other_modules(client, fresh_db):
 def _seed_heartbeat(fresh_db, module_id):
     con = fresh_db.connection.get_conn()
     try:
-        con.execute("INSERT INTO module_heartbeats (module_id) VALUES (?)", (module_id,))
+        con.execute(
+            "INSERT INTO module_heartbeats (module_id) VALUES (?)", (module_id,)
+        )
         con.commit()
     finally:
         con.close()
@@ -551,11 +553,42 @@ def test_delete_module_clears_every_referencing_table(client, fresh_db):
 
     assert client.delete(f"/modules/{TEST_MAC_1}").status_code == 200
 
-    assert _count(fresh_db, "SELECT COUNT(*) FROM module_configs WHERE id=?", (TEST_MAC_1,)) == 0
-    assert _count(fresh_db, "SELECT COUNT(*) FROM nest_data WHERE module_id=?", (TEST_MAC_1,)) == 0
-    assert _count(fresh_db, "SELECT COUNT(*) FROM image_uploads WHERE module_id=?", (TEST_MAC_1,)) == 0
-    assert _count(fresh_db, "SELECT COUNT(*) FROM module_heartbeats WHERE module_id=?", (TEST_MAC_1,)) == 0
-    assert _count(fresh_db, "SELECT COUNT(*) FROM measurements WHERE module_mac=?", (TEST_MAC_1,)) == 0
+    assert (
+        _count(
+            fresh_db, "SELECT COUNT(*) FROM module_configs WHERE id=?", (TEST_MAC_1,)
+        )
+        == 0
+    )
+    assert (
+        _count(
+            fresh_db, "SELECT COUNT(*) FROM nest_data WHERE module_id=?", (TEST_MAC_1,)
+        )
+        == 0
+    )
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM image_uploads WHERE module_id=?",
+            (TEST_MAC_1,),
+        )
+        == 0
+    )
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM module_heartbeats WHERE module_id=?",
+            (TEST_MAC_1,),
+        )
+        == 0
+    )
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM measurements WHERE module_mac=?",
+            (TEST_MAC_1,),
+        )
+        == 0
+    )
 
 
 def test_delete_module_matches_legacy_decimal_mac(client, fresh_db):
@@ -580,9 +613,28 @@ def test_delete_module_matches_legacy_decimal_mac(client, fresh_db):
 
     # The admin UI sends the canonical hex form; it must match the decimal row.
     assert client.delete(f"/modules/{canonical}").status_code == 200
-    assert _count(fresh_db, "SELECT COUNT(*) FROM module_configs WHERE id=?", (decimal_id,)) == 0
-    assert _count(fresh_db, "SELECT COUNT(*) FROM module_heartbeats WHERE module_id=?", (decimal_id,)) == 0
-    assert _count(fresh_db, "SELECT COUNT(*) FROM measurements WHERE module_mac=?", (decimal_id,)) == 0
+    assert (
+        _count(
+            fresh_db, "SELECT COUNT(*) FROM module_configs WHERE id=?", (decimal_id,)
+        )
+        == 0
+    )
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM module_heartbeats WHERE module_id=?",
+            (decimal_id,),
+        )
+        == 0
+    )
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM measurements WHERE module_mac=?",
+            (decimal_id,),
+        )
+        == 0
+    )
 
 
 def test_delete_module_unknown_returns_404(client, fresh_db):
@@ -591,6 +643,8 @@ def test_delete_module_unknown_returns_404(client, fresh_db):
 
 def test_delete_module_invalid_id_returns_400(client):
     assert client.delete("/modules/not-a-mac").status_code == 400
+
+
 # ---------- GET /image_uploads pagination ----------
 
 
@@ -599,7 +653,7 @@ def test_image_uploads_pagination_pages_newest_first(client, fresh_db):
     `total` across pages — not just a correctly-shaped envelope."""
     _seed_module(fresh_db, TEST_MAC_1)
     # Five uploads, ascending timestamps → "e" is newest.
-    for letter, day in zip("abcde", range(1, 6)):
+    for letter, day in zip("abcde", range(1, 6), strict=True):
         _seed_image_upload(
             fresh_db, TEST_MAC_1, f"{letter}.jpg", f"2024-06-0{day} 12:00:00"
         )
@@ -662,7 +716,7 @@ def test_image_uploads_malformed_limit_does_not_become_unbounded(client, fresh_d
     (the route only applies LIMIT/OFFSET when limit is set) and all 3
     rows would return; a finite cap honours the offset and returns 2."""
     _seed_module(fresh_db, TEST_MAC_1)
-    for letter, day in zip("abc", range(1, 4)):
+    for letter, day in zip("abc", range(1, 4), strict=True):
         _seed_image_upload(
             fresh_db, TEST_MAC_1, f"{letter}.jpg", f"2024-06-0{day} 12:00:00"
         )

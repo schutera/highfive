@@ -1,35 +1,13 @@
-[tool.ruff]
-# Match Black’s defaults for line length
-line-length = 88
-# Pin to the matrix floor (ADR-029), NOT a higher version: this config enables
-# the `UP` (pyupgrade) rule below, and on a `py311`+ target `ruff check --fix`
-# rewrites `datetime.now(timezone.utc)` → `datetime.now(UTC)` — reintroducing
-# the exact 3.11-only API that crashed prod (#180). ruff is NOT run in CI, so
-# this only guards a local `ruff --fix` / editor-on-save — but that is exactly
-# where the rewrite would silently sneak back in.
-target-version = "py310"
-exclude = ["venv", ".venv", "build", "dist", ".git"]
-
-# Enable common rule sets
-lint.select = [
-  "E", "F",   # pycodestyle + pyflakes
-  "I",        # isort (imports)
-  "B",        # bugbear (sensible warnings)
-  "UP"        # pyupgrade (modernize)
-]
-
-# Ignore noisy rules (adjust if needed)
-lint.ignore = [
-  "E203",     # whitespace before ':', Black-compatible
-  "E501"      # line length handled by formatter if you enable it
-]
-
-# Per-file ignores example (tests can be a bit looser)
-[tool.ruff.lint.per-file-ignores]
-"tests/**.py" = ["S101"] # example: allow assert if you enable flake8-bandit later
-
-# If you want Ruff to format too (replaces Black), keep this on:
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-docstring-code-format = true
+# image-service previously had its own [tool.ruff] configuration here.
+# As of issue #209, that config was consolidated into the repo-root
+# ruff.toml so both Python services (image-service, duckdb-service) share
+# a single ruff source of truth — see /ruff.toml.
+#
+# This file has no [build-system] or [project] table (image-service is
+# not installed as a package; deps come from requirements.txt), so once
+# the [tool.ruff] block is removed there is nothing left for pyproject.toml
+# to declare. It is kept as this pointer stub, rather than deleted,
+# because nothing in the repo *requires* its removal and a stub is less
+# surprising than a vanished file to anyone still looking for it here.
+# If a future change gives image-service an actual [build-system]/
+# [project] table, this comment can simply be dropped.

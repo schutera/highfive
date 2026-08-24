@@ -25,7 +25,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests
 
-
 TEST_MAC = "aabbccddeeff"
 SEED_LAT = 47.8086
 SEED_LNG = 9.6433

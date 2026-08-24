@@ -8,7 +8,6 @@ casing; dev mode is untouched.
 from __future__ import annotations
 
 import pytest
-
 from services.prod_guard import require_prod_key
 
 

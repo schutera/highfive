@@ -1,0 +1,45 @@
+# Shared ruff config for BOTH Python services (image-service, duckdb-service).
+# Standalone ruff.toml at the repo root: ruff resolves config from the
+# nearest ancestor, so this is the single source of truth for either
+# service's checkout-relative subtree. Do not add a competing
+# [tool.ruff] block to either service's pyproject.toml.
+#
+# /.python-version (ADR-029) is the single source of truth for the
+# runtime floor. target-version below MUST track it: this config enables
+# the `UP` (pyupgrade) rule, and on a `py311`+ target `ruff check --fix`
+# rewrites `datetime.now(timezone.utc)` -> `datetime.now(UTC)` —
+# reintroducing the exact 3.11-only API that crashed prod (#180). Pinning
+# target-version to the floor is what stops that autofix from firing.
+# scripts/check-python-version.sh asserts this value against
+# /.python-version; keep them in sync.
+line-length = 88
+target-version = "py310"
+exclude = ["venv", ".venv", "build", "dist", ".git"]
+
+# Enable common rule sets
+[lint]
+select = [
+  "E", "F",   # pycodestyle + pyflakes
+  "I",        # isort (imports)
+  "B",        # bugbear (sensible warnings)
+  "UP"        # pyupgrade (modernize)
+]
+
+ignore = [
+  "E203",     # whitespace before ':', formatter-compatible
+  "E501"      # line length is the formatter's job, not the linter's
+]
+
+# No [lint.per-file-ignores] block: the one carried over from
+# image-service's config ignored S101 in tests, which never did anything
+# because `S` (flake8-bandit) is not selected above. If you add one, note
+# that globs here resolve against THIS file's directory (the repo root)
+# and get no implicit "**/" prefix — a plain "tests/**.py" matches only
+# <root>/tests/*.py and silently misses both services' actual test dirs.
+# Write "**/tests/**.py" to match image-service/tests/ and
+# duckdb-service/tests/ from here.
+
+[format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

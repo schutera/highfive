@@ -1,6 +1,5 @@
 from datetime import date
 
-
 # Canonical 12-hex-char ModuleId test fixtures.
 TEST_MAC_1 = "aabbccddeeff"
 TEST_MAC_2 = "001122334455"
@@ -25,7 +24,7 @@ def _query(fresh_db, sql, params=()):
     try:
         cur = con.execute(sql, params)
         cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+        return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
     finally:
         con.close()
 

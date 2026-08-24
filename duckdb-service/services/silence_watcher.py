@@ -11,7 +11,7 @@ see chapter 11 "updated_at semantic overload".)
 
 from datetime import datetime
 
-from db.connection import lock, get_conn
+from db.connection import get_conn, lock
 from services.discord import send_discord_message
 
 # A module is "silent" once nothing has been heard from it for this long.

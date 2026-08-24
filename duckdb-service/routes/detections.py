@@ -15,11 +15,10 @@ detected snips here rather than opening the DB itself. Two routes:
 
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, request
-from pydantic import ValidationError
-
 from db.repository import query_all, write_transaction
+from flask import Blueprint, jsonify, request
 from models.module_id import ModuleId
+from pydantic import ValidationError
 
 detections_bp = Blueprint("detections", __name__)
 

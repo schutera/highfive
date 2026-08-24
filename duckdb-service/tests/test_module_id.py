@@ -8,10 +8,8 @@ non-string types).
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from models.module_id import ModuleId
-
+from pydantic import ValidationError
 
 # ---------------- canonicalization ----------------
 
@@ -84,9 +82,8 @@ def test_classification_output_rejects_legacy_modul_id_typo() -> None:
     """Deprecation window CLOSED (2026-07 audit, for #207): the legacy
     ``modul_id`` field name now fails validation."""
     import pytest
-    from pydantic import ValidationError
-
     from models.progress import ClassificationOutput
+    from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         ClassificationOutput.model_validate(

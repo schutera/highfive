@@ -21,7 +21,6 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import requests
-
 from db.connection import get_conn, lock
 from db.repository import write_transaction
 
@@ -199,7 +198,11 @@ def _parse_open_meteo(
     rows: list[tuple[datetime, str, float]] = []
     for field, metric in _METRIC_FIELDS.items():
         values = hourly.get(field) or []
-        for ts_str, val in zip(times, values):
+        # strict=False: Open-Meteo is a third-party API and a field's array
+        # can legitimately come back shorter than (or missing vs.) `times`
+        # (e.g. a metric absent from the response); truncate rather than
+        # raise, consistent with the null-gap tolerance documented above.
+        for ts_str, val in zip(times, values, strict=False):
             if val is None:
                 continue
             try:

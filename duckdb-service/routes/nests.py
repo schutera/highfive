@@ -1,6 +1,5 @@
-from flask import Blueprint, jsonify
-
 from db.repository import query_all
+from flask import Blueprint, jsonify
 
 nests_bp = Blueprint("nests", __name__)
 

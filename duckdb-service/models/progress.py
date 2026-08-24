@@ -1,5 +1,3 @@
-from typing import Dict
-
 from pydantic import BaseModel
 
 from models.module_id import ModuleId
@@ -17,7 +15,7 @@ class ClassificationOutput(BaseModel):
     """
 
     module_id: ModuleId
-    classification: Dict[str, Dict[int, float]]
+    classification: dict[str, dict[int, float]]
 
 
 BEE_TYPE_MAP = {

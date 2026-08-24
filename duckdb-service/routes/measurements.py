@@ -33,13 +33,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from db.repository import query_all, query_one, write_transaction
 from flask import Blueprint, jsonify, request
+from models.module_id import ModuleId
 from pydantic import ValidationError
 
-from db.repository import query_all, query_one, write_transaction
-from models.module_id import ModuleId
 from routes._bucketing import INTERVAL_STEP, floor_to_interval
-
 
 measurements_bp = Blueprint("measurements", __name__)
 
@@ -85,7 +84,10 @@ def _parse_ts(raw: Any) -> tuple[datetime | None, tuple | None]:
     ``Date.toISOString()``).
     """
     if not isinstance(raw, str) or not raw:
-        return None, (jsonify({"error": "'ts' must be a non-empty ISO 8601 string"}), 400)
+        return None, (
+            jsonify({"error": "'ts' must be a non-empty ISO 8601 string"}),
+            400,
+        )
     try:
         text = raw[:-1] if raw.endswith("Z") else raw
         parsed = datetime.fromisoformat(text)
@@ -225,7 +227,11 @@ def get_measurements(module_id: str):
         canonical = ModuleId.model_validate(module_id).root
     except ValidationError as e:
         cleaned = [
-            {"msg": err.get("msg"), "type": err.get("type"), "loc": list(err.get("loc", []))}
+            {
+                "msg": err.get("msg"),
+                "type": err.get("type"),
+                "loc": list(err.get("loc", [])),
+            }
             for err in e.errors()
         ]
         return jsonify({"error": "invalid module id", "detail": cleaned}), 400

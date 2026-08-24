@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-
 # Bucket sizes for time-bucketed read endpoints. The gap-fill cursor in
 # every caller and the SQL ``date_trunc`` stay in sync via this single
 # source of truth.

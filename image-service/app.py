@@ -19,7 +19,6 @@ from flask import (
     stream_with_context,
 )
 from pydantic import ValidationError
-
 from services.discord import send_discord_message
 from services.duckdb import DuckDBService
 from services.hole_detection import HoleDetector

@@ -519,9 +519,8 @@ def test_upload_heartbeat_called_with_battery_value(client, upload_env):
 
 def test_upload_survives_progress_count_failure(client, upload_env, monkeypatch):
     """A duckdb-service hiccup on /progress_count must not fail the upload."""
-    from requests import ConnectionError as RequestsConnectionError
-
     import services.duckdb as duckdb_svc_mod
+    from requests import ConnectionError as RequestsConnectionError
 
     def boom_get(url, **kwargs):
         raise RequestsConnectionError("duckdb-service down")
@@ -542,9 +541,8 @@ def test_upload_survives_progress_count_failure(client, upload_env, monkeypatch)
 def test_upload_survives_record_image_failure(client, upload_env, monkeypatch, capsys):
     """A duckdb-service hiccup on /record_image must not fail the upload, and
     the failure MUST be logged so the on-call can see an orphaned file."""
-    from requests import ConnectionError as RequestsConnectionError
-
     import services.duckdb as duckdb_svc_mod
+    from requests import ConnectionError as RequestsConnectionError
 
     posts = upload_env["duckdb_posts"]
 
@@ -579,9 +577,8 @@ def test_upload_survives_record_image_failure(client, upload_env, monkeypatch, c
 
 def test_upload_survives_heartbeat_failure(client, upload_env, monkeypatch):
     """A duckdb-service hiccup on /heartbeat must not fail the upload."""
-    from requests import ConnectionError as RequestsConnectionError
-
     import services.duckdb as duckdb_svc_mod
+    from requests import ConnectionError as RequestsConnectionError
 
     posts = upload_env["duckdb_posts"]
 

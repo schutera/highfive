@@ -9,9 +9,7 @@ See ADR-017 and ``services/weather_worker.py``'s
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
-
 from services.weather_worker import run_weather_backfill
-
 
 admin_weather_bp = Blueprint("admin_weather", __name__)
 

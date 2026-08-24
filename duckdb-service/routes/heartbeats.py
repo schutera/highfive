@@ -1,12 +1,11 @@
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, request
-from pydantic import ValidationError
-
-from db.connection import lock, get_conn
+from db.connection import get_conn, lock
 from db.repository import query_one, write_transaction
+from flask import Blueprint, jsonify, request
 from models.geo import coarsen_coord
 from models.module_id import ModuleId
+from pydantic import ValidationError
 
 heartbeats_bp = Blueprint("heartbeats", __name__)
 

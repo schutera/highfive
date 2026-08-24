@@ -8,7 +8,6 @@ import struct
 import cv2
 import numpy as np
 import pytest
-
 from services.image_guard import InvalidImageError, probe_jpeg
 
 

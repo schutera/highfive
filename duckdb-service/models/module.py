@@ -1,5 +1,3 @@
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from models.geo import coarsen_coord
@@ -34,7 +32,7 @@ class ModuleData(BaseModel):
     latitude: float = Field(ge=-90.0, le=90.0)
     longitude: float = Field(ge=-180.0, le=180.0)
     battery: int = Field(ge=0, le=100, validation_alias="battery_level")
-    email: Optional[str] = None
+    email: str | None = None
 
     # Generalize coordinates to ~1 km at the registration front door (issue
     # #145, ADR-020). Runs in ``mode="after"`` so the range constraints above

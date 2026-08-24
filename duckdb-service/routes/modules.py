@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta, timezone
-from flask import Blueprint, jsonify, request
-from pydantic import ValidationError
 
-from db.connection import lock, get_conn
-from db.repository import query_all, query_scalar, query_one, write_transaction
+from db.connection import get_conn, lock
+from db.repository import query_all, query_one, query_scalar, write_transaction
+from flask import Blueprint, jsonify, request
 from models.module import ModuleData
 from models.module_id import ModuleId
-from routes._bucketing import INTERVAL_STEP, floor_to_interval
+from pydantic import ValidationError
 from services.discord import send_discord_message
+
+from routes._bucketing import INTERVAL_STEP, floor_to_interval
 
 
 def _canonicalize_or_400(raw: str):

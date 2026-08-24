@@ -36,7 +36,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from requests import RequestException
-
 from services.hole_detection import BEE_TYPE_WIRE_TO_DB, DetectionResult, HoleDetector
 from services.image_guard import probe_jpeg
 from services.paths import reserve_filename, sanitize_upload_filename

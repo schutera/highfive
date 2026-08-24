@@ -12,7 +12,7 @@
 # actually ships or breaks:
 #   * image-service/Dockerfile.dev  FROM line  → python:<floor>-slim
 #   * duckdb-service/Dockerfile.dev FROM line  → python:<floor>-slim
-#   * image-service/pyproject.toml  ruff target-version → py<floor>
+#   * ruff.toml (repo root, shared by both services) target-version → py<floor>
 #   * .github/workflows tests.yml   each pytest matrix floor → '<floor>'
 #
 # Out of scope by design: prose docs and the *historical* mentions of
@@ -57,13 +57,13 @@ for df in image-service/Dockerfile.dev duckdb-service/Dockerfile.dev; do
   fi
 done
 
-# --- image-service ruff target-version: py<floor> --------------------------
-pyproject="image-service/pyproject.toml"
-if [[ ! -f "$pyproject" ]]; then
-  fails+=("$pyproject: missing (expected the image-service ruff config)")
-elif ! grep -qE "^[[:space:]]*target-version[[:space:]]*=[[:space:]]*\"${ruff_target}\"" "$pyproject"; then
-  got="$(grep -E '^[[:space:]]*target-version[[:space:]]*=' "$pyproject" || echo '<none>')"
-  fails+=("$pyproject: ruff target-version is '${got}', expected 'target-version = \"${ruff_target}\"'")
+# --- shared ruff target-version (both services): py<floor> -----------------
+ruff_config="ruff.toml"
+if [[ ! -f "$ruff_config" ]]; then
+  fails+=("$ruff_config: missing (expected the shared image-service + duckdb-service ruff config)")
+elif ! grep -qE "^[[:space:]]*target-version[[:space:]]*=[[:space:]]*\"${ruff_target}\"" "$ruff_config"; then
+  got="$(grep -E '^[[:space:]]*target-version[[:space:]]*=' "$ruff_config" || echo '<none>')"
+  fails+=("$ruff_config: ruff target-version is '${got}', expected 'target-version = \"${ruff_target}\"'")
 fi
 
 # --- CI matrices: each pytest matrix floor (first/lowest entry) == floor ----

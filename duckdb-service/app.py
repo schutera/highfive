@@ -2,19 +2,18 @@ import logging
 import os
 import time
 
-from flask import Flask, g, request
 from apscheduler.schedulers.background import BackgroundScheduler
-
 from db.schema import init_db
+from flask import Flask, g, request
 from routes.admin_weather import admin_weather_bp
 from routes.detections import detections_bp
 from routes.health import health_bp
+from routes.heartbeats import heartbeats_bp
 from routes.logs import logs_bp
 from routes.measurements import measurements_bp
 from routes.modules import modules_bp
 from routes.nests import nests_bp
 from routes.progress import progress_bp
-from routes.heartbeats import heartbeats_bp
 from services.backup import run_backup
 from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring

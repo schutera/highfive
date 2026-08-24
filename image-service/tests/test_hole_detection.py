@@ -20,7 +20,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from services.hole_detection import (
     BEE_TYPES_BY_SIZE,
     STATE_UNDETERMINED,

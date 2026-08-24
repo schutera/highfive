@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "Node16",
-    "lib": ["ES2020"],
+    // ES2022 lib (types only — `target` above still controls emitted
+    // syntax) so the checker knows about `AggregateError` and the
+    // `Error`/`TypeError` two-arg `{ cause }` constructor, both of which
+    // Node 22 supports natively and backend/tests/duckdb-*.test.ts exercise.
+    "lib": ["ES2022"],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,

@@ -65,7 +65,7 @@ function mockFetch(opts: {
 }) {
   const { modules, nests = [], progress = [], heartbeats = { summary: {} } } = opts;
 
-  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+  globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes('/heartbeats_summary')) {
       if (heartbeats === 'reject') {

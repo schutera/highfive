@@ -43,7 +43,7 @@ function upstreamModule() {
 }
 
 function installFetch() {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes('/heartbeats_summary')) {
       return new Response(JSON.stringify({ summary: {} }), { status: 200 });

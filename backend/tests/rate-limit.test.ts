@@ -48,7 +48,7 @@ describe('POST /api/waitlist rate limit', () => {
     process.env.DISCORD_WEBHOOK_URL = 'https://discord.example.invalid/webhook';
     const relay = vi.fn().mockResolvedValue({ ok: true, text: async () => '' });
     vi.stubGlobal('fetch', relay);
-    const { app } = await import('../src/app');
+    const { app } = await import('../src/app.js');
 
     const valid = { name: 'Test Bee', email: 'bee@example.com' };
 

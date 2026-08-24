@@ -25,7 +25,7 @@ describe('auth.ts startup guard', () => {
     // production-guard error message also contains "dev fallback" as
     // a substring, so a looser matcher would pass even if a regression
     // flipped which guard fires.
-    await expect(import('../src/auth')).rejects.toThrow(
+    await expect(import('../src/auth.js')).rejects.toThrow(
       /is set \(case-insensitively\) to the public dev fallback/,
     );
   });
@@ -37,7 +37,7 @@ describe('auth.ts startup guard', () => {
   it('refuses to load when HIGHFIVE_API_KEY is the dev fallback uppercased', async () => {
     process.env.HIGHFIVE_API_KEY = 'HF_DEV_KEY_2026';
 
-    await expect(import('../src/auth')).rejects.toThrow(
+    await expect(import('../src/auth.js')).rejects.toThrow(
       /is set \(case-insensitively\) to the public dev fallback/,
     );
   });
@@ -45,7 +45,7 @@ describe('auth.ts startup guard', () => {
   it('refuses to load when HIGHFIVE_API_KEY is the dev fallback mixed-case', async () => {
     process.env.HIGHFIVE_API_KEY = 'Hf_Dev_Key_2026';
 
-    await expect(import('../src/auth')).rejects.toThrow(
+    await expect(import('../src/auth.js')).rejects.toThrow(
       /is set \(case-insensitively\) to the public dev fallback/,
     );
   });
@@ -53,14 +53,14 @@ describe('auth.ts startup guard', () => {
   it('refuses to load when NODE_ENV=production and HIGHFIVE_API_KEY is unset', async () => {
     process.env.NODE_ENV = 'production';
 
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('refuses to load when NODE_ENV=production and HIGHFIVE_API_KEY is whitespace-only', async () => {
     process.env.NODE_ENV = 'production';
     process.env.HIGHFIVE_API_KEY = '   ';
 
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   // NODE_ENV typos: PR #84 senior-review caught that strict-equality on
@@ -79,19 +79,19 @@ describe('auth.ts startup guard', () => {
   it('refuses to load when NODE_ENV is Production (capital P) and no key', async () => {
     process.env.NODE_ENV = 'Production';
 
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('refuses to load when NODE_ENV is PRODUCTION (all caps) and no key', async () => {
     process.env.NODE_ENV = 'PRODUCTION';
 
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('refuses to load when NODE_ENV has trailing whitespace and no key', async () => {
     process.env.NODE_ENV = 'production ';
 
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('refuses to load when NODE_ENV="prod" and no key (unrecognised value, treated as prod)', async () => {
@@ -105,7 +105,7 @@ describe('auth.ts startup guard', () => {
     // throw containing "NODE_ENV"; the dev-fallback guard also mentions
     // NODE_ENV in its message, and a regression that flipped which path
     // fires would be invisible to a looser matcher.
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('refuses to load when NODE_ENV="staging" and no key (parallel-to-prod env)', async () => {
@@ -114,7 +114,7 @@ describe('auth.ts startup guard', () => {
     // Staging environments run with separate-from-prod secrets but
     // those secrets are still secrets. Routing staging to the public
     // dev fallback is no safer than routing production to it.
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   // Exotic whitespace: vim-with-autoindent and Windows-line-ending env
@@ -126,7 +126,7 @@ describe('auth.ts startup guard', () => {
   it('refuses to load with NODE_ENV containing tab/newline whitespace and no key', async () => {
     process.env.NODE_ENV = '\tproduction\n';
 
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   // Positive coverage for each entry in `env.ts`'s `DEV_ENV_TOKENS`
@@ -139,19 +139,19 @@ describe('auth.ts startup guard', () => {
 
   it('loads cleanly with NODE_ENV unset (safelist entry `""`)', async () => {
     // process.env.NODE_ENV not set in beforeEach already.
-    await expect(import('../src/auth')).resolves.toBeDefined();
+    await expect(import('../src/auth.js')).resolves.toBeDefined();
   });
 
   it('loads cleanly with NODE_ENV="development" (safelist entry; docker-compose.yml sets this)', async () => {
     process.env.NODE_ENV = 'development';
 
-    await expect(import('../src/auth')).resolves.toBeDefined();
+    await expect(import('../src/auth.js')).resolves.toBeDefined();
   });
 
   it('loads cleanly with NODE_ENV="test" (safelist entry; vitest default)', async () => {
     process.env.NODE_ENV = 'test';
 
-    await expect(import('../src/auth')).resolves.toBeDefined();
+    await expect(import('../src/auth.js')).resolves.toBeDefined();
   });
 
   // Negative pin: `'dev'` and `'testing'` were in the safelist through
@@ -164,19 +164,19 @@ describe('auth.ts startup guard', () => {
   it('refuses to load with NODE_ENV="dev" (not in safelist — was a round-3 cut)', async () => {
     process.env.NODE_ENV = 'dev';
 
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('refuses to load with NODE_ENV="testing" (not in safelist — was a round-3 cut)', async () => {
     process.env.NODE_ENV = 'testing';
 
-    await expect(import('../src/auth')).rejects.toThrow(/NODE_ENV=production/);
+    await expect(import('../src/auth.js')).rejects.toThrow(/NODE_ENV=production/);
   });
 
   it('loads cleanly with NODE_ENV=production and a strong key', async () => {
     process.env.NODE_ENV = 'production';
     process.env.HIGHFIVE_API_KEY = 'a-strong-32-byte-random-value-here';
 
-    await expect(import('../src/auth')).resolves.toBeDefined();
+    await expect(import('../src/auth.js')).resolves.toBeDefined();
   });
 });

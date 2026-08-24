@@ -38,7 +38,7 @@ function upstreamModule() {
 }
 
 function installCountingFetch() {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.includes('/heartbeats_summary')) {
       return new Response(JSON.stringify({ summary: {} }), { status: 200 });
@@ -105,7 +105,7 @@ describe('ModuleReadModel — short-TTL assembly cache', () => {
     // from cache. Otherwise a transient duckdb outage would freeze a
     // stuck `heartbeatsFailed` / empty fleet for a full TTL after
     // recovery.
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes('/heartbeats_summary')) {
         throw new Error('heartbeats endpoint unreachable');

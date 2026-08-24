@@ -66,13 +66,31 @@ make test-ui            # boots docker compose + production homepage, seeds, run
 Per-service unit tests (what CI runs):
 
 ```bash
-cd backend        && npm ci && npm test                       # vitest + supertest, 287 tests (30 files)
-cd homepage       && npm ci && npm test                       # vitest + jsdom, 191 tests (31 files)
+cd backend        && npm ci && npm test                       # vitest + supertest, 302 tests (33 files)
+cd homepage       && npm ci && npm test                       # vitest + jsdom, 198 tests (33 files)
 cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 292 tests
 cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 98 tests
 cd ESP32-CAM      && pio test -e native                       # Unity host tests, ~281 RUN_TEST across 20 suites
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware
 ```
+
+Static gates (also CI jobs `ts-quality` / `python-lint`, added in #208 / #209) —
+run from the repo root:
+
+```bash
+npm run typecheck            # tsc --noEmit across contracts/, backend/, homepage/
+npm run lint                 # ESLint flat config (eslint.config.js) over the same three
+bash scripts/ruff.sh check duckdb-service image-service        # ruff, under the root ruff.toml (py310 floor)
+bash scripts/ruff.sh format --check duckdb-service image-service
+```
+
+**Neither `npm test` nor `npm run dev` type-checks anything** — vitest and
+`tsx` both strip types through esbuild. `npm run typecheck` is the only thing
+that runs `tsc`, and before #208 the first `tsc` a backend change met ran on
+the production host with its output discarded. Use `bash scripts/ruff.sh`
+rather than a bare `ruff`: `ruff.exe` lands in Python's `Scripts\` dir, which
+is not on `PATH` by default on Windows, and the wrapper probes for a working
+interpreter instead of trusting `command -v` (#270).
 
 The `pio run -e esp32cam` line builds the firmware as a smoke test — it works without `GEO_API_KEY` and produces a binary that reports `(0, 0, 0)` on first boot. **Do not flash that binary** without first writing the Geolocation API key to `ESP32-CAM/GEO_API_KEY` (gitignored) or exporting `GEO_API_KEY` in your shell. Full setup: [`docs/07-deployment-view/esp-flashing.md` → "Provide the Geolocation API key"](docs/07-deployment-view/esp-flashing.md#provide-the-geolocation-api-key-one-time-before-first-build); mechanism + rotation: [`docs/08-crosscutting-concepts/auth.md` → "Third-party API keys: Geolocation"](docs/08-crosscutting-concepts/auth.md#third-party-api-keys-geolocation).
 

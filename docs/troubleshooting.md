@@ -187,13 +187,22 @@ Expect only `200` (deleted) and `404` (already gone) — any `000`/`5xx` means t
 `image-service/` dies in the pre-commit hook. Commits touching only
 TypeScript/Markdown succeed, which makes it look intermittent.
 
-**Cause.** `.lintstagedrc.json` runs `ruff check --fix` + `ruff format` on
-those paths, invoking `ruff` as a bare command. `pip install ruff` puts
-`ruff.exe` in Python's `Scripts\` directory, which is **not** on `PATH` by
-default on Windows — so `py -m ruff --version` works while `ruff --version`
-does not, and only Python-touching commits notice.
+**Cause.** `pip install ruff` puts `ruff.exe` in Python's `Scripts\`
+directory, which is **not** on `PATH` by default on Windows — so
+`py -m ruff --version` works while `ruff --version` does not, and only
+Python-touching commits notice.
 
-**Fix.** Install the pinned version and put `Scripts\` on `PATH`:
+**Fixed at the source since #209.** `.lintstagedrc.json` no longer invokes
+a bare `ruff`; it calls [`scripts/ruff.sh`](../scripts/ruff.sh), which
+probes for a real `ruff` binary and then falls back to `python3 -m ruff` /
+`python -m ruff` / `py -m ruff`, accepting a candidate only after actually
+running it (never on `command -v` alone — that matches the zero-byte
+Windows Store Python stub, which is issue #270). So on a current checkout
+this failure should not recur. Verify with `bash scripts/ruff.sh --version`.
+If **that** fails, no working ruff exists at all — `py -m pip install -r duckdb-service/requirements-dev.txt`.
+
+**Fix on an older checkout** (or if you want `ruff` on `PATH` for direct
+use): install the pinned version and add `Scripts\` to `PATH`:
 
 ```powershell
 py -m pip install ruff==0.14.1     # match duckdb-service/requirements-dev.txt

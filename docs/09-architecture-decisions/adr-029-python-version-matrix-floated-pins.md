@@ -87,3 +87,32 @@ real wheel.
   the code must tolerate. A `scripts/check-python-version.sh` guard (`make check-python-version`,
   wired into pre-push and a `python-version-consistency` CI job) fails the build if any of those
   surfaces drifts from `/.python-version`, so the three-way split cannot silently reopen.
+
+## Addendum — the ruff floor moved to the repo root and is now enforced in CI (#209)
+
+Two bullets above are superseded as of #209 and are kept only as the record of
+what was true before it:
+
+- ~~"The ruff floor is image-service-only, by design."~~ It no longer is. The
+  reasoning held ("`duckdb-service` has no ruff config, so it runs defaults —
+  E/F, no `UP` — and is not exposed to the `timezone.utc` → `UTC` rewrite"),
+  but it made the safety of the 3.10 floor depend on a service *not* opting
+  into a rule set. Any contributor adding a `duckdb-service/pyproject.toml`
+  with `UP` selected — a normal thing to do — would silently reopen #180 in
+  the service that owns the database. The config now lives in a repo-root
+  [`ruff.toml`](../../ruff.toml) governing both services with one
+  `target-version = "py310"`, and `image-service/pyproject.toml`'s duplicate
+  `[tool.ruff]` block is gone so there is a single source of truth. (Ruff
+  resolves config from the nearest ancestor directory, so a leftover
+  service-local config would have silently overridden the root one.)
+- ~~"Neither service runs ruff in CI; this guards local/editor use."~~ The
+  `python-lint` job now runs `ruff check` + `ruff format --check` over both
+  services on every PR. That closes the gap where a `--no-verify` push — or,
+  more commonly on Windows, a pre-commit hook that never ran because `ruff`
+  was not on `PATH` — shipped unlinted code with nothing downstream to notice.
+
+`scripts/check-python-version.sh` follows the config to its new home: it still
+asserts the ruff `target-version` against `/.python-version`, now reading the
+root `ruff.toml` instead of `image-service/pyproject.toml`. The invariant this
+ADR establishes is unchanged — `/.python-version` remains the single source of
+truth, and every surface is compared against it rather than generated from it.

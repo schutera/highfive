@@ -3,6 +3,13 @@
 # ruff.toml so both Python services (image-service, duckdb-service) share
 # a single ruff source of truth — see /ruff.toml.
 #
+# WARNING: do NOT add a [tool.ruff] block here. Ruff resolves config from
+# the nearest ancestor directory, so a local [tool.ruff] block would
+# SILENTLY override the root ruff.toml for this service only — undoing
+# the consolidation and reopening the gap where the py310 floor (which
+# guards against #180's datetime.UTC crash) existed in one service's
+# config alone.
+#
 # This file has no [build-system] or [project] table (image-service is
 # not installed as a package; deps come from requirements.txt), so once
 # the [tool.ruff] block is removed there is nothing left for pyproject.toml

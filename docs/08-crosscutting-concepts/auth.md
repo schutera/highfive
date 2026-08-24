@@ -245,12 +245,14 @@ string is safe to echo in logs — the API key is not).
 `GEO_API_KEY` and exposes it to `pio run -e esp32cam` as the
 `GEO_API_KEY` env var, where `extra_scripts.py` picks it up
 exactly as in a local build. The workflow's `on:` block fires on
-`push: [main, 'chore/test-harness']` and `pull_request: [main]` —
-no other event triggers it today, so the matrix is:
+`push: [main, production, 'chore/test-harness']` and
+`pull_request: [main]` — no other event triggers it today, so the
+matrix is:
 
 | Trigger                                                    | Secret available? | Pre-build guard | Build behaviour                                                                                                                                             |
 | ---------------------------------------------------------- | ----------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `push` to `main`                                           | required          | **enforced**    | Hard-fail with `::error::` annotation if the secret is missing. Catches "secret accidentally deleted" before a release artefact ships broken.               |
+| `push` to `production`                                     | required          | **enforced**    | Same hard-fail as `main`, and it matters more: `production` is the branch firmware OTA ships from, so a missing secret here would publish Null-Island firmware to the fleet. Added with the `repo-guards` job (#210) because `scripts/deploy.sh` pushes to this branch from the live host with `HUSKY=0`, bypassing every pre-push guard. |
 | `push` to `chore/test-harness`                             | yes               | skipped         | Real key baked in. Lets the CI gate self-test before being merged to `main`.                                                                                |
 | `pull_request` to `main` from same-repo branch             | yes               | skipped         | Real key baked in.                                                                                                                                          |
 | `pull_request` to `main` from a fork                       | no (by GitHub)    | skipped         | Build proceeds with empty key; the firmware's runtime guard skips the Google call. Fork PRs cannot be regression-tested against geolocation.                |

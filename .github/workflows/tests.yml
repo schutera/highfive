@@ -1,6 +1,7 @@
 # CI test workflow.
 #
-# Ten parallel jobs:
+# Fifteen parallel jobs. Keep this list in step with the `jobs:` map
+# below — it drifted once already, claiming ten while defining twelve.
 #
 #   esp-native      → host-side Unity tests for the pure C++ helpers
 #                     under ESP32-CAM/lib/. Fast (~1 min cold).
@@ -21,14 +22,38 @@
 #
 #   homepage-unit   → vitest + jsdom smoke tests for the React homepage.
 #
+#   ts-quality      → `tsc --noEmit` across all three npm workspaces plus
+#                     ESLint. Neither unit job type-checks: vitest and tsx
+#                     both strip types via esbuild without checking them
+#                     (#208).
+#
 #   doc-citations   → walks `path:line` references in docs/ and CLAUDE.md
 #                     and verifies each one resolves to a non-blank line
 #                     of the current source. Fast (<10 s).
+#
+#   shellcheck      → `shellcheck -S info` over scripts/*.sh and
+#                     ESP32-CAM/build.sh — the highest-blast-radius files
+#                     in the repo (#196).
+#
+#   duckdb-bind-claims
+#                   → asserts dev keeps duckdb-service LAN-reachable while
+#                     prod stays loopback-only, and that the docs say so.
 #
 #   python-version-consistency
 #                   → asserts the Dockerfiles, ruff floor, and pytest
 #                     matrices all match /.python-version (the single
 #                     source of truth). Guards the #180 root cause. Fast.
+#
+#   python-lint     → ruff check + ruff format --check over both Python
+#                     services under one root ruff.toml. Until #209 ruff
+#                     ran only in a pre-commit hook, and the py310 floor
+#                     that guards #180 covered image-service alone.
+#
+#   repo-guards     → the guard scripts that had no CI backstop before
+#                     #210 (hardcoded secrets, stale reset prose, stale
+#                     displayName rule) plus the python twin-file drift
+#                     gate (#241). Hooks are bypassable; the production
+#                     host bypasses them by design (HUSKY=0).
 #
 #   e2e-pipeline    → boots the four-service docker compose, drives it
 #                     with the Python mock ESP, asserts the upload chain
@@ -67,7 +92,12 @@ name: tests
 # consistency.
 on:
   push:
-    branches: [main, 'chore/test-harness']
+    # `production` is here for the repo-guards job (#210). scripts/deploy.sh
+    # installs with HUSKY=0 and then pushes the firmware auto-bump commit to
+    # `production` from the live host, so the one push that actually reaches
+    # the fleet runs no pre-push hook at all. Without this trigger that
+    # commit is the least-checked commit in the repo.
+    branches: [main, production, 'chore/test-harness']
   pull_request:
     branches: [main]
 
@@ -141,8 +171,12 @@ jobs:
       # security feature), and branch builds may legitimately be tested
       # without the production key. See
       # docs/08-crosscutting-concepts/auth.md "Third-party API keys".
-      - name: Guard — GEO_API_KEY must be set on main
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Guard — GEO_API_KEY must be set on main and production
+        # `production` is included since #210 added it to the push
+        # triggers: it is the branch firmware actually ships from, so a
+        # missing secret there would publish Null-Island firmware to the
+        # fleet — strictly worse than the same mistake on `main`.
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production')
         env:
           GEO_API_KEY: ${{ secrets.GEO_API_KEY }}
         run: |
@@ -287,6 +321,44 @@ jobs:
       - name: Run tests
         run: npm test --workspace homepage
 
+  ts-quality:
+    name: TypeScript typecheck + ESLint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          # Single root lockfile since the npm workspaces refactor.
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck all workspaces
+        # Neither existing TS job type-checks anything: vitest compiles
+        # via esbuild and `tsx` runs the dev server the same way, both of
+        # which strip types without checking them. Before #208 the first
+        # `tsc` in the pipeline ran on the production host inside
+        # `scripts/deploy.sh`, with its output sent to /dev/null — so a
+        # type-broken change merged green, got promoted to `production`,
+        # and then rolled back on every timer tick with a reason-less
+        # message. This job is what stops that reaching the host.
+        run: npm run typecheck
+
+      - name: Lint all workspaces
+        # Flat config at the repo root; `eslint-config-prettier` is last
+        # so nothing here fights prettier, which owns formatting via
+        # lint-staged. Until #208 the repo had no ESLint at all and the
+        # `eslint-disable` comments scattered through homepage/src were
+        # decorative — suppressing rules that no linter was running.
+        run: npm run lint
+
   doc-citations:
     name: Doc-citation drift gate
     runs-on: ubuntu-latest
@@ -365,6 +437,98 @@ jobs:
         # See ADR-029 and docs/11-risks-and-technical-debt/ "CI tested
         # only Python 3.11".
         run: bash scripts/check-python-version.sh
+
+  python-lint:
+    name: Python lint (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Lint does not need the runtime matrix — the floor that
+          # matters is `target-version` in the root ruff.toml, which
+          # `check-python-version.sh` pins to /.python-version. This is
+          # only the host interpreter that runs ruff itself.
+          python-version: '3.12'
+
+      - name: Install ruff
+        # Same pin both services carry in requirements-dev.txt. Pinned
+        # rather than floating because a ruff minor bump can add rules,
+        # which would turn an unrelated PR red.
+        run: pip install ruff==0.14.1
+
+      - name: Run ruff check
+        # Before #209 ruff ran only in the lint-staged pre-commit hook,
+        # so anyone bypassing hooks shipped unlinted code — and on
+        # Windows the bare `ruff` invocation frequently isn't on PATH at
+        # all, so the hook silently never ran. More importantly the
+        # py310 `target-version` pin, which stops UP-family autofixes
+        # rewriting `datetime.now(timezone.utc)` into the 3.11-only
+        # `datetime.UTC` that crashed both services in #180, lived only
+        # in image-service's config — duckdb-service ran under ruff
+        # defaults. One root ruff.toml now governs both.
+        #
+        # Scoped to the two services rather than `.` on purpose: the repo
+        # also carries Python under ESP32-CAM/, scripts/, tools/ and
+        # tests/e2e/ that has never been linted and currently trips 38
+        # findings. Widening the scope is worthwhile but is its own change
+        # — see #257 (repo hygiene). Keep this list in step with the
+        # matching glob in .lintstagedrc.json.
+        run: ruff check duckdb-service image-service
+
+      - name: Run ruff format --check
+        run: ruff format --check duckdb-service image-service
+
+  repo-guards:
+    name: Repo guard scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The four scripts below ran ONLY from .husky/pre-push until #210.
+      # A contributor pushing with --no-verify, a fork PR, a web IDE, or
+      # a CI bot bypassed all of them with no net — and CLAUDE.md
+      # forbidding --no-verify is not a control, it is a request. The
+      # production host bypasses them structurally: scripts/deploy.sh
+      # installs with HUSKY=0 and then pushes the firmware auto-bump to
+      # `production` itself, so the one push that ships to the field was
+      # the least checked push in the repo.
+      - name: Run check-no-hardcoded-api-keys.sh
+        # A security control, and the reason this job is not optional:
+        # greps for Google API key literals, Discord webhook URLs, and
+        # `WiFi.begin()` calls carrying a literal SSID/passphrase
+        # (issues #18, #201, #227).
+        run: bash scripts/check-no-hardcoded-api-keys.sh
+
+      - name: Run check-stale-display-name-rule.sh
+        # Catches the deprecated `displayName ?? name` label rule
+        # re-emerging. `??` only short-circuits on null, so it renders an
+        # empty string where `displayLabel.ts` renders the fallback. See
+        # docs/11-risks-and-technical-debt/ "`displayName ?? name` lived
+        # in seven docs and eight render sites".
+        run: bash scripts/check-stale-display-name-rule.sh
+
+      - name: Run check-stale-reset-prose.sh
+        # Catches the pre-#40 "hold IO0 for 5 seconds" factory-reset
+        # prose regressing into user-facing surfaces. GPIO0 is a strap
+        # pin; the instruction bricks the boot into flash mode.
+        run: bash scripts/check-stale-reset-prose.sh
+
+      - name: Run check-python-twins.sh
+        # Five Python modules are hand-duplicated between image-service
+        # and duckdb-service because Python has no workspace mechanism.
+        # The docstrings claimed they were "kept in sync" but nothing
+        # enforced it, and discord.py had already drifted (#241). Each
+        # service's pytest only imports its own copy, so a redaction fix
+        # applied to one log_ring.py passes both suites green while the
+        # other service keeps leaking.
+        run: bash scripts/check-python-twins.sh
 
   e2e-pipeline:
     name: End-to-end pipeline test

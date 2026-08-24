@@ -1,4 +1,8 @@
 {
-  "*.{ts,tsx,js,jsx,json,md,mdx,yml,yaml,css,scss,html}": "prettier --write",
-  "{duckdb-service,image-service}/**/*.py": ["ruff check --fix", "ruff format"]
+  "*.{ts,tsx,js,jsx}": ["eslint --fix", "prettier --write"],
+  "*.{json,md,mdx,yml,yaml,css,scss,html}": "prettier --write",
+  "{duckdb-service,image-service}/**/*.py": [
+    "bash scripts/ruff.sh check --fix",
+    "bash scripts/ruff.sh format"
+  ]
 }

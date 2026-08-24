@@ -38,12 +38,23 @@ fi
 
 # Windows Git Bash typically has only the `py` launcher, never `python3` —
 # the same detection ESP32-CAM/build.sh does for the same reason (#99).
+#
+# Probe FUNCTIONALLY, not by existence (#270): `command -v python3` on a
+# stock Windows install matches the Store alias stub — a zero-byte shim
+# that exits immediately (and would pop the Store UI on real invocation)
+# instead of running Python — so an existence-only probe "succeeds" and
+# then this gate fails on a machine that has a perfectly working `python`.
+# Accept the first candidate that actually runs a harmless script and
+# exits 0.
 PY=""
 for cand in python3 python py; do
-  if command -v "$cand" >/dev/null 2>&1; then PY="$cand"; break; fi
+  if "$cand" -c 'import sys; sys.exit(0)' >/dev/null 2>&1; then
+    PY="$cand"
+    break
+  fi
 done
 if [ -z "$PY" ]; then
-  echo "check-duckdb-bind-claims: SKIP — no python interpreter found."
+  echo "check-duckdb-bind-claims: SKIP — no working python interpreter found."
   exit 0
 fi
 

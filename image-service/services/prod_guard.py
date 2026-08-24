@@ -12,8 +12,8 @@ Production is signalled by `HIGHFIVE_ENV=production` — there is no
 set in `docker-compose.prod.yml`; a PM2/bare-metal host must set it in
 the server-side process config (see auth.md → "The secret").
 
-Twin module: `duckdb-service/services/prod_guard.py` (kept in sync the
-same way the two `log_ring.py` copies are).
+Twin module: `duckdb-service/services/prod_guard.py`, kept in sync by
+`scripts/check-python-twins.sh` (docstring-tolerant mode).
 """
 
 from __future__ import annotations

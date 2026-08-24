@@ -33,3 +33,10 @@ bash scripts/check-duckdb-bind-claims.sh || exit 1
 # /.python-version is the single source of truth. See
 # docs/11-risks-and-technical-debt/README.md "CI tested only Python 3.11".
 bash scripts/check-python-version.sh || exit 1
+
+# Catch the hand-duplicated image-service/duckdb-service Python twins
+# (log_ring, prod_guard, module_id, discord, test_prod_guard) drifting
+# apart with nothing to notice — exactly what happened to the discord.py
+# twin before this gate existed (#241). See
+# docs/11-risks-and-technical-debt/README.md for the twin-file relationship.
+bash scripts/check-python-twins.sh || exit 1

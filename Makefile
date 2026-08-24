@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version check-duckdb-bind-claims
+.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version check-duckdb-bind-claims check-python-twins
 
 help:
 	@echo "HiveHive — available make targets"
@@ -30,6 +30,8 @@ help:
 	@echo "                          Catch a hardcoded Google API key, Discord webhook, or WiFi.begin() Wi-Fi credential literal (issues #18, #227)"
 	@echo "  make check-python-version"
 	@echo "                          Verify Dockerfiles, ruff floor + CI matrices match /.python-version (#197)"
+	@echo "  make check-python-twins"
+	@echo "                          Verify the hand-duplicated image-service/duckdb-service Python modules haven't drifted (#241)"
 	@echo ""
 	@echo "Prerequisites:"
 	@echo "  firmware    →   arduino-cli with esp32:esp32 core installed"
@@ -134,3 +136,7 @@ check-duckdb-bind-claims:
 check-python-version:
 	@echo ">>> bash scripts/check-python-version.sh"
 	@bash scripts/check-python-version.sh
+
+check-python-twins:
+	@echo ">>> bash scripts/check-python-twins.sh"
+	@bash scripts/check-python-twins.sh

@@ -10,6 +10,7 @@ This is the single source of truth for module ID validation in
 image-service. The duckdb-service ships an identical copy in its
 ``models/module_id.py`` — Python has no npm-style workspace mechanism,
 and the class is small enough that duplication is the lower-pain option.
+Kept in sync by `scripts/check-python-twins.sh` (docstring-tolerant mode).
 """
 
 from __future__ import annotations

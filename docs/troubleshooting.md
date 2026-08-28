@@ -272,6 +272,40 @@ clobber the previous one). See CLAUDE.md's critical rules.
 from test suites running concurrently, not a prettier bug — let the suites
 finish and re-run the commit.
 
+### `git push` fails with "Python was not found; run without arguments to install from the Microsoft Store" (Windows, #270)
+
+**Symptom.** The pre-push hook dies in `scripts/check-duckdb-bind-claims.sh`
+with Microsoft's Store advertisement, on a machine where `python --version`
+prints a real version. Only local pushes are affected — the `duckdb-bind-claims`
+CI job runs on Linux and never sees it.
+
+**Cause.** A default Windows install ships
+`%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe`: an App Execution Alias
+stub whose only job is to open the Store. It is on `PATH`, so an interpreter
+probe written as `command -v python3` **succeeds on the stub** and stops there,
+never reaching the working `python` later in its candidate list. Invoked, the
+stub prints that message and exits non-zero:
+
+```console
+$ command -v python3          # finds the stub
+/c/Users/you/AppData/Local/Microsoft/WindowsApps/python3
+$ python3 -c 'import sys'; echo $?
+Python was not found; run without arguments to install from the Microsoft Store...
+49
+$ python -c 'import sys'; echo $?
+0
+```
+
+**Fix.** Already fixed on `main` — the script now probes by *running* each
+candidate rather than by `command -v`, so the stub fails the probe and the loop
+moves on to a working interpreter. Pull `main`. `ESP32-CAM/build.sh` has always
+probed this way (#99); only this script's loop did not, despite a comment
+claiming it matched.
+
+If you meet the same message from some *other* tool, disable the alias —
+Settings → Apps → Advanced app settings → App execution aliases → turn off
+`python3.exe` — or put a real Python ahead of it on `PATH`.
+
 ### Backend vitest run reports fewer files than exist / `Error: Worker exited unexpectedly` (Windows)
 
 **Symptom.** `cd backend && npm test` finishes green but with a file short —

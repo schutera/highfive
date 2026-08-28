@@ -30,13 +30,22 @@ fi
 # 2) Fall back to `<interpreter> -m ruff`, trying each candidate
 #    interpreter in turn and accepting only one that can actually run
 #    the ruff module.
-for cand in python3 python py; do
-  if "$cand" -m ruff --version >/dev/null 2>&1; then
-    exec "$cand" -m ruff "$@"
+#    The interpreter list itself lives in scripts/lib/python.sh (#273) so all
+#    three probing scripts agree; the extra requirement here is that the
+#    interpreter can also import ruff, so each candidate is tried against
+#    `-m ruff` rather than reusing resolve_python's plain import check.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib/python.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/python.sh"
+
+for cand in "${PYTHON_CANDIDATES[@]}"; do
+  read -ra try <<<"$cand"
+  if "${try[@]}" -m ruff --version >/dev/null 2>&1; then
+    exec "${try[@]}" -m ruff "$@"
   fi
 done
 
-echo "ruff.sh: FAIL — no working ruff found (checked: ruff on PATH," >&2
-echo "  python3 -m ruff, python -m ruff, py -m ruff)." >&2
+echo "ruff.sh: FAIL — no working ruff found (checked: ruff on PATH, then" >&2
+echo "  -m ruff under each of: $(python_candidates_tried))." >&2
 echo "  Install the pinned version: pip install -r duckdb-service/requirements-dev.txt" >&2
 exit 1

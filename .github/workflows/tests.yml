@@ -31,7 +31,8 @@
 #                     and verifies each one resolves to a non-blank line
 #                     of the current source. Fast (<10 s).
 #
-#   shellcheck      → `shellcheck -S info` over scripts/*.sh and
+#   shellcheck      → `shellcheck -x -S info` over scripts/*.sh,
+#                     scripts/lib/*.sh and
 #                     ESP32-CAM/build.sh — the highest-blast-radius files
 #                     in the repo (#196).
 #
@@ -397,7 +398,14 @@ jobs:
         # a root-run script handling paths. All files are clean at this level
         # today, so the gate costs nothing to keep. shellcheck ships
         # preinstalled on ubuntu-latest runners.
-        run: shellcheck -S info scripts/*.sh ESP32-CAM/build.sh
+        #
+        # `-x` follows `source`d files so the shared interpreter probe in
+        # scripts/lib/ is analysed in the context of each caller (#273);
+        # without it every `.` line reports SC1091 at info level and this job
+        # goes red. scripts/lib/*.sh is listed explicitly because scripts/*.sh
+        # does not match a subdirectory, and an unlinted helper sourced by
+        # three linted scripts is the gap this job exists to close.
+        run: shellcheck -x -S info scripts/*.sh scripts/lib/*.sh ESP32-CAM/build.sh
 
   duckdb-bind-claims:
     name: DuckDB bind/docs consistency gate

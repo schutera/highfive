@@ -36,25 +36,19 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 0
 fi
 
-# Windows Git Bash typically has only the `py` launcher, never `python3` —
-# the same detection ESP32-CAM/build.sh does for the same reason (#99).
-#
-# Probe FUNCTIONALLY, not by existence (#270): `command -v python3` on a
-# stock Windows install matches the Store alias stub — a zero-byte shim
-# that exits immediately (and would pop the Store UI on real invocation)
-# instead of running Python — so an existence-only probe "succeeds" and
-# then this gate fails on a machine that has a perfectly working `python`.
-# Accept the first candidate that actually runs a harmless script and
-# exits 0.
-PY=""
-for cand in python3 python py; do
-  if "$cand" -c 'import sys; sys.exit(0)' >/dev/null 2>&1; then
-    PY="$cand"
-    break
-  fi
-done
-if [ -z "$PY" ]; then
+# Interpreter probe: one candidate list and one functional check for the whole
+# repo, in scripts/lib/python.sh (#273). Both rules that matter -- probe by
+# executing rather than by `command -v`, and try `py -3` first -- are explained
+# there rather than restated here, so they cannot drift apart again.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib/python.sh
+. "$repo_root/scripts/lib/python.sh"
+
+if ! resolve_python; then
   echo "check-duckdb-bind-claims: SKIP — no working python interpreter found."
+  echo "  Tried: $(python_candidates_tried). Each was absent or failed to run"
+  echo "  (on Windows, python3.exe is often the Store alias stub — see"
+  echo "  docs/troubleshooting.md)."
   exit 0
 fi
 
@@ -74,7 +68,7 @@ bind_host_ip() { # bind_host_ip <compose-file>
     printf 'PARSE-ERROR'
     return 0
   fi
-  printf '%s' "$rendered" | "$PY" -c '
+  printf '%s' "$rendered" | "${PYTHON[@]}" -c '
 import json, sys
 try:
     doc = json.load(sys.stdin)

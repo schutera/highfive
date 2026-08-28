@@ -356,35 +356,35 @@ if [ "${FLASH_MODE}" != "dio" ]; then
   exit 1
 fi
 
-# Resolve a working interpreter. On Linux/macOS this is python3. On
-# Windows-from-python.org it is `python`. We MUST validate each
-# candidate by actually running `--version` because Windows ships an
-# MS Store stub at python3.exe that is on PATH (so `command -v` finds
-# it) but exits non-zero with "Python wurde nicht gefunden" when
-# invoked. Probing with --version catches the stub. If ESPTOOL is the
-# Windows .exe we invoke it directly and skip Python entirely.
+# Resolve an interpreter for esptool.py. If ESPTOOL is the Windows .exe we
+# invoke it directly and skip Python entirely -- that short-circuit stays ahead
+# of the probe, since the .exe bundles its own interpreter and esptool module.
+#
+# The fallback path used to try only python3 and python. On a stock Windows 11
+# + Git Bash box neither resolves and only the `py` launcher does, so this
+# aborted on a machine with a perfectly good Python 3.12 (#273). It has been
+# masked by the .exe short-circuit above, not prevented by the probe.
+#
+# The candidate list and the functional check now live in
+# scripts/lib/python.sh, shared with scripts/ruff.sh and
+# scripts/check-duckdb-bind-claims.sh, so the three cannot drift apart again.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../scripts/lib/python.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/lib/python.sh"
+
 if [[ "${ESPTOOL}" == *.exe ]]; then
   MERGE_CMD=( "${ESPTOOL}" )
 else
-  PYTHON=""
-  for candidate in python3 python; do
-    candidate_path="$(command -v "${candidate}" || true)"
-    if [ -n "${candidate_path}" ] && "${candidate_path}" --version >/dev/null 2>&1; then
-      PYTHON="${candidate_path}"
-      break
-    fi
-  done
-  if [ -z "${PYTHON}" ]; then
-    echo "ERROR: no working python3/python interpreter found on PATH." >&2
-    echo "       Tried: python3, python (in that order). Each was either" >&2
-    echo "       absent or failed --version (the Microsoft Store stub at" >&2
-    echo "       python3.exe is a known offender: on PATH but exits non-zero" >&2
-    echo "       with 'Python wurde nicht gefunden')." >&2
+  if ! resolve_python; then
+    echo "ERROR: no working Python interpreter found on PATH." >&2
+    echo "       Tried: $(python_candidates_tried). Each was either absent or" >&2
+    echo "       failed to run (the Microsoft Store stub at python3.exe is a" >&2
+    echo "       known offender: on PATH but exits non-zero)." >&2
     echo "       On Windows, install Python from python.org and ensure it" >&2
     echo "       is on PATH ahead of the MS Store alias." >&2
     exit 1
   fi
-  MERGE_CMD=( "${PYTHON}" "${ESPTOOL}" )
+  MERGE_CMD=( "${PYTHON[@]}" "${ESPTOOL}" )
 fi
 
 "${MERGE_CMD[@]}" --chip esp32 merge_bin \

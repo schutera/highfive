@@ -181,6 +181,46 @@ curl.exe -s "$base/api/images?module_id=$mac&limit=1"
 
 Expect only `200` (deleted) and `404` (already gone) — any `000`/`5xx` means the run isn't reaching the server, stop and investigate. **The UI count self-corrects:** the dashboard/admin "IMAGES" value is the live `real_image_count` ([`backend/src/database.ts`](../backend/src/database.ts)'s `fetchAndAssemble`), not the increment-only `module_configs.image_count`, so it drops as you delete — no separate counter fix needed.
 
+### A script says it cannot find Python, but `py -3 --version` works (Windows)
+
+**Symptom.** `ESP32-CAM/build.sh`, `scripts/ruff.sh` or a pre-push gate reports
+that no interpreter was found, on a machine where Python is installed and
+working.
+
+**Cause.** Neither `python3` nor `python` resolves in Git Bash on a stock
+Windows install — only the `py` launcher does:
+
+```console
+$ command -v python3 ; command -v python ; command -v py
+/c/WINDOWS/py
+
+$ py -3 -c "import sys; print(sys.version.split()[0])"
+3.12.9
+```
+
+Separately, a default Windows install puts an App Execution Alias stub at
+`%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe`, which *is* on `PATH` and
+exits non-zero when invoked (#270).
+
+**Fix.** All three scripts now share one probe,
+[`scripts/lib/python.sh`](../scripts/lib/python.sh), which tries `py -3` first
+and accepts a candidate only after actually running it. If the shared probe
+still finds nothing, the message lists everything it tried — install Python
+from python.org and put it on `PATH` ahead of the Store alias, or disable the
+alias under Settings → Apps → Advanced app settings → App execution aliases.
+
+Adding a new script that needs Python? Source the helper rather than writing a
+fourth probe (#273):
+
+```bash
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib/python.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/python.sh"
+resolve_python || { echo "no python: tried $(python_candidates_tried)" >&2; exit 1; }
+"${PYTHON[@]}" -c 'import sys'
+```
+
+
 ### `git commit` fails with `Der Befehl "ruff" ... konnte nicht gefunden werden` / `ruff: command not found`
 
 **Symptom.** A commit that touches any `.py` file under `duckdb-service/` or

@@ -23,6 +23,12 @@ lib/
 # was added on the author's disk but invisible to git, so CI would fail
 # at `tsc` on the missing import in `homepage/src/components/MapView.tsx`.
 !homepage/src/lib/
+# `scripts/lib/` is likewise source, not build output: the shared
+# Python-interpreter probe sourced by ruff.sh, check-duckdb-bind-claims.sh and
+# ESP32-CAM/build.sh (#273). Third carve-out for the same reason, and the third
+# time `lib/` has nearly swallowed a hand-written file -- an ignored helper that
+# three tracked scripts `source` would fail on every machine but the author's.
+!scripts/lib/
 lib64/
 parts/
 sdist/

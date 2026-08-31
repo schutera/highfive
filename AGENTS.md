@@ -12,6 +12,8 @@ Highest-priority items from the 2026-08-18 repo audit (tracking epic #262), in t
 4. **#229 follow-up — implement the ADR-032 device-identity fleet key.** [ADR-032](docs/09-architecture-decisions/adr-032-device-identity-for-ingest.md) (Proposed) records the decision but ships no code: the actual `X-Module-Key` — build-time injection, server-side `hmac.compare_digest` check, mixed-fleet grace window during OTA rollout — is a separate follow-up. Pick up once the ADR is reviewed/accepted. Effort M.
 5. **#229 follow-up — non-destructive edit path for a module's `name`/`email`/location.** Since #229's fix, the only way to relocate or correct a module's firmware-reported identity is `DELETE /modules/<id>` + re-register (admin-gated, correctly — but it wipes `daily_progress`/`nest_data`/`image_uploads`/`module_heartbeats`/`measurements` for that module id, not just the identity fields; see [`docs/08-crosscutting-concepts/auth.md`](docs/08-crosscutting-concepts/auth.md)). Add admin-gated `PATCH /modules/<id>/firmware_name`, `.../email`, and `.../location` endpoints mirroring the existing `PATCH /modules/<id>/display_name` — **not** `.../name`, which would collide with the backend's existing `PATCH /api/modules/:id/name` (already taken, writes `display_name`; see `backend/src/app.ts`) and reintroduce exactly the field-name-drift bug `api-contracts.md`'s "Field-name drift to watch for" section exists to prevent. Effort S–M.
 
+Two or more queue items (or one item with live follow-ups) usually ship together as one package — drive that shape of work with the `deliver-package` skill, and remember that clearing a queue entry is part of that package's commit.
+
 ## Project at a glance
 
 HiveHive monitors wild-bee nesting activity. ESP32-CAM modules upload images to a Python image service, a Python DuckDB service owns persistence, a Node/Express backend aggregates for the UI, and a React + Vite homepage renders dashboard, map, and setup wizard. Dev-side everything runs under `docker compose` on the shared bridge network `net`.
@@ -139,6 +141,17 @@ bash scripts/check-agent-context.sh
 
 It also runs from `make check-agent-context`, `.husky/pre-push`, and the `repo-guards` CI job. The gate reports drift instead of overwriting either agent's native file format — reconcile manually.
 
+## Skill library
+
+Project-owned skills live as byte-identical pairs in `.claude/skills/` and `.agents/skills/`, mirrored by `check-agent-context.sh` (`skill-creator` under `.claude/skills/` is a host-installed plugin, not project-owned). The authoritative trigger for each skill is its frontmatter `description`; this table is a routing map, not a substitute. Reach for a skill _before_ acting, not after.
+
+| Skill              | Reach for it when…                                                                                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deliver-package`  | taking on a whole cluster of issues at once ("take the next package", "pick the next issues and implement them") — priority queue → choose → implement → gates → senior-review → draft PR |
+| `analyze-pr`       | analyzing a PR end to end, or you need a manual-test checklist for what remains                                                                                                           |
+| `esp32-onboarding` | onboarding or troubleshooting a physical module                                                                                                                                           |
+| `asd-ste100`       | writing text another agent or system will parse — error strings, tool descriptions, status reports, inter-agent instructions — or doc prose that reads dense or ambiguous                 |
+
 ## Updating documentation (mandatory)
 
 Every PR that changes behaviour, adds a feature, or fixes a non-obvious bug must leave the docs better than found. **And every working session that teaches you a lesson — even one that produces no PR and no repo code at all (a debugging dead-end, a hardware / driver / Wi-Fi / firewall quirk, an environment or ops gotcha, a wrong assumption you had to correct mid-task) — owes that lesson to the docs before the task is done.** After completing your work, run through this lookup and update the named target(s):
@@ -164,6 +177,8 @@ Every PR that changes behaviour, adds a feature, or fixes a non-obvious bug must
 | Hardware setup quirk (browser, Wi-Fi, firewall)              | [`docs/08-crosscutting-concepts/hardware-notes.md`](docs/08-crosscutting-concepts/hardware-notes.md)                                                                                                                          |
 
 If unsure, default to [`docs/11-risks-and-technical-debt/`](docs/11-risks-and-technical-debt/README.md) — it is the catch-all for anything you don't want the next person to have to relearn.
+
+Write doc prose in plain, unambiguous English — and when the text will be parsed by another agent or system (an error string, a tool description, an inter-agent instruction, a status report), run the `asd-ste100` skill before you call the prose done.
 
 ### Verifying UI claims, wire shapes, and component-test fixtures
 
@@ -194,6 +209,8 @@ These are the most-violated rules from past incidents. Full list in [`docs/02-co
 ## Mandatory end-of-implementation gate
 
 Every non-trivial change — feature work, bug fix, doc restructure, refactor — MUST run through the [`senior-reviewer`](.claude/agents/senior-reviewer.md) subagent before it leaves the working tree. Invoke it via the Agent tool with `subagent_type: senior-reviewer`. It is harsh on purpose: a senior-staff-engineer persona that reads the actual diff, anchors every concrete claim to a path (preferring `` path's `symbol` `` over `path:line`), and ranks issues P0/P1/P2.
+
+opencode's task tool does not expose this subagent type ("Unknown agent type") — run a `general` agent whose prompt embeds `.claude/agents/senior-reviewer.md` and this section's gate rules instead.
 
 When to run it:
 

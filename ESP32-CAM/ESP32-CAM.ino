@@ -56,6 +56,30 @@ static_assert(TASK_WDT_TIMEOUT_S >= 60,
 // FACTORY_RESET_SETTLE_MS and WIFI_FAIL_AP_FALLBACK_THRESH live in
 // esp_init.h alongside the NVS helpers they gate on.
 
+// setup() and loop() both run on the Arduino core's loopTask, whose stack is
+// 8192 bytes by default (ARDUINO_LOOP_STACK_SIZE, in the core's main.cpp — a
+// number that appears nowhere in this repo, which is half of why this bit).
+// That is not enough for an mbedTLS handshake that parses and verifies a
+// certificate chain against the pinned ISRG Root X1: `httpOtaCheckAndApply`
+// tripped the canary on every boot and panicked ("Stack canary watchpoint
+// triggered (loopTask)") at breadcrumb `ota:manifest_fetch`, before the
+// manifest's status line was ever read — a ~5.7 s crash loop in which the
+// module joined WiFi and then never reached registration (#276).
+//
+// 16384 is a value verified to clear the observed overflow on hardware, NOT a
+// measured bound. setup() does verified TLS at least four times (OTA manifest,
+// geolocation, new_module registration, boot heartbeat) and loop() uploads
+// over TLS on every capture — all from this one task, all spending from this
+// one budget. Before adding or deepening a TLS call site, measure the real
+// headroom with uxTaskGetStackHighWaterMark(NULL) rather than assuming this
+// number still covers it. Rationale and the failure signature:
+// docs/06-runtime-view/esp-reliability.md's "loopTask stack budget".
+//
+// Note no automated gate covers this: `pio test -e native` has no Arduino
+// runtime and no TLS, and `pio run -e esp32cam` only proves the firmware
+// links. Both were green while the firmware could not finish setup().
+SET_LOOP_TASK_STACK_SIZE(16384);
+
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
 int counter = 0;

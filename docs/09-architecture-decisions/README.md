@@ -50,6 +50,7 @@ and link backwards.
 | [030](adr-030-production-as-gated-release-branch.md)        | `production` is the single gated release branch (services + firmware)            | Accepted                                                          |
 | [031](adr-031-backup-file-copy-not-export-database.md)      | Retained backups are gzip'd file copies, not `EXPORT DATABASE`                    | Accepted                                                          |
 | [032](adr-032-device-identity-for-ingest.md)                | Device identity for `/new_module` and `/heartbeat` — interim compiled-in fleet key | Proposed                                                          |
+| [033](adr-033-claude-codex-agent-context-parity.md)         | Claude Code ↔ Codex CLI agent-context parity, enforced by a bash gate              | Accepted                                                          |
 
 ## When to create an ADR
 

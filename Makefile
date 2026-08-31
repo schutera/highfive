@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version check-duckdb-bind-claims check-python-twins
+.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version check-duckdb-bind-claims check-python-twins check-agent-context
 
 help:
 	@echo "HiveHive — available make targets"
@@ -32,6 +32,8 @@ help:
 	@echo "                          Verify Dockerfiles, ruff floor + CI matrices match /.python-version (#197)"
 	@echo "  make check-python-twins"
 	@echo "                          Verify the hand-duplicated image-service/duckdb-service Python modules haven't drifted (#241)"
+	@echo "  make check-agent-context"
+	@echo "                          Verify CLAUDE.md/AGENTS.md, .claude/.codex agents, and .claude/.agents skills stay in sync"
 	@echo ""
 	@echo "Prerequisites:"
 	@echo "  firmware    →   arduino-cli with esp32:esp32 core installed"
@@ -140,3 +142,7 @@ check-python-version:
 check-python-twins:
 	@echo ">>> bash scripts/check-python-twins.sh"
 	@bash scripts/check-python-twins.sh
+
+check-agent-context:
+	@echo ">>> bash scripts/check-agent-context.sh"
+	@bash scripts/check-agent-context.sh

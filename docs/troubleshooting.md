@@ -952,6 +952,27 @@ New-NetFirewallRule -DisplayName "HiveHive image-service (8000)" -Direction Inbo
 New-NetFirewallRule -DisplayName "HiveHive duckdb-service (8002)" -Direction Inbound -Protocol TCP -LocalPort 8002 -Action Allow -Profile Any
 ```
 
+### A Private firewall rule can still fail silently if the WLAN profile is Public
+
+**Symptom.** A module registers (it shows up in `curl http://localhost:8002/modules`) but never uploads images, even after adding the port 8000/8002 `-Profile Any` firewall rules above.
+
+**Cause.** Windows' **network category** (Public vs Private) gates inbound LAN traffic independently of firewall rules — a Public-profile WLAN silently drops inbound TCP from LAN devices even with an explicit Allow rule. Check both the rule's profile and the network's actual active category:
+
+```powershell
+Get-NetFirewallRule -DisplayName "HiveHive*" | Select-Object DisplayName, Profile
+Get-NetConnectionProfile
+```
+
+**Fix.** Set the WLAN to Private:
+
+```powershell
+Set-NetConnectionProfile -InterfaceAlias "WLAN" -NetworkCategory Private
+```
+
+A **domain-managed machine may have this blocked by Group Policy** — the command fails or silently has no effect. In that case, scope the firewall rule itself to `-Profile Any` (already done for the rules above) rather than relying on the category change.
+
+**If a Private profile + a `-Profile Any` rule still fails**, the cause is a flaky link or Wi-Fi band-isolation (AP client isolation, mesh-node hairpin), not the firewall — move on to a wired/same-AP-hop test rather than re-checking firewall state.
+
 ### Watch live server traffic to confirm receipt
 
 ```bash

@@ -1,0 +1,10 @@
+# Keep the checked-in root instructions within a declared Codex project
+# budget. Codex's own built-in default is 32768 bytes; this repo's
+# CLAUDE.md/AGENTS.md (~33.5KB) is deliberately allowed slightly above that
+# after two rounds of trimming judged the remaining content (active-incident
+# firmware-release warnings, the mandatory-doc-update gate) not worth
+# cutting further just to clear a byte count — see ADR-033's "Negative"
+# consequences for the reasoning and the risk this accepts. Modest headroom
+# above the current size for normal growth; scripts/check-agent-context.sh
+# enforces AGENTS.md stays under this number regardless.
+project_doc_max_bytes = 36864

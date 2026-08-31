@@ -499,7 +499,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The four scripts below ran ONLY from .husky/pre-push until #210.
+      # check-no-hardcoded-api-keys.sh, check-stale-display-name-rule.sh, and
+      # check-stale-reset-prose.sh below ran ONLY from .husky/pre-push until #210.
       # A contributor pushing with --no-verify, a fork PR, a web IDE, or
       # a CI bot bypassed all of them with no net — and CLAUDE.md
       # forbidding --no-verify is not a control, it is a request. The
@@ -537,6 +538,14 @@ jobs:
         # applied to one log_ring.py passes both suites green while the
         # other service keeps leaking.
         run: bash scripts/check-python-twins.sh
+
+      - name: Run check-agent-context.sh
+        # Claude Code reads CLAUDE.md/.claude/; Codex CLI reads its own
+        # AGENTS.md/.agents/.codex/ equivalents. Nothing but this script
+        # enforces the two stay in sync, so a CLAUDE.md edit that forgets
+        # AGENTS.md (or a skill/agent update that only lands on one side)
+        # would otherwise ship two agents working from different context.
+        run: bash scripts/check-agent-context.sh
 
   e2e-pipeline:
     name: End-to-end pipeline test

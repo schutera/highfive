@@ -40,3 +40,9 @@ bash scripts/check-python-version.sh || exit 1
 # twin before this gate existed (#241). See
 # docs/11-risks-and-technical-debt/README.md for the twin-file relationship.
 bash scripts/check-python-twins.sh || exit 1
+
+# Catch Claude Code and Codex CLI receiving different project context:
+# CLAUDE.md/AGENTS.md going byte-out-of-sync, .claude/agents vs
+# .codex/agents drifting, or .claude/skills vs .agents/skills drifting.
+# See CLAUDE.md "Claude/Codex context parity".
+bash scripts/check-agent-context.sh || exit 1

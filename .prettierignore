@@ -67,3 +67,16 @@ pnpm-lock.yaml
 # Lesson: docs/11-risks-and-technical-debt/README.md → "A markdown formatter
 # rewrites emphasis, and this repo writes identifiers in prose".
 docs/**/*.md
+
+# Claude Code <-> Codex CLI mirrors (ADR-033) — these must stay byte-identical
+# to their .claude/ counterparts, which are NOT reformatted on every commit
+# (only touched by an actual content edit). Letting prettier reformat just
+# the .agents/.codex copy the moment it's newly staged desyncs the mirror
+# immediately — this happened for real committing ADR-033 itself
+# (.agents/skills/esp32-onboarding/SKILL.md's table columns got re-padded,
+# .claude/skills/esp32-onboarding/SKILL.md's didn't, and
+# scripts/check-agent-context.sh correctly failed on the mismatch).
+# scripts/check-agent-context.sh is the actual sync gate; prettier must not
+# independently opine on either side.
+.agents/skills/**
+.codex/**

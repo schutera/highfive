@@ -253,6 +253,8 @@ duckdb-service/data/
 .claude/skills/*
 !.claude/skills/analyze-pr/
 !.claude/skills/esp32-onboarding/
+!.claude/skills/asd-ste100/
+!.claude/skills/deliver-package/
 
 # Codex CLI — mirror of the Claude Code allow-list above (skills only;
 # .codex/config.toml and .codex/agents/*.toml are small and fully committed,
@@ -262,6 +264,8 @@ duckdb-service/data/
 .agents/skills/*
 !.agents/skills/analyze-pr/
 !.agents/skills/esp32-onboarding/
+!.agents/skills/asd-ste100/
+!.agents/skills/deliver-package/
 
 # FreeCAD autosave backups — the .FCStd is the source of truth, the
 # timestamped .FCBak files are noise that drift in every working tree.

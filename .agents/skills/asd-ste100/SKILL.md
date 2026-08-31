@@ -1,6 +1,6 @@
 ---
 name: asd-ste100
-description: "Use when English text must be parsed without a human to resolve ambiguity — tool descriptions, error messages, inter-agent instructions, system prompts, status reports — and misreading has a real cost, or when text reads as dense, hedged, or easy to misparse. Triggers: disambiguate, STE100 rewrite, apply Simplified Technical English, plain-language rewrite, controlled-language rewrite, rewrite so an agent cannot misread this. Not for creative or marketing copy."
+description: 'Use when English text must be parsed without a human to resolve ambiguity — tool descriptions, error messages, inter-agent instructions, system prompts, status reports — and misreading has a real cost, or when text reads as dense, hedged, or easy to misparse. Triggers: disambiguate, STE100 rewrite, apply Simplified Technical English, plain-language rewrite, controlled-language rewrite, rewrite so an agent cannot misread this. Not for creative or marketing copy.'
 version: 1.0.0
 ---
 
@@ -36,7 +36,7 @@ This skill encodes the **rule categories** of ASD-STE100 Issue 9 (Jan 2025): 53 
 
 It does **not** reproduce ASD's ~900-word approved dictionary verbatim. ASD-STE100 is free to obtain, but it is not free to redistribute: Issue 9, page 2 states that "no reproduction or publication of it, in whole or in part, shall be made without the written authority of an officer of ASD," and grants free reproduction rights only to eight listed categories (ASD/AIA/AIAC member associations and their member companies and customers, member-state defence ministries, A4A, airworthiness authorities, and universities and research institutes for educational purposes). This project is in none of them, so the dictionary stays out of this repo.
 
-Instead, this skill applies the *underlying principle* (pick the plainest, most common word available and use it the same way every time) rather than checking against a fixed word list. When exact ASD-approved wording matters (e.g. actual aircraft maintenance documentation), get the standard and check word-by-word against the real dictionary. Request it from the [official downloads page](https://www.asd-ste100.org/STE_downloads.html) — note that this is a request form that emails you a link, not a direct download. Rule numbers cited in the tables below (e.g. Rule 8.1) follow the standard's section layout as this repo interprets it — verify the exact numbering against your copy of the standard before quoting a rule number in a document.
+Instead, this skill applies the _underlying principle_ (pick the plainest, most common word available and use it the same way every time) rather than checking against a fixed word list. When exact ASD-approved wording matters (e.g. actual aircraft maintenance documentation), get the standard and check word-by-word against the real dictionary. Request it from the [official downloads page](https://www.asd-ste100.org/STE_downloads.html) — note that this is a request form that emails you a link, not a direct download. Rule numbers cited in the tables below (e.g. Rule 8.1) follow the standard's section layout as this repo interprets it — verify the exact numbering against your copy of the standard before quoting a rule number in a document.
 
 ## Core Rewrite Rules
 
@@ -46,27 +46,27 @@ Apply the structural rules with confidence. Apply the lexical rules as a directi
 
 ### Structural rules — apply these
 
-| Rule | Do | Don't |
-|---|---|---|
-| Active voice | "The agent deletes the file." | "The file is deleted (by the agent)." — unless the actor is genuinely unknown or irrelevant |
-| No phrasal verbs (Rule 9.3) | "Remove the panel." / "Start the job." | "Take off the panel." / "Spin up the job." — a two-word verb has meanings the parts do not predict |
-| One instruction per sentence | "Open the file. Read line 3." | "Open the file and read line 3, then check if it matches." |
-| Sentence length | ≤20 words for instructions/procedures, ≤25 words for descriptions | Long compound/subordinate-clause sentences |
-| No semicolons (Rule 8.1) | Split into separate sentences | Any semicolon at all — STE bans the mark outright, not only as a clause join. (Rule 8.1 permits every other standard punctuation mark; the em dash is *not* banned by STE, though it often signals a sentence that should be split.) |
-| Noun clusters | ≤3 words stacked as a noun phrase ("fuel pump valve") | 4+ word noun stacks ("high pressure fuel pump inlet valve assembly") |
-| No ellipsis | Keep the subject, verb, and article explicit even if it reads longer | Drop words to save space ("Files not backed up will be lost" → ambiguous which files) |
-| Keep modality | "The request **may have** failed." stays "may have" | Promote a hedge to a fact ("The request failed.") or invent a certainty the source did not state |
-| Paragraph limits | One topic per paragraph, ≤6 sentences | Multi-topic paragraphs |
-| Lists for sequences | Use a numbered or bulleted list for 3+ steps or conditions | Bury a sequence inside one prose sentence |
+| Rule                         | Do                                                                   | Don't                                                                                                                                                                                                                                |
+| ---------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Active voice                 | "The agent deletes the file."                                        | "The file is deleted (by the agent)." — unless the actor is genuinely unknown or irrelevant                                                                                                                                          |
+| No phrasal verbs (Rule 9.3)  | "Remove the panel." / "Start the job."                               | "Take off the panel." / "Spin up the job." — a two-word verb has meanings the parts do not predict                                                                                                                                   |
+| One instruction per sentence | "Open the file. Read line 3."                                        | "Open the file and read line 3, then check if it matches."                                                                                                                                                                           |
+| Sentence length              | ≤20 words for instructions/procedures, ≤25 words for descriptions    | Long compound/subordinate-clause sentences                                                                                                                                                                                           |
+| No semicolons (Rule 8.1)     | Split into separate sentences                                        | Any semicolon at all — STE bans the mark outright, not only as a clause join. (Rule 8.1 permits every other standard punctuation mark; the em dash is _not_ banned by STE, though it often signals a sentence that should be split.) |
+| Noun clusters                | ≤3 words stacked as a noun phrase ("fuel pump valve")                | 4+ word noun stacks ("high pressure fuel pump inlet valve assembly")                                                                                                                                                                 |
+| No ellipsis                  | Keep the subject, verb, and article explicit even if it reads longer | Drop words to save space ("Files not backed up will be lost" → ambiguous which files)                                                                                                                                                |
+| Keep modality                | "The request **may have** failed." stays "may have"                  | Promote a hedge to a fact ("The request failed.") or invent a certainty the source did not state                                                                                                                                     |
+| Paragraph limits             | One topic per paragraph, ≤6 sentences                                | Multi-topic paragraphs                                                                                                                                                                                                               |
+| Lists for sequences          | Use a numbered or bulleted list for 3+ steps or conditions           | Bury a sequence inside one prose sentence                                                                                                                                                                                            |
 
 ### Lexical rules — direction of travel only
 
-| Rule | Do | Don't | Why it is weaker here |
-|---|---|---|---|
-| One word, one meaning | Pick one verb for one action and reuse it every time (e.g. always "check", never mix "check"/"verify"/"confirm" for the same action) | Rotate synonyms for the same idea across a document | Consistency within a document is checkable. Which word is the *approved* one is not, without the dictionary. |
-| One part of speech per word | "Apply oil to the valve" (oil = noun) | "Oil the valve" (oil = verb) | Whether "oil" is approved as a noun only is a dictionary fact. Prefer the noun form when both read equally well; do not claim compliance. |
-| Verb, not noun (Rule 3.7) | "Analyze the log." | "Perform an analysis of the log." — a noun form of an action makes the sentence longer and hides who acts | Rule 3.7 says "use an **approved** verb to describe an action." Preferring the verb form is safe to apply anywhere; knowing which verb is the approved one needs the dictionary. |
-| Domain terms | Keep necessary technical nouns/verbs, but define them once if not common English (STE allows a project-specific glossary beyond its base dictionary) | Use jargon without ever defining it | The glossary allowance is real STE, but the base dictionary it extends is absent. |
+| Rule                        | Do                                                                                                                                                   | Don't                                                                                                     | Why it is weaker here                                                                                                                                                            |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One word, one meaning       | Pick one verb for one action and reuse it every time (e.g. always "check", never mix "check"/"verify"/"confirm" for the same action)                 | Rotate synonyms for the same idea across a document                                                       | Consistency within a document is checkable. Which word is the _approved_ one is not, without the dictionary.                                                                     |
+| One part of speech per word | "Apply oil to the valve" (oil = noun)                                                                                                                | "Oil the valve" (oil = verb)                                                                              | Whether "oil" is approved as a noun only is a dictionary fact. Prefer the noun form when both read equally well; do not claim compliance.                                        |
+| Verb, not noun (Rule 3.7)   | "Analyze the log."                                                                                                                                   | "Perform an analysis of the log." — a noun form of an action makes the sentence longer and hides who acts | Rule 3.7 says "use an **approved** verb to describe an action." Preferring the verb form is safe to apply anywhere; knowing which verb is the approved one needs the dictionary. |
+| Domain terms                | Keep necessary technical nouns/verbs, but define them once if not common English (STE allows a project-specific glossary beyond its base dictionary) | Use jargon without ever defining it                                                                       | The glossary allowance is real STE, but the base dictionary it extends is absent.                                                                                                |
 
 ### Simple tenses — apply with one exception
 
@@ -105,9 +105,9 @@ The one permitted addition: if step 4 kept a longer phrasing on purpose, add a s
 **On request: the rule table.** When the user asks to see the reasoning — "show the diff", "which rules did it break", "explain the changes", "before/after" — output this table instead:
 
 ```markdown
-| Rule violated | Original | Simplified |
-|---|---|---|
-| Present perfect tense | "We have received your request." | "We received your request." |
+| Rule violated           | Original                                | Simplified                                  |
+| ----------------------- | --------------------------------------- | ------------------------------------------- |
+| Present perfect tense   | "We have received your request."        | "We received your request."                 |
 | Noun cluster (4+ words) | "the agent task queue priority handler" | "the handler that sets task-queue priority" |
 
 Mode: Strict. 7 violations found.
@@ -118,6 +118,7 @@ Follow the table with a one-line note on anything you deliberately did **not** s
 ## Boundaries
 
 **Will:**
+
 - Rewrite ambiguous or dense English into short, single-meaning, active-voice sentences.
 - Return the rewritten text alone by default, and name the rules it applied when the user asks.
 - Preserve every fact, condition, and scope qualifier in the original.
@@ -125,12 +126,13 @@ Follow the table with a one-line note on anything you deliberately did **not** s
 - Suggest a one-line glossary entry for domain terms that must stay.
 
 **Will not:**
+
 - Reproduce ASD's official ~900-word dictionary as if it were memorized verbatim — always treat the official download as the source of truth for exact approved wording.
 - Simplify creative, marketing, or persuasive copy where voice and nuance are the point.
 - Silently drop a safety condition, exception, or scope qualifier to shorten a sentence — it will flag the trade-off instead.
 - Convert "may have failed" into "failed", or "could be caused by X" into "X is the cause" — losing a hedge changes the claim.
 - Guarantee an aerospace/defense-grade STE-compliant document; this is a general-purpose clarity tool inspired by STE, not a certified STE authoring tool.
-- Make weak content true or useful. STE fixes the *form* of a text, not its substance. A hollow paragraph rewritten under these rules becomes a clean, short, well-punctuated hollow paragraph. If the text has nothing to say, no rewrite fixes that — say so instead of polishing it.
+- Make weak content true or useful. STE fixes the _form_ of a text, not its substance. A hollow paragraph rewritten under these rules becomes a clean, short, well-punctuated hollow paragraph. If the text has nothing to say, no rewrite fixes that — say so instead of polishing it.
 - Shorten past the point of clarity. Cutting words is not the goal; removing ambiguity is. Past a certain point compression starts costing the reader time rather than saving it, so stop when the sentence is unambiguous, not when it is shortest.
 
 ## Additional Resources

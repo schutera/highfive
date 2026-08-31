@@ -30,17 +30,17 @@ the section layout below. The exact wording and rule numbering in this table
 are only ever as current as the issue they were read from — check the standard
 itself before citing a specific rule number in a document.
 
-| Section | Topic | What it governs |
-|---|---|---|
-| 1 | Writing conventions | Word forms and spelling — approved words are written exactly as given |
-| 2 | Words | Word choice: one word, one meaning; approved parts of speech; technical names; the allowance for a project-specific glossary beyond the base dictionary |
-| 3 | Word order | Sentence patterns — subject/verb/object placed predictably; placement of adjectives and adverbs |
-| 4 | Verbs | Simple tenses only; active voice; imperative mood for instructions; no compound verb forms such as present perfect |
-| 5 | Sentence construction | One idea per sentence; sentence types (instruction vs description); paragraph limits — one topic, few sentences |
-| 6 | Instructions and procedures | Imperative steps, one action per step, sequences as visible lists |
-| 7 | Descriptive text | Describing parts, functions, and operations; present tense; no step-like command language in descriptions |
-| 8 | Punctuation and word count | Which punctuation marks are allowed (no semicolons — the mark is banned outright); word-count caps (about 20 words for procedural sentences, about 25 for descriptive) |
-| 9 | Writing practices | Consistency — repeat the same approved word instead of rotating synonyms; avoid phrasal verbs; prefer the dictionary wording over approximations |
+| Section | Topic                       | What it governs                                                                                                                                                        |
+| ------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1       | Writing conventions         | Word forms and spelling — approved words are written exactly as given                                                                                                  |
+| 2       | Words                       | Word choice: one word, one meaning; approved parts of speech; technical names; the allowance for a project-specific glossary beyond the base dictionary                |
+| 3       | Word order                  | Sentence patterns — subject/verb/object placed predictably; placement of adjectives and adverbs                                                                        |
+| 4       | Verbs                       | Simple tenses only; active voice; imperative mood for instructions; no compound verb forms such as present perfect                                                     |
+| 5       | Sentence construction       | One idea per sentence; sentence types (instruction vs description); paragraph limits — one topic, few sentences                                                        |
+| 6       | Instructions and procedures | Imperative steps, one action per step, sequences as visible lists                                                                                                      |
+| 7       | Descriptive text            | Describing parts, functions, and operations; present tense; no step-like command language in descriptions                                                              |
+| 8       | Punctuation and word count  | Which punctuation marks are allowed (no semicolons — the mark is banned outright); word-count caps (about 20 words for procedural sentences, about 25 for descriptive) |
+| 9       | Writing practices           | Consistency — repeat the same approved word instead of rotating synonyms; avoid phrasal verbs; prefer the dictionary wording over approximations                       |
 
 ## The dictionary's two halves
 

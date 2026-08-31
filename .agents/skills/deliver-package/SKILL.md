@@ -62,7 +62,7 @@ git branch -a --contains $SHA      # is that merged PR's work really ON main?
 every "what is on main" view, and GitHub **permanently closes it** when that base branch is
 deleted by the parent's merge — closed PRs cannot be retargeted. The recipe that actually
 works: **rebase the child branch onto `main` and open a fresh PR**. Better still, retarget
-the child to `main` *before* merging the parent. If you find stranded work, land it first as
+the child to `main` _before_ merging the parent. If you find stranded work, land it first as
 its own PR and say so.
 
 ## 2. Choose the package
@@ -72,21 +72,21 @@ Prefer, in order:
 1. The work on the **stated critical path** — the priority queue's first item, or a roadmap
    ordering note — unless step 1 just invalidated it.
 2. A cluster whose blockers are now resolved — recheck, the note may be stale (the queue's
-   own items 2 and 3 say "operational, not code": the *code* shipped on `main`, the ops
+   own items 2 and 3 say "operational, not code": the _code_ shipped on `main`, the ops
    work did not).
 3. A cluster whose issues form a real dependency chain, so shipping them together is cheaper
    than shipping them apart.
 
 **An issue that states a recommendation is implementable — up to where the decision stops
 being the owner's call.** Decision-carrying issues here use a `decision + fix:`-style title
-with a bolded *"Recommendation: …"* in the body (issue #234 is the exemplar). The
+with a bolded _"Recommendation: …"_ in the body (issue #234 is the exemplar). The
 recommendation authorises implementing the recommended option, not making the decision
-itself: an acceptance item whose subject is a *"Maintainer decision … is recorded"* box
+itself: an acceptance item whose subject is a _"Maintainer decision … is recorded"_ box
 stays open until the owner picks — name it in the PR instead of ticking it. Never decide a
 product call silently in code. **Exclude only an issue that poses an open question with no
 recommendation**, or one whose resolution requires input the issue does not provide.
 
-If a blocker is *inside* the package (issue A blocks issue B), that is an argument **for**
+If a blocker is _inside_ the package (issue A blocks issue B), that is an argument **for**
 taking both, not for skipping B.
 
 State the choice and the reasoning in one short paragraph before writing any code. If the
@@ -191,13 +191,13 @@ build` passing is not sufficient.
 **Read what the run says, do not just read the exit code.** A failure is three different
 things and they want opposite responses:
 
-| The run shows | It probably means | Do |
-|---|---|---|
-| a service fails to boot in compose | a Dockerfile / seeding / health-probe break | fix the compose/Dockerfile; never settle for "works on my host" |
-| an upload or heartbeat fails only over the real LAN | a firewall / WLAN-profile / port issue, not logic | check `Get-NetFirewallRule -DisplayName "HiveHive*"` and `Get-NetConnectionProfile`; an in-process test does not refute it |
-| the UI renders plausible but wrong data | a genuine contract or logic defect the fixtures missed | that is a finding — fix the fixture, never adjust the assertion |
+| The run shows                                       | It probably means                                      | Do                                                                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| a service fails to boot in compose                  | a Dockerfile / seeding / health-probe break            | fix the compose/Dockerfile; never settle for "works on my host"                                                            |
+| an upload or heartbeat fails only over the real LAN | a firewall / WLAN-profile / port issue, not logic      | check `Get-NetFirewallRule -DisplayName "HiveHive*"` and `Get-NetConnectionProfile`; an in-process test does not refute it |
+| the UI renders plausible but wrong data             | a genuine contract or logic defect the fixtures missed | that is a finding — fix the fixture, never adjust the assertion                                                            |
 
-Record what a live run *surprised* you with in `docs/11-risks-and-technical-debt/`. A run
+Record what a live run _surprised_ you with in `docs/11-risks-and-technical-debt/`. A run
 that only confirmed what you already believed was not worth the electricity.
 
 ## 7. Documentation duty — before it counts as done
@@ -233,7 +233,7 @@ Four things that only bite at package scale:
 
 - **Once per PR, not once per package.** A package that ships as two or three PRs needs a
   review per branch — a clean pass on one says nothing about the others.
-- **Rounds compound.** Round 2 catches what round 1's *fix* broke, round 3 what rounds 1 and
+- **Rounds compound.** Round 2 catches what round 1's _fix_ broke, round 3 what rounds 1 and
   2 obscured. Budget for three, and re-run after every round of fixes.
 - **This skill never overrides a live instruction from the user.** It only refuses to let an
   unmet gate go unreported.
@@ -242,7 +242,7 @@ Four things that only bite at package scale:
 
 Then hand off: this workflow's landing convention is **a draft PR against `main`, and stop
 there** — do not mark it ready or merge it yourself until the owner confirms the manual
-tests from §9 passed. If the package includes firmware *source* changes, say in the PR that
+tests from §9 passed. If the package includes firmware _source_ changes, say in the PR that
 shipping to the field is a separate release: `SEQUENCE` bump + frontend rebuild + promotion
 to `production` + `prod-<codename>` tag per
 `docs/07-deployment-view/firmware-release.md`. A merged PR alone ships no firmware — that

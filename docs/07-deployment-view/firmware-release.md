@@ -112,8 +112,9 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    (see [risks ch. 11 → "`build.sh` release binaries ran without PSRAM"](../11-risks-and-technical-debt/README.md#lessons-learned)).
 
    **Re-verify the `loopTask` stack override while the bench module is live
-   (#276).** If this release carries `SET_LOOP_TASK_STACK_SIZE(16384)`, the
-   bench boot above doubles as the tripwire for the 16 KB budget: confirm the
+   (#276).** Every build since the fix carries
+   `SET_LOOP_TASK_STACK_SIZE(16384)` in `ESP32-CAM.ino`, so the bench boot
+   above doubles as the tripwire for the 16 KB budget: confirm the
    module walks past the OTA manifest TLS handshake to registration /
    heartbeat with **no** `Stack canary watchpoint triggered (loopTask)`
    panic — and, once #276's `uxTaskGetStackHighWaterMark(NULL)`

@@ -4102,3 +4102,70 @@ As of this PR, current `production` has no data yet (confirmed directly, not ass
 **Why it happened.** "Walk the directory and see what's there" reads as the obvious way to enumerate skills, and it is correct for content that's committed. It silently stops being correct the moment a host or plugin materializes its own directory under the same parent path (`.claude/skills/`) without going through `.gitignore`'s allow-list — which Claude Code's plugin-skill mechanism does routinely on a real dev machine. Nothing about "list the directories" distinguishes "this repo owns this skill" from "this machine happens to have a directory here."
 
 **How to avoid it next time.** For a check whose job is "does the repo's own content stay in sync," derive the set of things being compared from the repo's own declaration of ownership — here, `.gitignore`'s `!.claude/skills/<name>/` allow-list entries — not from what a `find`/glob turns up on a live filesystem. A live directory listing answers "what exists on this machine right now," which is a different question from "what does this repo consider its own," and the two only look identical until a host-provided artifact lands in the same parent directory.
+
+### The 8 KB `loopTask` stack was a budget nobody had costed, and TLS spent it (#276)
+
+**What happened.** Onboarding a real field module on current `main` produced a
+deterministic ~5.7 s crash loop: the board joined Wi-Fi, printed
+`[STAGE] arduino_ota_begin took=15ms`, then panicked with
+`Guru Meditation Error: Core 1 panic'ed (Unhandled debug exception). Debug
+exception reason: Stack canary watchpoint triggered (loopTask)`. It never
+reached registration, heartbeat, geolocation or capture, so it never appeared
+on the dashboard. The breadcrumb said `ota:manifest_fetch` and the decoded
+backtrace was mbedTLS frames all the way down under `setup()` — the verified-TLS
+handshake in [`ota.cpp`](../../ESP32-CAM/ota.cpp)'s `httpOtaCheckAndApply`,
+against the pinned ISRG Root X1, does not fit in what is left of the Arduino
+core's default 8192-byte `loopTask` stack.
+
+**Why it happened.** Nothing in the firmware ever named a stack budget. Every
+TLS call site reasons carefully about the resources it *did* think about —
+`getGeolocation` logs `[geo] largest free block=... floor 45000 before TLS`,
+`ota.cpp` scopes its `WiFiClientSecure` into a block specifically so the
+mbedTLS context is destructed before the binary fetch allocates another, and
+#185 bounded the handshake duration because an unbounded one is a WDT reboot
+loop. All of that is heap and time. The stack was the one resource with no
+guard, no log line and no comment, and it is the one that ran out — and it
+cannot be inferred from heap health: the crash came with the board's heap
+healthy (`-- PSRAM: found=1`, no allocation failures in the trace), because an
+mbedTLS handshake overflows *stack* by pulling deep certificate-parsing
+frames, and a free heap does not create free stack. The default
+is also invisible: 8192 lives in `ARDUINO_LOOP_STACK_SIZE` inside the Arduino
+core's `main.cpp`, not in `platformio.ini`, `build.sh` or any repo file that
+configures the firmware build, so reading the firmware end to end never
+surfaces the number being spent.
+Both build paths inherit it identically, which is why the wizard's merged
+`firmware.bin` had the same defect as the PlatformIO build.
+
+**How to avoid it next time.** When a call is guarded for one resource, ask
+which of the others it silently assumes. Heap headroom and handshake timeouts
+were treated as first-class here and the stack was not, purely because the
+first two had each already caused an incident and the third had not.
+The deeper point is a testing one: `pio test -e native` cannot reach this —
+the panic needs the Arduino runtime, real TLS and a real certificate chain —
+and `pio run -e esp32cam` only proves the firmware links. **Every gate this
+repo runs on firmware was green while the firmware could not complete
+`setup()` on hardware.** A green CI board on `ESP32-CAM/` means "compiles and
+its pure helpers pass", never "boots"; a smoke-flash on real hardware before a
+`SEQUENCE` bump is the only thing that closes that gap, and it is manual.
+
+**Fix.** `SET_LOOP_TASK_STACK_SIZE(16384)` at file scope in
+[`ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino), verified on hardware: the
+same board then walked the whole path — OTA manifest check (a survived HTTP
+404, see #275), geolocation, `new_module` registration, heartbeat and first
+image upload, all 200 against production. Note this is a number chosen to clear
+the observed overflow, **not** a measured bound; #276 tracks instrumenting the
+real high-water mark with `uxTaskGetStackHighWaterMark`, because the next TLS
+call site added to `setup()` will spend from the same unmeasured budget.
+And it ships to the field **only** via the `SEQUENCE`-bumped OTA release
+([firmware-release.md → Release checklist](../07-deployment-view/firmware-release.md#release-checklist)):
+merging this source to `main` deploys nothing by itself — the same silent no-op
+that has shipped twice before (#150, #132).
+
+**Second-order finding.** During the crash loop the OTA boot gate counted
+`pv=1/3 → 2/3 → 3/3` and then tried to save the board —
+`[OTA] rollback (pv=3/3 nc=0/3 unproven=0 rr=4) — reverting slot` — and could
+not: `E esp_ota_ops: Rollback is not possible, do not have any suitable apps in
+slots`. The ADR-008 / #148 rollback design assumes a good slot to fall back to,
+which a *fleet OTA* has and a *freshly USB/wizard-flashed factory slot* does
+not. The rollback machinery protects the fleet from a bad release; it does not
+protect the onboarding path, which is exactly where this defect lived.

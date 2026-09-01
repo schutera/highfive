@@ -441,6 +441,46 @@ else branch to stop the polling spin). The breadcrumb library remains
 in place as general-purpose diagnostic infrastructure for future
 regressions.
 
+### 9. `loopTask` stack budget (#276)
+
+`setup()` and `loop()` both run on the Arduino core's `loopTask`, whose stack
+is **8192 bytes by default** (`ARDUINO_LOOP_STACK_SIZE` in the core's
+`main.cpp` — a default that no repo file configures or references). That
+default is not enough for an mbedTLS handshake that parses and verifies a
+certificate chain
+against the pinned ISRG Root X1: the canary trips and the board panics with
+`Stack canary watchpoint triggered (loopTask)` *before* the HTTP status line is
+read, which reads as a network failure but is not one.
+
+`ESP32-CAM.ino` therefore raises it at file scope:
+
+```cpp
+SET_LOOP_TASK_STACK_SIZE(16384);
+```
+
+**Treat this as a budget, not a constant.** `setup()` performs verified TLS up
+to four times: OTA manifest fetch, `new_module` registration and the boot
+heartbeat on every boot; geolocation only as a fourth when the NVS geo cache
+misses (~1 in 14 boots — `esp_init.cpp`'s `kGeoCacheMaxBoots`, and a cache hit
+at `loadCachedGeolocation` skips the handshake entirely). `loop()` uploads over
+TLS on every capture — all from this one task, all spending from the same
+16 KB. Before adding another TLS call site, or deepening an existing one,
+measure rather than assume: `uxTaskGetStackHighWaterMark(NULL)` after the
+heaviest call reports the remaining headroom in words.
+
+Two properties make this failure mode easy to misread, so they are worth
+stating plainly:
+
+- **It is invisible to every automated gate.** `pio test -e native` runs on the
+  host with no Arduino runtime and no TLS; `pio run -e esp32cam` only proves
+  the firmware links. Both are green on a firmware that cannot finish `setup()`
+  on hardware. Only a smoke-flash catches it.
+- **The OTA rollback safety net does not cover it.** A stack overflow on a
+  freshly USB- or wizard-flashed *factory* slot has no previous slot to revert
+  to (`esp_ota_ops: Rollback is not possible, do not have any suitable apps in
+  slots`). The unproven-slot revert in [section 3a](#3a-liveness-self-heal-watchdog-148-phase-3)
+  protects the fleet from a bad OTA; it does not protect onboarding.
+
 ### LED legend
 
 The on-board LED (GPIO 4) is the **camera flash** — bright enough to

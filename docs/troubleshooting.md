@@ -649,6 +649,34 @@ build step, step 2 of the wizard 404s on the OTA URL. If you've never
 flashed firmware on this checkout, run `build.sh` first; on shared
 checkouts, regenerate after every firmware change.
 
+#### …and the same error on **production** (`highfive.schutera.com`), where you cannot run `build.sh` (#275)
+
+If the wizard shows *"Firmware not found at /firmware.bin (server returned
+HTML)"* against the deployed site — and the chip above it reads
+**`Firmware: Local`** rather than a bee-species codename — the artefacts are
+missing on the *host*, not in your checkout. `Local` is the
+`useSetupWizard.ts` fallback label used when `/firmware.json` cannot be
+parsed, so it is the tell that the manifest is absent too.
+
+Verify from anywhere:
+
+```powershell
+curl.exe -sS -o NUL -w "bin  %{http_code} %{content_type}`n" https://highfive.schutera.com/firmware.bin
+curl.exe -sS -o NUL -w "json %{http_code}`n" https://highfive.schutera.com/firmware.json
+```
+
+A healthy host answers `200 application/octet-stream` and `200`. A host missing
+the artefacts answers `200 text/html` (the SPA fallback — exactly what the
+wizard's guard rejects) and `404`.
+
+The three artefacts are gitignored, so a `git pull` + rebuild on the host never
+creates them; only `ESP32-CAM/build.sh` writes them, and on the deployed host
+only `scripts/deploy.sh`'s `publish_firmware()` copies them into the live
+`homepage/dist/`. There is **no operator fix from a laptop** — this needs a
+release, per
+[firmware-release.md → Release checklist](07-deployment-view/firmware-release.md#release-checklist).
+Tracked in #275.
+
 ### Serial shows `-- PSRAM: found=0` on a `build.sh` / OTA binary (but `pio` builds report `found=1`)
 
 The board has working PSRAM, but a `build.sh`-built binary boots with it off
@@ -713,12 +741,49 @@ Get-NetFirewallRule -DisplayName "HiveHive*" | Select-Object DisplayName, Enable
 
 Expected output includes all three HiveHive rules (image-service 8000, duckdb-service 8002, ArduinoOTA 55555) with `Action = Allow`.
 
-### PlatformIO not found / "No module named platformio"
+### PlatformIO not found / "No module named platformio" — or `Unknown development platform 'espressif32'`
 
-Multiple Python versions on the same machine can cause this. Find where PlatformIO was installed:
+Both symptoms read like PlatformIO is broken, and both are usually the same
+root cause: the `pio` command that resolves on your PATH is not the PlatformIO
+that this project's `platformio.ini` was written for.
+
+For **"No module named platformio"**, multiple Python versions on the same
+machine are the usual cause. Find where PlatformIO was installed:
 
 ```bash
 pip show platformio   # shows the Python environment it lives in
+```
+
+For **`Unknown development platform 'espressif32'`**, a machine can carry two
+PlatformIO cores, and the `pio.exe` on disk may be the old one. The giveaway is
+in `pio`'s own banner:
+
+```
+Obsolete PIO Core v4.3.4 is used (previous was 6.1.19)
+...
+Warning! Ignore unknown configuration option `build_src_filter` in section [env]
+espressif32 @ 6.13.0 is already installed
+Error: Unknown development platform 'espressif32'
+```
+
+Core 4.x cannot read a `platformio.ini` written for 6.x — it ignores
+`build_src_filter`, `test_framework` and `test_build_src`, then fails to
+resolve the (correctly installed) platform. `%USERPROFILE%\.platformio\penv\Scripts\pio.exe`
+is the copy most likely to be stale, because it is the one an old installer
+left behind.
+
+**Fix:** call PlatformIO as a module through the interpreter that owns the
+current core. A bare `pio` resolves to whatever `pio.exe` sits on PATH, which
+is exactly the stale copy the symptom is about:
+
+```powershell
+python -m platformio run -e esp32cam            # not: pio run -e esp32cam
+```
+
+Find which interpreter has the good core:
+
+```powershell
+python -c "import platformio; print(platformio.__version__)"
 ```
 
 Then call it with the explicit interpreter:
@@ -893,6 +958,60 @@ There is no separate in-band reset button anymore — flashing _is_ the reset. T
 ---
 
 ## Module joins Wi-Fi but never appears on the dashboard
+
+### Serial shows `Stack canary watchpoint triggered (loopTask)` and the board reboots every ~6 s (#276)
+
+**Check this first** — it looks like a connectivity problem and is not. The
+module joins Wi-Fi and prints an IP, then panics a moment later:
+
+```
+[WIFI] (re)connected, IP: 192.168.178.120
+[STAGE] setupWifiConnection took=713ms
+[STAGE] arduino_ota_begin took=15ms
+Guru Meditation Error: Core  1 panic'ed (Unhandled debug exception).
+Debug exception reason: Stack canary watchpoint triggered (loopTask)
+```
+
+and the next boot reports `[BOOT] last_stage_before_reboot=ota:manifest_fetch`.
+The board never reaches registration, so nothing about it is wrong on the
+server — it simply never called `/new_module`.
+
+**Cause.** The mbedTLS handshake for the OTA manifest fetch overflows the
+Arduino core's default 8192-byte `loopTask` stack. See
+[esp-reliability.md → "`loopTask` stack budget"](06-runtime-view/esp-reliability.md#9-looptask-stack-budget-276).
+
+**Fix.** Build from a firmware that carries `SET_LOOP_TASK_STACK_SIZE(16384)`
+in `ESP32-CAM/ESP32-CAM.ino`, then re-flash:
+
+```powershell
+$PORT = "COM5"
+cd ESP32-CAM; python -m platformio run -e esp32cam -t upload --upload-port $PORT
+```
+
+Confirm it now walks the whole path (registration, heartbeat, first upload):
+
+```powershell
+python scripts/esp_capture.py $PORT 75
+```
+
+A healthy boot reaches `Module added successfully`, `[heartbeat] HTTP/1.1 200 OK`
+and `responded with status: 200`.
+
+The panic text scrolls past fast, so capture it rather than watch it
+(`scripts/esp_capture.py` resets and records — see
+[How to read serial output for diagnosis](#how-to-read-serial-output-for-diagnosis)).
+To decode a backtrace yourself:
+
+```powershell
+$A = "$env:USERPROFILE\.platformio\packages\toolchain-xtensa-esp32\bin\xtensa-esp32-elf-addr2line.exe"
+& $A -pfiaC -e ESP32-CAM\.pio\build\esp32cam\firmware.elf 0x400d37ca 0x400e4cf5
+```
+
+The two `0x...` addresses are from a specific crash dump — replace them with
+the `<addr>` values from your own panic's backtrace lines.
+
+Ignore the top frames of a canary-trip backtrace — the overflow corrupts them.
+The frames nearest `setup()` are the trustworthy ones.
 
 ### ESP and server are on different networks
 

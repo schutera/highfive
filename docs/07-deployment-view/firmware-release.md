@@ -111,6 +111,18 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    If any boot reports `found=0`, **do not publish** — rebuild and re-verify
    (see [risks ch. 11 → "`build.sh` release binaries ran without PSRAM"](../11-risks-and-technical-debt/README.md#lessons-learned)).
 
+   **Re-verify the `loopTask` stack override while the bench module is live
+   (#276).** If this release carries `SET_LOOP_TASK_STACK_SIZE(16384)`, the
+   bench boot above doubles as the tripwire for the 16 KB budget: confirm the
+   module walks past the OTA manifest TLS handshake to registration /
+   heartbeat with **no** `Stack canary watchpoint triggered (loopTask)`
+   panic — and, once #276's `uxTaskGetStackHighWaterMark(NULL)`
+   instrumentation lands, that the printed headroom is still comfortable. The
+   macro is a strong-symbol override into the Arduino core's `main.cpp`, so a
+   core upgrade can silently break it while the firmware still compiles; the
+   smoke-flash is the only gate that notices. (See
+   [esp-reliability.md → "`loopTask` stack budget"](../06-runtime-view/esp-reliability.md#9-looptask-stack-budget-276).)
+
 3. **Publish the artifacts to prod.** The three files are **gitignored
    build outputs** (the `*.bin` glob and the explicit
    `homepage/public/firmware.json` line in [.gitignore](../../.gitignore)),

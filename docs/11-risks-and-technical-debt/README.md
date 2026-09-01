@@ -4124,10 +4124,15 @@ TLS call site reasons carefully about the resources it *did* think about —
 mbedTLS context is destructed before the binary fetch allocates another, and
 #185 bounded the handshake duration because an unbounded one is a WDT reboot
 loop. All of that is heap and time. The stack was the one resource with no
-guard, no log line and no comment, and it is the one that ran out. The default
+guard, no log line and no comment, and it is the one that ran out — and it
+cannot be inferred from heap health: the crash came with the board's heap
+healthy (`-- PSRAM: found=1`, no allocation failures in the trace), because an
+mbedTLS handshake overflows *stack* by pulling deep certificate-parsing
+frames, and a free heap does not create free stack. The default
 is also invisible: 8192 lives in `ARDUINO_LOOP_STACK_SIZE` inside the Arduino
-core's `main.cpp`, not in `platformio.ini`, `build.sh` or any file in this
-repo, so reading the firmware end to end never surfaces the number being spent.
+core's `main.cpp`, not in `platformio.ini`, `build.sh` or any repo file that
+configures the firmware build, so reading the firmware end to end never
+surfaces the number being spent.
 Both build paths inherit it identically, which is why the wizard's merged
 `firmware.bin` had the same defect as the PlatformIO build.
 
@@ -4151,6 +4156,10 @@ image upload, all 200 against production. Note this is a number chosen to clear
 the observed overflow, **not** a measured bound; #276 tracks instrumenting the
 real high-water mark with `uxTaskGetStackHighWaterMark`, because the next TLS
 call site added to `setup()` will spend from the same unmeasured budget.
+And it ships to the field **only** via the `SEQUENCE`-bumped OTA release
+([firmware-release.md → Release checklist](../07-deployment-view/firmware-release.md#release-checklist)):
+merging this source to `main` deploys nothing by itself — the same silent no-op
+that has shipped twice before (#150, #132).
 
 **Second-order finding.** During the crash loop the OTA boot gate counted
 `pv=1/3 → 2/3 → 3/3` and then tried to save the board —

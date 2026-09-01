@@ -58,7 +58,7 @@ static_assert(TASK_WDT_TIMEOUT_S >= 60,
 
 // setup() and loop() both run on the Arduino core's loopTask, whose stack is
 // 8192 bytes by default (ARDUINO_LOOP_STACK_SIZE, in the core's main.cpp — a
-// number that appears nowhere in this repo, which is half of why this bit).
+// default that no repo file configures or references).
 // That is not enough for an mbedTLS handshake that parses and verifies a
 // certificate chain against the pinned ISRG Root X1: `httpOtaCheckAndApply`
 // tripped the canary on every boot and panicked ("Stack canary watchpoint
@@ -67,12 +67,14 @@ static_assert(TASK_WDT_TIMEOUT_S >= 60,
 // module joined WiFi and then never reached registration (#276).
 //
 // 16384 is a value verified to clear the observed overflow on hardware, NOT a
-// measured bound. setup() does verified TLS at least four times (OTA manifest,
-// geolocation, new_module registration, boot heartbeat) and loop() uploads
-// over TLS on every capture — all from this one task, all spending from this
-// one budget. Before adding or deepening a TLS call site, measure the real
-// headroom with uxTaskGetStackHighWaterMark(NULL) rather than assuming this
-// number still covers it. Rationale and the failure signature:
+// measured bound. setup() does verified TLS up to four times (OTA manifest,
+// new_module registration and boot heartbeat always; geolocation a fourth time
+// only when the NVS geo cache misses, ~1 in 14 boots — see
+// esp_init.cpp's kGeoCacheMaxBoots) and loop() uploads over TLS on every
+// capture — all from this one task, all spending from this one budget. Before
+// adding or deepening a TLS call site, measure the real headroom with
+// uxTaskGetStackHighWaterMark(NULL) rather than assuming this number still
+// covers it. Rationale and the failure signature:
 // docs/06-runtime-view/esp-reliability.md's "loopTask stack budget".
 //
 // Note no automated gate covers this: `pio test -e native` has no Arduino

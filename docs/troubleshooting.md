@@ -741,18 +741,22 @@ Get-NetFirewallRule -DisplayName "HiveHive*" | Select-Object DisplayName, Enable
 
 Expected output includes all three HiveHive rules (image-service 8000, duckdb-service 8002, ArduinoOTA 55555) with `Action = Allow`.
 
-### PlatformIO not found / "No module named platformio"
+### PlatformIO not found / "No module named platformio" — or `Unknown development platform 'espressif32'`
 
-Multiple Python versions on the same machine can cause this. Find where PlatformIO was installed:
+Both symptoms read like PlatformIO is broken, and both are usually the same
+root cause: the `pio` command that resolves on your PATH is not the PlatformIO
+that this project's `platformio.ini` was written for.
+
+For **"No module named platformio"**, multiple Python versions on the same
+machine are the usual cause. Find where PlatformIO was installed:
 
 ```bash
 pip show platformio   # shows the Python environment it lives in
 ```
 
-### `pio` runs but fails with `Unknown development platform 'espressif32'` (an obsolete core shadowing a good one)
-
-A machine can carry two PlatformIO cores, and the `pio.exe` on disk may be the
-old one. The giveaway is in `pio`'s own banner:
+For **`Unknown development platform 'espressif32'`**, a machine can carry two
+PlatformIO cores, and the `pio.exe` on disk may be the old one. The giveaway is
+in `pio`'s own banner:
 
 ```
 Obsolete PIO Core v4.3.4 is used (previous was 6.1.19)
@@ -769,8 +773,8 @@ is the copy most likely to be stale, because it is the one an old installer
 left behind.
 
 **Fix:** call PlatformIO as a module through the interpreter that owns the
-current core — this is why the `Makefile` and this repo's docs always write
-`python -m platformio`, never a bare `pio`:
+current core. A bare `pio` resolves to whatever `pio.exe` sits on PATH, which
+is exactly the stale copy the symptom is about:
 
 ```powershell
 python -m platformio run -e esp32cam            # not: pio run -e esp32cam
@@ -1002,6 +1006,9 @@ To decode a backtrace yourself:
 $A = "$env:USERPROFILE\.platformio\packages\toolchain-xtensa-esp32\bin\xtensa-esp32-elf-addr2line.exe"
 & $A -pfiaC -e ESP32-CAM\.pio\build\esp32cam\firmware.elf 0x400d37ca 0x400e4cf5
 ```
+
+The two `0x...` addresses are from a specific crash dump — replace them with
+the `<addr>` values from your own panic's backtrace lines.
 
 Ignore the top frames of a canary-trip backtrace — the overflow corrupts them.
 The frames nearest `setup()` are the trustworthy ones.

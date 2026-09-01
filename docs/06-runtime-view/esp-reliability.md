@@ -445,8 +445,9 @@ regressions.
 
 `setup()` and `loop()` both run on the Arduino core's `loopTask`, whose stack
 is **8192 bytes by default** (`ARDUINO_LOOP_STACK_SIZE` in the core's
-`main.cpp` — a number that appears nowhere in this repo). That default is not
-enough for an mbedTLS handshake that parses and verifies a certificate chain
+`main.cpp` — a default that no repo file configures or references). That
+default is not enough for an mbedTLS handshake that parses and verifies a
+certificate chain
 against the pinned ISRG Root X1: the canary trips and the board panics with
 `Stack canary watchpoint triggered (loopTask)` *before* the HTTP status line is
 read, which reads as a network failure but is not one.
@@ -457,13 +458,15 @@ read, which reads as a network failure but is not one.
 SET_LOOP_TASK_STACK_SIZE(16384);
 ```
 
-**Treat this as a budget, not a constant.** `setup()` performs verified TLS at
-least four times (OTA manifest fetch, geolocation, `new_module` registration,
-boot heartbeat) and `loop()` uploads over TLS on every capture — all from this
-one task, all spending from the same 16 KB. Before adding another TLS call
-site, or deepening an existing one, measure rather than assume:
-`uxTaskGetStackHighWaterMark(NULL)` after the heaviest call reports the
-remaining headroom in words.
+**Treat this as a budget, not a constant.** `setup()` performs verified TLS up
+to four times: OTA manifest fetch, `new_module` registration and the boot
+heartbeat on every boot; geolocation only as a fourth when the NVS geo cache
+misses (~1 in 14 boots — `esp_init.cpp`'s `kGeoCacheMaxBoots`, and a cache hit
+at `loadCachedGeolocation` skips the handshake entirely). `loop()` uploads over
+TLS on every capture — all from this one task, all spending from the same
+16 KB. Before adding another TLS call site, or deepening an existing one,
+measure rather than assume: `uxTaskGetStackHighWaterMark(NULL)` after the
+heaviest call reports the remaining headroom in words.
 
 Two properties make this failure mode easy to misread, so they are worth
 stating plainly:

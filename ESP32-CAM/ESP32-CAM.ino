@@ -66,21 +66,45 @@ static_assert(TASK_WDT_TIMEOUT_S >= 60,
 // manifest's status line was ever read — a ~5.7 s crash loop in which the
 // module joined WiFi and then never reached registration (#276).
 //
-// 16384 is a value verified to clear the observed overflow on hardware, NOT a
-// measured bound. setup() does verified TLS up to four times (OTA manifest,
-// new_module registration and boot heartbeat always; geolocation a fourth time
-// only when the NVS geo cache misses, ~1 in 14 boots — see
-// esp_init.cpp's kGeoCacheMaxBoots) and loop() uploads over TLS on every
-// capture — all from this one task, all spending from this one budget. Before
-// adding or deepening a TLS call site, measure the real headroom with
-// uxTaskGetStackHighWaterMark(NULL) rather than assuming this number still
-// covers it. Rationale and the failure signature:
+// 16384 is a MEASURED bound since 2026-09-02 (bench ESP32-CAM, MAC
+// 68:09:47:60:33:08, production URLs). The logLoopTaskStack() lines at each
+// heavy stage — see below — report the running watermark
+// (uxTaskGetStackHighWaterMark(NULL): the minimum free bytes of THIS task
+// seen since boot). On a full production boot — OTA manifest TLS fetch,
+// live geolocation TLS fetch (cache expired), registration TLS POST, boot
+// heartbeat TLS POST, then the first loop() image-upload TLS POST — the
+// watermark reached 6428 of 16384 bytes free during the OTA-manifest stage
+// and no later stage took it lower: a measured peak of ~9.96 KB and
+// ~6.4 KB of headroom. The TLS path runs ~3.6 KB
+// deeper than the no-TLS baseline (10048 free on a boot whose manifest
+// connect failed against an unreachable target, so no handshake ran at
+// all), and the OTA-manifest fetch is the deepest single stage — the #276
+// crasher. setup() does verified TLS up
+// to four times (OTA manifest, new_module registration and boot heartbeat
+// always; geolocation a fourth time only when the NVS geo cache misses, ~1
+// in 14 boots — see esp_init.cpp's kGeoCacheMaxBoots) and loop() uploads
+// over TLS on every capture — all from this one task, all spending from this
+// one budget. Before adding or deepening a TLS call site, re-run that
+// measurement rather than assuming this number still covers it. Decision
+// record: ADR-034. Rationale and the failure signature:
 // docs/06-runtime-view/esp-reliability.md's "loopTask stack budget".
 //
 // Note no automated gate covers this: `pio test -e native` has no Arduino
 // runtime and no TLS, and `pio run -e esp32cam` only proves the firmware
 // links. Both were green while the firmware could not finish setup().
 SET_LOOP_TASK_STACK_SIZE(16384);
+
+// Stack-headroom instrumentation (#276): uxTaskGetStackHighWaterMark(NULL)
+// reports the lowest free-bytes watermark of THIS task — the Arduino
+// loopTask, which setup() and loop() share — since it started, so logging it
+// after each heavy stage records both the running minimum and the stage that
+// made it move. The last lines of the boot (end of setup(), then after the
+// first upload in loop()) are the peak-usage evidence the 16384 budget above
+// is tracked against.
+static void logLoopTaskStack(const char *stage) {
+  logf("[stack] loopTask high-water mark=%u bytes after %s",
+       (unsigned)uxTaskGetStackHighWaterMark(NULL), stage);
+}
 
 const char *CONFIG_FILE_PATH = "/config.json";
 esp_config_t esp_config;
@@ -492,6 +516,7 @@ void setup() {
   stageStartMs = millis();
   hf::httpOtaCheckAndApply(&esp_config);
   logf("[STAGE] http_ota_check took=%lums", millis() - stageStartMs);
+  logLoopTaskStack("ota_manifest");
 
   hf::breadcrumbSet("setup:getGeolocation");
   stageStartMs = millis();
@@ -515,6 +540,7 @@ void setup() {
       saveCachedGeolocation(esp_config.geolocation);
     }
   }
+  logLoopTaskStack("geolocation");
 
   Serial.print("Latitude: ");
   Serial.println(esp_config.geolocation.latitude, 6);
@@ -537,6 +563,7 @@ void setup() {
   stageStartMs = millis();
   initNewModuleOnServer(&esp_config);
   logf("[STAGE] initNewModuleOnServer took=%lums", millis() - stageStartMs);
+  logLoopTaskStack("register");
 
   // Arm the deferred-retry path if boot failed to obtain a fix.
   // loop() ticks the retry every iteration; once 30 minutes elapses
@@ -577,6 +604,7 @@ void setup() {
     onServerContact(millis());
   }
   logf("[STAGE] sendHeartbeat:boot took=%lums", millis() - stageStartMs);
+  logLoopTaskStack("boot_heartbeat");
   /*
     Camera init AFTER all WiFi/network operations to avoid DMA conflicts
   */
@@ -689,6 +717,7 @@ void setup() {
     }
     p.end();
   }
+  logLoopTaskStack("setup_complete");
 
   Serial.println("[ESP] SETUP COMPLETE");
 
@@ -981,6 +1010,7 @@ void loop() {
       // window; a failed upload makes no server spam and leaves the gate
       // re-armed. No-op if NTP hasn't synced (bogus epoch not persisted).
       hf::captureGateNote((uint32_t)time(nullptr));
+      logLoopTaskStack("first_upload");
     }
   }
 

@@ -4152,11 +4152,18 @@ its pure helpers pass", never "boots"; a smoke-flash on real hardware before a
 [`ESP32-CAM.ino`](../../ESP32-CAM/ESP32-CAM.ino), verified on hardware: the
 same board then walked the whole path — OTA manifest check (a survived HTTP
 404, see #275), geolocation, `new_module` registration, heartbeat and first
-image upload, all 200 against production. Note this is a number chosen to clear
-the observed overflow, **not** a measured bound; #276 tracks instrumenting the
-real high-water mark with `uxTaskGetStackHighWaterMark`, because the next TLS
-call site added to `setup()` will spend from the same unmeasured budget.
-And it ships to the field **only** via the `SEQUENCE`-bumped OTA release
+image upload — on the first verification walk every stage that reached the
+server returned 200 except the manifest's 404 (the 2026-09-02 measured walk
+saw the same manifest 404 and an nginx 405 on registration, both after the
+completed TLS handshake, so the stack depth was measured either way). The
+bound is now **measured, not picked**: per-boot `[stack] loopTask high-water
+mark=...` instrumentation (ADR-034) puts the worst observed watermark at
+**6428 bytes free of 16384** on a full production boot — ~9.96 KB peak, with
+the OTA-manifest TLS fetch the deepest single stage; the live Google TLS
+handshake and the upload TLS POST both stay at or above that watermark,
+leaving ~6.4 KB of headroom until a TLS call site goes deeper than the
+manifest fetch. And it ships to the field
+**only** via the `SEQUENCE`-bumped OTA release
 ([firmware-release.md → Release checklist](../07-deployment-view/firmware-release.md#release-checklist)):
 merging this source to `main` deploys nothing by itself — the same silent no-op
 that has shipped twice before (#150, #132).

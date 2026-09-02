@@ -51,6 +51,7 @@ and link backwards.
 | [031](adr-031-backup-file-copy-not-export-database.md)      | Retained backups are gzip'd file copies, not `EXPORT DATABASE`                    | Accepted                                                          |
 | [032](adr-032-device-identity-for-ingest.md)                | Device identity for `/new_module` and `/heartbeat` — interim compiled-in fleet key | Proposed                                                          |
 | [033](adr-033-claude-codex-agent-context-parity.md)         | Claude Code ↔ Codex CLI agent-context parity, enforced by a bash gate              | Accepted                                                          |
+| [034](adr-034-loop-task-stack-single-budget.md)             | `loopTask` stack is one global 16 KB budget, raised and measured per boot          | Accepted                                                          |
 
 ## When to create an ADR
 

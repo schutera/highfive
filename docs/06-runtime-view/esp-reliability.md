@@ -464,9 +464,29 @@ heartbeat on every boot; geolocation only as a fourth when the NVS geo cache
 misses (~1 in 14 boots — `esp_init.cpp`'s `kGeoCacheMaxBoots`, and a cache hit
 at `loadCachedGeolocation` skips the handshake entirely). `loop()` uploads over
 TLS on every capture — all from this one task, all spending from the same
-16 KB. Before adding another TLS call site, or deepening an existing one,
-measure rather than assume: `uxTaskGetStackHighWaterMark(NULL)` after the
-heaviest call reports the remaining headroom in words.
+16 KB. See [ADR-034](../09-architecture-decisions/adr-034-loop-task-stack-single-budget.md)
+for the design decision (one global budget + per-boot instrumentation, no
+per-call-site tasks).
+
+**Measured bound (2026-09-02, bench ESP32-CAM `68:09:47:60:33:08`).** The
+firmware logs `[stack] loopTask high-water mark=<N> bytes after <stage>` after
+every heavy stage — `uxTaskGetStackHighWaterMark(NULL)` on the loopTask, whose
+value is the minimum free bytes seen since boot (setup() and loop() are the
+same task). A full production boot exercises every stack consumer in one run:
+OTA manifest TLS fetch, a **live** geolocation TLS fetch (forced by letting
+the 14-boot cache TTL elapse), registration TLS POST, boot heartbeat TLS POST,
+then the first loop() image-upload TLS POST. The watermark reached
+**6428 bytes free of 16384** during the OTA-manifest stage and no later stage
+took it lower — a measured peak of ~9.96 KB (~61 % of the budget, ~6.4 KB of
+headroom). The TLS path runs ~3.6 KB deeper than the no-TLS baseline
+(10,048 bytes free on a boot whose manifest connect failed against an
+unreachable target, so no handshake ran at all), and the OTA-manifest fetch is
+the deepest single stage — the #276 crasher; the Google-cert-chain
+geolocation handshake and the upload POST both stay at or above that
+watermark. Before adding another TLS call site, or deepening an existing
+one, re-run this measurement rather than assuming the number still
+holds: the release-checklist re-verify step ([firmware-release.md](../07-deployment-view/firmware-release.md)
+→ step 2) greps the `[stack]` lines on the bench boot.
 
 Two properties make this failure mode easy to misread, so they are worth
 stating plainly:

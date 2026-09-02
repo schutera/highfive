@@ -92,6 +92,20 @@ T6 (ArduinoOTA LAN push) live in
 firmware change that touches `ota.cpp`, `ESP32-CAM.ino`'s `setup()`,
 `loop()`, or `platformio.ini`'s OTA env split.
 
+**The hardware smoke-flash is also the only gate for firmware
+memory-class defects.** A stack-budget overflow or a missing-PSRAM build
+passes every automated gate: `pio test -e native` runs host-side with no
+Arduino runtime and no TLS, and `pio run -e esp32cam` only proves the
+firmware links — both were green while the firmware could not finish
+`setup()` at all (the #276 loopTask stack panic). Catching this class is
+manual by construction: a smoke-flash and boot-walk on a real module,
+benchmarked per the release checklist's
+[`loopTask` re-verify step](../07-deployment-view/firmware-release.md),
+plus `-- PSRAM: found=1` verification. See
+[esp-reliability.md → "`loopTask` stack budget"](../06-runtime-view/esp-reliability.md#9-looptask-stack-budget-276).
+(ADR-014's Playwright layer covers the web side; the ESP side has no
+CI equivalent and none is planned.)
+
 ## Repo-level wrappers
 
 ```bash

@@ -995,7 +995,12 @@ python scripts/esp_capture.py $PORT 75
 ```
 
 A healthy boot reaches `Module added successfully`, `[heartbeat] HTTP/1.1 200 OK`
-and `responded with status: 200`.
+and `responded with status: 200` — and, on a build with the #276
+instrumentation, prints `[stack] loopTask high-water mark=<N> bytes after
+<stage>` after every heavy stage with a watermark of at least **6428 bytes
+free** (the measured minimum for the 16 KB budget; a materially lower value
+means a TLS call site outgrew the budget — see
+[ADR-034](09-architecture-decisions/adr-034-loop-task-stack-single-budget.md)).
 
 The panic text scrolls past fast, so capture it rather than watch it
 (`scripts/esp_capture.py` resets and records — see

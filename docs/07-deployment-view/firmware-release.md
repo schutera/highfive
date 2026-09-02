@@ -114,15 +114,20 @@ GEO_API_KEY=...` or the gitignored `ESP32-CAM/GEO_API_KEY` file. A
    **Re-verify the `loopTask` stack override while the bench module is live
    (#276).** Every build since the fix carries
    `SET_LOOP_TASK_STACK_SIZE(16384)` in `ESP32-CAM.ino`, so the bench boot
-   above doubles as the tripwire for the 16 KB budget: confirm the
-   module walks past the OTA manifest TLS handshake to registration /
-   heartbeat with **no** `Stack canary watchpoint triggered (loopTask)`
-   panic — and, once #276's `uxTaskGetStackHighWaterMark(NULL)`
-   instrumentation lands, that the printed headroom is still comfortable. The
-   macro is a strong-symbol override into the Arduino core's `main.cpp`, so a
-   core upgrade can silently break it while the firmware still compiles; the
-   smoke-flash is the only gate that notices. (See
-   [esp-reliability.md → "`loopTask` stack budget"](../06-runtime-view/esp-reliability.md#9-looptask-stack-budget-276).)
+   above doubles as the tripwire for the 16 KB budget. The instrumented
+   build logs `[stack] loopTask high-water mark=<N> bytes after <stage>`
+   after every heavy `setup()`/`loop()` stage; a healthy boot shows **no**
+   `Stack canary watchpoint triggered (loopTask)` panic and an every-stage
+   watermark of at least the measured bound — **6428 bytes free** (peak usage
+   ~9.96 KB; see
+   [esp-reliability.md → "`loopTask` stack budget"](../06-runtime-view/esp-reliability.md#9-looptask-stack-budget-276)
+   and [ADR-034](../09-architecture-decisions/adr-034-loop-task-stack-single-budget.md)).
+   Note the `first_upload` line only prints after a *successful* first
+   upload, so a boot whose upload fails carries setup-stage evidence only —
+   that boot also fails the `responded with status: 200` check above, so the
+   gap is caught, not hidden. The macro is a strong-symbol override into the Arduino core's `main.cpp`,
+   so a core upgrade can silently break it while the firmware still compiles;
+   the smoke-flash is the only gate that notices.
 
 3. **Publish the artifacts to prod.** The three files are **gitignored
    build outputs** (the `*.bin` glob and the explicit

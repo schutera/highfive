@@ -45,12 +45,45 @@ For scripts/CI, skip the cookie entirely and send the machine credential:
 docker compose logs <service-name>   # e.g. duckdb-service
 ```
 
-The most common cause is a missing or malformed `.env` file at the repo root. It must contain at minimum:
+The most common cause is a missing or malformed `.env` file at the repo root.
 
-```env
-DEBUG=true
-DUCKDB_SERVICE_URL=http://duckdb-service:8000
+The **file itself is required**, even though none of the variables in it are.
+`docker-compose.yml` declares `env_file: .env` on `backend`, `image-service`
+and `duckdb-service`, and compose refuses to render the stack at all when that
+file is absent — no service starts, and every command fails the same way:
+
+```console
+$ docker compose config -q
+env file /path/to/highfive/.env not found: ...
 ```
+
+(The text after `not found:` is the OS's own stat error, so it differs between
+Linux and Windows; the `env file … not found` prefix is the part to grep for.)
+
+Recreate the file from the template rather than hand-writing it:
+
+```bash
+cp .env.example .env
+```
+
+An **empty** `.env` is enough to boot the stack — every variable has a default
+(`DEBUG` is `false`, and `image-service` falls back to the Docker service name
+for `DUCKDB_SERVICE_URL`). This is why `scripts/check-duckdb-bind-claims.sh`
+creates a throwaway empty one in CI.
+
+So when a service exits and a `.env` is present, a *missing value* is not the
+cause. Which cause it is depends on how far the stack gets:
+
+```bash
+docker compose config -q          # does the configuration render at all?
+docker compose logs <service>     # if it does, why did the service stop?
+```
+
+If `docker compose config -q` fails, the `.env` has a syntax error and the
+command prints it. If it succeeds, the configuration is fine and the failure is
+at runtime — compose validation only proves that compose can parse and render
+the stack, never that the services can start. The `libgomp.so.1` case below is
+exactly that shape: a valid configuration and a service that still exits.
 
 ### `image-service` exits with `ImportError: libgomp.so.1: cannot open shared object file`
 

@@ -48,7 +48,6 @@ services:
       - '9000:4444'
     environment:
       DEBUG: 'false'
-      DUCKDB_PATH: /data/app.duckdb
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
     volumes:
       - duckdb_test_data:/data
@@ -69,8 +68,10 @@ services:
     environment:
       NODE_ENV: production
       # PORT must match the host:container mapping above (4002:3002).
-      # server.ts defaults to 3001 (legacy production), so set it
-      # explicitly here. Same fix as the root docker-compose.yml.
+      # server.ts's DEFAULT_PORT is 3002 today, so this is redundant but
+      # kept explicit: a future default change must not silently move the
+      # container off the published port. Same fix as the root
+      # docker-compose.yml.
       PORT: '3002'
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       IMAGE_SERVICE_URL: http://image-service:4444

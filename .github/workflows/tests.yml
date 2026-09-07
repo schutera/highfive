@@ -547,6 +547,15 @@ jobs:
         # would otherwise ship two agents working from different context.
         run: bash scripts/check-agent-context.sh
 
+      - name: Run check-env-var-docs.sh
+        # Every production env var declared in .deploy.env.example,
+        # .env.production.example, or docker-compose.prod.yml must be named
+        # in the env-var matrix in docs/07-deployment-view/what-is-live.md.
+        # The #201 failure mode was the inverse: a variable living in
+        # exactly one file with no document mapping it, so each deploy
+        # path's operator never saw it (#242).
+        run: bash scripts/check-env-var-docs.sh
+
   e2e-pipeline:
     name: End-to-end pipeline test
     runs-on: ubuntu-latest

@@ -69,7 +69,6 @@ services:
       - '9000:4444'
     environment:
       DEBUG: 'false'
-      DUCKDB_PATH: /data/app.duckdb
       DUCKDB_SERVICE_URL: http://duckdb-service:8000
       # Must match the backend's key for the #171 server-logs proxy.
       HIGHFIVE_API_KEY: hf_test_key

@@ -1,4 +1,10 @@
-# Production Deployment (Docker Compose + host-Nginx)
+# Production Deployment (Docker Compose + host-Nginx) — supported target, not yet deployed
+
+> This topology is the **supported production target**. The path the live
+> host runs today is the bare-metal Nginx + PM2 path —
+> [production-runbook.md](production-runbook.md); the one-page answer with
+> the runtime and env-var matrices is
+> [what-is-live.md](what-is-live.md).
 
 Deploy HiveHive to production from the `production` branch — the gated
 release branch, fast-forwarded from `main` when a release is cut (#152) —
@@ -9,7 +15,7 @@ for both `highfive.schutera.com` (frontend) and
 single Compose project; the `duckdb_data` named volume persists the
 DuckDB file across rebuilds.
 
-For a non-Docker production option (Nginx + PM2 on bare metal), see
+The path **live in production today** is the bare-metal Nginx + PM2 path —
 [production-runbook.md](production-runbook.md). For dev-laptop setup,
 see [docker-compose.md](docker-compose.md).
 
@@ -24,13 +30,17 @@ see [docker-compose.md](docker-compose.md).
 > branch/promotion model is recorded in
 > [ADR-030](../09-architecture-decisions/adr-030-production-as-gated-release-branch.md).
 >
-> ⚠️ **Which runtime is live?** The in-repo on-host automation
-> (`scripts/deploy.sh` + the `highfive-deploy` systemd timer) is the
-> **bare-metal PM2 path** — it `npm`/`vite`-builds, `pm2 reload`s, and copies
-> firmware artifacts into a host directory; it issues **no** `docker` commands.
-> So the timer-driven automation belongs to
-> [production-runbook.md](production-runbook.md), not this Docker doc. Confirm
-> which runtime your host actually runs before relying on either deploy action.
+> ⚠️ **Which runtime is live?** The bare-metal **PM2** path — see
+> [what-is-live.md](what-is-live.md) for the full runtime and env-var
+> matrices. The in-repo on-host automation (`scripts/deploy.sh` + the
+> `highfive-deploy` systemd timer) `npm`/`vite`-builds, `pm2 reload`s, and
+> copies firmware artifacts into a host directory; it issues **no**
+> `docker` commands, so it belongs to
+> [production-runbook.md](production-runbook.md), not this Docker doc.
+> This Docker topology is the supported target and has not been deployed
+> on the live host — confirm which runtime your host runs (the
+> verification block in what-is-live.md) before relying on either deploy
+> action.
 
 ## Topology at a glance
 
@@ -220,10 +230,14 @@ gates ensure `image-service` and `backend` only start after
 The Compose stack binds all four services to the server's loopback only.
 A host-level Nginx terminates TLS for two browser subdomains
 (`highfive.schutera.com`, `api.highfive.schutera.com`) and additionally
-proxies the three firmware paths (`/upload`, `/new_module`, `/heartbeat`)
-on plain HTTP because field ESP32-CAM modules ship with
-`http://highfive.schutera.com/upload` baked into `ESP32-CAM/config.json`
-and would otherwise hit a 301 redirect they can't follow. See "Known gaps".
+proxies the five ESP/OTA paths (`/upload`, `/new_module`, `/heartbeat`,
+`/firmware.json`, `/firmware.app.bin`) on **both** `:80` and `:443`:
+since #79 the fleet's URLs are `https://` (ADR-010), so the TLS vhosts
+carry the fleet, while the `:80` blocks serve pre-#79 stragglers (whose
+`http://` SPIFFS URLs are rewritten on the first post-#79 boot) and
+plain-HTTP LAN-dev builds. Without the exact-match locations a firmware
+request lands on the 301 (OTA) or the SPA catch-all (200 HTML the
+firmware can't parse). See "Known gaps".
 
 Loopback port map for host-Nginx:
 
@@ -231,8 +245,8 @@ Loopback port map for host-Nginx:
 | ---------------- | ---------------- | ------------------------------------------------- |
 | `127.0.0.1:8081` | `frontend`       | browser via TLS termination                       |
 | `127.0.0.1:3001` | `backend`        | browser via TLS termination                       |
-| `127.0.0.1:8000` | `image-service`  | ESP firmware via HTTP /upload                     |
-| `127.0.0.1:8002` | `duckdb-service` | ESP firmware via HTTP `/new_module`, `/heartbeat` |
+| `127.0.0.1:8000` | `image-service`  | ESP firmware `/upload` (TLS since #79; `:80` for stragglers) |
+| `127.0.0.1:8002` | `duckdb-service` | ESP firmware `/new_module`, `/heartbeat` (same)             |
 
 #### a. Install Nginx and certbot
 
@@ -294,11 +308,11 @@ sudo cp deploy/nginx/highfive-ingest.conf /etc/nginx/conf.d/highfive-ingest.conf
 Then create `/etc/nginx/sites-available/highfive`:
 
 ```nginx
-# Port 80, highfive.schutera.com - serves ESP firmware traffic on HTTP
-# AND redirects browser traffic to HTTPS. The /upload, /new_module,
-# /heartbeat locations exist because field firmware ships with
-# http://highfive.schutera.com/upload baked in - moving those to HTTPS
-# would require reflashing the fleet (tracked in Known gaps).
+# Port 80, highfive.schutera.com - ESP ingress for pre-#79 stragglers
+# and plain-HTTP LAN-dev builds (the fleet since #79 speaks TLS and
+# lands on the matching :443 blocks below - ADR-010), and redirects
+# browser traffic to HTTPS. The exact-match locations must take
+# precedence over the catch-all 301.
 server {
     listen 80;
     server_name highfive.schutera.com;
@@ -334,12 +348,12 @@ server {
         client_max_body_size 8k;
     }
 
-    # OTA firmware artifacts (#26). The ESP firmware fetches both files
-    # over plain HTTP because its WiFiClient does not do TLS. Pinned
-    # to exact-match locations (`location =`) so they take precedence
-    # over the catch-all 301-to-HTTPS below. Without these, every OTA
-    # check would land on the 301 and the device would log
-    # `[OTA] manifest HTTP 301` and skip. Tracked in ADR-008.
+    # OTA firmware artifacts (#26). Pre-#79 firmware fetched both files
+    # over plain HTTP; the fleet since #79 fetches them over TLS from
+    # the matching :443 block below (ADR-010). Exact-match locations
+    # take precedence over the catch-all 301-to-HTTPS - without them
+    # every OTA check lands on the 301 and the device logs
+    # `[OTA] manifest HTTP 301` and skips. Tracked in ADR-008.
     location = /firmware.json {
         proxy_pass http://127.0.0.1:8081/firmware.json;
         proxy_http_version 1.1;
@@ -385,6 +399,52 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
+
+    # ESP/OTA ingress (added for #242) - the fleet since #79 lands here
+    # over TLS (ADR-010); the port-80 block above serves stragglers.
+    # Exact-match locations beat the SPA proxy below.
+    location = /upload {
+        proxy_pass http://127.0.0.1:8000/upload;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_request_buffering off;
+        client_max_body_size 10M;
+        proxy_read_timeout 60s;
+    }
+
+    location = /new_module {
+        proxy_pass http://127.0.0.1:8002/new_module;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=hf_new_module burst=20 nodelay;
+        client_max_body_size 8k;
+    }
+
+    location = /heartbeat {
+        proxy_pass http://127.0.0.1:8002/heartbeat;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=hf_heartbeat burst=60 nodelay;
+        client_max_body_size 8k;
+    }
+
+    location = /firmware.json {
+        proxy_pass http://127.0.0.1:8081/firmware.json;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location = /firmware.app.bin {
+        proxy_pass http://127.0.0.1:8081/firmware.app.bin;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 120s;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:8081/;
@@ -468,20 +528,21 @@ the host-Nginx TLS proxy is wired and the dashboard will load data correctly.
 `curl -fsS -X POST https://api.highfive.schutera.com/api/admin/login -H 'Content-Type: application/json' -d "{\"password\":\"$HIGHFIVE_API_KEY\"}" -i`
 — look for the `Set-Cookie: hf_admin_session=…` header.)
 
-ESP firmware paths (HTTP, no `-f` because /upload returns 405 for HEAD):
+ESP firmware paths (probe GETs; 405 = routed to the service, not a 301):
 
 ```bash
-# 405 Method Not Allowed = success: nginx routed to image-service, not
-# a 301 to HTTPS. Pipe through grep so the test passes when 405 lands.
-curl -sSI http://highfive.schutera.com/upload | head -1
-curl -sSI http://highfive.schutera.com/heartbeat | head -1
-# OTA artifacts (#26). Both must return HTTP/1.1 200 (NOT 301) — see
-# ADR-008. The first time these are deployed, `firmware.app.bin` may
-# 404 until ESP32-CAM/build.sh has run; that's fine for the
-# infrastructure smoke-test but blocks Phase-2 OTA until the asset is
-# in place.
-curl -sSI http://highfive.schutera.com/firmware.json    | head -1
-curl -sSI http://highfive.schutera.com/firmware.app.bin | head -1
+# The fleet's path since #79 (ADR-010) - HTTPS:
+curl -sSI https://highfive.schutera.com/upload    | head -1
+curl -sSI https://highfive.schutera.com/heartbeat | head -1
+# The pre-#79/HTTP path:
+curl -sSI  http://highfive.schutera.com/upload    | head -1
+# OTA artifacts (#26). A 301 means the `location =` blocks aren't
+# matching. On a host that has already shipped firmware a 404 means
+# the artifacts are missing from the origin - publish them with
+# ESP32-CAM/build.sh first. A 404 on a *live-fleet* host is an
+# outage, not an expectation (#275).
+curl -sSI https://highfive.schutera.com/firmware.json    | head -1
+curl -sSI https://highfive.schutera.com/firmware.app.bin | head -1
 ```
 
 If any of these returns `HTTP/1.1 301 Moved Permanently` with a
@@ -614,15 +675,15 @@ must not be reverted away by doing step 3 first.
 
 Tracked gaps that this runbook accommodates rather than fixes:
 
-- **ESP firmware traffic stays on HTTP.** Field modules ship with
-  `http://highfive.schutera.com/upload` and `/new_module` baked into
-  `ESP32-CAM/config.json`. The host-Nginx port-80 server block proxies
-  `/upload`, `/new_module`, and `/heartbeat` to the appropriate
-  internal services on plain HTTP so the existing fleet keeps working
-  without reflashing. Migrating firmware to HTTPS would either require
-  reflashing every deployed module or fronting `image-service` with a
-  third TLS subdomain (e.g. `images.highfive.schutera.com`). Tracked as
-  a follow-up; out of scope for this runbook.
+- **Pre-#79 stragglers still arrive over HTTP.** The fleet's URLs
+  migrated to `https://` in #79 without a reflash —
+  `hf::rewriteLegacyHighfiveUrl` rewrites each module's stored
+  `http://highfive.schutera.com` URLs on the first post-#79 boot
+  (ADR-010) — but any module that never received that firmware still
+  speaks plain HTTP, so the port-80 ingress stays until the fleet is
+  fully post-#79. The OTA origin itself is public and the update
+  envelope is unsigned (MD5 only); that exposure — not the transport —
+  is what #281 closes.
 - **Python services run Flask's dev server.** `image-service` and
   `duckdb-service` use the same `Dockerfile.dev` in prod that the dev
   compose uses; both invoke `python app.py` which boots Flask's
@@ -1021,10 +1082,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.production down -v
 - Frontend: `https://highfive.schutera.com/`
 - API: `https://api.highfive.schutera.com/api/modules`
 - API health: `https://api.highfive.schutera.com/api/health`
-- ESP firmware (HTTP-only via host-Nginx port-80 vhost — see "Known gaps"):
-  - upload: `http://highfive.schutera.com/upload`
-  - register: `http://highfive.schutera.com/new_module`
-  - heartbeat: `http://highfive.schutera.com/heartbeat`
+- ESP firmware (the fleet since #79 over HTTPS, ADR-010; HTTP remains
+  for pre-#79 stragglers — see "Known gaps"):
+  - upload: `https://highfive.schutera.com/upload` (or `http://` for stragglers)
+  - register: `https://highfive.schutera.com/new_module` (or `http://`)
+  - heartbeat: `https://highfive.schutera.com/heartbeat` (or `http://`)
 
 ## See also
 

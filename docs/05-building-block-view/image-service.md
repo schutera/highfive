@@ -40,18 +40,29 @@ _Figure 1: Example of a Hive module equipped with ESP32-camera. (Mark Schutera, 
 
 ```
 image-service/
-├── app.py                  # Flask app, /upload + /snips endpoints, detector wiring
+├── app.py                  # Flask app — /upload, /snips/:filename, /images (gallery), /logs; detector wiring
 ├── Dockerfile.dev          # installs libglib2.0-0 (opencv) + libgomp1 (onnxruntime)
-├── requirements.txt
+├── requirements.txt        # the pins shared with duckdb-service's (requests & co.) must stay in sync — on the PM2 host both services share one system Python, so a divergent pin breaks exactly one of them; the files otherwise differ (onnx/OpenCV vs APScheduler/DuckDB), and no gate enforces the shared-pin sync yet
 ├── pyproject.toml
 ├── README.md
 ├── models/
-│   └── hole_detector.onnx  # learned YOLO26n-seg detector, run via onnxruntime (#165)
-└── services/
-    ├── duckdb.py           # HTTP client for DuckDB service (incl. record_detections)
-    ├── hole_detection.py   # learned HoleDetector — ONNX inference + snip crop (#165)
-    ├── image_guard.py      # JPEG magic-byte + dimension probe before save/decode (#228)
-    └── upload_pipeline.py  # orchestrates detect → record progress → persist snips
+│   ├── hole_detector.onnx  # learned YOLO26n-seg detector, run via onnxruntime (#165)
+│   └── README.md
+├── routes/
+│   └── __init__.py
+├── services/
+│   ├── discord.py          # Discord webhook poster — no baked-in fallback URL; unset disables it (#201)
+│   ├── duckdb.py           # HTTP client for duckdb-service (record_image, progress, heartbeat, record_detections)
+│   ├── hole_detection.py   # learned HoleDetector — ONNX inference + snip crop (#165)
+│   ├── image_guard.py      # JPEG magic-byte + dimension probe before save/decode (#228)
+│   ├── log_ring.py         # admin /logs ring + stdout tee (ADR-021)
+│   ├── module_id.py        # ModuleId — canonical 12-hex-char id normalization
+│   ├── paths.py            # sanitize_upload_filename, safe_child_path
+│   ├── prod_guard.py       # refuses to boot in production on the dev admin-key fallback (#204)
+│   ├── sidecar.py          # typed LogSidecarEnvelope for the .log.json telemetry sidecar
+│   ├── upload_pipeline.py  # orchestrates validate → detect → record → persist
+│   └── upload_throttle.py  # per-MAC upload rate budget
+└── demo_snips/             # sample snip assets
 ```
 
 ### Technologies

@@ -74,7 +74,6 @@ services:
     ports:
       - '127.0.0.1:8000:4444'
     environment:
-      - DUCKDB_PATH=/data/app.duckdb
       - DUCKDB_SERVICE_URL=http://duckdb-service:8000
       # Must match the backend's key so the #171 server-logs proxy (backend
       # forwards X-Admin-Key) authenticates against this service's internal

@@ -284,14 +284,15 @@ is being staged):
    - **Local release builds:** write the new key into
      `ESP32-CAM/GEO_API_KEY` (gitignored) or `export GEO_API_KEY=...`
      in your shell profile.
-4. Rebuild firmware and USB-flash deployed modules (OTA is
-   tracked in
-   [issue #26](https://github.com/schutera/highfive/issues/26)
-   and not implemented today). Until then, in-field modules
-   continue to hit Google with the now-revoked key — `getGeolocation`
-   will log the non-2xx response, but heartbeats, uploads, and the
-   map view are unaffected (the saved geolocation from first boot
-   persists in module config).
+4. Rebuild firmware and release it — **OTA** if the deployed modules are
+   already on the OTA-capable layout ([firmware-release.md](../07-deployment-view/firmware-release.md)),
+   **USB** if not ([esp-flashing.md → "First-time OTA
+   migration"](../07-deployment-view/esp-flashing.md#first-time-ota-migration-one-way-usb-only)).
+   The old key is baked into every running binary, so until the new build
+   reaches a module, that module keeps hitting Google with the now-revoked
+   key — `getGeolocation` logs the non-2xx response, but heartbeats,
+   uploads, and the map view are unaffected (the geolocation saved at
+   first boot persists in the module's config).
 
 ## Third-party credentials: Discord webhook
 

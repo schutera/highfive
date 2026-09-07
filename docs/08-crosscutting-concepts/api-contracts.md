@@ -500,18 +500,24 @@ response is a `200` that stores nothing**:
 
 ```jsonc
 // success
-{ "message": "...", "mac": "...", "battery": 67, "filename": "...", "classification": { … } }
+{ "message": "Image <stored-filename> uploaded successfully", "mac": "aabbccddeeff", "battery": 67, "classification": { … } }
 
 // throttled — SAME status code, none of the other keys
 { "message": "Upload rate exceeded — discarded" }
 ```
 
-**Branch on the presence of `filename`, never on the status code.** A consumer
-that assumes every `200` carries the full envelope gets a `KeyError` /
-`undefined` the first time a module storms. The ESP firmware is safe by
-accident here — `ESP32-CAM/client.cpp` reads only the status line — but any
-future consumer (a test harness, a second ingest client, a dashboard poller)
+**Branch on the presence of `mac`, never on the status code** — the
+throttled `200` carries only `message`. A consumer that assumes every
+`200` carries the full envelope gets a `KeyError` / `undefined` the
+first time a module storms. The ESP firmware is safe by accident here —
+`ESP32-CAM/client.cpp` reads only the status line — but any future
+consumer (a test harness, a second ingest client, a dashboard poller)
 is not.
+
+There is **no standalone `filename` key** in this envelope: the stored
+filename appears only inside the success `message` string (and as the
+`filename` field of the admin gallery's `GET /images` listing,
+api-reference.md § 2.4).
 
 The status code is `200` rather than `429` on purpose: a non-2xx counts toward
 the firmware's 5-consecutive-failure circuit breaker and would reboot a module
@@ -526,11 +532,12 @@ client-controlled:
 
 - **The stored (and echoed) filename's extension is always `.jpg`**,
   regardless of what the client sent — `services/paths.py::sanitize_upload_filename`
-  strips everything from the first `.` onward and appends `.jpg`. A consumer
-  that derives a file extension from the **uploaded** filename rather than
-  the **response**'s `message`/any listing endpoint's `filename` field will
-  be wrong for a non-`.jpg` upload (rare in practice — only a hostile or
-  buggy client sends one).
+   strips everything from the first `.` onward and appends `.jpg`. A consumer
+   that derives a file extension from the **uploaded** filename rather than
+   from the **response**'s `message` string (which echoes the stored name)
+   or the admin gallery's `filename` field (`GET /images`, api-reference.md
+   § 2.4) will be wrong for a non-`.jpg` upload (rare in practice — only a
+   hostile or buggy client sends one).
 - **A non-`.jpg` response body is also now possible on `200`'s sibling
   `400`:** `{"error": "invalid image: <reason>"}` when the bytes aren't a
   parseable JPEG or the declared frame exceeds `MAX_IMAGE_DIM`. Same

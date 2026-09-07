@@ -62,7 +62,8 @@ We have already worked with DuckDB as part of the Data Engineering course. We ca
 
 ## Data Model
 
-The data model consists of three FK-chained tables plus three auxiliary stores:
+The data model consists of three FK-chained tables plus four auxiliary
+stores (all defined in `db/schema.py`):
 
 - `module_configs` (root, registered modules)
 - `nest_data` (per-module nests, FK → `module_configs`)
@@ -70,6 +71,7 @@ The data model consists of three FK-chained tables plus three auxiliary stores:
 - `image_uploads` (per-upload event log, used for activity bucketing)
 - `module_heartbeats` (per-heartbeat telemetry rows; see [ADR-004](../09-architecture-decisions/adr-004-heartbeat-snapshot-in-contracts.md))
 - `measurements` (per-module canonical time-series; see [ADR-016](../09-architecture-decisions/adr-016-per-module-measurements-store.md))
+- `nest_detections` (per-hole detection rows backing the snip grid; #165 / [ADR-027](../09-architecture-decisions/adr-027-hole-detection-model.md))
 
 The FK-chained tables form a hierarchical structure:
 
@@ -85,14 +87,20 @@ Cardinality:
 
 Stores information about the registered **ESP32 modules**.
 
-| Attribute     | Data Type    | Required | Description                |
-| ------------- | ------------ | -------- | -------------------------- |
-| id            | VARCHAR(20)  | Yes      | unique module-ID           |
-| name          | VARCHAR(100) | Yes      | name of module             |
-| lat           | DECIMAL(9,6) | Yes      | latitude of location       |
-| lng           | DECIMAL(9,6) | Yes      | longitude of location      |
-| first_online  | DATE         | Yes      | date of first registration |
-| battery_level | INTEGER      | No       | current battery level      |
+| Attribute             | Data Type    | Required | Description                                                                                     |
+| --------------------- | ------------ | -------- | ------------------------------------------------------------------------------------------------- |
+| id                    | VARCHAR(20)  | Yes      | unique module-ID (canonical 12-hex-char form)                                                    |
+| name                  | VARCHAR(100) | Yes      | firmware-reported name (mutable on every registration, no UNIQUE — collisions auto-suffixed)     |
+| display_name          | VARCHAR(100) | No       | admin-settable label override, UNIQUE (ADR-011); null by default                                 |
+| lat                   | DECIMAL(9,6) | Yes      | latitude of location (coarsened to 2 dp ≈ 1 km on write, ADR-020)                               |
+| lng                   | DECIMAL(9,6) | Yes      | longitude of location (same coarsening)                                                          |
+| first_online          | DATE         | Yes      | date of first registration                                                                       |
+| battery_level         | INTEGER      | No       | current battery level                                                                            |
+| image_count           | INTEGER      | Yes      | upload counter, incremented by the post-upload aggregate heartbeat                               |
+| email                 | VARCHAR(255) | No       | operator contact registered at first boot (#229)                                                 |
+| updated_at            | TIMESTAMP    | Yes      | row-metadata timestamp (any write)                                                               |
+| last_seen_at          | TIMESTAMP    | Yes      | device-liveness signal — bumped only on `/new_module` registration (#97 split)                   |
+| last_silence_alert_at | TIMESTAMP    | No       | last silence-watcher alert, dedupe window (ADR-005)                                              |
 
 ---
 
@@ -117,16 +125,16 @@ Possible values for `beeType`:
 
 # Table: daily_progress
 
-Speichert den **täglichen Fortschritt eines Nestes**.
+Stores the **daily progress of a nest**.
 
-| Feld        | Datentyp    | Pflichtfeld | Beschreibung                    |
-| ----------- | ----------- | ----------- | ------------------------------- |
-| progress_id | VARCHAR(20) | Yes         | Unique ID of the progress entry |
-| nest_id     | VARCHAR(20) | Yes         | Reference to the Nest           |
-| date        | DATE        | Yes         | Date of entry                   |
-| empty       | INTEGER     | Yes         | Number of empty cells           |
-| sealed      | INTEGER     | Yes         | percentage of sealed cells      |
-| hatched     | INTEGER     | Yes         | Number of hatched cells         |
+| Attribute   | Data Type  | Required | Description                     |
+| ----------- | ---------- | -------- | ------------------------------- |
+| progress_id | VARCHAR(20) | Yes     | Unique ID of the progress entry |
+| nest_id     | VARCHAR(20) | Yes     | Reference to the nest           |
+| date        | DATE       | Yes      | Date of entry                   |
+| empty       | INTEGER    | Yes      | Number of empty cells           |
+| sealed      | INTEGER    | Yes      | Percentage of sealed cells      |
+| hatched     | INTEGER    | Yes      | Number of hatched cells         |
 
 The value `sealed` is stored as a percentage between 0 and 100 for one nest.
 
@@ -144,9 +152,9 @@ for the schema rationale (no PK, no FK, `value DOUBLE`).
 | ---------- | ----------- | -------- | ------------------------------------------------ |
 | module_mac | VARCHAR(20) | Yes      | Canonical module id (no FK; out-of-order safe)   |
 | ts         | TIMESTAMP   | Yes      | UTC; producers stamp explicitly                  |
-| metric     | VARCHAR(40) | Yes      | `battery_pct`, future: `temperature_c`, …        |
+| metric     | VARCHAR(40) | Yes      | `battery_pct` (ESP heartbeat), `temperature_c` / `humidity_pct` / `precipitation_mm` (weather worker, ADR-017); future: `activity_score` (#114), `battery_mv` (#8b) |
 | value      | DOUBLE      | Yes      | Numeric reading; `AVG(value)` aggregates on read |
-| source     | VARCHAR(40) | Yes      | `esp-heartbeat`, `esp-heartbeat-backfill`, …     |
+| source     | VARCHAR(40) | Yes      | `esp-heartbeat`, `esp-heartbeat-backfill`, `open-meteo` (live worker), `open-meteo-backfill` (historical) |
 
 Indices:
 
@@ -159,7 +167,10 @@ Indices:
 Writers: `routes/heartbeats.py`'s `post_heartbeat` (dual-write from the
 ESP heartbeat path, `metric='battery_pct'`, `source='esp-heartbeat'`),
 `routes/measurements.py`'s `post_measurements` (admin batch insert
-proxied through the backend), and a one-shot backfill in
+proxied through the backend), the ADR-017 weather worker
+(`services/weather_worker.py` — hourly APScheduler gap-fill plus
+admin-triggered archive backfill; `source='open-meteo'` /
+`'open-meteo-backfill'`), and a one-shot battery backfill in
 `db/schema.py`'s `init_db()` (idempotent; tags
 `source='esp-heartbeat-backfill'`).
 
@@ -365,7 +376,7 @@ through this endpoint).
 | Module                        | Role                                                                                                                                                                             |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `services/silence_watcher.py` | Periodic Discord alert when a module goes silent for >3 h, recovery message on return — see [ADR-005](../09-architecture-decisions/adr-005-silence-watcher-in-duckdb-service.md) |
-| `services/backup.py`          | Weekly retained, rotated, gzip'd + sha256'd snapshot of `app.duckdb` under `BACKUP_DIR` (default `/data/backups`); Discord gets a text notification only, never the file — see [ADR-031](../09-architecture-decisions/adr-031-backup-file-copy-not-export-database.md) |
+| `services/backup.py`          | Weekly retained, rotated, gzip'd + sha256'd snapshot of `app.duckdb` under `BACKUP_DIR` (Docker: `/data/backups` via `Dockerfile.dev`'s `DUCKDB_PATH=/data/app.duckdb`; bare-metal PM2: the code default `dirname(DUCKDB_PATH)/backups` = cwd-relative `./data/backups` under the service dir — see [what-is-live.md](../07-deployment-view/what-is-live.md)'s matrix); Discord gets a text notification only, never the file — see [ADR-031](../09-architecture-decisions/adr-031-backup-file-copy-not-export-database.md) |
 | `services/discord.py`         | Thin webhook wrapper used by the silence watcher and the AI-classification flow                                                                                                  |
 
 ## References:

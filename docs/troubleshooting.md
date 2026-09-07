@@ -272,6 +272,73 @@ clobber the previous one). See CLAUDE.md's critical rules.
 from test suites running concurrently, not a prettier bug — let the suites
 finish and re-run the commit.
 
+### `git commit` fails with `npx: command not found` on a host without Node
+
+**Symptom.** The husky pre-commit hook dies before lint-staged runs:
+`sh: 1: npx: not found`. Every commit fails, not just some.
+
+**Cause.** The first command the hook runs is `npx lint-staged`, and `npx`
+comes with a Node.js install. A Linux container can create a
+`node_modules/` inside a checkout (for example `npm ci` under a `node:22`
+image) while the host has no Node at all. The hook then dies on its first
+line. The sign: `node_modules/@esbuild/` contains `linux-x64`, not
+`win32-x64`. Verify:
+
+```powershell
+node --version
+# fails: node is not recognized
+Get-ChildItem node_modules\@esbuild
+# linux-x64 => node_modules was created inside a Linux container
+```
+
+**Fix 1 (durable): install Node 22 on the host.** The repo's
+`package.json` requires `node >= 22.12.0`.
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+# restart the shell, then verify:
+node --version
+npx --version
+```
+
+`git commit` then runs the hook natively. A commit that touches `.py` files
+also needs a working ruff; see the entry above.
+
+**Fix 2 (one-off, no host change): run the commit from a Node container.**
+The container sees the same `node_modules/`, so the hook's `npx`,
+`prettier`, `eslint`, and `ruff` all resolve. From PowerShell with Docker
+Desktop running:
+
+```powershell
+$repo = "C:\Users\info\VSCode\highfive"   # your checkout
+# Write your commit message to %TEMP%\commitmsg.txt first
+docker run --rm -v "${repo}:/work" -v "$env:TEMP:/tmp/t" -w /work node:22 bash -c 'apt-get update && apt-get install -y --no-install-recommends git python3-pip && pip install --no-cache-dir --break-system-packages ruff==0.14.1 && git add -A && git commit -F /tmp/t/commitmsg.txt'
+```
+
+The command stages every dirty file (`git add -A`). For a partial commit,
+stage the files you want first, then run `git commit -F` the same way
+without `git add -A`.
+
+**Push the same way** when the host's git cannot authenticate to GitHub
+(no stored credential, no SSH key, no `gh`) or when you want the push to
+run in the same container environment as the commit. Pass your `gh` token
+in the remote URL. The pre-push hook still runs.
+
+```powershell
+$user   = gh api user -q .login
+$token  = gh auth token
+$branch = git branch --show-current
+docker run --rm -v "${repo}:/work" -w /work node:22 bash -c "git push https://$user:$token@github.com/schutera/highfive.git $branch"
+```
+
+The token is visible in the container process list while the push runs.
+`gh auth token` returns a short-lived OAuth token. Rotate it with
+`gh auth refresh` if the machine is shared.
+
+**Do not bypass the hooks.** `HUSKY=0` and `--no-verify` skip the
+lint-staged auto-fixes and the pre-push gates. The failure then moves to
+CI, with an extra commit in between.
+
 ### `git push` fails with "Python was not found; run without arguments to install from the Microsoft Store" (Windows, #270)
 
 **Symptom.** The pre-push hook dies in `scripts/check-duckdb-bind-claims.sh`

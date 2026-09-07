@@ -312,8 +312,16 @@ Desktop running:
 ```powershell
 $repo = "C:\Users\info\VSCode\highfive"   # your checkout
 # Write your commit message to %TEMP%\commitmsg.txt first
-docker run --rm -v "${repo}:/work" -v "$env:TEMP:/tmp/t" -w /work node:22 bash -c 'apt-get update && apt-get install -y --no-install-recommends git python3-pip && pip install --no-cache-dir --break-system-packages ruff==0.14.1 && git add -A && git commit -F /tmp/t/commitmsg.txt'
+Copy-Item "$env:TEMP\commitmsg.txt" "$repo\.git\COMMIT_MSG_TMP"
+docker run --rm -v "${repo}:/work" -w /work node:22 bash -c 'apt-get update >/dev/null && apt-get install -y --no-install-recommends git python3-pip >/dev/null && pip install --no-cache-dir --break-system-packages ruff==0.14.1 && git add -A && git commit -F .git/COMMIT_MSG_TMP && rm -f .git/COMMIT_MSG_TMP'
 ```
+
+The command mounts only the repository. Docker Desktop on Windows serves
+host directories over a file-sharing service, and mounting two host
+directories is unreliable: heavy writes to one share can hide files on the
+other share from the container (observed with a commit message file while
+`git add` ran on the other mount). The message file therefore rides in
+`.git/`, which is never tracked, and is read from the same mount.
 
 The command stages every dirty file (`git add -A`). For a partial commit,
 stage the files you want first, then run `git commit -F` the same way
@@ -328,7 +336,7 @@ in the remote URL. The pre-push hook still runs.
 $user   = gh api user -q .login
 $token  = gh auth token
 $branch = git branch --show-current
-docker run --rm -v "${repo}:/work" -w /work node:22 bash -c "git push https://$user:$token@github.com/schutera/highfive.git $branch"
+docker run --rm -e "USER=$user" -e "TOKEN=$token" -e "BRANCH=$branch" -v "${repo}:/work" -w /work node:22 bash -c 'apt-get update >/dev/null && apt-get install -y --no-install-recommends git ca-certificates >/dev/null && git push "https://$USER:$TOKEN@github.com/schutera/highfive.git" "$BRANCH"'
 ```
 
 The token is visible in the container process list while the push runs.

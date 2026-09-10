@@ -8,7 +8,7 @@
 >
 > **Scope.** This runbook covers the Node backend (PM2), the static
 > frontend (Nginx-served), the ESP/OTA Nginx ingress
-> ([section 5b](#5b-espota-ingress-port-80)), and the environment the two
+> ([section 5b](#5b-espota-ingress-both-ports)), and the environment the two
 > Python services need. It does **not** cover the _initial_ bare-metal
 > provisioning of `image-service` and `duckdb-service` as pm2 apps — the
 > template entries are in [section 6](#6-create-pm2-ecosystem-config-on-server);

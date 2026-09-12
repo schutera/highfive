@@ -339,9 +339,10 @@ $branch = git branch --show-current
 docker run --rm -e "USER=$user" -e "TOKEN=$token" -e "BRANCH=$branch" -v "${repo}:/work" -w /work node:22 bash -c 'apt-get update >/dev/null && apt-get install -y --no-install-recommends git ca-certificates >/dev/null && git push "https://$USER:$TOKEN@github.com/schutera/highfive.git" "$BRANCH"'
 ```
 
-The token is visible in the container process list while the push runs.
-`gh auth token` returns a short-lived OAuth token. Rotate it with
-`gh auth refresh` if the machine is shared.
+The token is visible in the container process list while the push runs,
+because it is embedded in the remote URL. `gh auth token` returns a
+long-lived OAuth token with your account's scopes; if the machine is
+shared, revoke it from GitHub's token settings after the push.
 
 **Do not bypass the hooks.** `HUSKY=0` and `--no-verify` skip the
 lint-staged auto-fixes and the pre-push gates. The failure then moves to
@@ -408,9 +409,12 @@ raw API call.
    docker run --rm -e HF_TOKEN="$token" -e GITHUB_URL="$url" -v "${repo}:/work" -w /work node:22 node .git/github-api-post.mjs .git/github-api-payload.json
    ```
 
-The token is visible in the container process list while the command runs.
-`gh auth token` returns a short-lived OAuth token; rotate it with
-`gh auth refresh` if the machine is shared.
+The token is passed to the container as an environment variable, so it is
+not in the container process argv (though it is readable from the process's
+`/proc` environ entry, and from the `docker run` command line while the
+command starts). `gh auth token` returns a long-lived OAuth token with
+your account's scopes; if the machine is shared, revoke it from GitHub's
+token settings after the command finishes.
 
 ### `git push` fails with "Python was not found; run without arguments to install from the Microsoft Store" (Windows, #270)
 

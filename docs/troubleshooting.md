@@ -347,6 +347,71 @@ The token is visible in the container process list while the push runs.
 lint-staged auto-fixes and the pre-push gates. The failure then moves to
 CI, with an extra commit in between.
 
+### GitHub API rejects non-ASCII JSON from Windows PowerShell 5.1 `Invoke-RestMethod`
+
+**Symptom.** A GitHub API request whose JSON body contains non-ASCII
+characters (for example an em dash in a PR or issue body) fails before the
+API accepts the resource:
+
+- sending the body as a PowerShell string returns `400` with
+  `{"message":"Problems parsing JSON"}`;
+- sending the body as an explicit UTF-8 `byte[]` returns `422` for
+  `properties/body`, with the echoed value stopping at the first
+  non-ASCII character.
+
+The same JSON payload succeeds from Node's `fetch`.
+
+**Cause.** Windows PowerShell 5.1 does not reliably preserve non-ASCII
+request-body bytes through `Invoke-RestMethod` in this environment. The
+exact internal encoding step was not isolated, so treat the cmdlet as
+unreliable for GitHub API JSON that is not pure ASCII. Do not spend more
+time on `-Encoding`, `ContentType`, or byte-array variants once both
+shapes above have been observed.
+
+**Fix.** Run the GitHub API call from a `node:22` container. Node's
+`fetch` sends the payload as UTF-8. If `gh` is installed and authenticated,
+prefer `gh` for routine PR/issue commands; use the container pattern for a
+raw API call.
+
+1. Save the complete JSON request body as **UTF-8 without BOM** in
+   `.git/github-api-payload.json` (an untracked path). Use an editor that
+   saves UTF-8, not a PowerShell `>` redirect.
+2. Save this helper as `.git/github-api-post.mjs`:
+
+   ```js
+   import { readFileSync } from 'node:fs';
+
+   const url = process.env.GITHUB_URL;
+   const payload = readFileSync(process.argv[2], 'utf8');
+
+   const res = await fetch(url, {
+     method: 'POST',
+     headers: {
+       Authorization: 'Bearer ' + process.env.HF_TOKEN,
+       Accept: 'application/vnd.github+json',
+       'User-Agent': 'highfive-docs-sweep',
+       'Content-Type': 'application/json'
+     },
+     body: payload
+   });
+
+   console.log('STATUS', res.status);
+   console.log(await res.text());
+   ```
+
+3. From PowerShell, with Docker Desktop running:
+
+   ```powershell
+   $repo  = "C:\Users\info\VSCode\highfive"
+   $token = gh auth token
+   $url   = "https://api.github.com/repos/schutera/highfive/pulls"
+   docker run --rm -e HF_TOKEN="$token" -e GITHUB_URL="$url" -v "${repo}:/work" -w /work node:22 node .git/github-api-post.mjs .git/github-api-payload.json
+   ```
+
+The token is visible in the container process list while the command runs.
+`gh auth token` returns a short-lived OAuth token; rotate it with
+`gh auth refresh` if the machine is shared.
+
 ### `git push` fails with "Python was not found; run without arguments to install from the Microsoft Store" (Windows, #270)
 
 **Symptom.** The pre-push hook dies in `scripts/check-duckdb-bind-claims.sh`

@@ -1255,7 +1255,7 @@ This is the **telemetry heartbeat** fired hourly by firmware's
 `sendHeartbeat` in `ESP32-CAM/client.cpp`. It is distinct from the post-upload
 aggregate at `POST /modules/<id>/heartbeat` below — same word, different
 endpoint, different body, different table. See
-[../12-glossary/README.md](../12-glossary/README.md) "Heartbeat (telemetry)"
+[12-glossary/README.md](12-glossary/README.md) "Heartbeat (telemetry)"
 vs "Heartbeat (post-upload aggregate)".
 
 ## 3.8 Post-upload aggregate heartbeat

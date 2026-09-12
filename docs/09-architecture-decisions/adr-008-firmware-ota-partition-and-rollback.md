@@ -500,7 +500,7 @@ sections assumed the homepage origin and the modules share a single LAN.
 That premise no longer holds: `highfive.schutera.com` serves the OTA origin
 from a **public host** — on the live PM2 path and on the supported Docker
 target (see
-[`what-is-live.md`](../../07-deployment-view/what-is-live.md)) — while field
+[`what-is-live.md`](../07-deployment-view/what-is-live.md)) — while field
 modules connect from arbitrary operator home networks.
 
 The **transport** leg of that threat model was since closed: issue #79 /

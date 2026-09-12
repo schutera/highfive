@@ -20,6 +20,8 @@ Highlights worth knowing about even if you're not assigned:
 | [#275](https://github.com/schutera/highfive/issues/275) | The live host's firmware origin 404s                          | `/firmware.json` and `/firmware.app.bin` are missing from the live `homepage/dist` on both ports (first observed 2026-09-02, re-probed 2026-09-06): the setup wizard cannot flash a new module from production, and no `SEQUENCE`-bumped OTA — including the #231 timeout fix — can reach the fleet. [what-is-live.md → Known gaps](../07-deployment-view/what-is-live.md#known-gaps-on-the-live-pm2-host). |
 | — (no issue filed yet)                                  | Public `GET /api/modules` payload carries the firmware-reported `email` | `backend/src/database.ts`'s `listModules` maps `ModuleDetail.email` into the public list response (reads are public by design — #142/ADR-019), and ADR-020 coarsened *coordinates* but never addressed *email*. Needs a decision: strip the field from the public payload, or document the exposure in [auth.md](../08-crosscutting-concepts/auth.md) as deliberate. Found during the #242/#252 sweep. |
 
+Rows for #19, #20, #26, #56, and #57 were removed on 2026-09-12 after GitHub confirmed all five closed (2026-05-12 or 2026-05-14).
+
 ## Field-name drift
 
 The canonical wire field on `POST /add_progress_for_module` is

@@ -1,11 +1,16 @@
 # Cutting a firmware OTA release
 
 The end-to-end procedure for shipping a new ESP32-CAM firmware to the
-deployed fleet over the air. This is the **operator runbook**; the
-runtime mechanics live in
+deployed fleet over the air. This is the **operator runbook** for the
+**manual** path; the runtime mechanics live in
 [../06-runtime-view/ota-update-flow.md](../06-runtime-view/ota-update-flow.md)
 and the design rationale in
 [../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md).
+On the live PM2 host there is also an **automated** mode
+(`FIRMWARE_AUTO_OTA=1` in `.deploy.env`) in which the on-host
+`scripts/deploy.sh` timer performs these same steps itself after a
+firmware-source change lands on `production` — see
+[what-is-live.md → Firmware release modes](what-is-live.md#firmware-release-modes).
 
 ## The one rule
 

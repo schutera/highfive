@@ -67,4 +67,3 @@ future contributors don't "fix" them without context.
 2. Structured observability — central logs + trace IDs across services.
 3. Drop dev-key fallback in production builds.
 4. DuckDB schema migration / versioning strategy.
-5. OTA firmware updates ([issue #26](https://github.com/schutera/highfive/issues/26)).

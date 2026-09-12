@@ -568,10 +568,17 @@ bash build.sh
 # Then deploy the updated homepage/public/* artifacts to the host.
 ```
 
-`build.sh` runs unmodified on Linux, macOS, and Windows 11 + Git Bash;
-the script auto-detects `%LOCALAPPDATA%/Arduino15`, `esptool.exe`, and
-the right Python interpreter (rejecting the MS Store stub at
-`python3.exe`) so no env overrides are needed on Windows (#99).
+`build.sh` is **arduino-cli-based, not PlatformIO-based**: it compiles
+with `arduino-cli compile` (Arduino-ESP32 core, same board JSON and
+`min_spiffs.csv` partition preset as `platformio.ini`, so both paths
+emit byte-identical `partitions.bin`) and stitches the merged web-flash
+binary with `esptool merge_bin`. It runs unmodified on Linux, macOS,
+and Windows 11 + Git Bash; the script auto-detects
+`%LOCALAPPDATA%/Arduino15`, `esptool.exe`, and the right Python
+interpreter (rejecting the MS Store stub at `python3.exe`) so no env
+overrides are needed on Windows (#99). The USB-flash paths above
+(`pio run -e esp32cam -t upload`) remain the way to put a binary onto a
+specific module — `build.sh` only produces the release artifacts.
 
 `build.sh` writes both `homepage/public/firmware.bin` (merged, for
 the web installer) and `homepage/public/firmware.app.bin` (app-only,

@@ -1,20 +1,26 @@
-# Production Runbook (Nginx + PM2) — non-recommended bare-metal path
+# Production Runbook (Nginx + PM2) — the path live in production
 
-> ⚠️ **Non-recommended legacy path.** This runbook covers only the
-> Node backend (PM2) and the static frontend (Nginx-served). It does
-> **not** cover the _initial_ bare-metal provisioning of `image-service`
-> and `duckdb-service` (each needs its own pm2/systemd unit, shared
-> filesystem volume, and reverse-proxy plumbing) — though ongoing
-> **redeploys** of those Python services (dependency install + reload) are
-> covered under [Updates & Redeployment](#updates--redeployment). The supported
-> production path is **Docker Compose + host-Nginx**:
-> [production-deployment.md](production-deployment.md). Use this PM2
-> runbook only if Docker is not an option on the target host; expect
-> to fill in the upload-pipeline plumbing yourself — including the
+> ✅ **This is the path the live host runs today** — see
+> [what-is-live.md](what-is-live.md) for the evidence and a 30-second
+> verification. The Docker Compose topology
+> ([production-deployment.md](production-deployment.md)) is the **supported
+> target, not yet deployed**.
+>
+> **Scope.** This runbook covers the Node backend (PM2), the static
+> frontend (Nginx-served), the ESP/OTA Nginx ingress
+> ([section 5b](#5b-espota-ingress-both-ports)), and the environment the two
+> Python services need. It does **not** cover the _initial_ bare-metal
+> provisioning of `image-service` and `duckdb-service` as pm2 apps — the
+> template entries are in [section 6](#6-create-pm2-ecosystem-config-on-server);
+> registering them on a host is the operator's step — nor the off-host
+> backup sync for their data ([Backup & Restore](#backup--restore)).
+> Ongoing **redeploys** of those services (dependency install + reload) are
+> covered under [Updates & Redeployment](#updates--redeployment). The
 > `/new_module` and `/heartbeat` rate/body-size limits in
 > [`deploy/nginx/highfive-ingest.conf`](../../deploy/nginx/highfive-ingest.conf)
-> (2026-08 audit, for #229), which this runbook's Nginx config below does
-> not include.
+> (2026-08 audit, for #229) are referenced by the section 5b blocks below
+> but have **not** been applied to the live host yet — that is an
+> operational follow-up (#229), not something a doc change performs.
 
 ## Overview
 
@@ -22,9 +28,9 @@ This runbook covers deploying HighFive to production at
 `highfive.schutera.com` using Nginx as the public-facing reverse proxy
 and PM2 to supervise the Node backend on bare metal — no Docker.
 
-For the supported Docker-Compose-based production deploy, see
-[production-deployment.md](production-deployment.md). For dev-laptop
-setup, see [docker-compose.md](docker-compose.md).
+For the Docker-Compose production deploy — the supported target, not yet
+deployed — see [production-deployment.md](production-deployment.md). For
+dev-laptop setup, see [docker-compose.md](docker-compose.md).
 
 ## Prerequisites
 
@@ -102,15 +108,77 @@ sudo certbot certonly --standalone -d highfive.schutera.com
 
 ### 5. Create Nginx Configuration (on server)
 
+First install the rate-limit zones for the credential-free `/new_module`
+and `/heartbeat` routes (2026-08 audit, for #229 — see
+[`deploy/nginx/highfive-ingest.conf`](../../deploy/nginx/highfive-ingest.conf)
+for the sizing rationale). `limit_req_zone` must live in the `http {}`
+context, so the file goes into `conf.d`, not the site file:
+
+```bash
+sudo cp deploy/nginx/highfive-ingest.conf /etc/nginx/conf.d/highfive-ingest.conf
+```
+
 Create `/etc/nginx/sites-available/highfive`:
 
 ```bash
 sudo cat > /etc/nginx/sites-available/highfive << 'EOF'
-# Redirect HTTP to HTTPS
+# Port 80 - ESP ingress for pre-#79 stragglers (their stored SPIFFS URLs
+# are still http:// until the first post-#79 boot rewrites them - ADR-010)
+# and plain-HTTP LAN-dev builds; the current fleet speaks TLS (https) and
+# lands on the matching :443 locations in the block below instead. The
+# exact-match locations must stay ABOVE the catch-all, or stray ESP
+# requests land on the 301.
 server {
     listen 80;
     server_name highfive.schutera.com;
-    return 301 https://$server_name$request_uri;
+
+    location = /upload {
+        proxy_pass http://127.0.0.1:4444/upload;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_request_buffering off;
+        client_max_body_size 10M;
+        proxy_read_timeout 60s;
+    }
+
+    # limit_req + client_max_body_size: zones from highfive-ingest.conf
+    # (installed above) - these two routes had NO nginx-level bound
+    # before the 2026-08 audit (#229).
+    location = /new_module {
+        proxy_pass http://127.0.0.1:8000/new_module;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=hf_new_module burst=20 nodelay;
+        client_max_body_size 8k;
+    }
+
+    location = /heartbeat {
+        proxy_pass http://127.0.0.1:8000/heartbeat;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=hf_heartbeat burst=60 nodelay;
+        client_max_body_size 8k;
+    }
+
+    # OTA artifacts served straight from the live dist - scripts/deploy.sh's
+    # publish_firmware() lands them in /var/www/highfive/homepage/dist/.
+    location = /firmware.json {
+        alias /var/www/highfive/homepage/dist/firmware.json;
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    location = /firmware.app.bin {
+        alias /var/www/highfive/homepage/dist/firmware.app.bin;
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    # Everything else (browsers) -> HTTPS.
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
 }
 
 # Main HTTPS server
@@ -137,6 +205,53 @@ server {
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
+    # ESP/OTA ingress (added for #242). Since #79 the fleet's URLs are
+    # https:// (ADR-010), so it lands HERE, not on the port-80 block
+    # above - that one only serves pre-#79 stragglers and LAN-dev builds.
+    # Exact-match locations beat the SPA catch-all below; without them a
+    # POST /upload falls through to index.html (200 HTML the firmware
+    # cannot parse) and every OTA check 404s.
+    location = /upload {
+        proxy_pass http://127.0.0.1:4444/upload;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_request_buffering off;
+        client_max_body_size 10M;
+        proxy_read_timeout 60s;
+    }
+
+    # limit_req + client_max_body_size: zones from highfive-ingest.conf
+    # (installed in step 5).
+    location = /new_module {
+        proxy_pass http://127.0.0.1:8000/new_module;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=hf_new_module burst=20 nodelay;
+        client_max_body_size 8k;
+    }
+
+    location = /heartbeat {
+        proxy_pass http://127.0.0.1:8000/heartbeat;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=hf_heartbeat burst=60 nodelay;
+        client_max_body_size 8k;
+    }
+
+    # OTA artifacts from the live dist (deploy.sh's publish_firmware()).
+    location = /firmware.json {
+        alias /var/www/highfive/homepage/dist/firmware.json;
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    location = /firmware.app.bin {
+        alias /var/www/highfive/homepage/dist/firmware.app.bin;
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
     # Frontend (React SPA)
     location / {
         root /var/www/highfive/homepage/dist;
@@ -152,7 +267,12 @@ server {
         }
     }
 
-    # Backend API
+    # Backend API.
+    # NOTE: a host built from this template serves the API under the main
+    # domain's /api/. The live host deviates: its main-domain /api/ falls
+    # into the SPA's location / below, and the browser API is served from
+    # the api.highfive.schutera.com subdomain behind a Caddy edge — see
+    # what-is-live.md ("Nginx vhosts" row).
     location /api/ {
         proxy_pass http://127.0.0.1:3001/api/;
         proxy_http_version 1.1;
@@ -186,6 +306,65 @@ sudo nginx -t
 sudo systemctl restart nginx
 ```
 
+### 5b. ESP/OTA Ingress (both ports)
+
+Why ESP ingress at all, and why on **both** ports: since #79 the
+firmware's production URLs are `https://` (ADR-010) — registration,
+upload, heartbeat and the OTA manifest/binary fetch all verify the
+origin against the embedded ISRG Root X1 — so the **TLS vhost carries
+the fleet** (the `location =` blocks added to the `:443` server above).
+The **port-80** blocks remain for pre-#79 stragglers (their stored
+`http://` URLs are only rewritten on the first post-#79 boot, ADR-010)
+and for plain-HTTP LAN-dev builds. Two failure modes if the exact-match
+locations are missing or outranked by a catch-all: a blanket `301` (the
+device logs `[OTA] manifest HTTP 301` and skips), or the SPA `try_files`
+catch-all answering `200 index.html` to a POST the firmware cannot
+parse — the worse one, because it is silent (retry/circuit-breaker
+churn, no log line on the device).
+
+**Port-mirror footgun.** On this PM2 path the Flask services listen on
+their native ports — `image-service` on `:4444`, `duckdb-service` on
+`:8000` — the *opposite* of the Docker path's host-port mapping (image
+`:8000`, duckdb `:8002`). Copying a `proxy_pass` port across the two
+topologies points at the wrong service;
+[what-is-live.md](what-is-live.md) carries the full matrix.
+
+**Retrofitting an already-provisioned host** (the live vhost predates
+these blocks): add the five `location =` blocks to **both** the
+`listen 443` and `listen 80` server blocks, each *above* that block's
+catch-all, install the `conf.d` zones file shown in step 5, then
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**Live-host divergence (verified 2026-09-06, probe-only — the host's
+`/etc/nginx` is not readable):** `/upload`, `/new_module` and
+`/heartbeat` answer on **both** ports (405 to a probe GET = routed to
+the Flask services), so the live vhost already carries the ingress on
+both; but `/firmware.json` and `/firmware.app.bin` **404 on both** —
+the artifacts are missing from the live `homepage/dist` ([#275](https://github.com/schutera/highfive/issues/275)). Until
+#275 lands, the setup wizard cannot flash a new module from production
+and no `SEQUENCE`-bumped OTA release can reach the fleet — including
+the #231 fix. The live vhost also diverges from this template in ways
+a rebuild from it would not reproduce: a Caddy edge sits in front
+(responses carry `Server: Caddy`), and the browser API is reached on
+the `api.highfive.schutera.com` subdomain — the main domain's `/api/`
+falls into the SPA (both confirmed by probe; see
+[what-is-live.md](what-is-live.md)).
+
+**Smoke test** (a `301` means the exact-match blocks are missing or
+outranked; on a host that has already shipped firmware a `404` on the
+firmware pair is an **outage** — #275 — not an expectation):
+
+```bash
+curl -sSI https://highfive.schutera.com/upload          | head -1   # 405 = TLS ingress routed to image-service (the fleet's path since #79)
+curl -sSI https://highfive.schutera.com/heartbeat       | head -1   # 405 = TLS ingress routed to duckdb-service
+curl -sSI  http://highfive.schutera.com/upload          | head -1   # 405 = pre-#79/HTTP ingress still routed (not 301)
+curl -sSI https://highfive.schutera.com/firmware.json   | head -1   # 200 = published; 404 on a live-fleet host = missing from the origin (#275)
+curl -sSI https://highfive.schutera.com/firmware.app.bin | head -1  # 200 = published; 404 on a live-fleet host = missing from the origin (#275)
+```
+
 ### 6. Create PM2 Ecosystem Config (on server)
 
 Create `ecosystem.config.js` in `/var/www/highfive/`:
@@ -197,6 +376,9 @@ module.exports = {
     {
       name: 'highfive-api',
       script: './backend/dist/server.js',
+      // cluster gives one process per core; the rate limiters, the ADR-023
+      // log ring, the SSE tail and the read-model cache are per-process, so
+      // an N-core host runs N independent copies (tracked in #248).
       instances: 'max',
       exec_mode: 'cluster',
       env: {
@@ -326,6 +508,10 @@ cd ..
 
 # Build frontend with API URL
 cd homepage
+# The URL above matches this runbook's section-5 vhost, which proxies the
+# main domain's /api/ to :3001. The live host diverges: its bundle points
+# at https://api.highfive.schutera.com/api (main-domain /api/ falls into
+# the SPA there) — see what-is-live.md.
 VITE_API_URL=https://highfive.schutera.com/api npm run build
 cd ..
 
@@ -410,6 +596,9 @@ python3 -m pip install -r image-service/requirements.txt
 
 # 3) Build the Node side (contracts is source-only — no build step)
 npm --prefix backend run build
+# VITE_API_URL above matches a host built from this runbook's section-5
+# vhost; the live host's bundle points at
+# https://api.highfive.schutera.com/api (see what-is-live.md).
 ( cd homepage && VITE_API_URL=https://highfive.schutera.com/api npm run build )
 
 # 4) Reload (zero-downtime for the api cluster) and health-check.
@@ -443,7 +632,8 @@ All AI/ML inference is server-side — the ESP runs no models
 
 Full procedure lives in
 [production-deployment.md → Backup & Restore](production-deployment.md#backup--restore)
-(the supported Docker path) — Step 0 (manual pre-migration backup, stop-first
+(the Docker path — the supported target; this PM2 path is the one live
+today, see [what-is-live.md](what-is-live.md)) — Step 0 (manual pre-migration backup, stop-first
 so it's safe), the automatic weekly retained backup (`services/backup.py`,
 issue #232,
 [ADR-031](../09-architecture-decisions/adr-031-backup-file-copy-not-export-database.md)),
@@ -471,6 +661,10 @@ pm2 logs highfive-api
 
 ```bash
 curl https://highfive.schutera.com/api/modules
+# On the live host use https://api.highfive.schutera.com/api/modules
+# instead - there the main domain's /api/ falls into the SPA and answers
+# index.html (2026-09-06 probe); on a fresh host built from section 5
+# the main-domain /api/ works, because that vhost proxies it to :3001.
 ```
 
 ### Check Frontend
@@ -523,12 +717,25 @@ pm2 save
 
 ## Environment Configuration
 
-The `.env.production` file in the repository contains generic production settings:
+The source of truth per variable is the
+[Environment variable matrix](what-is-live.md#environment-variable-matrix) —
+read that first. In short:
 
-- `NODE_ENV=production`
-- `PORT=3001`
-
-The server-specific `.env` file (created during setup) overrides these and should NOT be committed to git.
+- **Live PM2 host** — values come from the gitignored
+  `/var/www/highfive/.env` (backend, via `dotenv`),
+  `/var/www/highfive/.deploy.env` (sourced by `scripts/deploy.sh`, exported
+  into every `pm2 reload --update-env`) and the `env:` blocks in
+  `ecosystem.config.js`.
+- **Docker target** — values come from `.env.production`
+  (`docker compose --env-file`); the tracked `.env.production.example`
+  holds the two secrets the stack fail-fasts on (plus optional
+  `BACKUP_DIR`/`BACKUP_KEEP` overrides). `NODE_ENV`, `PORT` and
+  `VITE_API_URL` are fixed in `docker-compose.prod.yml` itself, not in that
+  file.
+- The tracked `.env.example` (generic production values: `NODE_ENV`,
+  `PORT`, and `VITE_API_URL` — with the mandatory `/api` suffix) and
+  `.env.production.example` are templates only. Host-local env files are
+  gitignored and must never be committed.
 
 ## Rollback
 
@@ -558,24 +765,29 @@ openssl rand -base64 32
 
 ### Setting API Key in Production
 
-#### Option 1: Using docker-compose (recommended)
+#### Option 1: Docker (the other supported target — not the live path)
+
+The live host runs bare-metal PM2 (Option 2) — see
+[what-is-live.md](what-is-live.md). To deploy the Docker target instead:
 
 ```bash
-# Create or edit .env file in project root
+# Create or edit .env.production in project root
 HIGHFIVE_API_KEY=your_generated_key_here   # the only secret (#142)
 
-# Deploy with docker-compose
-docker-compose up -d
+# Deploy
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 ```
 
-#### Option 2: Using PM2
+#### Option 2: Using PM2 (the live path)
 
 ```bash
 # In /var/www/highfive/.env
 HIGHFIVE_API_KEY=your_generated_key_here
 
-# Backend will read from .env automatically
-pm2 start backend/dist/server.js --name "highfive-backend"
+# Backend will read from .env automatically.
+# (On the live host the app is actually started via ecosystem.config.js —
+# `pm2 start ecosystem.config.js` — which names the same app `highfive-api`.)
+pm2 start backend/dist/server.js --name "highfive-api"
 ```
 
 #### Option 3: Environment variables (systemd)

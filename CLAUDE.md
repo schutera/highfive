@@ -70,8 +70,8 @@ Per-service unit tests (what CI runs):
 ```bash
 cd backend        && npm ci && npm test                       # vitest + supertest, 302 tests (33 files)
 cd homepage       && npm ci && npm test                       # vitest + jsdom, 198 tests (33 files)
-cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 292 tests
-cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 98 tests
+cd duckdb-service && pip install -r requirements-dev.txt && pytest tests/ -q   # 304 tests
+cd image-service  && pip install -r requirements-dev.txt && pytest tests/ -q   # 181 tests
 cd ESP32-CAM      && pio test -e native                       # Unity host tests, ~281 RUN_TEST across 20 suites
 cd ESP32-CAM      && pio run  -e esp32cam                     # cross-compile firmware
 ```
@@ -94,17 +94,21 @@ Full testing strategy: [`docs/10-quality-requirements/`](docs/10-quality-require
 
 ## Cutting a firmware OTA release
 
-To ship new ESP32-CAM firmware to the field, follow the runbook — do **not** improvise: [`docs/07-deployment-view/firmware-release.md`](docs/07-deployment-view/firmware-release.md). **The one rule:** bump `ESP32-CAM/SEQUENCE` (a new `VERSION` codename alone won't flash) — the on-device comparator requires the manifest's `version` to differ **and** its `sequence` to be strictly greater, so merging firmware source to `main` ships nothing until a higher-`SEQUENCE` build is published and a `prod-<codename>` tag exists. This silent no-op has shipped twice (#150, #132).
+Two ways to ship new ESP32-CAM firmware to the field; either way, follow
+the runbook — do **not** improvise: [`docs/07-deployment-view/firmware-release.md`](docs/07-deployment-view/firmware-release.md). **The one rule (both modes):** bump `ESP32-CAM/SEQUENCE` (a new `VERSION` codename alone won't flash) — the on-device comparator requires the manifest's `version` to differ **and** its `sequence` to be strictly greater, so merging firmware source to `main` ships nothing until a higher-`SEQUENCE` build is published and a `prod-<codename>` tag exists. This silent no-op has shipped twice (#150, #132).
 
-Ground truth, in execution order:
+- **Manual (both runtimes):** an operator runs the checklist below end to end.
+- **Automated (live PM2 host only):** with `FIRMWARE_AUTO_OTA=1` in `.deploy.env`, a firmware-source change on `production` makes the on-host `scripts/deploy.sh` timer run the native test gate (`pio test -e native`), `ESP32-CAM/build.sh`, publish the three artifacts into the live `homepage/dist`, and commit + push the `VERSION`/`SEQUENCE` bump and `prod-<codename>` tag — after the services are healthy, since the OTA is the last, irreversible step. Forward-only: no field rollback. The Docker target has no automation; releases there are manual. Where `FIRMWARE_AUTO_OTA` lives per runtime: [what-is-live.md → Firmware release modes](docs/07-deployment-view/what-is-live.md#firmware-release-modes).
 
-- **The checklist** — [`firmware-release.md` → Release checklist](docs/07-deployment-view/firmware-release.md#release-checklist): bump both `ESP32-CAM/VERSION` + `ESP32-CAM/SEQUENCE` → `bash ESP32-CAM/build.sh` (needs `GEO_API_KEY`) → rebuild the **frontend image** (the artifacts are gitignored, so `git pull` doesn't carry them) → commit on `main`, **promote to `production`** (`git push origin <sha>:production`), annotated `prod-<codename>` tag on the deployed commit → verify `curl https://highfive.schutera.com/firmware.json`.
+Ground truth (manual mode), in execution order:
+
+- **The checklist** — [`firmware-release.md` → Release checklist](docs/07-deployment-view/firmware-release.md#release-checklist): bump both `ESP32-CAM/VERSION` + `ESP32-CAM/SEQUENCE` → `bash ESP32-CAM/build.sh` (needs `GEO_API_KEY`) → republish the frontend (the artifacts are gitignored, so `git pull` doesn't carry them) → commit on `main`, **promote to `production`** (`git push origin <sha>:production`), annotated `prod-<codename>` tag on the deployed commit → verify `curl https://highfive.schutera.com/firmware.json`.
 - **Why `SEQUENCE` is the gate** — [`ADR-008` → Sequence + allow_downgrade addendum](docs/09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md#sequence--allow_downgrade-addendum-pr-ii-83) and [`ESP32-CAM/lib/ota_version/ota_version.h`](ESP32-CAM/lib/ota_version/ota_version.h).
 - **The build/publish script** — [`ESP32-CAM/build.sh`](ESP32-CAM/build.sh) (writes the 3 artifacts + manifest into `homepage/public/`).
 - **Runtime fetch/flash/rollback** — [`docs/06-runtime-view/ota-update-flow.md`](docs/06-runtime-view/ota-update-flow.md).
 - **The trap to avoid** — [chapter 11 → "Merging firmware source is not a release"](docs/11-risks-and-technical-debt/README.md#merging-firmware-source-is-not-a-release--the-sequence-bump-is-the-release-150-132).
 
-Since #152 ([ADR-030](docs/09-architecture-decisions/adr-030-production-as-gated-release-branch.md)), **both** the web services **and** firmware OTA deploy from the single gated `production` branch: `main` is the integration line, and a release is a fast-forward of `production` onto a chosen `main` commit (`git push origin <sha>:production`). `prod-*` tags are cut on `production`. The on-host `scripts/deploy.sh` timer (`BRANCH=production`) pulls it and auto-publishes firmware changes ([branch & tag model](docs/07-deployment-view/firmware-release.md#git-branch--tag-model)).
+Since #152 ([ADR-030](docs/09-architecture-decisions/adr-030-production-as-gated-release-branch.md)), **both** the web services **and** firmware OTA deploy from the single gated `production` branch: `main` is the integration line, and a release is a fast-forward of `production` onto a chosen `main` commit (`git push origin <sha>:production`). `prod-*` tags are cut on `production`. The on-host `scripts/deploy.sh` timer (`BRANCH=production`) pulls it; it publishes firmware changes itself only in automated mode (`FIRMWARE_AUTO_OTA=1`) — otherwise a firmware-source change deploys services only, and the release still needs the manual checklist ([branch & tag model](docs/07-deployment-view/firmware-release.md#git-branch--tag-model)).
 
 ## Documentation map (arc42)
 

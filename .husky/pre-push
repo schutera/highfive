@@ -46,3 +46,10 @@ bash scripts/check-python-twins.sh || exit 1
 # .codex/agents drifting, or .claude/skills vs .agents/skills drifting.
 # See CLAUDE.md "Claude/Codex context parity".
 bash scripts/check-agent-context.sh || exit 1
+
+# Catch a production env var appearing in .deploy.env.example,
+# .env.production.example, or docker-compose.prod.yml without a row in the
+# env-var matrix in docs/07-deployment-view/what-is-live.md — the #201
+# failure mode: a variable living in exactly one file, with no document
+# mapping which runtime reads it from where (#242).
+bash scripts/check-env-var-docs.sh || exit 1

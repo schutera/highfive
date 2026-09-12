@@ -409,9 +409,10 @@ GET /api/modules/:id/activity?interval=hourly&days=7
 
 Public — no auth (#142).
 
-Bucketed image-upload counts for a single module, used by the dashboard
-`ActivityWeatherChart` to overlay activity against Open-Meteo weather
-at the module's lat/lng. Maps to the duckdb-service
+Bucketed image-upload counts for a single module, used by the
+dashboard's `ActivityWeatherChart` (currently shelved, #219) to overlay
+activity against weather at the module's lat/lng. Maps to the
+duckdb-service
 `/modules/<id>/activity_timeseries` route (see §3.10) and rewrites the
 snake_case wire to the camelCase `ActivityTimeSeries` shape pinned in
 [`contracts/src/index.ts`](../contracts/src/index.ts).
@@ -796,7 +797,7 @@ Response:
 ```json
 {
   "message": "Image hive_image.jpg uploaded successfully",
-  "mac": "esp-9081726354",
+  "mac": "aabbccddeeff",
   "battery": 67,
   "classification": {
     "black_masked_bee": { "1": 1, "2": 0, "3": 1, "4": 0 },
@@ -806,6 +807,9 @@ Response:
   }
 }
 ```
+
+`mac` echoes the canonical 12-hex-char module id. There is no standalone
+`filename` key — the stored filename appears only inside `message`.
 
 The classifier is currently a stub returning random 0/1 values.
 
@@ -1058,22 +1062,42 @@ fields).
 GET /modules
 ```
 
-Returns the raw DB rows under `modules`:
+Returns one row per module from `module_configs` (an explicit column list —
+adding a column to the table cannot leak to the wire without a deliberate
+edit in the handler) plus per-module image aggregates from
+`image_uploads`:
 
 ```json
 {
   "modules": [
     {
-      "battery_level": 72,
+      "id": "aabbccddeeff",
+      "name": "Garden-Hive",
+      "display_name": "Garden",
+      "lat": "47.810000",
+      "lng": "9.640000",
       "first_online": "Wed, 11 Mar 2026 00:00:00 GMT",
-      "id": "esp-9081726354",
-      "lat": "48.52137",
-      "lng": "9.05891",
-      "name": "Garden-Hive"
+      "battery_level": 72,
+      "image_count": 3,
+      "email": "ops@example.org",
+      "updated_at": "Thu, 12 Mar 2026 06:04:00 GMT",
+      "last_seen_at": "Thu, 12 Mar 2026 06:00:00 GMT",
+      "last_silence_alert_at": null,
+      "real_image_count": 3,
+      "last_image_at": "Thu, 12 Mar 2026 06:04:00 GMT"
     }
   ]
 }
 ```
+
+Wire types: `lat`/`lng` are stringified `DECIMAL(9,6)` (the trailing zeros
+are the column's fixed scale; values are coarsened to 2 decimal places ≈
+1 km before storage, ADR-020); `first_online` is a `DATE`, the other
+timestamps are `TIMESTAMP` — all serialise as RFC-1123 strings. Nullable
+columns (`display_name`, `email`, `battery_level`,
+`last_silence_alert_at`, `last_image_at`) come back as `null` when unset.
+`image_count` is the fleet-maintained counter (bumped by the module
+itself); `real_image_count` counts actual `image_uploads` rows.
 
 ## 3.4 List nests
 
@@ -1231,7 +1255,7 @@ This is the **telemetry heartbeat** fired hourly by firmware's
 `sendHeartbeat` in `ESP32-CAM/client.cpp`. It is distinct from the post-upload
 aggregate at `POST /modules/<id>/heartbeat` below — same word, different
 endpoint, different body, different table. See
-[../12-glossary/README.md](../12-glossary/README.md) "Heartbeat (telemetry)"
+[12-glossary/README.md](12-glossary/README.md) "Heartbeat (telemetry)"
 vs "Heartbeat (post-upload aggregate)".
 
 ## 3.8 Post-upload aggregate heartbeat

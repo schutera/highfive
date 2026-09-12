@@ -14,14 +14,15 @@ Run hermetically — no Docker, no real DB, no network.
 
 | Service          | Stack                  | Count | Run                                  |
 | ---------------- | ---------------------- | ----- | ------------------------------------ |
-| `backend`        | vitest + supertest     | 17    | `cd backend && npm test`             |
-| `homepage`       | vitest + jsdom         | 8     | `cd homepage && npm test`            |
-| `image-service`  | pytest                 | 31    | `cd image-service && pytest tests/`  |
-| `duckdb-service` | pytest (per-test tmp-file DuckDB) | 290 | `cd duckdb-service && pytest tests/` |
+| `backend`        | vitest + supertest     | 302 | `cd backend && npm test`             |
+| `homepage`       | vitest + jsdom         | 198 | `cd homepage && npm test`            |
+| `image-service`  | pytest                 | 181 | `cd image-service && pytest tests/`  |
+| `duckdb-service` | pytest (per-test tmp-file DuckDB) | 304 | `cd duckdb-service && pytest tests/` |
 
 In `backend`, the duckdb-service client is mocked via `vi.mock`. In
-`image-service`, all outbound HTTP and `duckdb.connect` calls are
-monkey-patched. In `duckdb-service`, `tests/conftest.py`'s `fresh_db`
+`image-service`, all outbound HTTP is monkey-patched (including its
+duckdb-service client — the service itself never opens DuckDB, ADR-001).
+In `duckdb-service`, `tests/conftest.py`'s `fresh_db`
 fixture points `DUCKDB_PATH` at a fresh `tmp_path` file per test (not
 in-memory — DuckDB's in-memory mode can't be reopened read-only the way
 several tests, including the backup restore tests, need) and reimports
@@ -33,13 +34,18 @@ time, exercising schema, nest creation, progress insertion, and
 
 PlatformIO `native` env (no Arduino core, runs on the CI host).
 
-| Suite                                  | Count | Run                                  |
-| -------------------------------------- | ----- | ------------------------------------ |
-| `ESP32-CAM/test/test_native_url`       | -     | `cd ESP32-CAM && pio test -e native` |
-| `ESP32-CAM/test/test_native_ring_*`    | -     | (same — runs all 38 in one job)      |
-| `ESP32-CAM/test/test_native_telemetry` | -     | (same)                               |
+20 suites under `ESP32-CAM/test/` — one Unity suite per host-testable
+library: `url`, `ring_buffer`, `telemetry`, `ota_version`,
+`ota_rollback`, `wifi_diag`, `serial_cmd`, `module_name`, `module_id`,
+`geolocation`, `metrics`, `capture_gate`, `hb_failure`, `http_status`,
+`form_query`, `loop_health`, `breadcrumb`, `config_json`, `led_state`,
+`tls_roots` (directory `test_native_<name>/` for each). ~281
+`RUN_TEST`s in total, all executed by one job:
 
-Total: 38 tests covering `lib/url`, `lib/ring_buffer`, `lib/telemetry`.
+```bash
+cd ESP32-CAM && pio test -e native
+```
+
 Why this works: see [ADR-002](../09-architecture-decisions/adr-002-esp-host-testable-lib.md).
 
 A second job (`esp-firmware`) cross-compiles the actual Arduino
@@ -68,13 +74,22 @@ shape drift at the rendered-DOM boundary, SPA route mounting, and
 cross-service contract regressions that pass `npm test && npm run build`
 silently.
 
-Five specs in iteration 1:
+Thirteen specs in `tests/ui/tests/`. The five from iteration 1 pinned
+the two ch.-11 regressions:
 
 - `smoke.spec.ts` — homepage `/`, `/dashboard`, `/setup` mount without console errors.
 - `dashboard-telemetry.spec.ts` — pins the [Telemetry sidecar envelope drift](../11-risks-and-technical-debt/README.md#telemetry-sidecar-envelope-drift--admin-ui-silently-rendered--for-every-field) regression. Asserts TelemetryRow renders literal values, not `—`.
 - `dashboard-side-list.spec.ts` — pins the [Three layers, one rule](../11-risks-and-technical-debt/README.md#three-layers-one-rule-was-actually-four-surfaces--the-dashboard-side-list-silently-filtered-pending-modules-pr-ii-final-pass-smoke) regression. Asserts the Null-Island module appears with the "Location pending" pill.
 - `module-panel-rendering.spec.ts` — header, MAC-prefix, nest grid (4 leafcutter progressbars), and bee-type summary total hatches (64, summed from `daily_progress`) render against real backend data. Image count is deliberately not pinned — see the spec for why.
 - `setup-wizard-happy-path.spec.ts` — Step 1 → 5 via the documented skip branches.
+
+The other eight cover features added later (see each spec's header for
+the exact assertions): `snip-timelapse`, `module-battery-history`,
+`module-nest-snips`, `module-heartbeat-gaps`,
+`module-heartbeat-diagnostics` (all against the module-detail panel),
+`admin-server-logs` and `admin-image-pagination` (admin session flow),
+`coordinate-generalization` (the ~1 km map generalization,
+[ADR-020](../09-architecture-decisions/adr-020-coordinate-generalization.md)).
 
 Specs that fixture-type a wire shape import the type from
 `@highfive/contracts` — currently `dashboard-telemetry.spec.ts`
@@ -124,5 +139,5 @@ default `make test` target.
 
 ## CI
 
-Ten parallel jobs gate every PR — see [ci-gates.md](ci-gates.md).
+Fifteen parallel jobs gate every PR — see [ci-gates.md](ci-gates.md).
 All must be green to merge.

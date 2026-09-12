@@ -27,8 +27,10 @@ like and how much surface the backup path has to get right.
 `run_backup()` uses **file-copy + gzip** (`services/backup.py`'s
 `_checkpoint_and_copy` + `_gzip_and_remove`). The retained artifact is
 a single `highfive_backup_<UTC timestamp>.duckdb.gz` with a `.sha256`
-sidecar under `BACKUP_DIR` (default `/data/backups`), rotated to the
-newest `BACKUP_KEEP` (default `4`).
+sidecar under `BACKUP_DIR` (Docker: `/data/backups`; bare-metal PM2: the
+code default `dirname(DUCKDB_PATH)/backups`, which is cwd-relative — see
+[what-is-live.md](../07-deployment-view/what-is-live.md)'s matrix),
+rotated to the newest `BACKUP_KEEP` (default `4`).
 
 ## Alternatives considered
 

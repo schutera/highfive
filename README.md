@@ -40,6 +40,10 @@ docker compose up --build  # homepage on http://localhost:5173
 
 Full setup, ports, and service map: **[Deployment Guide](docs/07-deployment-view/docker-compose.md)**.
 
+Deploying rather than developing? `.env.example` is the wrong file — see
+[`.env.production.example`](.env.production.example) and the
+[production deployment guide](docs/07-deployment-view/production-deployment.md).
+
 <br>
 
 ## Where to go next

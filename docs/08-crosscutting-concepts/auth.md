@@ -42,8 +42,13 @@ keyed on
 unknown values as production):
 
 1. If `HIGHFIVE_API_KEY` is set case-insensitively to the dev
-   fallback, the backend refuses to boot. A `.env` file copy-paste
-   from `.env.example` is the typical trigger.
+   fallback, the backend refuses to boot. Copying the template
+   (`cp .env.example .env`) does not trigger this: the template ships
+   `HIGHFIVE_API_KEY` commented out, so the copy leaves it unset and the
+   fallback applies through the normal dev path. The guard fires when
+   someone sets the variable to the fallback deliberately — pasting it
+   from this page, `CLAUDE.md`, or a test — which in a real deployment
+   is a secret that only looks set.
 2. If `isProduction()` is true and `HIGHFIVE_API_KEY` is unset or
    whitespace, the backend refuses to boot. A missing override on
    production is the typical trigger.

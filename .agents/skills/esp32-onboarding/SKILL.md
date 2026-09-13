@@ -29,7 +29,7 @@ http://<LAN-IP>:8000/health      → ok
 http://<LAN-IP>:8002/health      → ok
 ```
 
-If a service is down: `docker compose up --build`. Confirm `.env` exists at the repo root with `DEBUG=true` and `DUCKDB_SERVICE_URL=http://duckdb-service:8000`.
+If a service is down: `docker compose up --build`. Confirm `.env` exists at the repo root — `cp .env.example .env` if not. [`.env.example`](../../../.env.example) is the one description of what belongs in it; don't restate the values here.
 
 **Windows only:** ports 8000 and 8002 need inbound firewall rules. If services are healthy but modules never appear, add them now (admin PowerShell):
 
@@ -188,12 +188,12 @@ The new module should appear with its name, battery level, location, and status 
 
 ## Quick reference — known gotchas
 
-| Issue                                         | Fix                                                       |
-| --------------------------------------------- | --------------------------------------------------------- |
-| AP called "HiveHive-Access-Point" in old docs | Actual name is `ESP32-Access-Point`, pw `esp-12345`       |
-| Form saves blank after Submit                 | Use Chrome or Firefox, not Brave                          |
-| Board crashes every ~44 s in AP mode          | Outdated firmware — reflash from current repo             |
-| Module on network but not registering         | Check Windows Firewall (ports 8000, 8002)                 |
-| Module never joins Wi-Fi                      | 2.4 GHz only; case-sensitive SSID; same network as server |
+| Issue                                         | Fix                                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------------------- |
+| AP called "HiveHive-Access-Point" in old docs | Actual name is `ESP32-Access-Point`, pw `esp-12345`                               |
+| Form saves blank after Submit                 | Use Chrome or Firefox, not Brave                                                  |
+| Board crashes every ~44 s in AP mode          | Outdated firmware — reflash from current repo                                     |
+| Module on network but not registering         | Check Windows Firewall (ports 8000, 8002)                                         |
+| Module never joins Wi-Fi                      | 2.4 GHz only; case-sensitive SSID; same network as server                         |
 | BT mouse/keyboard drops when joining the AP   | Combo Wi-Fi+BT radio coexistence — pair from a phone, or use wired/built-in input |
-| `python -m platformio` not found              | Multiple Python versions — use explicit path              |
+| `python -m platformio` not found              | Multiple Python versions — use explicit path                                      |

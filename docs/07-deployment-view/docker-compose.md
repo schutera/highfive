@@ -39,29 +39,29 @@ docker compose version
 
 ```bash
 git clone https://github.com/schutera/highfive.git
-cd hivehive
+cd highfive
 ```
 
 ## 3. Environment Configuration
 
-Create a `.env` file in the root directory.
-
-Example:
+Copy the template at the repo root:
 
 ```bash
-## Debug mode for development
-DEBUG=<boolean>
-
-## DuckDB service URL
-## (used by the classification backend to connect to the DuckDB service)
-## Keep as is then running with docker-compose
-DUCKDB_SERVICE_URL="http://duckdb-service:8000"
-
-## Optional: Additional environment variables can be added here as needed
+cp .env.example .env
 ```
 
-The `.env` file is used by the **image service** and the
-**DuckDB service**.
+[`.env.example`](../../.env.example) is the canonical description of the dev
+environment — it documents each variable, which service reads it, and the
+fact that all of them are optional. It is deliberately the only place that
+information lives, so this guide does not repeat it.
+
+Compose loads `.env` into **backend**, **image service** and **DuckDB
+service** (`env_file` in `docker-compose.yml`). The `homepage` service has no
+`env_file`.
+
+Deploying to production is a different file and a different compose file —
+see [`.env.production.example`](../../.env.production.example) and
+[production-deployment.md](production-deployment.md).
 
 ## 4. Start the Services
 

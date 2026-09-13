@@ -221,6 +221,48 @@ identity key, normalize it once at the boundary
 **stored** value through every consumer; grep for the raw value's
 other uses before calling it done.
 
+### Four documents described one `.env`, and the file the quick start copies was a production template (2026-08 audit, #260)
+
+**What happened:** `README.md`'s quick start copies the template
+(`cp .env.example .env`) and then runs `docker compose up --build`, but
+`.env.example` was headed
+"HighFive Production Environment Variables" and carried
+`NODE_ENV=production`, `PORT=3001`, a production `VITE_API_URL`, and
+`HIGHFIVE_API_KEY=your_secure_production_key_here`. Compose feeds that
+`.env` into `backend`, `image-service` and `duckdb-service`, and the
+`environment:` block overrides `NODE_ENV` and `PORT` — so the stack booted
+and nothing looked wrong, while the placeholder string quietly became the
+admin password of every fresh dev box. Meanwhile `CLAUDE.md`,
+`CONTRIBUTING.md`, `docker-compose.md` and `troubleshooting.md` each
+prescribed a *different* hand-written dev `.env`, and one of them told you
+to `cd hivehive` after cloning `highfive`.
+
+**Why:** nobody owned the file. Each doc that needed a dev `.env` wrote out
+its own version inline instead of pointing at the template, so there were
+five sources of truth and no single one that was wrong enough to notice.
+The compose overrides then hid the mismatch, which is the same shape as the
+inert-security-control incident below: a config everyone believed described
+reality, which the running system had already worked around.
+
+**How to avoid it next time:** a file that ships as a template is the
+canonical description of itself — docs link to it, they do not restate it.
+`.env.example` now documents each variable and which service reads it, and
+the four docs point at it. Worth noting what the restatements had actually
+drifted into: `troubleshooting.md` claimed `DEBUG` and `DUCKDB_SERVICE_URL`
+were required "at minimum", when both are optional in the code that reads
+them — `os.getenv("DEBUG", "false")` in both `image-service/app.py` and
+`duckdb-service/app.py`, and `os.getenv("DUCKDB_SERVICE_URL",
+"http://duckdb-service:8000")` in `image-service/app.py`. So the one doc a
+stuck contributor reaches for was sending them to fix a non-problem.
+
+`DUCKDB_SERVICE_URL` is read by four call sites, not one, and they do not agree
+on a default: `image-service/app.py`, `image-service/services/duckdb.py` and
+`scripts/backfill_detections.py` fall back to the compose service name, while
+`backend/src/duckdbClient.ts`'s `resolveDuckdbUrl` falls back to
+`http://127.0.0.1:8002` — the host port mapping, for a backend run outside
+compose. That divergence is exactly why the template rather than any one doc
+has to be the description.
+
 ### Probing a production host with guessed SSH usernames gets your IP banned — and the ban looks exactly like an outage
 
 **What happened.** `ssh highfive` returned `Permission denied (publickey)`

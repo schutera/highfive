@@ -1,7 +1,10 @@
 # Homepage Documentation
 
 This document describes the structure, pages, and backend connection of the
-HighFive homepage — a React 19 + Vite + TS frontend served on port `5173`.
+HighFive homepage — a React 19 + Vite + TS frontend served on port `5173`
+in dev (Vite). The Docker production target serves the built SPA on
+`127.0.0.1:8081`; the live PM2 host serves it as static files through
+nginx. Which runtime is live, and its ports: [what-is-live.md](../07-deployment-view/what-is-live.md).
 
 The homepage guides users through the full workflow:
 
@@ -169,18 +172,22 @@ the prod hostname in deployed builds via the build-time
 | `GET`  | `/modules`              | list all registered modules                                                                                                                                                                                                                                                     |
 | `GET`  | `/modules/:id`          | single module + nests                                                                                                                                                                                                                                                           |
 | `GET`  | `/modules/:id/logs`     | admin telemetry sidecars (X-Admin-Key)                                                                                                                                                                                                                                          |
-| `GET`  | `/modules/:id/activity` | bucketed image-upload counts for the `ActivityWeatherChart` in `ModulePanel.tsx`                                                                                                                                                                                                |
+| `GET`  | `/modules/:id/activity` | bucketed image-upload counts for the `ActivityWeatherChart` in `ModulePanel.tsx` (chart currently shelved, #219)                                                                                                                                                                  |
 | `GET`  | `/images`               | newest-first upload metadata pages for the admin gallery in `AdminPage.tsx` (paginated, always on). The public panel's per-module imagery (the `NestSnipGrid` snip grid + time-lapse, gated by `VITE_ENABLE_DASHBOARD_IMAGES`) reads `/snips` + `/snips/history`, not `/images` |
 | `GET`  | `/images/:filename`     | raw image bytes for both surfaces above (public read, ADR-019)                                                                                                                                                                                                                  |
 
-The dashboard's `ActivityWeatherChart` also calls Open-Meteo
-directly from the browser (no API key, CORS open) at
+The dashboard's `ActivityWeatherChart` (currently shelved in
+`ModulePanel.tsx` — its browser-direct Open-Meteo fetch was a major
+side-panel load-time cost; re-enablement against the server-side
+`measurements` store is tracked in issue #219) is designed to call
+Open-Meteo directly from the browser (no API key, CORS open) at
 `https://api.open-meteo.com/v1/forecast` — see
 [ADR-015](../09-architecture-decisions/adr-015-weather-correlation.md).
-The chart component lives at
+The component lives at
 [`homepage/src/components/ActivityWeatherChart.tsx`](../../homepage/src/components/ActivityWeatherChart.tsx);
 the Open-Meteo client at
-[`homepage/src/services/weather.ts`](../../homepage/src/services/weather.ts).
+[`homepage/src/services/weather.ts`](../../homepage/src/services/weather.ts)
+(kept as scaffolding for #219).
 
 For the wire shape see
 [../08-crosscutting-concepts/api-contracts.md](../08-crosscutting-concepts/api-contracts.md);

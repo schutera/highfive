@@ -7,7 +7,7 @@ its own.
 
 | Path                             | Role                                                                         |
 | -------------------------------- | ---------------------------------------------------------------------------- |
-| `backend/src/server.ts`          | Express bootstrap, port `3002`                                               |
+| `backend/src/server.ts`          | Express bootstrap — listens on `PORT` (dev default `3002`; both production runtimes set `3001`, see [what-is-live.md](../07-deployment-view/what-is-live.md)) |
 | `backend/src/app.ts`             | Route handlers                                                               |
 | `backend/src/auth.ts`            | API-key + admin-key middleware ([auth](../08-crosscutting-concepts/auth.md)) |
 | `backend/src/duckdbClient.ts`    | Typed HTTP client for `duckdb-service`                                       |

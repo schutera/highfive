@@ -83,8 +83,20 @@ full setup walkthrough.
 ## Known constraints and risks
 
 - **2.4 GHz Wi-Fi only.** No 5 GHz support.
-- **No OTA today.** Firmware updates require physical USB access. Tracked
-  in [issue #26](https://github.com/schutera/highfive/issues/26).
+- **OTA is TLS (https) with a pinned CA since #79.** The firmware is
+  OTA-capable (dual app slots; it fetches `/firmware.json` +
+  `/firmware.app.bin` from the release origin — the same host as
+  `INIT_URL`). The production URLs are `https://`, and every fetch
+  verifies the origin against the embedded ISRG Root X1 (ADR-010;
+  `ESP32-CAM/ota.cpp` and `lib/tls_roots/`); the plain-HTTP path remains
+  for LAN-dev builds and any pre-#79 stragglers (their stored `http://`
+  URLs are rewritten on the first post-#79 boot). Trade-off record:
+  [ADR-008](../09-architecture-decisions/adr-008-firmware-ota-partition-and-rollback.md)
+  (plus its public-origin addendum, #281); release procedure:
+  [firmware-release.md](../07-deployment-view/firmware-release.md). First
+  flash is still USB (or the web installer's merged binary) — see
+  [esp-flashing.md → "First-time OTA
+  migration"](../07-deployment-view/esp-flashing.md#first-time-ota-migration-one-way-usb-only).
 - **Google Geolocation API key is build-time injected**, not hardcoded.
   `esp_init.cpp`'s `getGeolocation` reads the `GEO_API_KEY` macro
   supplied by `extra_scripts.py` (PlatformIO) or `build.sh`

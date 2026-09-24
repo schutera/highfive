@@ -80,7 +80,6 @@ services:
     ports:
       - '8000:4444'
     environment:
-      DUCKDB_PATH: /data/app.duckdb
       # Server-log persistence (#178 / ADR-023). Distinct subdir of the shared
       # duckdb_data volume so the two Flask services don't collide on one file.
       LOG_DIR: /data/logs/image

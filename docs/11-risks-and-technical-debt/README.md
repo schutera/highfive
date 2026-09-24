@@ -2,21 +2,25 @@
 
 Known issues that aren't bugs to be fixed in the current PR but that
 future contributors must know about. Two sub-registers below:
-**open issues** (active items in GitHub) and **lessons learned**
-(things we paid for and don't want to relearn).
+**open issues** (active items; tracked on GitHub where an issue exists)
+and **lessons learned** (things we paid for and don't want to relearn).
 
 ## Open issues
 
-Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues).
+Tracked on GitHub at [schutera/highfive/issues](https://github.com/schutera/highfive/issues) where an issue exists — the last row below is a pending decision that has none yet.
 Highlights worth knowing about even if you're not assigned:
 
-| #                                                     | Title (short)                                                         | Why it matters                                                                                                                                                                              |
-| ----------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [#19](https://github.com/schutera/highfive/issues/19) | `StaticJsonDocument` size in ESP firmware                             | Risk of silent truncation on telemetry growth.                                                                                                                                              |
-| [#20](https://github.com/schutera/highfive/issues/20) | Capture interval is hardcoded                                         | Should be configurable via the AP form.                                                                                                                                                     |
-| [#26](https://github.com/schutera/highfive/issues/26) | OTA firmware update support                                           | Today every firmware update requires physical USB. Tracked as a feature request with a recommended ArduinoOTA-first phasing.                                                                |
-| [#56](https://github.com/schutera/highfive/issues/56) | GPIO0 reconfigure trigger lands in DOWNLOAD_BOOT (and corrupts flash) | Documented user path drops the chip into ROM bootloader; finger-roll variant reproduces a flash-read-err loop requiring re-flash. WiFi-fail auto-fallback is the working trigger today.     |
-| [#57](https://github.com/schutera/highfive/issues/57) | Extract captive-portal `/save` logic into a host-testable helper      | The keep-current-on-empty contract has three layers (HTML attr, JS validator, server check); the server half is currently un-unit-testable. Land before adding a second keep-current field. |
+| #                                                      | Title (short)                                              | Why it matters                                                                                                                                                                                                                         |
+| ------------------------------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#219](https://github.com/schutera/highfive/issues/219) | Re-enable the module activity/weather chart               | `ActivityWeatherChart` is commented out in `ModulePanel.tsx` for load perf (commit `652afd5`); the measurements store, weather worker (ADR-017) and endpoints all exist — blocked on a cheap backend read path. ADR-015 notes the shelving. |
+| [#231](https://github.com/schutera/highfive/issues/231) | Firmware `setTimeout()` unit bug + portal/OTA deadlines   | A timeout-unit bug ships in field firmware; the fix lands only via a `SEQUENCE`-bumped OTA release (see [firmware-release.md](../07-deployment-view/firmware-release.md)).                                                                                       |
+| [#232](https://github.com/schutera/highfive/issues/232) | Stand up real off-host backup sync                        | The backup code is fixed (retained/rotated, disk-space guard, drilled restore), but `/data/backups` and `/data/images` still live on the same volume as the live DB — the off-host systemd sync unit is a template nobody has run. |
+| [#237](https://github.com/schutera/highfive/issues/237) | Enforce promotion to the `production` branch              | The `production` branch is unprotected and the host holds write creds and runs `npm` lifecycle scripts as root within ~2 min of any push; promotion must be gated (ADR-030 defines the branch, not its protection).                               |
+| [#253](https://github.com/schutera/highfive/issues/253) | Split this 3,900+-line chapter into index + per-lesson files | Keep every lesson, make the chapter navigable.                                                                                                                                                                                          |
+| [#275](https://github.com/schutera/highfive/issues/275) | The live host's firmware origin 404s                          | `/firmware.json` and `/firmware.app.bin` are missing from the live `homepage/dist` on both ports (first observed 2026-09-02, re-probed 2026-09-06): the setup wizard cannot flash a new module from production, and no `SEQUENCE`-bumped OTA — including the #231 timeout fix — can reach the fleet. [what-is-live.md → Known gaps](../07-deployment-view/what-is-live.md#known-gaps-on-the-live-pm2-host). |
+| — (no issue filed yet)                                  | Public `GET /api/modules` payload carries the firmware-reported `email` | `backend/src/database.ts`'s `listModules` maps `ModuleDetail.email` into the public list response (reads are public by design — #142/ADR-019), and ADR-020 coarsened *coordinates* but never addressed *email*. Needs a decision: strip the field from the public payload, or document the exposure in [auth.md](../08-crosscutting-concepts/auth.md) as deliberate. Found during the #242/#252 sweep. |
+
+Rows for #19, #20, #26, #56, and #57 were removed on 2026-09-12 after GitHub confirmed all five closed (2026-05-12 or 2026-05-14).
 
 ## Field-name drift
 
@@ -340,10 +344,13 @@ the **ADR-005 silence watcher**, the operator's primary signal that a field
 module has gone quiet. A security PR's net effect on the deployed system was to
 turn off monitoring.
 
-The same review round found the follow-up fix half-wrong too: the supported
+The same review round found the follow-up fix half-wrong too: it landed on
+the PM2 path — the one that is **live in production** (see
+[what-is-live.md](../07-deployment-view/what-is-live.md)) — while the
 _Docker_ production path (`.env.production.example`,
-`production-deployment.md`) also gained no `DISCORD_WEBHOOK_URL` entry, because
-the fix was written against the PM2 path the reviewer had named.
+`production-deployment.md`, the supported target) gained no
+`DISCORD_WEBHOOK_URL` entry at all, because the two topologies were treated
+as interchangeable when they are not.
 
 **Why it happened.** This repo has **three** deployment topologies — dev
 compose, prod compose, bare-metal PM2 — plus `.deploy.env`, which
@@ -4176,3 +4183,50 @@ slots`. The ADR-008 / #148 rollback design assumes a good slot to fall back to,
 which a *fleet OTA* has and a *freshly USB/wizard-flashed factory slot* does
 not. The rollback machinery protects the fleet from a bad release; it does not
 protect the onboarding path, which is exactly where this defect lived.
+
+### The deployment chapter documented a transport the fleet abandoned years ago — and a smoke test that called the live outage "expected" (#275, found during the #242/#252 sweep)
+
+**What happened.** The 2026-09 consistency sweep found five deployment-doc
+sites asserting, in the present tense, that the ESP fleet speaks plain HTTP —
+"the firmware's `WiFiClient` cannot do TLS" (runbook §5b, the ch.-05 ESP
+file, the Docker doc's vhost comments and its first Known-gaps bullet, and
+ADR-008's public-origin addendum, which framed the residual risk as a
+plain-HTTP MITM). The fleet has not spoken that transport since #79:
+[ADR-010](../09-architecture-decisions/adr-010-esp-firmware-tls-trust-model.md)
+(Accepted) moved registration, upload, heartbeat, geolocation and the OTA
+fetch to `https://` with the origin verified against the embedded ISRG Root
+X1, and `hf::rewriteLegacyHighfiveUrl` migrated the fleet's stored URLs on
+the first post-#79 boot — no reflash. The sweep's live probes (2026-09-06)
+found a second, operational problem the docs did not even have a slot for:
+`/firmware.json` and `/firmware.app.bin` **404 on both ports** of the live
+host ([#275](https://github.com/schutera/highfive/issues/275); first observed
+on the 2026-09-02 hardware walk in the #276 lesson above) — the setup wizard
+cannot flash a new module from production, and no `SEQUENCE`-bumped OTA
+release, including the #231 timeout fix, can reach the fleet. The runbook's
+smoke test made it worse: its note said a 404 on the firmware pair "is
+expected until `ESP32-CAM/build.sh` has published artifacts" — an
+instruction to read a live outage as a success.
+
+**Why it happened.** #79 was real and well-recorded *in its own places*
+(ADR-010, auth.md, this chapter's #79 lesson) — but the deployment chapters
+had been written around the pre-#79 world and were never re-read against the
+ADR that changed it. A stale fact repeated in five slightly different
+wordings reads like five independent confirmations, so the agreement itself
+was the trap: consistency across docs is not evidence of correctness when
+the docs share one stale ancestor. And the smoke-test note had been written
+for the fresh-install case (artifacts genuinely absent before the first
+`build.sh` run) and left unqualified, so it also "explained" the live
+404.
+
+**How to avoid it next time.** A present-tense claim about the *live* host
+is only as good as the last probe against it: before writing one, run the
+read-only curl battery in
+[what-is-live.md → Verify it on the host](../07-deployment-view/what-is-live.md#verify-it-on-the-host)
+and record the probe date (the 2026-09 sweep's fixes all carry
+"verified 2026-09-06" for exactly this reason). Keep the two kinds of claim
+separate: the in-repo templates document the *spec* of a fresh install,
+while the live host is free to diverge (it has a Caddy edge in front and a
+subdomain the bundle points at) — say which kind each sentence is. And a
+smoke-test note that labels an error state "expected" must name the
+distinction that makes it so: fresh-install-and-not-yet-published (fine)
+versus a fleet origin that is missing its artifacts (#275 — an outage).

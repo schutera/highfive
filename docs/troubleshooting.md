@@ -272,6 +272,150 @@ clobber the previous one). See CLAUDE.md's critical rules.
 from test suites running concurrently, not a prettier bug — let the suites
 finish and re-run the commit.
 
+### `git commit` fails with `npx: command not found` on a host without Node
+
+**Symptom.** The husky pre-commit hook dies before lint-staged runs:
+`sh: 1: npx: not found`. Every commit fails, not just some.
+
+**Cause.** The first command the hook runs is `npx lint-staged`, and `npx`
+comes with a Node.js install. A Linux container can create a
+`node_modules/` inside a checkout (for example `npm ci` under a `node:22`
+image) while the host has no Node at all. The hook then dies on its first
+line. The sign: `node_modules/@esbuild/` contains `linux-x64`, not
+`win32-x64`. Verify:
+
+```powershell
+node --version
+# fails: node is not recognized
+Get-ChildItem node_modules\@esbuild
+# linux-x64 => node_modules was created inside a Linux container
+```
+
+**Fix 1 (durable): install Node 22 on the host.** The repo's
+`package.json` requires `node >= 22.12.0`.
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+# restart the shell, then verify:
+node --version
+npx --version
+```
+
+`git commit` then runs the hook natively. A commit that touches `.py` files
+also needs a working ruff; see the entry above.
+
+**Fix 2 (one-off, no host change): run the commit from a Node container.**
+The container sees the same `node_modules/`, so the hook's `npx`,
+`prettier`, `eslint`, and `ruff` all resolve. From PowerShell with Docker
+Desktop running:
+
+```powershell
+$repo = "C:\Users\info\VSCode\highfive"   # your checkout
+# Write your commit message to %TEMP%\commitmsg.txt first
+Copy-Item "$env:TEMP\commitmsg.txt" "$repo\.git\COMMIT_MSG_TMP"
+docker run --rm -v "${repo}:/work" -w /work node:22 bash -c 'apt-get update >/dev/null && apt-get install -y --no-install-recommends git python3-pip >/dev/null && pip install --no-cache-dir --break-system-packages ruff==0.14.1 && git add -A && git commit -F .git/COMMIT_MSG_TMP && rm -f .git/COMMIT_MSG_TMP'
+```
+
+The command mounts only the repository. Docker Desktop on Windows serves
+host directories over a file-sharing service, and mounting two host
+directories is unreliable: heavy writes to one share can hide files on the
+other share from the container (observed with a commit message file while
+`git add` ran on the other mount). The message file therefore rides in
+`.git/`, which is never tracked, and is read from the same mount.
+
+The command stages every dirty file (`git add -A`). For a partial commit,
+stage the files you want first, then run `git commit -F` the same way
+without `git add -A`.
+
+**Push the same way** when the host's git cannot authenticate to GitHub
+(no stored credential, no SSH key, no `gh`) or when you want the push to
+run in the same container environment as the commit. Pass your `gh` token
+in the remote URL. The pre-push hook still runs.
+
+```powershell
+$user   = gh api user -q .login
+$token  = gh auth token
+$branch = git branch --show-current
+docker run --rm -e "USER=$user" -e "TOKEN=$token" -e "BRANCH=$branch" -v "${repo}:/work" -w /work node:22 bash -c 'apt-get update >/dev/null && apt-get install -y --no-install-recommends git ca-certificates >/dev/null && git push "https://$USER:$TOKEN@github.com/schutera/highfive.git" "$BRANCH"'
+```
+
+The token is visible in the container process list while the push runs,
+because it is embedded in the remote URL. `gh auth token` returns a
+long-lived OAuth token with your account's scopes; if the machine is
+shared, revoke it from GitHub's token settings after the push.
+
+**Do not bypass the hooks.** `HUSKY=0` and `--no-verify` skip the
+lint-staged auto-fixes and the pre-push gates. The failure then moves to
+CI, with an extra commit in between.
+
+### GitHub API rejects non-ASCII JSON from Windows PowerShell 5.1 `Invoke-RestMethod`
+
+**Symptom.** A GitHub API request whose JSON body contains non-ASCII
+characters (for example an em dash in a PR or issue body) fails before the
+API accepts the resource:
+
+- sending the body as a PowerShell string returns `400` with
+  `{"message":"Problems parsing JSON"}`;
+- sending the body as an explicit UTF-8 `byte[]` returns `422` for
+  `properties/body`, with the echoed value stopping at the first
+  non-ASCII character.
+
+The same JSON payload succeeds from Node's `fetch`.
+
+**Cause.** Windows PowerShell 5.1 does not reliably preserve non-ASCII
+request-body bytes through `Invoke-RestMethod` in this environment. The
+exact internal encoding step was not isolated, so treat the cmdlet as
+unreliable for GitHub API JSON that is not pure ASCII. Do not spend more
+time on `-Encoding`, `ContentType`, or byte-array variants once both
+shapes above have been observed.
+
+**Fix.** Run the GitHub API call from a `node:22` container. Node's
+`fetch` sends the payload as UTF-8. If `gh` is installed and authenticated,
+prefer `gh` for routine PR/issue commands; use the container pattern for a
+raw API call.
+
+1. Save the complete JSON request body as **UTF-8 without BOM** in
+   `.git/github-api-payload.json` (an untracked path). Use an editor that
+   saves UTF-8, not a PowerShell `>` redirect.
+2. Save this helper as `.git/github-api-post.mjs`:
+
+   ```js
+   import { readFileSync } from 'node:fs';
+
+   const url = process.env.GITHUB_URL;
+   const payload = readFileSync(process.argv[2], 'utf8');
+
+   const res = await fetch(url, {
+     method: 'POST',
+     headers: {
+       Authorization: 'Bearer ' + process.env.HF_TOKEN,
+       Accept: 'application/vnd.github+json',
+       'User-Agent': 'highfive-docs-sweep',
+       'Content-Type': 'application/json'
+     },
+     body: payload
+   });
+
+   console.log('STATUS', res.status);
+   console.log(await res.text());
+   ```
+
+3. From PowerShell, with Docker Desktop running:
+
+   ```powershell
+   $repo  = "C:\Users\info\VSCode\highfive"
+   $token = gh auth token
+   $url   = "https://api.github.com/repos/schutera/highfive/pulls"
+   docker run --rm -e HF_TOKEN="$token" -e GITHUB_URL="$url" -v "${repo}:/work" -w /work node:22 node .git/github-api-post.mjs .git/github-api-payload.json
+   ```
+
+The token is passed to the container as an environment variable, so it is
+not in the container process argv (though it is readable from the process's
+`/proc` environ entry, and from the `docker run` command line while the
+command starts). `gh auth token` returns a long-lived OAuth token with
+your account's scopes; if the machine is shared, revoke it from GitHub's
+token settings after the command finishes.
+
 ### `git push` fails with "Python was not found; run without arguments to install from the Microsoft Store" (Windows, #270)
 
 **Symptom.** The pre-push hook dies in `scripts/check-duckdb-bind-claims.sh`

@@ -15,16 +15,6 @@ class DuckDBService:
         r.raise_for_status()
         return r.json()
 
-    def query(self, sql: str) -> dict:
-        # Internal use only. Prefer specific endpoints over raw SQL for public access.
-        r = requests.post(
-            f"{self.base_url}/query",
-            json={"sql": sql},
-            timeout=self.timeout,
-        )
-        r.raise_for_status()
-        return r.json()
-
     def get_progress_count(self, module_id: str) -> int:
         """Return the number of daily_progress rows for a module.
 

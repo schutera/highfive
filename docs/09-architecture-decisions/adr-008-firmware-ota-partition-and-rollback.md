@@ -280,7 +280,8 @@ watchdog feed.
   through the web installer. Documented separately; not blocking for
   the deployment topology where the homepage is on the same LAN as
   the modules. A signed-update story belongs in a follow-up ADR if
-  we ever expose modules to networks we don't control.
+  we ever expose modules to networks we don't control — production
+  has now done exactly that; see the addendum at the end of this file.
 - **Firmware-side DoS bounds.** `httpOtaCheckAndApply` in
   [`ESP32-CAM/ota.cpp`](../../ESP32-CAM/ota.cpp) caps the manifest
   body at `kManifestMaxBytes = 1024` bytes and the binary at
@@ -318,7 +319,11 @@ watchdog feed.
   homepage and modules share the same LAN; not acceptable for a
   module on a hostile guest network. A follow-up ADR (TLS +
   code-signed updates) should be filed before the second deployment
-  topology lands, not after.
+  topology lands, not after. That deadline has passed — both current
+  topologies serve this origin from the public host
+  `highfive.schutera.com` — and the follow-up is now tracked as
+  [issue #281](https://github.com/schutera/highfive/issues/281) (see
+  the addendum at the end of this file).
 
 **Forecloses:**
 
@@ -405,13 +410,17 @@ a stderr warning if SEQUENCE drops below the previously-published
 manifest's value.
 
 **Trade-off taken.** `allow_downgrade` is an unsigned manifest field.
-Combined with ADR-008's pre-existing "Plain HTTP, MD5 integrity, no
-signature" stance, an attacker with network MITM can serve a forged
-manifest with `allow_downgrade: true` to force a downgrade. This is
-no weaker than the rest of the manifest under the current threat
-model. A future TLS + signed-manifest ADR will close both gaps
-together — they share an implementation seam (a signed envelope) and
-splitting them would force two migration cycles instead of one.
+Combined with ADR-008's "no signature" stance, an attacker who can serve
+a forged manifest can set `allow_downgrade: true` to force a downgrade —
+no weaker than the rest of the manifest under the current threat model.
+The transport half of that exposure is gone: ADR-010 (#79) puts the whole
+exchange over TLS with a pinned root, so forging a manifest now requires
+compromising the TLS-verified origin itself — an on-path attacker cannot
+inject a manifest, because the pinned root rejects any other chain — not
+just being reachable on the LAN. The remaining gap is content-side — the unsigned
+update envelope — tracked as
+[issue #281](https://github.com/schutera/highfive/issues/281) (see the
+addendum at the end of this file).
 
 ## Mark-valid-on-first-contact addendum (#148 Phase 3)
 
@@ -482,3 +491,40 @@ the liveness watchdog `abort()` (→ `ESP_RST_PANIC`) on an unproven slot so the
 faulty counter would catch it. The shipped design instead counts unproven boots
 in `nc_boots` regardless of *why* they rebooted, so the watchdog stays a clean
 `ESP.restart()` and no `ESP.restart()`-vs-`abort()` invariant is touched.
+
+## Public-origin OTA addendum (#281, 2026-09)
+
+The threat-model framing in the **Cons** ("No CDN, no integrity beyond MD5")
+and **Implicit coupling** ("Plain HTTP, MD5 integrity, no signature")
+sections assumed the homepage origin and the modules share a single LAN.
+That premise no longer holds: `highfive.schutera.com` serves the OTA origin
+from a **public host** — on the live PM2 path and on the supported Docker
+target (see
+[`what-is-live.md`](../07-deployment-view/what-is-live.md)) — while field
+modules connect from arbitrary operator home networks.
+
+The **transport** leg of that threat model was since closed: issue #79 /
+[ADR-010](adr-010-esp-firmware-tls-trust-model.md) moved every firmware call
+site — registration, upload, heartbeat, geolocation and the OTA
+manifest/binary fetch — to `https://` with the origin verified against
+embedded, pinned roots (`lib/tls_roots/`: ISRG Root X1 for
+`highfive.schutera.com`, the GTS Root R1/R4 bundle for the
+`www.googleapis.com` geolocation endpoint), so the plain-HTTP sentences in
+the body of this ADR predate that change and are superseded on the
+transport point by ADR-010.
+What ADR-010 did **not** close — and what the follow-up this ADR required
+must decide — is that the update envelope is **unsigned** (MD5 integrity
+only) and **shared by every device**: an attacker who can write to (or
+compromise) the origin serves the whole fleet a firmware of their choice,
+and the origin accepts any client without per-device identity (ADR-032).
+This ADR required that follow-up to be filed *before* the second deployment
+topology landed; it did not, so the remainder is tracked as
+[issue #281](https://github.com/schutera/highfive/issues/281).
+
+Until #281 lands, the unsigned-origin exposure is an **accepted residual**,
+mitigated by: the TLS-verified channel (ADR-010), MD5 integrity on both
+manifest and binary, the firmware-side size and wall-clock bounds
+(`kManifestMaxBytes`, `kOtaBinaryDeadlineMs`), and a known, monitored
+origin. The decision #281 must make is whether — and in what order — to add
+a signed update envelope (manifest + binary, including the key-storage
+question it raises) and per-device identity.

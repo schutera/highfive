@@ -113,7 +113,7 @@ cd ESP32-CAM && python -m platformio run -e esp32cam
 
 ### CI
 
-`.github/workflows/tests.yml` runs ten parallel jobs on every PR to
+`.github/workflows/tests.yml` runs fifteen parallel jobs on every PR to
 `main` and on push to `main`:
 
 - `esp-native` — host unit tests for `ESP32-CAM/lib/*`
@@ -124,6 +124,11 @@ cd ESP32-CAM && python -m platformio run -e esp32cam
 - `homepage-unit` — vitest + jsdom smoke tests for the React homepage
 - `doc-citations` — verifies `path:line` references in `docs/` and `CLAUDE.md` still resolve
 - `python-version-consistency` — asserts the Dockerfiles, ruff floor, and pytest matrices all match `/.python-version` (#197)
+- `ts-quality` — `tsc --noEmit` across `contracts/`, `backend/`, `homepage/`, then ESLint (neither `npm test` nor `npm run dev` type-checks)
+- `shellcheck` — `shellcheck -S info` on `scripts/*.sh` + `ESP32-CAM/build.sh`
+- `duckdb-bind-claims` — asserts dev keeps DuckDB LAN-reachable, prod stays loopbound
+- `python-lint` — ruff check + format check under the root `ruff.toml`
+- `repo-guards` — the guard scripts (hardcoded secrets, stale prose, python twins, agent-context parity, env-var matrix)
 - `e2e-pipeline` — boots the four-service docker-compose stack and drives it with the mock ESP
 - `ui-playwright` — boots the stack plus a production-built homepage and drives real Chromium through the SPA
 

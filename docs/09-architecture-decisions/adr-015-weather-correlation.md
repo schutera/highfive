@@ -2,7 +2,21 @@
 
 ## Status
 
-Accepted.
+Accepted — **shelved in the UI** (note below).
+
+> **Shelved in the UI (commit `652afd5`, re-enablement tracked in issue
+> #219).** The `ActivityWeatherChart` this ADR describes is currently
+> commented out of `ModulePanel.tsx` — the browser-direct Open-Meteo
+> fetch was a major side-panel load-time cost, and its sibling
+> `BatteryHistoryChart` was shelved in the same change pending real
+> battery sensing (#8a/#8b). The component, its tests, and the
+> `homepage/src/services/weather.ts` client remain in the tree as
+> scaffolding; no browser-side Open-Meteo call is made today. The live
+> weather path is server-side only: ADR-017's hourly worker lands
+> Open-Meteo rows in the `measurements` table. Issue #219 proposes
+> rewiring the chart to that store, which would retire the
+> browser-direct decision recorded here; until it lands, this ADR
+> documents the original decision, not the current data path.
 
 ## Context
 

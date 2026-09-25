@@ -4,39 +4,11 @@ from db.connection import get_conn, lock
 from db.repository import query_all, query_one, query_scalar, write_transaction
 from flask import Blueprint, jsonify, request
 from models.module import ModuleData
-from models.module_id import ModuleId
 from pydantic import ValidationError
 from services.discord import send_discord_message
 
 from routes._bucketing import INTERVAL_STEP, floor_to_interval
-
-
-def _canonicalize_or_400(raw: str):
-    """Normalise an inbound module-id URL param via ``ModuleId``.
-
-    Returns the canonical 12-hex string on success, or a Flask ``(json,
-    status)`` tuple on failure that the route can return verbatim.
-
-    Pydantic v2 ``ValidationError.errors()`` includes a ``ctx`` field
-    containing the underlying ``ValueError`` instance, which is not JSON
-    serialisable. We strip that out before returning.
-    """
-    try:
-        return ModuleId.model_validate(raw).root, None
-    except ValidationError as e:
-        cleaned = [
-            {
-                "msg": err.get("msg"),
-                "type": err.get("type"),
-                "loc": list(err.get("loc", [])),
-            }
-            for err in e.errors()
-        ]
-        return None, (
-            jsonify({"error": "invalid module id", "detail": cleaned}),
-            400,
-        )
-
+from routes._module_id import _canonicalize_or_400
 
 modules_bp = Blueprint("modules", __name__)
 
@@ -66,153 +38,154 @@ def add_module():
             for err in e.errors()
         ]
         return jsonify({"error": cleaned}), 400
-    except Exception as e:
-        print(f"[new_module] Unexpected error: {e}")
-        return jsonify({"error": str(e)}), 400
+    # No `except Exception` here (for #246): an unexpected fault is a
+    # 500, not a 400 — the app-level handler logs it to the ring and
+    # returns the generic envelope. Mapping it to 400 hid genuine
+    # server faults behind "your request was bad" and told callers to
+    # stop retrying.
 
     # ``data.mac`` is a ``ModuleId`` root model; unwrap to the canonical str
     # for DB writes and the response body.
     mac_str = data.mac.root
     now = datetime.now().strftime("%Y-%m-%d")
-    try:
-        with write_transaction() as con:
-            # 2026-08 audit, for #229: this write is credential-free and
-            # internet-reachable (any client that knows or enumerates a
-            # 12-hex module id via public `GET /modules` can call it), so
-            # a re-registration must not let an attacker overwrite a real
-            # module's `name`/`email`/location. Only fields the STORED row
-            # doesn't already have a real value for get filled in from the
-            # incoming payload. There is currently NO non-destructive way
-            # to correct `name`/`email`/location once set — `PATCH
-            # /modules/<id>/display_name` writes a *different*,
-            # UNIQUE-constrained column (an admin-settable display
-            # override), never `name` itself. The only actual path is
-            # `DELETE /modules/<id>` + re-register, which wipes the
-            # module's entire history (`daily_progress`, `nest_data`,
-            # `image_uploads`, `module_heartbeats`, `measurements`), not
-            # just its identity fields — see `docs/08-crosscutting-
-            # concepts/auth.md` for the full rationale and the tracked
-            # follow-up (non-destructive `PATCH` endpoints for these
-            # fields). Same-batch ESP32 firmware can still
-            # generate identical default names on FIRST registration
-            # (issue #92 fixed the entropy, but operator-chosen names and
-            # legacy batches can still collide), so the auto-suffix below
-            # only ever runs for a brand-new row.
-            #
-            # `add_module` is the ONLY writer that bumps `last_seen_at` —
-            # that column is the device-liveness signal the backend's
-            # `fetchAndAssemble` folds into `Module.lastSeenAt` for the
-            # 2 h status window (issue #97 / PR B). Every other UPDATE on
-            # `module_configs` (display_name rename, heartbeat row-patch,
-            # heartbeat-side geo-patch) is row-metadata and bumps only
-            # `updated_at`. Re-registration is a "device was heard from"
-            # event, so the UPSERT path bumps both — regardless of
-            # whether any value actually changed.
-            is_new = (
-                con.execute(
-                    "SELECT 1 FROM module_configs WHERE id = ?", (mac_str,)
-                ).fetchone()
-                is None
-            )
-            # Cap at -99 so a pathological collision rate cannot run
-            # away; raising at the cap surfaces the situation rather
-            # than silently storing a 100th lookalike. Only run for a
-            # brand-new row (senior-review P2): the CASE below discards
-            # this value on a re-registration anyway, and running it
-            # unconditionally meant a pathological collision on some
-            # OTHER module's name could 500 a re-registration whose own
-            # name was never going to be written.
-            stored_name = (
-                _resolve_unique_firmware_name(con, mac_str, data.module_name)
-                if is_new
-                else data.module_name
-            )
+    # Unexpected faults propagate to the app-level JSON error
+    # handler (for #246) — no per-route `except Exception` here.
+    with write_transaction() as con:
+        # 2026-08 audit, for #229: this write is credential-free and
+        # internet-reachable (any client that knows or enumerates a
+        # 12-hex module id via public `GET /modules` can call it), so
+        # a re-registration must not let an attacker overwrite a real
+        # module's `name`/`email`/location. Only fields the STORED row
+        # doesn't already have a real value for get filled in from the
+        # incoming payload. There is currently NO non-destructive way
+        # to correct `name`/`email`/location once set — `PATCH
+        # /modules/<id>/display_name` writes a *different*,
+        # UNIQUE-constrained column (an admin-settable display
+        # override), never `name` itself. The only actual path is
+        # `DELETE /modules/<id>` + re-register, which wipes the
+        # module's entire history (`daily_progress`, `nest_data`,
+        # `image_uploads`, `module_heartbeats`, `measurements`), not
+        # just its identity fields — see `docs/08-crosscutting-
+        # concepts/auth.md` for the full rationale and the tracked
+        # follow-up (non-destructive `PATCH` endpoints for these
+        # fields). Same-batch ESP32 firmware can still
+        # generate identical default names on FIRST registration
+        # (issue #92 fixed the entropy, but operator-chosen names and
+        # legacy batches can still collide), so the auto-suffix below
+        # only ever runs for a brand-new row.
+        #
+        # `add_module` is the ONLY writer that bumps `last_seen_at` —
+        # that column is the device-liveness signal the backend's
+        # `fetchAndAssemble` folds into `Module.lastSeenAt` for the
+        # 2 h status window (issue #97 / PR B). Every other UPDATE on
+        # `module_configs` (display_name rename, heartbeat row-patch,
+        # heartbeat-side geo-patch) is row-metadata and bumps only
+        # `updated_at`. Re-registration is a "device was heard from"
+        # event, so the UPSERT path bumps both — regardless of
+        # whether any value actually changed.
+        is_new = (
             con.execute(
-                """
-                INSERT INTO module_configs
-                    (id, name, lat, lng, first_online, battery_level, email,
-                     updated_at, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-                ON CONFLICT (id) DO UPDATE SET
-                    name = CASE
-                        WHEN module_configs.name IS NULL OR module_configs.name = ''
-                        THEN EXCLUDED.name
-                        ELSE module_configs.name
-                    END,
-                    -- 2026-08 audit, for #229 (senior-review P0 fix — the
-                    -- first-pass version of this CASE inverted the rule
-                    -- below and still let an anonymous re-POST relocate a
-                    -- placed module; verified end-to-end before landing
-                    -- this fix). Location follows the SAME "preserve
-                    -- unless the stored value is unset" shape as
-                    -- name/email above: `lat`/`lng` can never be SQL NULL
-                    -- (schema: NOT NULL), so their "unset" state is the
-                    -- `(0,0)` sentinel instead. Patch from the incoming
-                    -- payload ONLY when the STORED row is at `(0,0)` AND
-                    -- the incoming payload carries a real (non-`(0,0)`)
-                    -- fix — the PR II / issue #89 recovery case (firmware
-                    -- calls `initNewModuleOnServer` on every boot,
-                    -- registering at `(0,0)` when boot-time
-                    -- getGeolocation fails). Every other combination
-                    -- preserves the stored value — an anonymous
-                    -- re-registration can NEVER move an already-placed
-                    -- module, matching `routes/heartbeats.py`'s
-                    -- `post_heartbeat`, which gates on the same "only
-                    -- patch from a STORED (0,0)" condition. A genuine
-                    -- operator relocation goes through
-                    -- `DELETE /modules/<id>` + re-register (a fresh
-                    -- INSERT, not this UPDATE branch) — destructive
-                    -- (wipes the module's whole history, not just this
-                    -- field), see the module-level comment above.
-                    lat = CASE
-                        WHEN module_configs.lat = 0 AND module_configs.lng = 0
-                             AND NOT (EXCLUDED.lat = 0 AND EXCLUDED.lng = 0)
-                        THEN EXCLUDED.lat
-                        ELSE module_configs.lat
-                    END,
-                    lng = CASE
-                        WHEN module_configs.lat = 0 AND module_configs.lng = 0
-                             AND NOT (EXCLUDED.lat = 0 AND EXCLUDED.lng = 0)
-                        THEN EXCLUDED.lng
-                        ELSE module_configs.lng
-                    END,
-                    battery_level = EXCLUDED.battery_level,
-                    email = CASE
-                        WHEN module_configs.email IS NULL OR module_configs.email = ''
-                        THEN EXCLUDED.email
-                        ELSE module_configs.email
-                    END,
-                    updated_at = NOW(),
-                    last_seen_at = NOW()
-                """,
-                (
-                    mac_str,
-                    stored_name,
-                    float(data.latitude),
-                    float(data.longitude),
-                    now,
-                    data.battery,
-                    data.email,
-                ),
-            )
-            # Read back what actually landed — the CASE clauses above may
-            # have kept the stored value instead of the incoming one, so
-            # the response / Discord message must reflect the true
-            # persisted row, not the (possibly-discarded) incoming payload.
-            final_name, final_lat, final_lng = con.execute(
-                "SELECT name, lat, lng FROM module_configs WHERE id = ?",
-                (mac_str,),
+                "SELECT 1 FROM module_configs WHERE id = ?", (mac_str,)
             ).fetchone()
-            # DuckDB returns DECIMAL(9,6) columns as `decimal.Decimal`,
-            # whose str() shows full fixed-point precision (e.g.
-            # "48.520000") — float() first so the Discord message and log
-            # line render the same compact form as the pre-#229 code did
-            # (e.g. "48.52") rather than a decimal-precision artifact
-            # (senior-review round 2 P2).
-            final_lat = float(final_lat)
-            final_lng = float(final_lng)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+            is None
+        )
+        # Cap at -99 so a pathological collision rate cannot run
+        # away; raising at the cap surfaces the situation rather
+        # than silently storing a 100th lookalike. Only run for a
+        # brand-new row (senior-review P2): the CASE below discards
+        # this value on a re-registration anyway, and running it
+        # unconditionally meant a pathological collision on some
+        # OTHER module's name could 500 a re-registration whose own
+        # name was never going to be written.
+        stored_name = (
+            _resolve_unique_firmware_name(con, mac_str, data.module_name)
+            if is_new
+            else data.module_name
+        )
+        con.execute(
+            """
+            INSERT INTO module_configs
+                (id, name, lat, lng, first_online, battery_level, email,
+                 updated_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                name = CASE
+                    WHEN module_configs.name IS NULL OR module_configs.name = ''
+                    THEN EXCLUDED.name
+                    ELSE module_configs.name
+                END,
+                -- 2026-08 audit, for #229 (senior-review P0 fix — the
+                -- first-pass version of this CASE inverted the rule
+                -- below and still let an anonymous re-POST relocate a
+                -- placed module; verified end-to-end before landing
+                -- this fix). Location follows the SAME "preserve
+                -- unless the stored value is unset" shape as
+                -- name/email above: `lat`/`lng` can never be SQL NULL
+                -- (schema: NOT NULL), so their "unset" state is the
+                -- `(0,0)` sentinel instead. Patch from the incoming
+                -- payload ONLY when the STORED row is at `(0,0)` AND
+                -- the incoming payload carries a real (non-`(0,0)`)
+                -- fix — the PR II / issue #89 recovery case (firmware
+                -- calls `initNewModuleOnServer` on every boot,
+                -- registering at `(0,0)` when boot-time
+                -- getGeolocation fails). Every other combination
+                -- preserves the stored value — an anonymous
+                -- re-registration can NEVER move an already-placed
+                -- module, matching `routes/heartbeats.py`'s
+                -- `post_heartbeat`, which gates on the same "only
+                -- patch from a STORED (0,0)" condition. A genuine
+                -- operator relocation goes through
+                -- `DELETE /modules/<id>` + re-register (a fresh
+                -- INSERT, not this UPDATE branch) — destructive
+                -- (wipes the module's whole history, not just this
+                -- field), see the module-level comment above.
+                lat = CASE
+                    WHEN module_configs.lat = 0 AND module_configs.lng = 0
+                         AND NOT (EXCLUDED.lat = 0 AND EXCLUDED.lng = 0)
+                    THEN EXCLUDED.lat
+                    ELSE module_configs.lat
+                END,
+                lng = CASE
+                    WHEN module_configs.lat = 0 AND module_configs.lng = 0
+                         AND NOT (EXCLUDED.lat = 0 AND EXCLUDED.lng = 0)
+                    THEN EXCLUDED.lng
+                    ELSE module_configs.lng
+                END,
+                battery_level = EXCLUDED.battery_level,
+                email = CASE
+                    WHEN module_configs.email IS NULL OR module_configs.email = ''
+                    THEN EXCLUDED.email
+                    ELSE module_configs.email
+                END,
+                updated_at = NOW(),
+                last_seen_at = NOW()
+            """,
+            (
+                mac_str,
+                stored_name,
+                float(data.latitude),
+                float(data.longitude),
+                now,
+                data.battery,
+                data.email,
+            ),
+        )
+        # Read back what actually landed — the CASE clauses above may
+        # have kept the stored value instead of the incoming one, so
+        # the response / Discord message must reflect the true
+        # persisted row, not the (possibly-discarded) incoming payload.
+        final_name, final_lat, final_lng = con.execute(
+            "SELECT name, lat, lng FROM module_configs WHERE id = ?",
+            (mac_str,),
+        ).fetchone()
+        # DuckDB returns DECIMAL(9,6) columns as `decimal.Decimal`,
+        # whose str() shows full fixed-point precision (e.g.
+        # "48.520000") — float() first so the Discord message and log
+        # line render the same compact form as the pre-#229 code did
+        # (e.g. "48.52") rather than a decimal-precision artifact
+        # (senior-review round 2 P2).
+        final_lat = float(final_lat)
+        final_lng = float(final_lng)
 
     # Discord only on first registration (2026-08 audit, for #229): the
     # unconditional post let anyone spam the webhook by re-posting the
@@ -552,9 +525,11 @@ def set_display_name(module_id):
                 ),
                 200,
             )
-        except Exception as e:
-            print(f"[set_display_name] {type(e).__name__}: {e}", flush=True)
-            return jsonify({"error": str(e)}), 500
+        # No `except Exception` here (for #246): the dance's own
+        # compensating-restore already ran above, so any fault now
+        # propagates to the app-level JSON handler, which logs it to
+        # the ring. The old `print + str(e)` 500 masked the real
+        # exception class behind a body string.
         finally:
             con.close()
 
@@ -570,9 +545,28 @@ def delete_module(module_id):
     would 404 against those modules. We canonicalise the input and also
     derive its decimal equivalent, matching either.
 
-    Also clears `module_heartbeats` and `measurements` — the previous
-    version deleted only nests/progress/images/config and left orphan
-    telemetry behind.
+    Also clears `module_heartbeats`, `measurements` and
+    `nest_detections` — the previous version deleted only
+    nests/progress/images/config and left orphan telemetry behind.
+
+    Why compensating-restore instead of `write_transaction()` (#233):
+    DuckDB 1.4.4 does not see same-transaction DELETEs in its FK
+    checks, so deleting `daily_progress`/`nest_data` and their parents
+    inside one explicit `BEGIN` trips the #105 FK over-enforcement
+    (`ConstraintException` even in strict reverse-FK order — verified
+    empirically, and the reason `set_display_name` dances too). No
+    FK-disable pragma exists on this version. The deletes therefore run
+    in autocommit (each statement commits, so FK enforcement sees the
+    fresh state) with a snapshot taken first: on any failure the
+    snapshot is restored before the error surfaces, so the operator
+    sees either "deleted" or "untouched + 500", never a half-deleted
+    module. The global `lock` is held throughout. Residual window (not
+    closable at this layer): process death between the partial delete
+    and the restore leaves a half-deleted module with the snapshot
+    only in memory — take the manual pre-delete backup seriously on
+    production data (see production-deployment.md "Backup & Restore",
+    #232). Unexpected faults propagate to the app-level JSON handler
+    (no `rollback()`-in-autocommit trap, no `str(e)` body).
     """
     canonical, err = _canonicalize_or_400(module_id)
     if err is not None:
@@ -588,25 +582,119 @@ def delete_module(module_id):
             if not existing:
                 return jsonify({"error": "Module not found"}), 404
 
-            # Reverse-FK order; both id forms; every table that references
-            # the module so nothing is orphaned.
-            con.execute(
-                "DELETE FROM daily_progress WHERE nest_id IN "
+            snapshot = _snapshot_module(con, ids)
+
+            def _delete_all() -> None:
+                # Reverse-FK order; both id forms; every table that
+                # references the module so nothing is orphaned.
+                con.execute(
+                    "DELETE FROM daily_progress WHERE nest_id IN "
+                    "(SELECT nest_id FROM nest_data WHERE module_id IN (?, ?))",
+                    ids,
+                )
+                con.execute("DELETE FROM nest_data WHERE module_id IN (?, ?)", ids)
+                con.execute(
+                    "DELETE FROM nest_detections WHERE module_id IN (?, ?)", ids
+                )
+                con.execute("DELETE FROM image_uploads WHERE module_id IN (?, ?)", ids)
+                con.execute(
+                    "DELETE FROM module_heartbeats WHERE module_id IN (?, ?)",
+                    ids,
+                )
+                con.execute("DELETE FROM measurements WHERE module_mac IN (?, ?)", ids)
+                con.execute("DELETE FROM module_configs WHERE id IN (?, ?)", ids)
+
+            try:
+                _delete_all()
+            except Exception as dance_err:
+                # Compensating action: converge back to the snapshotted
+                # state (delete any partial, re-insert everything).
+                # If the restore itself raises, the operator needs to
+                # know data may be missing and should restore from
+                # backup — surface the marker in the response body.
+                restore_failed = False
+                restore_err: Exception | None = None
+                try:
+                    _restore_module(con, snapshot, _delete_all)
+                except Exception as e:
+                    restore_failed = True
+                    restore_err = e
+                    print(
+                        f"[delete_module] CRITICAL: restore failed for "
+                        f"{canonical}: {type(e).__name__}: {e}. Original "
+                        f"dance error: {type(dance_err).__name__}: "
+                        f"{dance_err}. Module rows may be missing; "
+                        f"restore from backup.",
+                        flush=True,
+                    )
+                if restore_failed:
+                    return (
+                        jsonify(
+                            {
+                                "error": "internal error",
+                                "restore_failed": True,
+                                "restore_error": str(restore_err)
+                                if restore_err is not None
+                                else None,
+                                "module_id": canonical,
+                                "message": (
+                                    "Delete failed AND the compensating "
+                                    "restore of the module rows raised. "
+                                    "Module rows may be missing; restore "
+                                    "from backup before retrying."
+                                ),
+                            }
+                        ),
+                        500,
+                    )
+                raise
+            return jsonify({"message": f"Module {canonical} deleted"}), 200
+        finally:
+            con.close()
+
+
+def _snapshot_module(con, ids):
+    """Snapshot every row of a module (both id forms) for a later restore.
+
+    Returns a list of `(table, columns, rows)` in forward-FK (restore)
+    order. Column names come from the live cursor so a future schema
+    edit can't silently desync the INSERT below.
+    """
+    tables = [
+        ("module_configs", "id"),
+        ("nest_data", "module_id"),
+        ("daily_progress", "nest_id"),
+        ("image_uploads", "module_id"),
+        ("module_heartbeats", "module_id"),
+        ("measurements", "module_mac"),
+        ("nest_detections", "module_id"),
+    ]
+    snapshot = []
+    for table, col in tables:
+        if table == "daily_progress":
+            cur = con.execute(
+                "SELECT * FROM daily_progress WHERE nest_id IN "
                 "(SELECT nest_id FROM nest_data WHERE module_id IN (?, ?))",
                 ids,
             )
-            con.execute("DELETE FROM nest_data WHERE module_id IN (?, ?)", ids)
-            con.execute("DELETE FROM image_uploads WHERE module_id IN (?, ?)", ids)
-            con.execute("DELETE FROM module_heartbeats WHERE module_id IN (?, ?)", ids)
-            con.execute("DELETE FROM measurements WHERE module_mac IN (?, ?)", ids)
-            con.execute("DELETE FROM module_configs WHERE id IN (?, ?)", ids)
-            con.commit()
-            return jsonify({"message": f"Module {canonical} deleted"}), 200
-        except Exception as e:
-            con.rollback()
-            return jsonify({"error": str(e)}), 500
-        finally:
-            con.close()
+        else:
+            cur = con.execute(f"SELECT * FROM {table} WHERE {col} IN (?, ?)", ids)
+        cols = [d[0] for d in cur.description]
+        snapshot.append((table, cols, cur.fetchall()))
+    return snapshot
+
+
+def _restore_module(con, snapshot, clear):
+    """Converge back to a `_snapshot_module` state: clear any partial
+    delete, then re-insert every snapshotted row in forward-FK order
+    (parents before children, so autocommit FK checks pass)."""
+    clear()
+    for table, cols, rows in snapshot:
+        if not rows:
+            continue
+        quoted = ", ".join(f'"{c}"' for c in cols)
+        placeholders = ", ".join(["?"] * len(cols))
+        con.executemany(f"INSERT INTO {table} ({quoted}) VALUES ({placeholders})", rows)
 
 
 @modules_bp.post("/record_image")
@@ -619,48 +707,47 @@ def record_image():
     canonical, err = _canonicalize_or_400(raw_module_id)
     if err is not None:
         return err
-    try:
-        with write_transaction() as con:
-            # UTC, NOT naive-local. The `activity_timeseries` reader
-            # computes its window against `datetime.now(timezone.utc)`;
-            # if the writer stamps in container-local time (which is
-            # what `datetime.now()` does — UTC today only because the
-            # python:3.x-slim image happens to default to UTC), setting
-            # `TZ=Europe/Berlin` on the container in prod would put
-            # writes 1-2 hours past the reader's window upper bound.
-            # The schema's `DEFAULT CURRENT_TIMESTAMP` carries the same
-            # naive-local risk; chapter-11 entry to follow.
-            now_utc = (
-                datetime.now(timezone.utc)
-                .replace(tzinfo=None)
-                .strftime("%Y-%m-%d %H:%M:%S")
-            )
-            con.execute(
-                "INSERT INTO image_uploads (module_id, filename, uploaded_at) VALUES (?, ?, ?)",
-                (canonical, filename, now_utc),
-            )
-        return jsonify({"message": "Image recorded"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # No per-route `except Exception` (for #246) — unexpected faults
+    # propagate to the app-level JSON handler.
+    with write_transaction() as con:
+        # UTC, NOT naive-local. The `activity_timeseries` reader
+        # computes its window against `datetime.now(timezone.utc)`;
+        # if the writer stamps in container-local time (which is
+        # what `datetime.now()` does — UTC today only because the
+        # python:3.x-slim image happens to default to UTC), setting
+        # `TZ=Europe/Berlin` on the container in prod would put
+        # writes 1-2 hours past the reader's window upper bound.
+        # The schema's `DEFAULT CURRENT_TIMESTAMP` carries the same
+        # naive-local risk; chapter-11 entry to follow.
+        now_utc = (
+            datetime.now(timezone.utc)
+            .replace(tzinfo=None)
+            .strftime("%Y-%m-%d %H:%M:%S")
+        )
+        con.execute(
+            "INSERT INTO image_uploads (module_id, filename, uploaded_at) VALUES (?, ?, ?)",
+            (canonical, filename, now_utc),
+        )
+    return jsonify({"message": "Image recorded"}), 200
 
 
 @modules_bp.delete("/image_uploads/<filename>")
 def delete_image_upload(filename):
-    with lock:
-        con = get_conn()
-        try:
-            existing = con.execute(
-                "SELECT filename FROM image_uploads WHERE filename = ?", (filename,)
-            ).fetchone()
-            if not existing:
-                return jsonify({"error": "Image not found"}), 404
-            con.execute("DELETE FROM image_uploads WHERE filename = ?", (filename,))
-            con.commit()
-            return jsonify({"message": "Image record deleted"}), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-        finally:
-            con.close()
+    """Delete one image_uploads row plus its `nest_detections` rows.
+
+    Runs inside `write_transaction()` (for #233) — same autocommit +
+    stray-commit shape `delete_module` had. Unexpected faults
+    propagate to the app-level JSON handler.
+    """
+    with write_transaction() as con:
+        existing = con.execute(
+            "SELECT filename FROM image_uploads WHERE filename = ?", (filename,)
+        ).fetchone()
+        if not existing:
+            return jsonify({"error": "Image not found"}), 404
+        con.execute("DELETE FROM image_uploads WHERE filename = ?", (filename,))
+        con.execute("DELETE FROM nest_detections WHERE filename = ?", (filename,))
+    return jsonify({"message": "Image record deleted"}), 200
 
 
 @modules_bp.get("/image_uploads")
@@ -712,79 +799,73 @@ def list_image_uploads():
 
     where = "WHERE module_id = ?" if module_id else ""
     where_params = [module_id] if module_id else []
-    with lock:
-        con = get_conn()
-        try:
-            total = con.execute(
-                f"SELECT COUNT(*) FROM image_uploads {where}", where_params
-            ).fetchone()[0]
-            # `id DESC` is a stable tiebreaker, NOT decoration: with only
-            # `uploaded_at DESC`, two uploads sharing a timestamp (same
-            # second/microsecond) sort in an undefined order that can
-            # differ between the page-1 query and the page-2 query — so
-            # LIMIT/OFFSET paging would duplicate one row and skip
-            # another. `id` is the monotonic insertion sequence (capture
-            # order), so `uploaded_at DESC, id DESC` is a strict total
-            # order: newest capture first, deterministic across pages.
-            sql = (
-                "SELECT module_id, filename, uploaded_at "
-                f"FROM image_uploads {where} ORDER BY uploaded_at DESC, id DESC"
-            )
-            query_params = list(where_params)
-            if limit is not None:
-                sql += " LIMIT ? OFFSET ?"
-                query_params += [limit, offset]
-            rows = con.execute(sql, query_params).fetchall()
-            images = [
-                {"module_id": r[0], "filename": r[1], "uploaded_at": str(r[2])}
-                for r in rows
-            ]
-            return jsonify(images=images, total=total), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-        finally:
-            con.close()
+    # No per-route `except Exception` (for #246) — faults propagate to
+    # the app-level JSON handler.
+    total = query_scalar(
+        f"SELECT COUNT(*) FROM image_uploads {where}", tuple(where_params)
+    )
+    # `id DESC` is a stable tiebreaker, NOT decoration: with only
+    # `uploaded_at DESC`, two uploads sharing a timestamp (same
+    # second/microsecond) sort in an undefined order that can
+    # differ between the page-1 query and the page-2 query — so
+    # LIMIT/OFFSET paging would duplicate one row and skip
+    # another. `id` is the monotonic insertion sequence (capture
+    # order), so `uploaded_at DESC, id DESC` is a strict total
+    # order: newest capture first, deterministic across pages.
+    sql = (
+        "SELECT module_id, filename, uploaded_at "
+        f"FROM image_uploads {where} ORDER BY uploaded_at DESC, id DESC"
+    )
+    query_params = list(where_params)
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        query_params += [limit, offset]
+    rows = query_all(sql, tuple(query_params))
+    images = [
+        {
+            "module_id": r["module_id"],
+            "filename": r["filename"],
+            "uploaded_at": str(r["uploaded_at"]),
+        }
+        for r in rows
+    ]
+    return jsonify(images=images, total=total), 200
 
 
 @modules_bp.get("/modules")
 def get_modules():
-    try:
-        # Explicit column list (no `SELECT m.*`) so adding a column to
-        # `module_configs` cannot silently leak through to the wire
-        # shape without a deliberate edit here. The backend's
-        # `ApiModule` TS interface mirrors this list. The client
-        # (homepage) resolves the operator-visible label via
-        # `homepage/src/lib/displayLabel.ts` — we deliberately do not
-        # collapse `display_name`/`name` server-side so the admin UI
-        # can show both.
-        modules = query_all(
-            """
-            SELECT m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,
-                   m.battery_level, m.image_count, m.email,
-                   m.updated_at, m.last_seen_at,
-                   m.last_silence_alert_at,
-                   COUNT(i.id) AS real_image_count,
-                   MAX(i.uploaded_at) AS last_image_at
-            FROM module_configs m
-            LEFT JOIN image_uploads i ON m.id = i.module_id
-            GROUP BY m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,
-                     m.battery_level, m.image_count, m.email,
-                     m.updated_at, m.last_seen_at,
-                     m.last_silence_alert_at
-            """
-        )
-        return jsonify(modules=modules), 200
-    except Exception as e:
-        # Without this wrapper Flask serves the default HTML 500 page,
-        # which the backend then JSON.parses and throws on, masking the
-        # underlying DB error as a generic upstream 502 (#32). The body
-        # is the error only — no `modules: []` fallback. The backend's
-        # fetchAndAssemble checks `r.ok` first, so it never reads this
-        # body; any other consumer that ignores the status would TypeError
-        # on `data.modules.map`, which is more honest than a silent
-        # empty fleet.
-        print(f"[get_modules] {type(e).__name__}: {e}", flush=True)
-        return jsonify(error=str(e)), 500
+    # Explicit column list (no `SELECT m.*`) so adding a column to
+    # `module_configs` cannot silently leak through to the wire
+    # shape without a deliberate edit here. The backend's
+    # `ApiModule` TS interface mirrors this list. The client
+    # (homepage) resolves the operator-visible label via
+    # `homepage/src/lib/displayLabel.ts` — we deliberately do not
+    # collapse `display_name`/`name` server-side so the admin UI
+    # can show both.
+    #
+    # No per-route `except Exception` (for #246): faults propagate
+    # to the app-level JSON handler. The old wrapper existed because
+    # without it Flask served the default HTML 500 page, which the
+    # backend JSON.parsed into a generic upstream 502 (#32) — that
+    # rationale now lives on the handler in `app.py`, where it
+    # covers every route instead of one.
+    modules = query_all(
+        """
+        SELECT m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,
+               m.battery_level, m.image_count, m.email,
+               m.updated_at, m.last_seen_at,
+               m.last_silence_alert_at,
+               COUNT(i.id) AS real_image_count,
+               MAX(i.uploaded_at) AS last_image_at
+        FROM module_configs m
+        LEFT JOIN image_uploads i ON m.id = i.module_id
+        GROUP BY m.id, m.name, m.display_name, m.lat, m.lng, m.first_online,
+                 m.battery_level, m.image_count, m.email,
+                 m.updated_at, m.last_seen_at,
+                 m.last_silence_alert_at
+        """
+    )
+    return jsonify(modules=modules), 200
 
 
 @modules_bp.get("/modules/<module_id>/progress_count")

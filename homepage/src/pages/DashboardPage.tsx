@@ -6,8 +6,8 @@ import { displayLabel } from '../lib/displayLabel';
 import ModulePanel from '../components/ModulePanel';
 import SiteHeader from '../components/SiteHeader';
 import { useTranslation } from '../i18n/LanguageContext';
-import { api } from '../services/api';
-import type { Module, UserLocation } from '@highfive/contracts';
+import { api, ModulesUnavailableError } from '../services/api';
+import type { DataLeg, Module, UserLocation } from '@highfive/contracts';
 
 export default function DashboardPage() {
   const { t, lang } = useTranslation();
@@ -16,10 +16,15 @@ export default function DashboardPage() {
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Mirrors the X-Highfive-Data-Incomplete response header (#31). When true,
-  // some module statuses may be 'unknown' instead of accurate, and we show
-  // a banner explaining the degradation.
-  const [heartbeatsIncomplete, setHeartbeatsIncomplete] = useState(false);
+  // Mirrors the X-Highfive-Data-Incomplete response header (#31, #230).
+  // Names the failed upstream legs; the banner lists them so the
+  // operator knows WHICH data is stale. Leg tokens stay untranslated —
+  // they are wire identifiers, not prose.
+  const [incompleteLegs, setIncompleteLegs] = useState<DataLeg[]>([]);
+  // True when the backend answered 503 (its duckdb `/modules` leg
+  // failed — for #230). Distinct from `error` (backend down): the
+  // backend is up, the module store is not. Retry usually recovers.
+  const [storeUnavailable, setStoreUnavailable] = useState(false);
   const [mobileListExpanded, setMobileListExpanded] = useState(false);
   // Coarse IP-based location hint for the map (issue #14). Null until the
   // request resolves — and stays null on 5xx or private/loopback IPs. The
@@ -48,9 +53,13 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       setError(null);
+      setStoreUnavailable(false);
       const { modules: data, dataIncomplete } = await api.getAllModulesWithMeta();
       setModules(data);
-      setHeartbeatsIncomplete(dataIncomplete.heartbeats);
+      const legs: DataLeg[] = (['nests', 'progress', 'heartbeats'] as const).filter(
+        (leg) => dataIncomplete[leg],
+      );
+      setIncompleteLegs(legs);
 
       // Auto-select module passed from setup wizard
       const navState = location.state as { selectModuleId?: string } | null;
@@ -61,7 +70,14 @@ export default function DashboardPage() {
         window.history.replaceState({}, '');
       }
     } catch (err) {
-      setError(t('dashboard.errorDetail'));
+      if (err instanceof ModulesUnavailableError) {
+        // 503: the backend is up but its module store is not. Show the
+        // dedicated unavailable state (with retry) rather than the
+        // generic "backend down" error.
+        setStoreUnavailable(true);
+      } else {
+        setError(t('dashboard.errorDetail'));
+      }
       console.error('Error loading modules:', err);
     } finally {
       setLoading(false);
@@ -125,7 +141,7 @@ export default function DashboardPage() {
           />
           <span className="hidden sm:inline">{t('common.loading')}</span>
         </span>
-      ) : error ? (
+      ) : error || storeUnavailable ? (
         <span className="inline-flex items-center gap-1.5 text-hf-danger">
           <span className="w-2 h-2 bg-hf-danger rounded-full" aria-hidden="true" />
           <span className="hidden sm:inline">{t('common.error')}</span>
@@ -135,7 +151,7 @@ export default function DashboardPage() {
           <span className="w-2 h-2 bg-hf-success rounded-full" aria-hidden="true" />
           <span
             aria-label={
-              heartbeatsIncomplete
+              incompleteLegs.length > 0
                 ? `${onlineCount} of ${modules.length} modules online (some statuses unknown)`
                 : `${onlineCount} of ${modules.length} modules online`
             }
@@ -152,23 +168,23 @@ export default function DashboardPage() {
     <div className="h-[100dvh] flex flex-col bg-hf-bg overflow-hidden">
       <SiteHeader title={t('dashboard.title')} right={statusPill} />
 
-      {/* Heartbeat-data-incomplete banner (#31). Shown when the backend
-          flagged the heartbeats endpoint as unreachable on the last fetch
-          — some module statuses may be 'unknown' rather than accurate. */}
-      {!loading && !error && heartbeatsIncomplete && (
+      {/* Data-incomplete banner (#31, #230). Shown when the backend
+          flagged upstream legs as failed on the last fetch — some
+          module details may be stale rather than accurate. */}
+      {!loading && !error && !storeUnavailable && incompleteLegs.length > 0 && (
         <div
           role="status"
           aria-live="polite"
           className="px-4 py-2 text-hf-xs md:text-hf-sm border-b border-hf-honey-300 bg-hf-honey-50 text-hf-honey-900"
         >
-          {t('common.heartbeatDataIncomplete')}
+          {t('common.dataIncomplete', { legs: incompleteLegs.join(', ') })}
         </div>
       )}
 
       {/* Main content */}
       <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden relative">
-        {/* Error state — backend down */}
-        {error && (
+        {/* Error state — backend down, or module store unavailable (#230) */}
+        {(error || storeUnavailable) && (
           <div
             className="flex-1 flex items-center justify-center p-4 md:p-8"
             style={{
@@ -180,10 +196,14 @@ export default function DashboardPage() {
                 <div className="text-5xl md:text-7xl animate-bounce">🐝</div>
               </div>
               <h2 className="text-hf-fg mb-2 md:mb-3" style={{ fontSize: 'var(--fs-lg)' }}>
-                {t('dashboard.errorTitle')}
+                {storeUnavailable
+                  ? t('dashboard.storeUnavailableTitle')
+                  : t('dashboard.errorTitle')}
               </h2>
               <p className="text-hf-fg-soft mb-6 md:mb-8 text-hf-sm">
-                {t('dashboard.errorSubtitle')}
+                {storeUnavailable
+                  ? t('dashboard.storeUnavailableSubtitle')
+                  : t('dashboard.errorSubtitle')}
               </p>
               <button onClick={loadModules} className="hf-btn hf-btn-primary px-6 py-3 mx-auto">
                 <svg
@@ -203,14 +223,16 @@ export default function DashboardPage() {
                 {t('common.tryAgain')}
               </button>
               <div className="mt-6 md:mt-8 p-3 md:p-4 hf-card">
-                <p className="text-hf-xs text-hf-fg-mute font-mono break-words">{error}</p>
+                <p className="text-hf-xs text-hf-fg-mute font-mono break-words">
+                  {storeUnavailable ? t('dashboard.storeUnavailableDetail') : error}
+                </p>
               </div>
             </div>
           </div>
         )}
 
         {/* Map */}
-        {!error && (
+        {!error && !storeUnavailable && (
           <div className="flex-1 relative min-h-0">
             {!loading && (
               <MapView

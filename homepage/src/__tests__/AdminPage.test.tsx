@@ -46,7 +46,6 @@ function makeModule(location: { lat: number; lng: number }): Module {
     firstOnline: '2026-05-16',
     totalHatches: 0,
     imageCount: 0,
-    email: null,
     updatedAt: '2026-05-16T20:00:00.000Z',
     lastSeenAt: '2026-05-16T20:00:00.000Z',
     latestHeartbeat: null,

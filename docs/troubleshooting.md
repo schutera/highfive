@@ -48,7 +48,7 @@ docker compose logs <service-name>   # e.g. duckdb-service
 The most common cause is a missing or malformed `.env` file at the repo root. It must contain at minimum:
 
 ```env
-DEBUG=true
+DEBUG=false
 DUCKDB_SERVICE_URL=http://duckdb-service:8000
 ```
 
@@ -104,6 +104,30 @@ loaded (`loaded model …/hole_detector.onnx`) or was skipped.
    "Is the service running?" is usually the wrong question — confirm the
    _path_ end-to-end before concluding a service is down. See chapter 11
    "failed to load images" for the full incident.
+
+### Dashboard shows "Module data is temporarily unavailable" (`GET /api/modules` answers 503)
+
+**Symptom.** The dashboard renders an explicit unavailable panel (not
+the generic backend-down error) and `GET /api/modules` answers `503
+{ error: 'upstream module store unavailable' }` with a `Retry-After:
+5` header.
+
+**Why it happens.** The backend's duckdb `/modules` leg failed
+(duckdb-service restarting on deploy, OOM, or a DB error) — since #230
+the backend surfaces that as an outage instead of a lying `200 []`.
+Degraded snapshots are never cached, so this clears by itself once
+duckdb answers again; retrying in a few seconds is the correct
+response, not a re-register of anything.
+
+```bash
+docker compose ps duckdb-service
+docker compose logs --tail=30 duckdb-service
+curl.exe -s -o NUL -w "%{http_code}\n" http://localhost:8002/modules
+```
+
+A `200` with `X-Highfive-Data-Incomplete: nests` (or `progress`,
+`heartbeats`) is the milder sibling: the fleet renders, one banner
+names the stale legs, same recovery story.
 
 ### `duckdb-service` exits with `RuntimeError: module_configs status-drop migration failed`
 

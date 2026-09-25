@@ -39,7 +39,7 @@ docker compose up --build
 Required `.env` at the repo root:
 
 ```env
-DEBUG=true
+DEBUG=false
 DUCKDB_SERVICE_URL=http://duckdb-service:8000
 # HIGHFIVE_API_KEY=...   # optional, overrides dev fallback 'hf_dev_key_2026'
 ```

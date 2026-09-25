@@ -28,7 +28,7 @@ from services.log_ring import init_persistence as init_log_persistence
 from services.log_ring import install as install_log_ring
 from services.log_ring import log_event, subscribe, unsubscribe
 from services.module_id import ModuleId
-from services.paths import safe_child_path
+from services.paths import is_snip_of, safe_child_path
 from services.prod_guard import require_prod_key
 from services.sidecar import LogSidecarEnvelope
 from services.upload_pipeline import UploadPipeline, UploadRequest
@@ -452,20 +452,25 @@ def list_images():
 
 @app.delete("/images/<path:filename>")
 def delete_image(filename):
-    """Delete an image's DB record then its on-disk file.
+    """Delete an image's DB record then its on-disk artefacts.
 
     Wire shape (closes #30):
-      * 2xx from duckdb → row gone, remove the file, return 200.
-      * 404 from duckdb → row already gone; remove the file if still
+      * 2xx from duckdb → row gone, remove the artefacts, return 200.
+      * 404 from duckdb → row already gone; remove the artefacts if still
         present (idempotent cleanup) and return 404.
       * Any other non-2xx from duckdb (3xx redirect, 4xx other than
-        404, 5xx) → leave the file in place and forward the upstream
+        404, 5xx) → leave everything in place and forward the upstream
         status. A retry by the caller sees a consistent file+row pair
         instead of an orphaned row pointing at a deleted file.
-      * Network/timeout exception → 502, file untouched.
+      * Network/timeout exception → 502, everything untouched.
       * Traversal / non-basename filename → 400, nothing touched
         (2026-07 audit, for #202 — the read paths get containment from
         `send_from_directory`; the delete path must enforce its own).
+
+    "Artefacts" (for #233) = the source JPEG, the `<file>.log.json`
+    telemetry sidecar, and every `snips/<base>-*.jpg` crop, where
+    `<base>` is the filename without extension (mirroring
+    `upload_pipeline.py`'s snip naming exactly).
     """
     if "/" in filename or "\\" in filename:
         return jsonify({"error": "Invalid filename"}), 400
@@ -484,8 +489,7 @@ def delete_image(filename):
         return jsonify({"error": "duckdb-service unreachable"}), 502
 
     if resp.status_code == 404:
-        if os.path.isfile(file_path):
-            os.remove(file_path)
+        _remove_capture_artefacts(filename, file_path)
         return jsonify({"error": "Image not found"}), 404
 
     if not (200 <= resp.status_code < 300):
@@ -498,9 +502,36 @@ def delete_image(filename):
             resp.status_code,
         )
 
+    _remove_capture_artefacts(filename, file_path)
+    return jsonify({"message": "Image deleted"}), 200
+
+
+def _remove_capture_artefacts(filename, file_path):
+    """Unlink one capture's source JPEG, sidecar and snips (for #233).
+
+    Every path goes through `safe_child_path` and every unlink is
+    guarded by `isfile` — nothing outside `UPLOAD_FOLDER`/`SNIP_FOLDER`
+    is touched and a missing artefact is not an error. Snips match the
+    pipeline's exact grammar (`<base>-<bee_type>-<nest_index>.jpg`,
+    bee types like `leafcutter_bee`) — a mere `<base>-` prefix would
+    also catch an unrelated capture literally named `<base>-*.jpg`.
+    """
     if os.path.isfile(file_path):
         os.remove(file_path)
-    return jsonify({"message": "Image deleted"}), 200
+    sidecar = safe_child_path(UPLOAD_FOLDER, filename + ".log.json")
+    if sidecar is not None and os.path.isfile(sidecar):
+        os.remove(sidecar)
+    base = os.path.splitext(filename)[0]
+    try:
+        names = os.listdir(SNIP_FOLDER)
+    except OSError:
+        return
+    for name in names:
+        # Shared grammar with the write path (`services/paths.py`).
+        if is_snip_of(name, base):
+            snip = safe_child_path(SNIP_FOLDER, name)
+            if snip is not None and os.path.isfile(snip):
+                os.remove(snip)
 
 
 @app.get("/images/<path:filename>")
@@ -559,4 +590,9 @@ if __name__ == "__main__":
     # one worker for the stream's whole lifetime, so concurrent request handling is
     # required or an open admin tail would stall image uploads. A future move to
     # gunicorn must keep per-stream concurrency (threaded/async workers).
-    app.run(host="0.0.0.0", port=4444, debug=debug, threaded=True)
+    # use_debugger=False (for #235): DEBUG=true is the documented dev
+    # setting and both ports are LAN-published, so the Werkzeug
+    # interactive console would be a LAN-reachable code-execution target
+    # in containers holding the DuckDB volume. The reloader (the only
+    # dev-useful half of debug=True) is unaffected.
+    app.run(host="0.0.0.0", port=4444, debug=debug, use_debugger=False, threaded=True)

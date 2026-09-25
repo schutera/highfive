@@ -645,6 +645,194 @@ def test_delete_module_invalid_id_returns_400(client):
     assert client.delete("/modules/not-a-mac").status_code == 400
 
 
+def _seed_detection(fresh_db, module_id, filename, snip_filename):
+    con = fresh_db.connection.get_conn()
+    try:
+        con.execute(
+            "INSERT INTO nest_detections (module_id, filename, bee_type, "
+            "nest_index, state, snip_filename) VALUES (?, ?, 'blackmasked', 0, "
+            "'empty', ?)",
+            (module_id, filename, snip_filename),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def test_delete_module_clears_nest_detections(client, fresh_db):
+    """`nest_detections` rows die with their module — for BOTH id forms
+    (for #233)."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    decimal_id = str(int(TEST_MAC_1, 16))
+    _seed_detection(fresh_db, TEST_MAC_1, "a.jpg", "a-blackmasked-0.jpg")
+    _seed_detection(fresh_db, decimal_id, "b.jpg", "b-blackmasked-0.jpg")
+    _seed_detection(fresh_db, TEST_MAC_2, "c.jpg", "c-blackmasked-0.jpg")
+
+    assert client.delete(f"/modules/{TEST_MAC_1}").status_code == 200
+
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM nest_detections WHERE module_id IN (?, ?)",
+            (TEST_MAC_1, decimal_id),
+        )
+        == 0
+    )
+    # Unrelated module's detections survive.
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM nest_detections WHERE module_id=?",
+            (TEST_MAC_2,),
+        )
+        == 1
+    )
+
+
+def test_delete_module_is_atomic_on_midway_failure(client, fresh_db, monkeypatch):
+    """A failure after the first DELETE rolls everything back (for
+    #233): zero rows removed from every table, JSON 500 (never the
+    HTML 500 the old autocommit+rollback trap produced)."""
+    import routes.modules as routes_modules
+
+    _seed_module(fresh_db, TEST_MAC_1)
+    _seed_nest(fresh_db, "nest-1", TEST_MAC_1)
+    _seed_progress(fresh_db, "prog-1", "nest-1")
+    _seed_image_upload(fresh_db, TEST_MAC_1, "x.jpg", "2024-06-01 12:00:00")
+    _seed_heartbeat(fresh_db, TEST_MAC_1)
+    _seed_measurement(fresh_db, TEST_MAC_1)
+    _seed_detection(fresh_db, TEST_MAC_1, "x.jpg", "x-blackmasked-0.jpg")
+
+    real_get_conn = fresh_db.connection.get_conn
+    deletes = []
+
+    # Fail the SECOND delete only (the `nest_data` DELETE). The counter
+    # keeps counting through restore-phase DELETEs, but that is harmless
+    # here: only ordinal 2 raises, so restore's re-run of the identical
+    # `_delete_all` cannot re-trip it (ordinals 3-9) and converges. If an
+    # 8th table is ever added to the dance, re-check which ordinal fails
+    # here — the test is coupled to table order by construction.
+    class FailSecondDelete:
+        def __init__(self, real):
+            self._real = real
+
+        def execute(self, sql, params=()):
+            if isinstance(sql, str) and sql.lstrip().upper().startswith("DELETE"):
+                deletes.append(sql)
+                if len(deletes) == 2:
+                    raise RuntimeError("boom")
+            return self._real.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    # `routes.modules` captures `get_conn` at import time (`from
+    # db.connection import get_conn`), so the patch must target the
+    # route module's own binding — patching `db.connection.get_conn`
+    # would not reach it (see tests/conftest.py).
+    monkeypatch.setattr(
+        routes_modules, "get_conn", lambda: FailSecondDelete(real_get_conn())
+    )
+
+    resp = client.delete(f"/modules/{TEST_MAC_1}")
+    assert resp.status_code == 500
+    assert resp.is_json
+    assert resp.get_json() == {"error": "internal error"}
+
+    for table, col in (
+        ("module_configs", "id"),
+        ("nest_data", "module_id"),
+        ("image_uploads", "module_id"),
+        ("module_heartbeats", "module_id"),
+        ("measurements", "module_mac"),
+        ("nest_detections", "module_id"),
+    ):
+        assert (
+            _count(
+                fresh_db,
+                f"SELECT COUNT(*) FROM {table} WHERE {col}=?",
+                (TEST_MAC_1,),
+            )
+            == 1
+        ), table
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM daily_progress WHERE nest_id=?",
+            ("nest-1",),
+        )
+        == 1
+    )
+
+
+def test_delete_module_restore_failure_surfaces_restore_failed(
+    client, fresh_db, monkeypatch
+):
+    """If the compensating restore itself raises, the response says so
+    (for #233): `restore_failed: True` plus the data-loss pointer —
+    never a silent half-delete."""
+    import routes.modules as routes_modules
+
+    _seed_module(fresh_db, TEST_MAC_1)
+    _seed_nest(fresh_db, "nest-1", TEST_MAC_1)
+
+    real_get_conn = fresh_db.connection.get_conn
+
+    class FailModuleConfigsDelete:
+        def __init__(self, real):
+            self._real = real
+
+        def execute(self, sql, params=()):
+            if isinstance(sql, str) and sql.lstrip().upper().startswith(
+                "DELETE FROM MODULE_CONFIGS"
+            ):
+                raise RuntimeError("boom")
+            return self._real.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    monkeypatch.setattr(
+        routes_modules, "get_conn", lambda: FailModuleConfigsDelete(real_get_conn())
+    )
+
+    resp = client.delete(f"/modules/{TEST_MAC_1}")
+    assert resp.status_code == 500
+    body = resp.get_json()
+    assert body["error"] == "internal error"
+    assert body["restore_failed"] is True
+    assert body["module_id"] == TEST_MAC_1
+
+
+def test_delete_image_upload_clears_nest_detections(client, fresh_db):
+    """`DELETE /image_uploads/<filename>` removes that capture's
+    detection rows and leaves other captures alone (for #233)."""
+    _seed_module(fresh_db, TEST_MAC_1)
+    _seed_image_upload(fresh_db, TEST_MAC_1, "x.jpg", "2024-06-01 12:00:00")
+    _seed_detection(fresh_db, TEST_MAC_1, "x.jpg", "x-blackmasked-0.jpg")
+    _seed_detection(fresh_db, TEST_MAC_1, "x.jpg", "x-blackmasked-1.jpg")
+    _seed_detection(fresh_db, TEST_MAC_1, "y.jpg", "y-blackmasked-0.jpg")
+
+    assert client.delete("/image_uploads/x.jpg").status_code == 200
+
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM nest_detections WHERE filename=?",
+            ("x.jpg",),
+        )
+        == 0
+    )
+    assert (
+        _count(
+            fresh_db,
+            "SELECT COUNT(*) FROM nest_detections WHERE filename=?",
+            ("y.jpg",),
+        )
+        == 1
+    )
+
+
 # ---------- GET /image_uploads pagination ----------
 
 

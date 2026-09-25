@@ -454,8 +454,8 @@ keeps onboarding to one secret while preserving the gating semantics.
     /api/modules/:id`, unlike the anonymous `/new_module` POST it
     replaces the effect of), which is the right privilege level — but
     `routes/modules.py::delete_module` wipes `daily_progress`,
-    `nest_data`, `image_uploads`, `module_heartbeats`, and
-    `measurements` for that module id, not just `module_configs`. A
+    `nest_data`, `image_uploads`, `module_heartbeats`,
+    `measurements`, and `nest_detections` for that module id, not just `module_configs`. A
     relocated module starts its whole observation history over from
     zero; the JPEGs already on disk are orphaned (the DB rows pointing
     at them are gone, the files are not). There is no non-destructive
@@ -504,7 +504,11 @@ keeps onboarding to one secret while preserving the gating semantics.
     `print(f"... Received: {json_data}")` — which put the raw body,
     including `email`, into the admin-readable log ring — is gone; the
     replacement line logs only the canonical id, stored name, and
-    already-coarsened lat/lng.
+    already-coarsened lat/lng. And since #235 the operator email goes
+    no further: the backend drops it at the response boundary, so the
+    public `Module` wire shape carries no PII at all (the stored column
+    and the firmware-sent value are unchanged — only the republication
+    is gone).
   - `POST /heartbeat` (`routes/heartbeats.py::post_heartbeat`) — a MAC
     with no `module_configs` row is dropped (still `200`, nothing
     written to `module_heartbeats`/`measurements`) instead of growing
@@ -539,7 +543,12 @@ keeps onboarding to one secret while preserving the gating semantics.
   So **treat a running dev stack as trusted-LAN-only** — it serves
   `DELETE /modules/:id` and friends to anyone on the same network. On
   an untrusted network, drop the `8002` port mapping and accept that no
-  ESP can register while it is gone. See
+  ESP can register while it is gone. One historical reason for this
+  caveat is gone in #235: both Flask services now pass
+  `use_debugger=False` to `app.run`, so the Werkzeug interactive
+  debugger (a LAN-reachable code-execution console in containers
+  holding the DuckDB volume) stays off no matter what `DEBUG` says.
+  See
   [docker-compose.md → Startup ordering](../07-deployment-view/docker-compose.md).
 
 ## Captive-portal credential handling

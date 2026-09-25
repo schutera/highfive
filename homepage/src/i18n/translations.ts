@@ -7,8 +7,11 @@ const translations = {
       online: 'Online',
       offline: 'Offline',
       unknown: 'Unknown',
-      heartbeatDataIncomplete:
-        'Heartbeat data unavailable — some module statuses may be incomplete. Refresh in a moment.',
+      // Generalised banner (#230): names the failed upstream legs
+      // ({legs} is a comma-joined wire identifier list, e.g.
+      // "nests, progress" — intentionally untranslated).
+      dataIncomplete:
+        'Upstream data unavailable ({legs}) — some module details may be incomplete. Refresh in a moment.',
       loading: 'Loading...',
       error: 'Error',
       tryAgain: 'Try Again',
@@ -72,6 +75,12 @@ const translations = {
       errorTitle: "It's not you, it's us!",
       errorSubtitle: 'Our worker bees are already on it.',
       errorDetail: 'Failed to load modules. Make sure the backend is running.',
+      // Explicit 503 state (#230): the backend is up but its duckdb
+      // `/modules` leg failed — a retry shortly usually recovers.
+      storeUnavailableTitle: 'Module data is temporarily unavailable',
+      storeUnavailableSubtitle:
+        'The backend is up, but its module store is not answering. Trying again in a moment usually helps.',
+      storeUnavailableDetail: 'GET /api/modules answered 503 (upstream module store unavailable).',
       loadingMap: 'Loading map...',
       onlineCount: '{online}/{total}',
       statusOnline: '\u25CF Online',
@@ -483,8 +492,8 @@ const translations = {
       online: 'Online',
       offline: 'Offline',
       unknown: 'Unbekannt',
-      heartbeatDataIncomplete:
-        'Heartbeat-Daten nicht verfügbar — einige Modul-Status können unvollständig sein. Bitte gleich neu laden.',
+      dataIncomplete:
+        'Upstream-Daten nicht verfügbar ({legs}) — einige Moduldetails können unvollständig sein. Bitte gleich neu laden.',
       loading: 'Laden...',
       error: 'Fehler',
       tryAgain: 'Erneut versuchen',
@@ -539,6 +548,11 @@ const translations = {
       errorSubtitle: 'Unsere Arbeitsbienen sind bereits dran.',
       errorDetail:
         'Module konnten nicht geladen werden. Stelle sicher, dass das Backend l\u00E4uft.',
+      storeUnavailableTitle: 'Moduldaten sind vorübergehend nicht verfügbar',
+      storeUnavailableSubtitle:
+        'Das Backend läuft, aber sein Modulspeicher antwortet nicht. Ein erneuter Versuch gleich hilft meist.',
+      storeUnavailableDetail:
+        'GET /api/modules antwortete 503 (upstream module store unavailable).',
       loadingMap: 'Karte wird geladen...',
       onlineCount: '{online}/{total}',
       statusOnline: '\u25CF Online',

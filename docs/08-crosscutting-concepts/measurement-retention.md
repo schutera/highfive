@@ -33,7 +33,11 @@ Even at 100× the metric count and 10× the module count, this stays
 under 1 GB/decade. The DuckDB file already carries
 `module_heartbeats`, `image_uploads`, and `daily_progress` rows in the
 same order of magnitude with no retention story — and those have run
-for a year without a complaint.
+for a year without a complaint. (Admin deletes cascade fully since
+#233 — `DELETE /modules/<id>` clears all seven tables and
+`DELETE /images/<filename>` clears sidecar + snips — but that is
+per-object cleanup on demand, not a retention schedule; the schedule
+itself remains #250.)
 
 The two indices declared in `_MEASUREMENTS_DDL` keep the read endpoint
 fast at scale: `idx_measurements_module_metric_ts` covers

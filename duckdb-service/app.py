@@ -4,7 +4,7 @@ import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from db.schema import init_db
-from flask import Flask, g, request
+from flask import Flask, g, jsonify, request
 from routes.admin_weather import admin_weather_bp
 from routes.detections import detections_bp
 from routes.health import health_bp
@@ -21,6 +21,7 @@ from services.log_ring import log_event
 from services.prod_guard import require_prod_key
 from services.silence_watcher import check_silence
 from services.weather_worker import run_weather_fetch
+from werkzeug.exceptions import HTTPException
 
 # Tee stdout/stderr into the in-memory ring (#171) so the admin server-logs
 # endpoint can tail this service's output. Runs before the app serves traffic;
@@ -83,6 +84,23 @@ def _access_log_finish(resp):
     return resp
 
 
+@app.errorhandler(Exception)
+def _json_error_handler(e):
+    # One JSON envelope for every unexpected fault (for #246). Without a
+    # handler Flask serves its default HTML 500 page, which the Node
+    # backend then JSON.parses and throws on, masking the underlying DB
+    # error as a generic upstream 502 (#32) — a rationale that used to
+    # live as a per-route comment on `get_modules` but applies to every
+    # route, so it lives here now. Detail goes to the ring (visible on
+    # the admin-gated `GET /logs`), never `str(e)` to the client.
+    if isinstance(e, HTTPException):
+        # Routing status codes (404, 405, 413, …) are Flask's own answer,
+        # not a fault — return them unchanged.
+        return e
+    log_event("error", f"{request.method} {request.path}: {type(e).__name__}: {e}")
+    return jsonify({"error": "internal error"}), 500
+
+
 app.register_blueprint(health_bp)
 app.register_blueprint(logs_bp)
 app.register_blueprint(modules_bp)
@@ -125,4 +143,9 @@ if __name__ == "__main__":
     # one worker for the stream's whole lifetime, so concurrent request handling is
     # required or an open admin tail would stall all other traffic. A future move
     # to gunicorn must keep per-stream concurrency (threaded/async workers).
-    app.run(host="0.0.0.0", port=8000, debug=debug, threaded=True)
+    # use_debugger=False (for #235): DEBUG=true is the documented dev
+    # setting and both ports are LAN-published, so the Werkzeug
+    # interactive console would be a LAN-reachable code-execution target
+    # in containers holding the DuckDB volume. The reloader (the only
+    # dev-useful half of debug=True) is unaffected.
+    app.run(host="0.0.0.0", port=8000, debug=debug, use_debugger=False, threaded=True)

@@ -1,22 +1,40 @@
+import math
 from datetime import datetime, timezone
 
-from db.connection import get_conn, lock
-from db.repository import query_one, write_transaction
+from db.repository import query_all, query_one, write_transaction
 from flask import Blueprint, jsonify, request
 from models.geo import coarsen_coord
 from models.module_id import ModuleId
 from pydantic import ValidationError
 
+from routes._module_id import _canonicalize_or_400
+
 heartbeats_bp = Blueprint("heartbeats", __name__)
+
+# Signed 32-bit ceiling shared by every `_to_int` caller. The narrowest
+# `module_heartbeats` integer column is INTEGER; clamping here guarantees
+# any value this helper returns is insertable into every integer column
+# it feeds (BIGINT columns accept it too). A clamped `uptime_ms` (wraps
+# past ~24.8 days) is a degraded diagnostic, not a fault — the endpoint's
+# contract is "never 500 on a bad field".
+_INT32_MAX = 2**31 - 1
+_INT32_MIN = -(2**31)
 
 
 def _to_int(value, default=None):
     if value is None or value == "":
         return default
     try:
-        return int(float(value))
+        as_float = float(value)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(as_float):
+        # inf / nan (e.g. "1e400", "nan", "-inf"): `int()` on these
+        # raises OverflowError/ValueError, which used to escape
+        # `post_heartbeat` as an HTML 500 (for #246) — and a non-2xx
+        # here counts toward the firmware's `hb_failure` streak (#172).
+        return default
+    return max(_INT32_MIN, min(_INT32_MAX, int(as_float)))
 
 
 def _to_float(value, default=None):
@@ -317,41 +335,45 @@ def post_heartbeat():
 @heartbeats_bp.get("/heartbeats/<module_id>")
 def get_heartbeats(module_id):
     """Return the latest N heartbeats for a module, newest first."""
+    canonical, err = _canonicalize_or_400(module_id)
+    if err is not None:
+        return err
     limit = _to_int(request.args.get("limit"), default=50) or 50
     limit = max(1, min(limit, 500))
 
-    with lock:
-        con = get_conn()
-        rows = con.execute(
-            """
-            SELECT received_at, battery, rssi, uptime_ms, free_heap, fw_version,
-                   reset_reason, min_free_heap, boot_count,
-                   last_hb_fail_code, last_hb_fail_count,
-                   last_stage_before_reboot
-              FROM module_heartbeats
-             WHERE module_id = ?
-             ORDER BY received_at DESC
-             LIMIT ?
-            """,
-            [module_id, limit],
-        ).fetchall()
+    rows = query_all(
+        """
+        SELECT received_at, battery, rssi, uptime_ms, free_heap, fw_version,
+               reset_reason, min_free_heap, boot_count,
+               last_hb_fail_code, last_hb_fail_count,
+               last_stage_before_reboot
+          FROM module_heartbeats
+         WHERE module_id = ?
+         ORDER BY received_at DESC
+         LIMIT ?
+        """,
+        (canonical, limit),
+    )
+
+    def _iso(ts):
+        return ts.isoformat() if ts else None
 
     return jsonify(
         {
             "heartbeats": [
                 {
-                    "received_at": r[0].isoformat() if r[0] else None,
-                    "battery": r[1],
-                    "rssi": r[2],
-                    "uptime_ms": r[3],
-                    "free_heap": r[4],
-                    "fw_version": r[5],
-                    "reset_reason": r[6],
-                    "min_free_heap": r[7],
-                    "boot_count": r[8],
-                    "last_hb_fail_code": r[9],
-                    "last_hb_fail_count": r[10],
-                    "last_stage_before_reboot": r[11],
+                    "received_at": _iso(r["received_at"]),
+                    "battery": r["battery"],
+                    "rssi": r["rssi"],
+                    "uptime_ms": r["uptime_ms"],
+                    "free_heap": r["free_heap"],
+                    "fw_version": r["fw_version"],
+                    "reset_reason": r["reset_reason"],
+                    "min_free_heap": r["min_free_heap"],
+                    "boot_count": r["boot_count"],
+                    "last_hb_fail_code": r["last_hb_fail_code"],
+                    "last_hb_fail_count": r["last_hb_fail_count"],
+                    "last_stage_before_reboot": r["last_stage_before_reboot"],
                 }
                 for r in rows
             ]
@@ -383,39 +405,40 @@ def get_heartbeat_gaps(module_id):
     single-writer; this derives from the already-persisted timeline so it can
     never drift). Newest gap first.
     """
+    canonical, err = _canonicalize_or_400(module_id)
+    if err is not None:
+        return err
     limit = _to_int(request.args.get("limit"), default=50) or 50
     limit = max(1, min(limit, 500))
 
-    with lock:
-        con = get_conn()
-        rows = con.execute(
-            """
-            WITH ordered AS (
-                SELECT received_at,
-                       LAG(received_at) OVER (ORDER BY received_at) AS prev_at
-                  FROM module_heartbeats
-                 WHERE module_id = ?
-            )
-            SELECT prev_at AS gap_start,
-                   received_at AS gap_end,
-                   EPOCH(received_at) - EPOCH(prev_at) AS gap_seconds
-              FROM ordered
-             WHERE prev_at IS NOT NULL
-               AND EPOCH(received_at) - EPOCH(prev_at) > ?
-             ORDER BY received_at DESC
-             LIMIT ?
-            """,
-            [module_id, _GAP_THRESHOLD_S, limit],
-        ).fetchall()
+    rows = query_all(
+        """
+        WITH ordered AS (
+            SELECT received_at,
+                   LAG(received_at) OVER (ORDER BY received_at) AS prev_at
+              FROM module_heartbeats
+             WHERE module_id = ?
+        )
+        SELECT prev_at AS gap_start,
+               received_at AS gap_end,
+               EPOCH(received_at) - EPOCH(prev_at) AS gap_seconds
+          FROM ordered
+         WHERE prev_at IS NOT NULL
+           AND EPOCH(received_at) - EPOCH(prev_at) > ?
+         ORDER BY received_at DESC
+         LIMIT ?
+        """,
+        (canonical, _GAP_THRESHOLD_S, limit),
+    )
 
     return jsonify(
         {
-            "module_id": module_id,
+            "module_id": canonical,
             "gaps": [
                 {
-                    "gap_start": r[0].isoformat() if r[0] else None,
-                    "gap_end": r[1].isoformat() if r[1] else None,
-                    "gap_seconds": int(r[2]),
+                    "gap_start": r["gap_start"].isoformat() if r["gap_start"] else None,
+                    "gap_end": r["gap_end"].isoformat() if r["gap_end"] else None,
+                    "gap_seconds": int(r["gap_seconds"]),
                 }
                 for r in rows
             ],
@@ -427,45 +450,46 @@ def get_heartbeat_gaps(module_id):
 def get_heartbeats_summary():
     """Latest heartbeat per module — used to compute lastSeenAt on the
     /modules list endpoint without N+1 queries."""
-    with lock:
-        con = get_conn()
-        rows = con.execute(
-            """
-            SELECT module_id,
-                   MAX(received_at) AS last_seen,
-                   ARG_MAX(battery, received_at) AS battery,
-                   ARG_MAX(rssi, received_at) AS rssi,
-                   ARG_MAX(uptime_ms, received_at) AS uptime_ms,
-                   ARG_MAX(free_heap, received_at) AS free_heap,
-                   ARG_MAX(fw_version, received_at) AS fw_version,
-                   ARG_MAX(reset_reason, received_at) AS reset_reason,
-                   ARG_MAX(min_free_heap, received_at) AS min_free_heap,
-                   ARG_MAX(boot_count, received_at) AS boot_count,
-                   ARG_MAX(last_hb_fail_code, received_at) AS last_hb_fail_code,
-                   ARG_MAX(last_hb_fail_count, received_at) AS last_hb_fail_count,
-                   ARG_MAX(last_stage_before_reboot, received_at)
-                       AS last_stage_before_reboot
-              FROM module_heartbeats
-          GROUP BY module_id
-            """
-        ).fetchall()
+    rows = query_all(
+        """
+        SELECT module_id,
+               MAX(received_at) AS last_seen,
+               ARG_MAX(battery, received_at) AS battery,
+               ARG_MAX(rssi, received_at) AS rssi,
+               ARG_MAX(uptime_ms, received_at) AS uptime_ms,
+               ARG_MAX(free_heap, received_at) AS free_heap,
+               ARG_MAX(fw_version, received_at) AS fw_version,
+               ARG_MAX(reset_reason, received_at) AS reset_reason,
+               ARG_MAX(min_free_heap, received_at) AS min_free_heap,
+               ARG_MAX(boot_count, received_at) AS boot_count,
+               ARG_MAX(last_hb_fail_code, received_at) AS last_hb_fail_code,
+               ARG_MAX(last_hb_fail_count, received_at) AS last_hb_fail_count,
+               ARG_MAX(last_stage_before_reboot, received_at)
+                   AS last_stage_before_reboot
+          FROM module_heartbeats
+      GROUP BY module_id
+        """
+    )
+
+    def _iso(ts):
+        return ts.isoformat() if ts else None
 
     return jsonify(
         {
             "summary": {
-                r[0]: {
-                    "last_seen": r[1].isoformat() if r[1] else None,
-                    "battery": r[2],
-                    "rssi": r[3],
-                    "uptime_ms": r[4],
-                    "free_heap": r[5],
-                    "fw_version": r[6],
-                    "reset_reason": r[7],
-                    "min_free_heap": r[8],
-                    "boot_count": r[9],
-                    "last_hb_fail_code": r[10],
-                    "last_hb_fail_count": r[11],
-                    "last_stage_before_reboot": r[12],
+                r["module_id"]: {
+                    "last_seen": _iso(r["last_seen"]),
+                    "battery": r["battery"],
+                    "rssi": r["rssi"],
+                    "uptime_ms": r["uptime_ms"],
+                    "free_heap": r["free_heap"],
+                    "fw_version": r["fw_version"],
+                    "reset_reason": r["reset_reason"],
+                    "min_free_heap": r["min_free_heap"],
+                    "boot_count": r["boot_count"],
+                    "last_hb_fail_code": r["last_hb_fail_code"],
+                    "last_hb_fail_count": r["last_hb_fail_count"],
+                    "last_stage_before_reboot": r["last_stage_before_reboot"],
                 }
                 for r in rows
             }

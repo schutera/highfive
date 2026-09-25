@@ -21,7 +21,7 @@ Create a `.env` at the repo root (used by `image-service` and
 `duckdb-service`):
 
 ```env
-DEBUG=true
+DEBUG=false
 DUCKDB_SERVICE_URL=http://duckdb-service:8000
 # Optional — overrides default dev key 'hf_dev_key_2026'
 # HIGHFIVE_API_KEY=your-strong-key

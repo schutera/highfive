@@ -49,8 +49,11 @@ Create a `.env` file in the root directory.
 Example:
 
 ```bash
-## Debug mode for development
-DEBUG=<boolean>
+## Debug mode for development (keep `false`: the Werkzeug interactive
+## debugger is hard-disabled in both Flask services regardless (#235),
+## so `true` would buy only the reloader — which is useless without
+## bind mounts anyway, and Python edits here are not bind-mounted)
+DEBUG=false
 
 ## DuckDB service URL
 ## (used by the classification backend to connect to the DuckDB service)

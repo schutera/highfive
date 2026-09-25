@@ -148,7 +148,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
     // try/catch with a stray `console.error('[GET /api/modules]', ...)`
     // would silently leak the catch-block tag (and any payload it
     // ships) on every successful request. Pin the absence here.
-    mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: false });
+    mocks.listModules.mockResolvedValue({ modules: [], failedLegs: [] });
 
     const res = await request(app).get('/api/modules').set('X-Admin-Key', KEY);
 
@@ -173,7 +173,7 @@ describe('5xx-returning catch blocks log structured errors (#32)', () => {
         imageCount: 0,
         nests: [],
       },
-      heartbeatsFailed: false,
+      failedLegs: [],
     });
 
     const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-Admin-Key', KEY);

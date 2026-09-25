@@ -103,7 +103,7 @@ describe('ModuleReadModel — short-TTL assembly cache', () => {
     // Heartbeats endpoint rejects → the snapshot is `degraded`, so the
     // second call must re-fetch rather than serve the partial result
     // from cache. Otherwise a transient duckdb outage would freeze a
-    // stuck `heartbeatsFailed` / empty fleet for a full TTL after
+    // stuck failed leg / empty fleet for a full TTL after
     // recovery.
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -128,8 +128,8 @@ describe('ModuleReadModel — short-TTL assembly cache', () => {
     const first = await db.listModules();
     const second = await db.listModules();
 
-    expect(first.heartbeatsFailed).toBe(true);
-    expect(second.heartbeatsFailed).toBe(true);
+    expect(first.failedLegs).toEqual(['heartbeats']);
+    expect(second.failedLegs).toEqual(['heartbeats']);
     expect(fetchMock).toHaveBeenCalledTimes(FETCHES_PER_FANOUT * 2);
     warnSpy.mockRestore();
   });

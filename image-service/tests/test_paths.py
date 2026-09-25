@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from services.paths import reserve_filename, safe_child_path, sanitize_upload_filename
+from services.paths import (
+    is_snip_of,
+    reserve_filename,
+    safe_child_path,
+    sanitize_upload_filename,
+    snip_filename_for,
+)
 
 # ------------------------- safe_child_path -------------------------
 
@@ -125,3 +131,24 @@ def test_collision_appends_suffix_before_extension(tmp_path: Path):
 def test_collision_without_extension(tmp_path: Path):
     (tmp_path / "noext").write_bytes(b"1")
     assert reserve_filename(str(tmp_path), "noext") == "noext-1"
+
+
+# -------------------------- snip grammar (for #233) --------------------------
+
+
+def test_snip_round_trip_writer_output_always_matches():
+    """The matcher must recognise everything the writer can emit —
+    otherwise a future bee type rots into orphaned snips again. Bases
+    carry regex-significant chars on purpose (`re.escape` must hold)."""
+    for base in ("img-001", "esp_capture_20260101_120000", "a+b(c).d"):
+        for bee_type in ("blackmasked", "leafcutter_bee", "bee2", "x"):
+            for idx in (0, 7, 123):
+                name = snip_filename_for(base, bee_type, idx)
+                assert is_snip_of(name, base), name
+
+
+def test_snip_matcher_rejects_prefix_lookalikes():
+    assert not is_snip_of("img-001-evil.jpg", "img-001")
+    assert not is_snip_of("other-blackmasked-0.jpg", "img-001")
+    assert not is_snip_of("img-001-blackmasked-0.JPG", "img-001")
+    assert is_snip_of("img-001-leafcutter_bee-12.jpg", "img-001")

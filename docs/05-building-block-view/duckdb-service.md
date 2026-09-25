@@ -371,6 +371,33 @@ in-cluster producers (heartbeat dual-write writes directly; future
 producers — weather worker #111, classifier #112 — will route
 through this endpoint).
 
+## Error handling and DB access rules (for #246)
+
+- **One app-level JSON error handler** (`@app.errorhandler(Exception)`
+  in `app.py`): unexpected faults answer `{"error": "internal error"}`
+  500 with the detail logged to the ring (`GET /logs`); Werkzeug
+  routing errors pass through. No route carries its own `except
+  Exception → str(e)` wrapper — that shape leaked internals to
+  clients, hid server faults behind 400s, and (in autocommit code)
+  masked the real error behind a secondary rollback exception as an
+  HTML 500 (the #32 re-incarnation #233 fixed in `delete_module`).
+  `ValidationError`/`ValueError` branches returning 400 stay —
+  caller faults are explicit, not generic. (One deliberate exception:
+  `delete_module`'s `restore_failed` body carries `restore_error:
+  str(e)` — an admin-gated data-loss marker the operator needs for
+  the restore-from-backup decision, not a leak of convenience.)
+- **No `get_conn()` outside `db/repository.py`.** Reads go through
+  `query_all`/`query_one`/`query_scalar` (which close the connection
+  instead of leaving it for GC); multi-statement writes go through
+  `write_transaction()` — except `set_display_name` and
+  `delete_module`, which dance in autocommit with compensating
+  restore because DuckDB's #105 FK over-enforcement blocks
+  same-transaction child-then-parent DELETEs (see ADR-013 for the
+  pattern and when to follow which).
+- **`/heartbeat` never 500s on a malformed optional field.**
+  `_to_int` degrades non-finite/malformed values to NULL (a non-2xx
+  would count toward the firmware's `hb_failure` streak, #172).
+
 ## Internal services (no HTTP surface)
 
 | Module                        | Role                                                                                                                                                                             |

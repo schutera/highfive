@@ -115,11 +115,13 @@ def fresh_db(tmp_path, monkeypatch):
     importlib.import_module("routes.measurements")
 
     # services.backup and services.silence_watcher both do ``from
-    # services.discord import send_discord_message`` (and, for
-    # silence_watcher, ``from db.connection import lock, get_conn`` too) —
-    # same bound-name-captured-at-import-time problem as routes.modules.
-    # Both must be in the purge list above AND reimported here, or they
-    # silently keep a previous test's stale ``lock``/``get_conn``/spy.
+    # services.discord import send_discord_message`` — same
+    # bound-name-captured-at-import-time problem as routes.modules.
+    # (silence_watcher used to ALSO do ``from db.connection import lock,
+    # get_conn``; #246 moved it onto ``db.repository`` helpers, which
+    # resolve ``db.connection`` at call time.) Both modules must be in
+    # the purge list above AND reimported here, or they silently keep a
+    # previous test's stale ``lock``/``get_conn``/spy.
     backup = importlib.import_module("services.backup")
     monkeypatch.setattr(backup, "send_discord_message", _fake_send)
 

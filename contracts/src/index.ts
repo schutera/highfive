@@ -157,9 +157,17 @@ export interface HeartbeatGap {
   gapSeconds: number; // wall-clock width of the gap, in seconds
 }
 
+// One leg of the backend read-model fan-out (`backend/src/database.ts`
+// `fetchAndAssemble` fans out to these four duckdb-service endpoints).
+// A degraded response names the failed legs via the
+// `X-Highfive-Data-Incomplete` header as a comma-joined subset in
+// stable order (`nests,progress,heartbeats`); a failed `modules` leg
+// instead becomes a 503 with a JSON error body, since nothing
+// meaningful renders without the module list (for #230).
+export type DataLeg = 'modules' | 'nests' | 'progress' | 'heartbeats';
+
 export interface Module {
-  id: ModuleId;
-  // Firmware-reported name. Mutates on every registration / UPSERT
+  id: ModuleId; // Firmware-reported name. Mutates on every registration / UPSERT
   // (duckdb-service `add_module` writes whatever the ESP posted in
   // `module_name`). Same-batch ESPs used to collide here — issue #92
   // fixed the entropy and #94's auto-suffix in `add_module` keeps
@@ -190,7 +198,12 @@ export interface Module {
   firstOnline: string; // ISO date string
   totalHatches: number; // Sum of all hatches across all nests
   imageCount: number; // Total images uploaded by this module
-  email: string | null;
+  // NOTE: no `email` on this wire shape (for #235). The operator email
+  // the firmware reports is PII with no public consumer — every fleet
+  // module emits null and only the admin page rendered it — so the
+  // backend drops it at the response boundary instead of republishing
+  // it to anonymous callers. duckdb-service still stores the column;
+  // see `backend/src/database.ts`'s `ApiModule` (upstream mirror).
   // ISO timestamp — row-metadata; bumped on every UPDATE to
   // `module_configs` (registration, display-name rename, legacy
   // heartbeat row-update, heartbeat-side geo-patch). Use `lastSeenAt`

@@ -93,7 +93,6 @@ const baseModule: ModuleDetail = {
   firstOnline: '2026-05-14',
   totalHatches: 0,
   imageCount: 12,
-  email: null,
   updatedAt: '2026-05-14T16:00:00.000Z',
   lastSeenAt: '2026-05-14T16:00:00.000Z',
   latestHeartbeat: {

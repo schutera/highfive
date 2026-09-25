@@ -38,7 +38,7 @@ from typing import Any
 from requests import RequestException
 from services.hole_detection import BEE_TYPE_WIRE_TO_DB, DetectionResult, HoleDetector
 from services.image_guard import probe_jpeg
-from services.paths import reserve_filename, sanitize_upload_filename
+from services.paths import reserve_filename, sanitize_upload_filename, snip_filename_for
 from services.sidecar import LogSidecarEnvelope
 
 # Type-only hint for the werkzeug FileStorage. Importing werkzeug here is
@@ -267,7 +267,9 @@ class UploadPipeline:
 
         rows: list[dict] = []
         for snip in detection.snips:
-            snip_filename = f"{base}-{snip.bee_type}-{snip.nest_index}.jpg"
+            # Shared grammar with the delete path (`services/paths.py`):
+            # the filename embeds the wire bee_type, not the DB one.
+            snip_filename = snip_filename_for(base, snip.bee_type, snip.nest_index)
             snip_path = os.path.join(self.snip_folder, snip_filename)
             try:
                 with open(snip_path, "wb") as f:

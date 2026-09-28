@@ -167,7 +167,8 @@ export interface HeartbeatGap {
 export type DataLeg = 'modules' | 'nests' | 'progress' | 'heartbeats';
 
 export interface Module {
-  id: ModuleId; // Firmware-reported name. Mutates on every registration / UPSERT
+  id: ModuleId;
+  // Firmware-reported name. Mutates on every registration / UPSERT
   // (duckdb-service `add_module` writes whatever the ESP posted in
   // `module_name`). Same-batch ESPs used to collide here — issue #92
   // fixed the entropy and #94's auto-suffix in `add_module` keeps

@@ -36,11 +36,14 @@ def check_silence():
 
     # Read via `query_all` (for #246) — no bare `get_conn()` outside
     # `db/repository.py`, and the connection is closed instead of left
-    # for GC. State updates go through one `write_transaction()` below;
-    # the read and the writes no longer share a single lock hold, which
-    # is safe because APScheduler runs this job on one thread
-    # (`max_instances=1` default) and the decision inputs are
-    # recomputed from the DB on every tick.
+    # for GC. State updates go through one `write_transaction()` below.
+    # The read and the writes no longer share a single lock hold: a
+    # concurrent `post_heartbeat` write can interleave between them.
+    # That race is benign — the window is milliseconds, the decision
+    # inputs are recomputed from the DB on every tick, and a missed
+    # alert self-corrects on the next one. (Single-threadedness of
+    # the scheduler only prevents concurrent `check_silence` runs;
+    # it does NOT close the interleave window.)
     rows = query_all(
         """
             SELECT m.id,

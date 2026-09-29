@@ -128,15 +128,23 @@ that a heartbeat from the last few minutes would have flipped it to
 `'online'`, so we admit uncertainty rather than misleading the
 on-call. See #31.
 
-The header `X-Highfive-Data-Incomplete: heartbeats` is set on the
-**listing route** whenever the heartbeats fetch failed (irrespective of
-whether any module's status actually flipped — the header surfaces the
-_data quality_, not a per-module flag) so the dashboard can render a
-"data incomplete" banner. The detail route (`/api/modules/:id`)
-deliberately omits the header — its consumer always lands there from
-the listing and has already seen the degradation signal. Old clients
-that don't read the header still see a structurally valid response;
-only the per-module `status` value may differ.
+The header `X-Highfive-Data-Incomplete` is set on the **listing
+route** whenever a non-`modules` upstream leg failed — a comma-joined
+subset of `nests,progress,heartbeats` in stable order (e.g.
+`nests,progress`; a heartbeats-only failure still produces exactly
+`heartbeats`) — irrespective of whether any module's status actually
+flipped. The header surfaces the _data quality_, not a per-module flag,
+so the dashboard can render a "data incomplete" banner naming the stale
+legs. When the **`/modules` leg itself** failed, nothing meaningful can
+render, so the listing answers **`503`** with a JSON error body
+(`{ error: 'upstream module store unavailable' }`, plus `Retry-After:
+5`) instead of a lying `200 []` — and the detail route answers the
+same 503 instead of `404 Module not found` (for #230). The detail
+route (`/api/modules/:id`) deliberately omits the incompleteness
+header — its consumer always lands there from the listing and has
+already seen the degradation signal. Old clients that don't read the
+header still see a structurally valid response; only the per-module
+`status` value may differ.
 
 **Caching / freshness.** Both `GET /api/modules` and
 `GET /api/modules/:id` are served from a shared in-process snapshot in
@@ -159,7 +167,10 @@ GET /api/modules/:id
 
 Public — no auth (#142). Same shape as above, plus a `nests` array of `NestData`. Each nest
 carries `dailyProgress[]` with `progress_id`, `nest_id`, `date`,
-`empty`, `sealed`, `hatched`. 404 if the module is unknown.
+`empty`, `sealed`, `hatched`. 404 if the module is unknown — unless the
+duckdb `/modules` leg itself failed, in which case the route answers
+503 like the listing (a 404 would assert the module doesn't exist; for
+#230).
 
 ## 1.4 Rename module (admin)
 
@@ -1040,9 +1051,12 @@ prefers over `name` for display, never a write to `name` itself. The
 only actual path is `DELETE /modules/<id>` (proxied by the backend's
 admin-gated `DELETE /api/modules/:id`) followed by re-registration — and
 that is destructive, not a lightweight edit: `delete_module` wipes
-`daily_progress`, `nest_data`, `image_uploads`, `module_heartbeats`, and
-`measurements` for the module id, not just the identity fields the
-operator meant to correct. See
+`daily_progress`, `nest_data`, `image_uploads`, `module_heartbeats`,
+`measurements`, and `nest_detections` for the module id (both id forms),
+not just the identity fields the operator meant to correct — and
+`DELETE /images/<filename>` (image-service) removes the source JPEG
+plus its `<file>.log.json` sidecar and every `snips/<base>-*.jpg` crop
+(for #233). See
 [auth.md](08-crosscutting-concepts/auth.md) for the full rationale and
 the tracked follow-up (non-destructive `PATCH` endpoints for these
 fields).

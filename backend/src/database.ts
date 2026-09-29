@@ -5,6 +5,7 @@ import {
   DailyProgress,
   HeartbeatSnapshot,
   ModuleId,
+  DataLeg,
   parseModuleId,
   coarsenLocation,
 } from '@highfive/contracts';
@@ -53,6 +54,9 @@ interface ApiModule {
   image_count: number;
   real_image_count: number;
   last_image_at: string | null;
+  // Upstream-only: duckdb-service still SELECTs this column, but the
+  // public wire shape (`Module`) carries no PII — deliberately NOT
+  // mapped below (for #235).
   email: string | null;
   updated_at: string | null;
   // Device-liveness signal — bumped only on `add_module` per-boot
@@ -86,18 +90,20 @@ interface ApiModuleResponse {
  */
 /**
  * Wrapper returned by ModuleReadModel methods so callers can surface
- * upstream-fetch failures to the wire (currently as the
- * ``X-Highfive-Data-Incomplete`` response header). The body itself stays
+ * upstream-fetch failures to the wire: a failed `modules` leg becomes a
+ * 503 with a JSON error body, any other failed legs become the
+ * ``X-Highfive-Data-Incomplete`` response header (comma-joined subset
+ * of `nests,progress,heartbeats` in stable order). The body itself stays
  * shape-compatible with old clients — only the meta moves out-of-band.
  */
 export interface ModulesWithMeta {
   modules: Module[];
-  heartbeatsFailed: boolean;
+  failedLegs: DataLeg[];
 }
 
 export interface ModuleDetailWithMeta {
   detail: ModuleDetail | null;
-  heartbeatsFailed: boolean;
+  failedLegs: DataLeg[];
 }
 
 /**
@@ -106,13 +112,15 @@ export interface ModuleDetailWithMeta {
  */
 interface AssembleResult {
   items: Array<{ detail: ModuleDetail; totalHatches: number }>;
-  heartbeatsFailed: boolean;
+  // Failed fan-out legs in stable order (modules, nests, progress,
+  // heartbeats). Empty on a fully-successful snapshot.
+  failedLegs: DataLeg[];
   // True when ANY of the four upstream fetches rejected (modules, nests,
   // progress, or heartbeats). The fan-out uses `Promise.allSettled` and
   // degrades gracefully rather than throwing, so this flag is the only
   // signal that the snapshot is partial. `assemble()` refuses to cache a
   // degraded snapshot — otherwise a transient duckdb outage would pin an
-  // empty/partial fleet (or a stuck `heartbeatsFailed`) for a full TTL
+  // empty/partial fleet (or stuck failed legs) for a full TTL
   // after upstream recovered. Not part of the public method return shape.
   degraded: boolean;
 }
@@ -140,7 +148,7 @@ export class ModuleReadModel {
   private inflight: Promise<AssembleResult> | null = null;
 
   async listModules(): Promise<ModulesWithMeta> {
-    const { items, heartbeatsFailed } = await this.assemble();
+    const { items, failedLegs } = await this.assemble();
     const modules = items.map(({ detail, totalHatches }) => ({
       id: detail.id,
       name: detail.name,
@@ -152,18 +160,17 @@ export class ModuleReadModel {
       firstOnline: detail.firstOnline,
       totalHatches,
       imageCount: detail.imageCount,
-      email: detail.email,
       updatedAt: detail.updatedAt,
       lastSeenAt: detail.lastSeenAt,
       latestHeartbeat: detail.latestHeartbeat,
     }));
-    return { modules, heartbeatsFailed };
+    return { modules, failedLegs };
   }
 
   async getModuleDetail(id: ModuleId): Promise<ModuleDetailWithMeta> {
-    const { items, heartbeatsFailed } = await this.assemble();
+    const { items, failedLegs } = await this.assemble();
     const detail = items.find((x) => x.detail.id === id)?.detail ?? null;
-    return { detail, heartbeatsFailed };
+    return { detail, failedLegs };
   }
 
   /**
@@ -251,13 +258,27 @@ export class ModuleReadModel {
       console.warn('⚠️ Failed to fetch heartbeats:', heartbeatsResult.reason);
     }
 
+    // Failed legs in stable order (for #230). The route layer turns a
+    // failed `modules` leg into a 503 (nothing renders without the
+    // module list) and any other failed legs into the
+    // X-Highfive-Data-Incomplete header.
+    const failedLegs: DataLeg[] = [];
+    if (modulesResult.status === 'rejected') {
+      failedLegs.push('modules');
+    }
+    if (nestsResult.status === 'rejected') {
+      failedLegs.push('nests');
+    }
+    if (progressResult.status === 'rejected') {
+      failedLegs.push('progress');
+    }
+    if (heartbeatsFailed) {
+      failedLegs.push('heartbeats');
+    }
+
     // Any rejected fetch makes the assembled snapshot partial — see the
     // `degraded` field on AssembleResult for why `assemble()` won't cache it.
-    const degraded =
-      modulesResult.status === 'rejected' ||
-      nestsResult.status === 'rejected' ||
-      progressResult.status === 'rejected' ||
-      heartbeatsFailed;
+    const degraded = failedLegs.length > 0;
 
     const modulesData = (
       modulesResult.status === 'fulfilled' ? modulesResult.value : { modules: [] }
@@ -413,7 +434,6 @@ export class ModuleReadModel {
         batteryLevel: m.battery_level ?? 0,
         totalHatches,
         imageCount: m.real_image_count ?? m.image_count ?? 0,
-        email: m.email ?? null,
         updatedAt: m.updated_at ?? undefined,
         lastSeenAt,
         latestHeartbeat,
@@ -422,7 +442,7 @@ export class ModuleReadModel {
 
       return { detail, totalHatches };
     });
-    return { items, heartbeatsFailed, degraded };
+    return { items, failedLegs, degraded };
   }
 }
 

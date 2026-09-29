@@ -185,7 +185,12 @@ app.post('/api/waitlist', async (req, res) => {
     const discordRes = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      // allowed_mentions (for #235): name/email are raw user input
+      // interpolated into the operator alert channel — without this a
+      // signup named `@everyone` pings the channel that also carries
+      // silence-watcher alerts, and markdown can spoof alert-looking
+      // messages.
+      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
     });
 
     if (!discordRes.ok) {
@@ -251,9 +256,23 @@ app.get('/api/admin/session', (req, res) => {
 
 app.get('/api/modules', async (req, res) => {
   try {
-    const { modules, heartbeatsFailed } = await db.listModules();
-    if (heartbeatsFailed) {
-      res.setHeader('X-Highfive-Data-Incomplete', 'heartbeats');
+    const { modules, failedLegs } = await db.listModules();
+    if (failedLegs.includes('modules')) {
+      // Nothing meaningful renders without the module list — surface
+      // the outage as a 503 instead of a lying `200 []` (for #230).
+      // Degraded snapshots are never cached, so recovery is immediate
+      // once duckdb is back.
+      res.setHeader('Retry-After', '5');
+      res.status(503).json({ error: 'upstream module store unavailable' });
+      return;
+    }
+    // Stable order comes from the read model (modules, nests, progress,
+    // heartbeats); the modules leg is handled above, so the header is a
+    // subset of nests,progress,heartbeats. Heartbeats-only failure still
+    // produces exactly `heartbeats`.
+    const partial = failedLegs.filter((leg) => leg !== 'modules');
+    if (partial.length > 0) {
+      res.setHeader('X-Highfive-Data-Incomplete', partial.join(','));
     }
     res.json(modules);
   } catch (error) {
@@ -317,7 +336,14 @@ app.get('/api/modules/:id', async (req, res) => {
     // always opened from the listing, so the user has already seen the
     // degradation signal. Avoids API/UI drift where one route surfaces
     // the header but the consumer doesn't read it.
-    const { detail } = await db.getModuleDetail(id);
+    const { detail, failedLegs } = await db.getModuleDetail(id);
+    if (failedLegs.includes('modules')) {
+      // Same 503 as the listing (for #230) — answering 404 here would
+      // assert a falsehood ("Module not found") for modules that exist.
+      res.setHeader('Retry-After', '5');
+      res.status(503).json({ error: 'upstream module store unavailable' });
+      return;
+    }
     if (detail) {
       res.json(detail);
     } else {

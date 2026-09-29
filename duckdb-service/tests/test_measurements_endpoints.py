@@ -584,14 +584,13 @@ def test_heartbeat_dual_write_atomic_on_measurements_failure(
 
     monkeypatch.setattr(fresh_db.connection, "get_conn", fake_get_conn)
 
-    # In TESTING mode Flask re-raises rather than serving a 500. Use
-    # `pytest.raises` so the propagating RuntimeError becomes the
-    # successful path — the contract under test is "the rollback
-    # happened", not "what status code Flask emitted".
-    import pytest
-
-    with pytest.raises(RuntimeError, match="simulated measurements write failure"):
-        client.post("/heartbeat", data={"mac": TEST_MAC_1, "battery": "42"})
+    # The app-level JSON error handler (for #246) converts the
+    # propagating RuntimeError into a generic 500 — the contract under
+    # test is "the rollback happened AND the client saw JSON, not HTML".
+    resp = client.post("/heartbeat", data={"mac": TEST_MAC_1, "battery": "42"})
+    assert resp.status_code == 500
+    assert resp.is_json
+    assert resp.get_json() == {"error": "internal error"}
 
     # Either-neither-or-both: with the simulated failure on the
     # second INSERT, neither row should survive.

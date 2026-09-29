@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Module } from '@highfive/contracts';
@@ -6,23 +6,42 @@ import { parseModuleId } from '@highfive/contracts';
 import { LanguageProvider } from '../i18n/LanguageContext';
 
 // Mock api so the dashboard's useEffect resolves with whatever the
-// individual test sets via `nextDashboardModules` below — `[]` by default.
+// individual test sets via `nextDashboardModules` / `nextDataIncomplete`
+// below — `[]` / all-fresh by default. `nextMetaFailure`, when set,
+// makes getAllModulesWithMeta reject (e.g. a ModulesUnavailableError
+// for the 503 path). NOTE: the factory below must not reference
+// top-level bindings eagerly (hoisted TDZ) — the `let`s are only read
+// inside nested closures (lazy), and the error class is defined
+// INSIDE the factory for the same reason.
 let nextDashboardModules: Module[] = [];
-vi.mock('../services/api', () => ({
-  api: {
-    getAllModules: vi.fn(() => Promise.resolve(nextDashboardModules)),
-    getAllModulesWithMeta: vi.fn(() =>
-      Promise.resolve({
-        modules: nextDashboardModules,
-        dataIncomplete: { heartbeats: false },
-      }),
-    ),
-    getModuleById: vi.fn(),
-    getModuleLogs: vi.fn().mockResolvedValue([]),
-    getUserLocation: vi.fn().mockResolvedValue(null),
-    healthCheck: vi.fn().mockResolvedValue({ status: 'ok', timestamp: '' }),
-  },
-}));
+let nextDataIncomplete = { nests: false, progress: false, heartbeats: false };
+let nextMetaFailure: unknown = null;
+vi.mock('../services/api', () => {
+  class ModulesUnavailableError extends Error {
+    constructor() {
+      super('upstream module store unavailable');
+      this.name = 'ModulesUnavailableError';
+    }
+  }
+  return {
+    api: {
+      getAllModules: vi.fn(() => Promise.resolve(nextDashboardModules)),
+      getAllModulesWithMeta: vi.fn(() =>
+        nextMetaFailure
+          ? Promise.reject(nextMetaFailure)
+          : Promise.resolve({
+              modules: nextDashboardModules,
+              dataIncomplete: nextDataIncomplete,
+            }),
+      ),
+      getModuleById: vi.fn(),
+      getModuleLogs: vi.fn().mockResolvedValue([]),
+      getUserLocation: vi.fn().mockResolvedValue(null),
+      healthCheck: vi.fn().mockResolvedValue({ status: 'ok', timestamp: '' }),
+    },
+    ModulesUnavailableError,
+  };
+});
 
 // jsdom has no canvas — replace leaflet entities with dumb placeholders.
 vi.mock('leaflet', () => {
@@ -126,6 +145,7 @@ vi.mock('react-leaflet', () => {
 });
 
 import DashboardPage from '../pages/DashboardPage';
+import { ModulesUnavailableError } from '../services/api';
 
 function makeModule(args: {
   id: string;
@@ -143,7 +163,6 @@ function makeModule(args: {
     firstOnline: '2026-05-16',
     totalHatches: 0,
     imageCount: 0,
-    email: null,
     updatedAt: '2026-05-16T20:00:00.000Z',
     lastSeenAt: '2026-05-16T20:00:00.000Z',
     latestHeartbeat: null,
@@ -315,5 +334,58 @@ describe('DashboardPage Location-pending side-list', () => {
     // subtitle (first 4 hex, uppercased) is the visible differentiator.
     expect(items[0]).toHaveTextContent('AAAA');
     expect(items[1]).toHaveTextContent('FFFF');
+  });
+});
+
+// Issue #230 — the dashboard names the failed upstream legs in one
+// banner and renders an explicit state when the module store 503s.
+// The fixtures below drive `api.getAllModulesWithMeta` with the EXACT
+// header-derived shape the backend emits (per CLAUDE.md rule 3, the
+// fixture shape is the contract under test).
+describe('DashboardPage data-incomplete banner + store-unavailable state', () => {
+  beforeEach(() => {
+    nextDashboardModules = [];
+    nextDataIncomplete = { nests: false, progress: false, heartbeats: false };
+    nextMetaFailure = null;
+  });
+
+  function renderDashboard() {
+    render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+  }
+
+  it('renders no banner when every leg is fresh', async () => {
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading/i)).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Upstream data unavailable/)).not.toBeInTheDocument();
+  });
+
+  it('renders one banner naming the failed legs', async () => {
+    nextDataIncomplete = { nests: true, progress: false, heartbeats: true };
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Upstream data unavailable \(nests, heartbeats\)/),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('renders the store-unavailable state (not the backend-down error) on 503', async () => {
+    nextMetaFailure = new ModulesUnavailableError();
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Module data is temporarily unavailable')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Trying again in a moment usually helps/)).toBeInTheDocument();
   });
 });

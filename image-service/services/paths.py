@@ -113,3 +113,29 @@ def reserve_filename(directory: str, filename: str) -> str:
             continue
         os.close(fd)
         return candidate
+
+
+# Per-nest snip filename grammar (for #233): `<base>-<bee_type>-<nest_index>.jpg`
+# where `<base>` is the source capture's stem. `bee_type` is a wire key
+# like `leafcutter_bee` (`services/hole_detection.py`); `nest_index` is
+# a non-negative int. Both the writer (`upload_pipeline.py`) and the
+# deleter (`app.py::_remove_capture_artefacts`) go through these two
+# helpers so the grammar lives in exactly one place — a regex here and
+# an f-string there is how the next orphaned-snip bug ships.
+def snip_filename_for(base: str, bee_type: str, nest_index: int) -> str:
+    """Build one snip filename from its capture stem."""
+    return f"{base}-{bee_type}-{nest_index}.jpg"
+
+
+def is_snip_of(name: str, base: str) -> bool:
+    """True iff `name` is a pipeline-grammar snip of capture stem `base`.
+
+    Full match, not a `<base>-` prefix: a prefix would also eat an
+    unrelated capture literally named `<base>-*.jpg`. The middle class
+    deliberately accepts digits too (`[A-Za-z0-9_]+`): the writer
+    (`snip_filename_for`) takes any `bee_type` string, so the matcher
+    must be a SUPERSET of what the writer can emit — otherwise a
+    future bee type with a digit would write snips the deleter leaves
+    behind (the orphaned-snip bug #233 fixed, recreated).
+    """
+    return re.fullmatch(rf"{re.escape(base)}-[A-Za-z0-9_]+-\d+\.jpg", name) is not None

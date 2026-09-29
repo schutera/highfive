@@ -262,6 +262,23 @@ first-upload detection uses `GET /modules/<mac>/progress_count`.
 shared volume locally; only the DB writes are HTTP. See
 [ADR-001](../09-architecture-decisions/adr-001-duckdb-as-sole-writer.md).
 
+## Delete flow (admin; #233)
+
+Deletes run the pipeline in reverse, row first, then files:
+`DELETE /images/<filename>` (image-service) calls duckdb-service
+`DELETE /image_uploads/<filename>`, which removes the row plus that
+capture's `nest_detections` rows; only on a 2xx (or idempotent 404)
+does image-service unlink the source JPEG, the `<file>.log.json`
+sidecar, and every `snips/<base>-*.jpg` crop. A 5xx leaves everything
+in place so a retry sees a consistent file+row pair.
+`DELETE /modules/<id>` removes all seven tables for both id forms
+(canonical hex and legacy decimal) under the global lock, from a
+snapshot that is restored if any DELETE fails — plain transactions
+trip DuckDB's #105 FK over-enforcement, hence the compensating
+pattern (same as `PATCH .../display_name`; see ADR-013). The snapshot
+lives only in memory, so back up production data before deleting
+(see production-deployment.md "Backup & Restore", #232).
+
 ## Field-name drift to watch
 
 The `POST /add_progress_for_module` payload carries the canonical

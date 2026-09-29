@@ -50,8 +50,15 @@ A 5 s in-memory snapshot cache sits in front of the fan-out
 (`backend/src/database.ts`'s `ASSEMBLE_CACHE_TTL_MS`), and concurrent
 callers are deduped, so a browser poll inside that window is served from
 memory. Only a fully-successful snapshot is cached. Partial failures
-degrade gracefully (some fields empty) rather than 500ing, and a
-degraded snapshot is deliberately not cached.
+degrade gracefully rather than 500ing, and a degraded snapshot is
+deliberately not cached. The degradation contract (for #230): the
+read model attributes failures per leg (`failedLegs`, leg names in the
+contracts `DataLeg` union). A failed `/modules` leg answers **503**
+with a JSON error body on both the listing and the detail route
+(the detail 404 would assert a module doesn't exist); any other failed
+legs answer 200 with `X-Highfive-Data-Incomplete` carrying the
+comma-joined subset (`nests,progress,heartbeats`), which the dashboard
+renders as one banner naming the stale legs.
 
 ## Admin telemetry read flow
 

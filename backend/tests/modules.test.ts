@@ -28,7 +28,7 @@ beforeEach(() => {
 
 describe('GET /api/modules', () => {
   it('is public — returns 200 without any credential (#142)', async () => {
-    mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: false });
+    mocks.listModules.mockResolvedValue({ modules: [], failedLegs: [] });
     const res = await request(app).get('/api/modules');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
@@ -48,7 +48,7 @@ describe('GET /api/modules', () => {
         imageCount: 12,
       },
     ];
-    mocks.listModules.mockResolvedValue({ modules: fakeModules, heartbeatsFailed: false });
+    mocks.listModules.mockResolvedValue({ modules: fakeModules, failedLegs: [] });
 
     const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
     expect(res.status).toBe(200);
@@ -66,7 +66,7 @@ describe('GET /api/modules', () => {
     // dashboard banner is dead. Asserting on the GET response (not the
     // OPTIONS preflight) is the phase the browser actually reads when
     // resolving fetch().headers.get().
-    mocks.listModules.mockResolvedValue({ modules: [], heartbeatsFailed: true });
+    mocks.listModules.mockResolvedValue({ modules: [], failedLegs: ['heartbeats'] });
 
     const res = await request(app)
       .get('/api/modules')
@@ -76,6 +76,31 @@ describe('GET /api/modules', () => {
     expect(res.status).toBe(200);
     expect(res.headers['x-highfive-data-incomplete']).toBe('heartbeats');
     expect(res.headers['access-control-expose-headers']).toContain('X-Highfive-Data-Incomplete');
+  });
+
+  it('answers 503 with a JSON error (not 200 []) when the modules leg failed', async () => {
+    // A duckdb outage must surface as an outage, never as a plausible
+    // "no modules registered" fleet (for #230). Degraded snapshots are
+    // never cached, so recovery is immediate once duckdb is back.
+    mocks.listModules.mockResolvedValue({ modules: [], failedLegs: ['modules'] });
+
+    const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
+
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'upstream module store unavailable' });
+    expect(res.headers['retry-after']).toBe('5');
+  });
+
+  it('joins multiple partial legs into one stable header', async () => {
+    mocks.listModules.mockResolvedValue({
+      modules: [],
+      failedLegs: ['nests', 'progress', 'heartbeats'],
+    });
+
+    const res = await request(app).get('/api/modules').set('X-API-Key', KEY);
+
+    expect(res.status).toBe(200);
+    expect(res.headers['x-highfive-data-incomplete']).toBe('nests,progress,heartbeats');
   });
 });
 
@@ -93,7 +118,7 @@ describe('GET /api/modules/:id', () => {
       imageCount: 0,
       nests: [],
     };
-    mocks.getModuleDetail.mockResolvedValue({ detail: fakeModule, heartbeatsFailed: false });
+    mocks.getModuleDetail.mockResolvedValue({ detail: fakeModule, failedLegs: [] });
 
     const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
     expect(res.status).toBe(200);
@@ -102,7 +127,7 @@ describe('GET /api/modules/:id', () => {
     expect(mocks.getModuleDetail).toHaveBeenCalledWith(VALID_ID);
   });
 
-  it('does NOT emit X-Highfive-Data-Incomplete on the detail route even when heartbeatsFailed', async () => {
+  it('does NOT emit X-Highfive-Data-Incomplete on the detail route even with failed legs', async () => {
     // Banner-rendering happens at the listing level — the detail panel
     // is always opened from the listing, so the user has already seen
     // the degradation signal. Pin this so future drift can't sneak in.
@@ -119,7 +144,7 @@ describe('GET /api/modules/:id', () => {
         imageCount: 0,
         nests: [],
       },
-      heartbeatsFailed: true,
+      failedLegs: ['nests', 'heartbeats'],
     });
 
     const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
@@ -127,8 +152,18 @@ describe('GET /api/modules/:id', () => {
     expect(res.headers['x-highfive-data-incomplete']).toBeUndefined();
   });
 
+  it('answers 503 (not 404) for a known id when the modules leg failed', async () => {
+    // 404 here would assert a falsehood ("Module not found") for a
+    // module that exists (for #230).
+    mocks.getModuleDetail.mockResolvedValue({ detail: null, failedLegs: ['modules'] });
+
+    const res = await request(app).get(`/api/modules/${VALID_ID}`).set('X-API-Key', KEY);
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'upstream module store unavailable' });
+  });
+
   it('returns 404 for an unknown id', async () => {
-    mocks.getModuleDetail.mockResolvedValue({ detail: null, heartbeatsFailed: false });
+    mocks.getModuleDetail.mockResolvedValue({ detail: null, failedLegs: [] });
 
     const res = await request(app).get('/api/modules/000000000001').set('X-API-Key', KEY);
     expect(res.status).toBe(404);

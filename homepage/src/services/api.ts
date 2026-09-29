@@ -1,5 +1,6 @@
 import type {
   ActivityTimeSeries,
+  DataLeg,
   HeartbeatGap,
   ImageUploadsPage,
   MeasurementTimeSeries,
@@ -36,6 +37,20 @@ export class RenameConflictError extends Error {
   ) {
     super(`display_name "${displayName}" already in use by module ${conflictingModuleId}`);
     this.name = 'RenameConflictError';
+  }
+}
+
+/**
+ * Thrown by `getAllModulesWithMeta()` when the backend answers 503
+ * because its duckdb `/modules` leg failed (for #230) — the module
+ * store is unreachable, so no fleet can render. Distinct from a
+ * generic fetch failure so the dashboard can show an explicit
+ * "unavailable, retry shortly" state instead of "backend down".
+ */
+export class ModulesUnavailableError extends Error {
+  constructor() {
+    super('upstream module store unavailable');
+    this.name = 'ModulesUnavailableError';
   }
 }
 
@@ -106,17 +121,22 @@ class ApiService {
 
   /**
    * Companion to getAllModules() that surfaces the X-Highfive-Data-Incomplete
-   * response header. Used by the dashboard to render a banner when the
-   * backend couldn't reach the heartbeats endpoint (#31).
+   * response header. Used by the dashboard to render a banner naming which
+   * upstream legs failed (#31 for heartbeats, #230 for nests/progress).
+   * Throws ModulesUnavailableError when the backend answers 503 (its
+   * duckdb `/modules` leg failed — no fleet can render).
    */
   async getAllModulesWithMeta(): Promise<{
     modules: Module[];
-    dataIncomplete: { heartbeats: boolean };
+    dataIncomplete: { nests: boolean; progress: boolean; heartbeats: boolean };
   }> {
     const response = await fetch(`${this.baseUrl}/modules`, {
       headers: this.getHeaders(),
       credentials: 'include',
     });
+    if (response.status === 503) {
+      throw new ModulesUnavailableError();
+    }
     if (!response.ok) {
       throw new Error('Failed to fetch modules');
     }
@@ -130,9 +150,16 @@ class ApiService {
       ...raw,
       id: parseModuleId(raw.id as string),
     })) as Module[];
+    // The leg names ride the shared contracts union (ADR-004); an
+    // unknown header token is ignored, never rendered.
+    const has = (leg: DataLeg) => incompleteParts.includes(leg);
     return {
       modules,
-      dataIncomplete: { heartbeats: incompleteParts.includes('heartbeats') },
+      dataIncomplete: {
+        nests: has('nests'),
+        progress: has('progress'),
+        heartbeats: has('heartbeats'),
+      },
     };
   }
 

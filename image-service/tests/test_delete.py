@@ -177,3 +177,67 @@ def test_delete_backslash_filename_returns_400(app, client, monkeypatch):
     resp = client.delete("/images/..%5C..%5Cvictim.jpg")
     assert resp.status_code == 400
     assert calls == []
+
+
+# ------------------- sidecar + snip cascade (for #233) -------------------
+
+
+def _install_artefacts(app_module, tmp_upload_dir: Path, stem: str) -> dict[str, Path]:
+    """Materialise a source JPEG, its `.log.json` sidecar and two snips,
+    plus a decoy snip from another capture that must survive."""
+    src = tmp_upload_dir / f"{stem}.jpg"
+    src.write_bytes(b"\xff\xd8fakejpeg")
+    sidecar = tmp_upload_dir / f"{stem}.jpg.log.json"
+    sidecar.write_text('{"telemetry": true}')
+    snip_dir = Path(app_module.SNIP_FOLDER)
+    snip_dir.mkdir(parents=True, exist_ok=True)
+    snip_a = snip_dir / f"{stem}-blackmasked-0.jpg"
+    snip_b = snip_dir / f"{stem}-resin-1.jpg"
+    snip_a.write_bytes(b"snip")
+    snip_b.write_bytes(b"snip")
+    decoy = snip_dir / "other-blackmasked-0.jpg"
+    decoy.write_bytes(b"decoy")
+    # Prefix-lookalike that is NOT pipeline grammar (`<base>-<type>-<idx>.jpg`):
+    # a naive `<base>-` prefix match would eat this unrelated capture.
+    lookalike = snip_dir / f"{stem}-evil.jpg"
+    lookalike.write_bytes(b"lookalike")
+    return {
+        "src": src,
+        "sidecar": sidecar,
+        "snip_a": snip_a,
+        "snip_b": snip_b,
+        "decoy": decoy,
+        "lookalike": lookalike,
+    }
+
+
+def test_delete_2xx_removes_sidecar_and_snips(app, client, tmp_upload_dir, monkeypatch):
+    import app as app_module
+
+    artefacts = _install_artefacts(app_module, tmp_upload_dir, "img-001")
+    _patch_duckdb_delete(
+        app, monkeypatch, _Resp(200, {"message": "Image record deleted"})
+    )
+
+    resp = client.delete("/images/img-001.jpg")
+
+    assert resp.status_code == 200
+    assert not artefacts["src"].exists()
+    assert not artefacts["sidecar"].exists()
+    assert not artefacts["snip_a"].exists()
+    assert not artefacts["snip_b"].exists()
+    assert artefacts["decoy"].exists(), "another capture's snip must survive"
+    assert artefacts["lookalike"].exists(), "a prefix-lookalike file must survive"
+
+
+def test_delete_5xx_leaves_sidecar_and_snips(app, client, tmp_upload_dir, monkeypatch):
+    import app as app_module
+
+    artefacts = _install_artefacts(app_module, tmp_upload_dir, "img-001")
+    _patch_duckdb_delete(app, monkeypatch, _Resp(500, {"error": "x"}, text="x"))
+
+    resp = client.delete("/images/img-001.jpg")
+
+    assert resp.status_code == 500
+    for key in ("src", "sidecar", "snip_a", "snip_b", "decoy", "lookalike"):
+        assert artefacts[key].exists(), f"{key} MUST remain on 5xx"

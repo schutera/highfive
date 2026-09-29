@@ -9,6 +9,20 @@ Frontend and backend share a single source of truth for typed DTOs:
 For HTTP shapes (request/response examples), see
 [../api-reference.md](../api-reference.md).
 
+## Error envelopes (duckdb-service; #246)
+
+Every duckdb-service route answers unexpected faults with the same
+envelope — `{"error": "internal error"}`, status 500 — produced by the
+single `@app.errorhandler(Exception)` in `duckdb-service/app.py`. The
+detail (method, path, exception type, message) goes to the log ring,
+visible on the admin-gated `GET /logs`, never `str(e)` to the client.
+Werkzeug routing errors (404, 405, 413, …) pass through unchanged.
+Caller faults stay explicit: **400** `{"error": ...}` for malformed
+input, **404** for unknown modules/images. The Node backend checks
+`r.ok` before parsing, so it never trips on an HTML body the way #32
+did — that incident's per-route wrapper is what the handler
+generalises.
+
 ## Why the shared package exists
 
 Both `backend` and `homepage` previously declared their own copies of
@@ -134,8 +148,10 @@ It is computed on demand from the `module_heartbeats.received_at` timeline (a
 `backend GET /api/modules/:id/heartbeat-gaps`. No table, no writer — see
 [ADR-025](../09-architecture-decisions/adr-025-heartbeat-gap-derived-read.md).
 
-`Module` gained `displayName`, `email`, `updatedAt`, `lastSeenAt`, and
-`latestHeartbeat`. `displayName` is the admin-settable label override
+`Module` gained `displayName`, `updatedAt`, `lastSeenAt`, and
+`latestHeartbeat`. (`email` was removed again in #235 — operator PII
+with no public consumer; the backend drops it at the response
+boundary.) `displayName` is the admin-settable label override
 introduced in PR I (ADR-011) — null when no operator has renamed the
 module; resolution into the operator-visible label happens client-side
 via [`homepage/src/lib/displayLabel.ts`](../../homepage/src/lib/displayLabel.ts)
@@ -162,12 +178,17 @@ value (added 2026-05-07, issue #31) covers the case where the duckdb
 been classified as `'offline'` — we can't rule out that a heartbeat
 from the last few minutes would have flipped it to `'online'`, so we
 admit uncertainty rather than misleading the on-call. The header
-`X-Highfive-Data-Incomplete: heartbeats` is set on the listing
-response (`/api/modules`) whenever the heartbeats fetch failed —
+`X-Highfive-Data-Incomplete` carries the failed legs as a comma-joined
+subset of `nests,progress,heartbeats` in stable order (generalised from
+heartbeats-only in #230) on the listing response (`/api/modules`) —
 irrespective of whether any module's status actually flipped — so the
-dashboard can surface a data-quality banner. The detail route
-deliberately omits the header because the user always lands there
-from the listing.
+dashboard can surface a data-quality banner naming the stale legs. A
+failed `/modules` leg instead becomes a **503** with a JSON error body
+on both the listing and the detail route (a 404 on the detail route
+would assert a module doesn't exist; #230). The detail route
+deliberately omits the incompleteness header because the user always
+lands there from the listing. The leg-name union lives in the
+contracts package as `DataLeg` (ADR-004).
 
 The header was chosen over a body-shape change so old clients keep
 deserialising the response body unchanged; only the per-module
@@ -588,6 +609,25 @@ still Proposed).
   **rejected** an out-of-range value with `400` — the two
   routes deliberately disagree here (this one never 400s on a malformed
   optional field; that one validates a required one at the front door).
+
+## Delete cascades (admin; #233)
+
+- **`DELETE /modules/<id>`** (duckdb-service, proxied admin-gated by
+  the backend) removes the module's rows from `daily_progress`,
+  `nest_data`, `image_uploads`, `module_heartbeats`, `measurements`,
+  **`nest_detections`**, and `module_configs` — both id forms
+  (canonical hex and legacy decimal). A midway failure restores the
+  snapshot taken under the lock before the error surfaces
+  (compensating-restore — plain multi-statement transactions trip
+  DuckDB's #105 FK over-enforcement, same reason `PATCH
+  .../display_name` dances; see ADR-013 for the pattern).
+- **`DELETE /image_uploads/<filename>`** removes the row plus that
+  capture's `nest_detections` rows.
+- **`DELETE /images/<filename>`** (image-service) removes the source
+  JPEG, the `<file>.log.json` telemetry sidecar, and every
+  `snips/<base>-*.jpg` crop — row first, then files, so a 5xx leaves a
+  consistent file+row pair for retry. Retention/pruning itself is
+  #250, not here.
 
 ## Field-name drift to watch for
 

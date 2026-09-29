@@ -167,6 +167,82 @@ write the lesson here so the next contributor doesn't repeat it.
 Format: short title + **What happened** + **Why it happened** +
 **How to avoid it next time**.
 
+### The fetch helper rejected correctly and the caller re-absorbed the rejection one line later — `GET /api/modules` answered `200 []` on a duckdb outage (#230)
+
+**What happened:** since #31, `fetchJsonOk` correctly threw on a
+non-2xx upstream — but `fetchAndAssemble` caught every leg via
+`Promise.allSettled`, `console.warn`'ed three of the four rejections,
+and substituted empty defaults. A duckdb outage rendered as `200 []`
+("no modules") on the listing and `404 Module not found` on every
+detail route, while `/api/health` stayed green. The #31 guarantee
+("never lie with 200") was asserted on the fetch helper, not on the
+wire result — and the wire is the only thing callers observe.
+
+**Why:** `allSettled` splits "the fetch failed" from "the response
+lied" into two different places, and the tests pinned the first
+(`heartbeatsFailed`) while no test pinned the second (the actual HTTP
+status/body of `GET /api/modules` under a failed leg).
+
+**How to avoid it next time:** assert the refusal path at the wire,
+not the helper — a test that 500s the upstream `/modules` leg and
+asserts the route answers 503 (and names `nests`/`progress` legs in
+`X-Highfive-Data-Incomplete`). `backend/tests/modules-partial-failure.test.ts`
+is that test; the leg names ride the contracts `DataLeg` union so a
+fifth leg becomes a compile error, not a silent string.
+
+### Per-route error wrappers fixed one route and left the fault class — plus `int(float("1e400"))` raises OverflowError (#246, #233)
+
+**What happened:** two faces of the same habit. (a) The #32 fix (an
+HTML 500 the Node backend JSON.parsed into a generic 502) was applied
+as a try/except on `get_modules` alone; every sibling route kept its
+own `str(e)`+500/400-or-HTML variant, and `delete_module`'s
+`con.rollback()` in autocommit raised a *second* exception inside the
+`except`, so the operator saw Flask's HTML 500 instead of either the
+real error or the intended JSON. (b) Independently, `POST /heartbeat`
+with `rssi=1e400` escaped as an HTML 500: `float("1e400")` is `inf`
+and `int(inf)` raises `OverflowError`, which the `(TypeError,
+ValueError)` tuple didn't catch — on a public route where a non-2xx
+counts toward the firmware's `hb_failure` streak.
+
+**Why:** error handling was treated as a per-route chore, so each
+route invented its own envelope; and numeric parsing helpers are
+tested (if at all) against `""`/`None`/`"abc"`, never against the
+non-finite floats a hostile or glitchy client actually sends.
+
+**How to avoid it next time:** one `@app.errorhandler(Exception)` in
+`duckdb-service/app.py` (generic `{"error": "internal error"}` 500,
+detail to the ring, `HTTPException` passthrough) and no `except
+Exception` in any route — `grep -rn "str(e)" duckdb-service/routes/`
+must show no `jsonify(...str(e)...)`. Raw `get_conn()` lives only in
+`db/repository.py` (plus the two ADR-013 dances that document why
+they bypass it). `_to_int`-style parsers get `1e400`/`nan`/`-inf`
+cases, because the defect scales with the parameter the tests never
+varied.
+
+### The public contract carried PII nobody populated, so no test ever caught it — and the dev `.env` armed the Werkzeug debugger on the LAN (#235)
+
+**What happened:** `Module.email` flowed firmware → duckdb-service →
+backend → anonymous callers, contradicting the ADR-020 coordinate
+coarsening rationale — but every fixture used `email: null`, so the
+pipeline was real and every test green. Separately, the documented
+dev `.env` set `DEBUG=true` while both Flask services bound
+`0.0.0.0` with LAN-published ports: any LAN peer triggering an
+unhandled exception got the PIN-gated Werkzeug console (code
+execution in containers holding the DuckDB volume).
+
+**Why:** a `null`-valued fixture proves nothing about a leak — the
+assertion passes whether the field is stripped or not. And
+`debug=True` bundles the reloader (useful, and useless under compose
+without bind mounts anyway) with the interactive debugger
+(RCE-adjacent), with no code separating the two.
+
+**How to avoid it next time:** leak tests mock a **non-null**
+sensitive value upstream and assert the key's absence on the wire
+(`backend/tests/modules-no-email.test.ts`). Both Flask services pass
+`use_debugger=False` unconditionally, and the documented `.env` says
+`DEBUG=false` — the debugger is off by construction, not by
+configuration.
+
 ### A rebase dropped two i18n keys, and `t()` renders the key path instead of failing — the degraded-mode banner read `common.heartbeatDataIncomplete` in production (2026-08 audit, #238)
 
 **What happened:** `common.unknown` and `common.heartbeatDataIncomplete`
@@ -2959,6 +3035,18 @@ fan-out fetch, also classify partial failures into the smallest
 honest signal (here: `'unknown'` instead of `'offline'`, plus an
 out-of-band header `X-Highfive-Data-Incomplete` that old clients
 ignore but the dashboard reads).
+
+*Addendum (package #230/#233/#246, 2026-09):* both halves of this
+entry regressed in subtler form and are now pinned at the wire. The
+#31 `fetchJsonOk` fix rejected correctly but the rejection was
+re-absorbed one line later (`200 []` on a duckdb outage) — the class
+fix attributes failures per leg (`failedLegs`, 503 for a dead
+`/modules` leg). The #32 wrapper was applied to one duckdb route
+while siblings kept their own `str(e)`/HTML variants — the class fix
+is the single `@app.errorhandler(Exception)` plus the
+no-`get_conn()`-outside-`repository` rule. "Never lie with 200" and
+"no HTML to JSON parsers" need assertions on the *wire result*, not
+on the helper that almost enforces them.
 
 ### Production stack shipped with two silent gaps (#37 + #38)
 

@@ -7,7 +7,7 @@ import request from 'supertest';
 // admin-delete.test.ts.
 vi.mock('../src/database', () => ({
   db: {
-    listModules: vi.fn().mockResolvedValue({ modules: [], heartbeatsFailed: false }),
+    listModules: vi.fn().mockResolvedValue({ modules: [], failedLegs: [] }),
     getModuleDetail: vi.fn().mockResolvedValue(null),
   },
 }));

@@ -309,7 +309,6 @@ export default function AdminPage() {
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Last Seen</th>
                     <th className="px-4 py-3">Telemetry</th>
-                    <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Location</th>
                     <th className="px-4 py-3">Images</th>
                     <th className="px-4 py-3">First Online</th>
@@ -387,9 +386,6 @@ export default function AdminPage() {
                         ) : (
                           <span className="text-gray-300">no heartbeat yet</span>
                         )}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">
-                        {m.email || <span className="text-gray-300">&mdash;</span>}
                       </td>
                       {/* Coordinates are generalized to ~1 km for every caller,
                           admin included (issue #145, ADR-020). Render 2 dp so the

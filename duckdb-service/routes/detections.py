@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 
 from db.repository import query_all, write_transaction
 from flask import Blueprint, jsonify, request
-from models.module_id import ModuleId
-from pydantic import ValidationError
+
+from routes._module_id import _canonicalize_or_400
 
 detections_bp = Blueprint("detections", __name__)
 
@@ -28,22 +28,6 @@ detections_bp = Blueprint("detections", __name__)
 # model finds the hole but defers the empty-vs-sealed call. Mirror the
 # `NestSnip.state` union (contracts) and the backend `SNIP_STATES` guard.
 _VALID_STATES = {"empty", "sealed", "undetermined"}
-
-
-def _canonicalize_or_400(raw: str):
-    """Normalise an inbound module id via ``ModuleId`` (mirrors routes/modules)."""
-    try:
-        return ModuleId.model_validate(raw).root, None
-    except ValidationError as e:
-        cleaned = [
-            {
-                "msg": err.get("msg"),
-                "type": err.get("type"),
-                "loc": list(err.get("loc", [])),
-            }
-            for err in e.errors()
-        ]
-        return None, (jsonify({"error": "invalid module id", "detail": cleaned}), 400)
 
 
 def _bbox4(bbox) -> tuple[float, float, float, float]:
@@ -79,43 +63,42 @@ def record_detections():
         datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
     )
     inserted = 0
-    try:
-        with write_transaction() as con:
-            for det in detections:
-                if not isinstance(det, dict):
-                    continue
-                state = det.get("state")
-                snip_filename = det.get("snip_filename")
-                if state not in _VALID_STATES or not snip_filename:
-                    continue
-                bx, by, bw, bh = _bbox4(det.get("bbox"))
-                con.execute(
-                    """
-                    INSERT INTO nest_detections
-                        (module_id, filename, bee_type, nest_index,
-                         bbox_x, bbox_y, bbox_w, bbox_h,
-                         state, confidence, snip_filename, detected_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        canonical,
-                        filename,
-                        str(det.get("bee_type", "")),
-                        int(det.get("nest_index", 0) or 0),
-                        bx,
-                        by,
-                        bw,
-                        bh,
-                        state,
-                        float(det.get("confidence", 0.0) or 0.0),
-                        str(snip_filename),
-                        now_utc,
-                    ),
-                )
-                inserted += 1
-        return jsonify({"message": "Detections recorded", "inserted": inserted}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # No per-route `except Exception` (for #246) — faults propagate to
+    # the app-level JSON handler, which logs them to the ring.
+    with write_transaction() as con:
+        for det in detections:
+            if not isinstance(det, dict):
+                continue
+            state = det.get("state")
+            snip_filename = det.get("snip_filename")
+            if state not in _VALID_STATES or not snip_filename:
+                continue
+            bx, by, bw, bh = _bbox4(det.get("bbox"))
+            con.execute(
+                """
+                INSERT INTO nest_detections
+                    (module_id, filename, bee_type, nest_index,
+                     bbox_x, bbox_y, bbox_w, bbox_h,
+                     state, confidence, snip_filename, detected_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    canonical,
+                    filename,
+                    str(det.get("bee_type", "")),
+                    int(det.get("nest_index", 0) or 0),
+                    bx,
+                    by,
+                    bw,
+                    bh,
+                    state,
+                    float(det.get("confidence", 0.0) or 0.0),
+                    str(snip_filename),
+                    now_utc,
+                ),
+            )
+            inserted += 1
+    return jsonify({"message": "Detections recorded", "inserted": inserted}), 200
 
 
 @detections_bp.get("/detections")

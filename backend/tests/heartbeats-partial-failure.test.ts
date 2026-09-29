@@ -6,7 +6,7 @@ import { ModuleReadModel } from '../src/database';
  * whose dominant freshness signal is the heartbeat (most modules — they
  * heartbeat every 60 s but only image on motion) used to silently flip
  * to 'offline'. The read model now classifies them as 'unknown' instead
- * and surfaces a heartbeatsFailed flag the route handler turns into the
+ * and surfaces a failedLegs array the route handler turns into the
  * X-Highfive-Data-Incomplete response header.
  *
  * These tests drive the real ModuleReadModel through a mocked global
@@ -100,23 +100,23 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
     warnSpy.mockRestore();
   });
 
-  it('flags heartbeatsFailed=false on the happy path', async () => {
+  it('reports no failed legs on the happy path', async () => {
     mockFetch({ modules: [fakeModule()] });
     const db = new ModuleReadModel();
 
-    const { modules, heartbeatsFailed } = await db.listModules();
+    const { modules, failedLegs } = await db.listModules();
 
-    expect(heartbeatsFailed).toBe(false);
+    expect(failedLegs).toEqual([]);
     expect(modules).toHaveLength(1);
   });
 
-  it('flags heartbeatsFailed=true when /heartbeats_summary rejects', async () => {
+  it('reports the heartbeats leg when /heartbeats_summary rejects', async () => {
     mockFetch({ modules: [fakeModule()], heartbeats: 'reject' });
     const db = new ModuleReadModel();
 
-    const { heartbeatsFailed } = await db.listModules();
+    const { failedLegs } = await db.listModules();
 
-    expect(heartbeatsFailed).toBe(true);
+    expect(failedLegs).toEqual(['heartbeats']);
     // Existing diagnostic line stays — humans grep for this in the logs.
     expect(warnSpy).toHaveBeenCalledWith('⚠️ Failed to fetch heartbeats:', expect.any(Error));
   });
@@ -201,22 +201,22 @@ describe('ModuleReadModel — heartbeats fetch failure (#31)', () => {
     });
     const db = new ModuleReadModel();
 
-    const { modules, heartbeatsFailed } = await db.listModules();
+    const { modules, failedLegs } = await db.listModules();
 
-    expect(heartbeatsFailed).toBe(false);
+    expect(failedLegs).toEqual([]);
     expect(modules[0].status).toBe('offline');
   });
 
-  it('getModuleDetail surfaces heartbeatsFailed alongside the detail', async () => {
+  it('getModuleDetail surfaces failed legs alongside the detail', async () => {
     mockFetch({
       modules: [fakeModule({ id: 'aabbccddeeff' })],
       heartbeats: 'reject',
     });
     const db = new ModuleReadModel();
 
-    const { detail, heartbeatsFailed } = await db.getModuleDetail('aabbccddeeff' as never);
+    const { detail, failedLegs } = await db.getModuleDetail('aabbccddeeff' as never);
 
     expect(detail).not.toBeNull();
-    expect(heartbeatsFailed).toBe(true);
+    expect(failedLegs).toEqual(['heartbeats']);
   });
 });

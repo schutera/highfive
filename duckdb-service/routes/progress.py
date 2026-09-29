@@ -119,7 +119,39 @@ def add_progress_for_module():
     module_id = payload.module_id.root
     today = date.today().isoformat()
 
+    # Validate every per-type dict BEFORE opening the transaction
+    # (for #246): returning 400 from inside the write loop would commit
+    # the types already written and report failure after a partial
+    # write. An empty dict would otherwise `IndexError` on
+    # `sealed_list[-1]` below and escape as an HTML 500.
+    for bee_type_payload, sealed_values in payload.classification.items():
+        if BEE_TYPE_MAP.get(bee_type_payload) is None:
+            continue
+        if not sealed_values:
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            f"classification.{bee_type_payload} must "
+                            "contain at least one nest"
+                        )
+                    }
+                ),
+                400,
+            )
+
     with write_transaction() as con:
+        # Unknown modules used to trip the `nest_data.module_id`
+        # REFERENCES FK and escape as an HTML 500 (for #246) — 404 JSON
+        # instead. Checked inside the transaction so the check and the
+        # writes stay atomic.
+        if (
+            con.execute(
+                "SELECT 1 FROM module_configs WHERE id = ?", (module_id,)
+            ).fetchone()
+            is None
+        ):
+            return jsonify({"error": "unknown module"}), 404
         for bee_type_payload, sealed_values in payload.classification.items():
             db_bee_type = BEE_TYPE_MAP.get(bee_type_payload)
             if db_bee_type is None:

@@ -36,13 +36,9 @@ Internal calls use Docker service names (e.g. `http://duckdb-service:8000`), **n
 docker compose up --build
 ```
 
-Required `.env` at the repo root:
-
-```env
-DEBUG=false
-DUCKDB_SERVICE_URL=http://duckdb-service:8000
-# HIGHFIVE_API_KEY=...   # optional, overrides dev fallback 'hf_dev_key_2026'
-```
+Required: `cp .env.example .env` at the repo root. [`.env.example`](.env.example)
+documents every variable; all are optional, but compose will not start without
+the file.
 
 `duckdb-service` auto-seeds five sample modules when `SEED_DATA=true` (compose default) and the DB is empty.
 

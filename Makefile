@@ -4,7 +4,7 @@
 # the full repo with one command. Each target prints what it actually shells
 # out to, so it is always discoverable how to run the same step by hand.
 
-.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version check-duckdb-bind-claims check-python-twins check-agent-context check-env-var-docs
+.PHONY: help firmware flash-dev test test-esp test-esp-native test-e2e test-e2e-deps test-ui test-ui-deps check-citations check-stale-reset-prose check-stale-display-name-rule check-no-hardcoded-api-keys check-python-version check-duckdb-bind-claims check-python-twins check-agent-context check-env-var-docs check-env-example-is-dev
 
 help:
 	@echo "HiveHive — available make targets"
@@ -36,6 +36,8 @@ help:
 	@echo "                          Verify CLAUDE.md/AGENTS.md, .claude/.codex agents, and .claude/.agents skills stay in sync"
 	@echo "  make check-env-var-docs"
 	@echo "                          Verify every production env var (.deploy.env.example, .env.production.example, docker-compose.prod.yml) is named in the what-is-live.md matrix (#242)"
+	@echo "  make check-env-example-is-dev"
+	@echo "                          Verify .env.example sets no production-only variable on an active line (#260)"
 	@echo ""
 	@echo "Prerequisites:"
 	@echo "  firmware    →   arduino-cli with esp32:esp32 core installed"
@@ -152,3 +154,7 @@ check-agent-context:
 check-env-var-docs:
 	@echo ">>> bash scripts/check-env-var-docs.sh"
 	@bash scripts/check-env-var-docs.sh
+
+check-env-example-is-dev:
+	@echo ">>> bash scripts/check-env-example-is-dev.sh"
+	@bash scripts/check-env-example-is-dev.sh

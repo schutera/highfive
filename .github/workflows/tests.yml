@@ -594,7 +594,9 @@ jobs:
 
   ui-playwright:
     name: UI tests (Playwright)
-    runs-on: ubuntu-latest
+    # Pinned to ubuntu-24.04: GitHub updated ubuntu-latest to 26.04, which
+    # Playwright 1.56.0 does not yet support (no chromium packages).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout

@@ -732,8 +732,9 @@ read that first. In short:
   `BACKUP_DIR`/`BACKUP_KEEP` overrides). `NODE_ENV`, `PORT` and
   `VITE_API_URL` are fixed in `docker-compose.prod.yml` itself, not in that
   file.
-- The tracked `.env.example` (generic production values: `NODE_ENV`,
-  `PORT`, and `VITE_API_URL` — with the mandatory `/api` suffix) and
+- The tracked `.env.example` is the local development template and sets no
+  production value (`scripts/check-env-example-is-dev.sh` keeps it that
+  way); neither production topology reads it. It and
   `.env.production.example` are templates only. Host-local env files are
   gitignored and must never be committed.
 

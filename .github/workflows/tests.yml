@@ -556,6 +556,13 @@ jobs:
         # path's operator never saw it (#242).
         run: bash scripts/check-env-var-docs.sh
 
+      - name: Run check-env-example-is-dev.sh
+        # .env.example is the dev template that `cp .env.example .env` feeds
+        # into backend, image-service and duckdb-service. It used to carry an
+        # active production key placeholder, which became every fresh dev
+        # box's admin password (#260).
+        run: bash scripts/check-env-example-is-dev.sh
+
   e2e-pipeline:
     name: End-to-end pipeline test
     runs-on: ubuntu-latest

@@ -10,9 +10,14 @@ const DEV_FALLBACK_KEY = 'hf_dev_key_2026';
 //     fallback. The fallback is a public string by design — documented in
 //     CLAUDE.md, used by the entire backend test suite — so an env value
 //     of `hf_dev_key_2026`, `HF_DEV_KEY_2026`, or any case-mixed variant
-//     was almost certainly a copy-paste from `.env.example` rather than
-//     a deliberate strong secret. Comparison is case-insensitive on the
-//     env-value side; the canonical fallback stays lowercase.
+//     is far more likely to be copied from somewhere that documents the
+//     fallback -- CLAUDE.md, this file, a test -- than to be a deliberate
+//     strong secret. `.env.example` is no longer one of those places: it
+//     ships `HIGHFIVE_API_KEY` commented out, so a `cp .env.example .env`
+//     leaves the variable unset and reaches this guard only if someone
+//     uncomments it and pastes the fallback in by hand. Comparison is
+//     case-insensitive on the env-value side; the canonical fallback stays
+//     lowercase.
 // (2) `isProduction()` is true but `HIGHFIVE_API_KEY` is empty/unset,
 //     which would silently activate the dev fallback as the production
 //     admin gate. CLAUDE.md flags this as a "do NOT violate" rule; this

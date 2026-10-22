@@ -29,7 +29,7 @@ http://<LAN-IP>:8000/health      → ok
 http://<LAN-IP>:8002/health      → ok
 ```
 
-If a service is down: `docker compose up --build`. Confirm `.env` exists at the repo root with `DEBUG=false` and `DUCKDB_SERVICE_URL=http://duckdb-service:8000`.
+If a service is down: `docker compose up --build`. Confirm `.env` exists at the repo root — `cp .env.example .env` if not. [`.env.example`](../../../.env.example) is the one description of what belongs in it; don't restate the values here.
 
 **Windows only:** ports 8000 and 8002 need inbound firewall rules. If services are healthy but modules never appear, add them now (admin PowerShell):
 

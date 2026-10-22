@@ -40,6 +40,13 @@ docker compose up --build  # homepage on http://localhost:5173
 
 Full setup, ports, and service map: **[Deployment Guide](docs/07-deployment-view/docker-compose.md)**.
 
+Deploying rather than developing? `.env.example` is the wrong file. The live
+host runs PM2 ([production runbook](docs/07-deployment-view/production-runbook.md));
+the Docker production target, which is not deployed, uses
+[`.env.production.example`](.env.production.example)
+([production deployment guide](docs/07-deployment-view/production-deployment.md)).
+[What is live](docs/07-deployment-view/what-is-live.md) says which is which.
+
 <br>
 
 ## Where to go next

@@ -53,3 +53,8 @@ bash scripts/check-agent-context.sh || exit 1
 # failure mode: a variable living in exactly one file, with no document
 # mapping which runtime reads it from where (#242).
 bash scripts/check-env-var-docs.sh || exit 1
+
+# Catch production values (an active HIGHFIVE_API_KEY placeholder,
+# NODE_ENV=production, PORT, VITE_API_URL) returning to .env.example, which
+# `cp .env.example .env` feeds into three dev services (#260).
+bash scripts/check-env-example-is-dev.sh || exit 1
